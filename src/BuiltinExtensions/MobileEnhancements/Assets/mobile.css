@@ -1,0 +1,21 @@
+/* MobileEnhancements — mobile/PWA styles (fork extension).
+   Every rule is scoped (body.small-window / body.coarse-pointer / body.pwa-standalone) so the desktop
+   experience is byte-for-byte unchanged. See docs/MobilePWA-Optimization-Plan.md. Class selectors only. */
+
+/* --- Phase 1: PWA + touch input baseline --- */
+
+/* iOS Safari auto-zooms the page when focusing an input whose font is under 16px. Bump the interactive
+   fields in the parameter sidebar and prompt so focusing them never triggers that jarring zoom. */
+body.coarse-pointer .input-sidebar input,
+body.coarse-pointer .input-sidebar textarea,
+body.coarse-pointer .input-sidebar select,
+body.coarse-pointer .alt_prompt_textboxes textarea,
+body.coarse-pointer .alt_prompt_textboxes input {
+    font-size: 16px;
+}
+
+/* Installed PWA (viewport-fit=cover): push the app content clear of the top safe area (status bar / notch).
+   The layout's height math reads the root div's live top offset, so it self-corrects to this padding. */
+body.pwa-standalone {
+    padding-top: env(safe-area-inset-top);
+}
