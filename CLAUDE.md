@@ -62,4 +62,4 @@ Files this fork adds or changes relative to upstream:
 
 - `CLAUDE.md` (this file)
 - `docs/MobilePWA-Optimization-Plan.md` — implementation plan for the mobile/PWA overhaul (phases, verified design facts, verification gates, and the coupling watchlist to re-check after upstream merges)
-- `src/BuiltinExtensions/MobileEnhancements/**` — planned, not yet implemented; see the plan doc
+- `src/BuiltinExtensions/MobileEnhancements/**` — mobile/PWA extension (Phases 1–4 implemented: PWA manifest + service worker, touch image viewer with swipe navigation, mobile layout/ergonomics CSS, network resilience). Zero core-file edits; behavioral couplings tracked in the plan doc's coupling watchlist. **Not yet browser-verified** — build/format/boot could not run in the authoring environment (egress policy blocked the .NET SDK download); validated by static analysis + JS/JSON syntax checks. Run the verification gate before relying on it.

@@ -4,6 +4,18 @@ Implementation handoff document for making SwarmUI feel robust, fluid, and intui
 
 Read `CLAUDE.md` and `AGENTS.md` first. All work follows the fork's merge-friendly policy: **zero edits to existing core files** — every change below is a new file.
 
+## Implementation status (living)
+
+Phases 1–4 are **implemented** in `src/BuiltinExtensions/MobileEnhancements/` with zero core-file edits, as designed. What shipped vs. what was intentionally deferred/changed:
+
+- **Phase 1 (PWA scaffold + service worker)** — done. `MobileEnhancementsExtension.cs` maps root `/manifest.json` + `/sw.js` and injects head tags in `OnPreLaunch`; `sw.js` (network-first HTML/JS/CSS, cache-first static, offline fallback), `mobile_core.js` (viewport fix, SW registration, standalone/coarse-pointer flags, keyboard handling), `mobile.css`, and icons generated from `favicon.ico`.
+- **Phase 2 (image viewer)** — done. `mobile_fullview_touch.js`: pinch/pan/double-tap zoom, horizontal swipe navigation driving the core `shiftToNextImagePreview`, swipe-down dismiss, tap toggles metadata. **Deferred within Phase 2**: the full custom action-overlay chrome and in-viewer Share button (§2c) — instead, tap-on-image toggles the existing metadata/undertext (which already holds the per-image action buttons), and tap-outside closes. Share via `navigator.share` remains a clean follow-up. `ImageCompareHelper` touch parity also still TODO.
+- **Phase 3 (layout & ergonomics)** — mostly done: 44px touch targets, horizontally-scrollable tab strips, pull-to-refresh suppression, momentum scroll, visualViewport keyboard-avoidance, PWA safe-area padding. **Deferred**: the sidebar open/close swipe **animation** (§3.3) — it is too tightly coupled to `layout.js`'s eval-based inline sizing to ship without live device testing; revisit with a browser in hand.
+- **Phase 4 (network resilience)** — done, with one deliberate design change: instead of **wrapping** the core `genericRequest`/`makeWSRequest` (fragile, and unverifiable without a running server), the connection banner is driven by the browser `online`/`offline` events (robust, decoupled, covers the primary mobile network-drop case). Haptics (batch MutationObserver) and screen wake-lock during generation shipped as planned. Server-reachable-but-app-down detection is a possible future add via light request wrapping.
+- **Phase 5** — not started (optional enhancements).
+
+**Verification owed (blocking real use):** the authoring environment's egress policy blocked the .NET SDK download, so `dotnet build`, `dotnet format --verify-no-changes`, and the ci-test boot could **not** be run. Verification so far is static analysis + `node --check` on all JS + JSON validation + cross-file asset-URL consistency. Before relying on this, run the full gate below on a real machine and do the mobile browser checks (Lighthouse PWA audit, DevTools device emulation, and a real phone for the touch viewer).
+
 ## Why
 
 Current state (as of the audit on upstream-equivalent master, 2026-07):
