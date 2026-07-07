@@ -33,3 +33,65 @@ body.coarse-pointer .imageview_modal_imagewrap {
 body.coarse-pointer .imageview_modal_inner_div {
     will-change: transform;
 }
+
+/* --- Phase 3: layout & touch ergonomics (mobile only) --- */
+
+/* Spec-compliant (>=44px) touch targets for the primary controls. */
+body.coarse-pointer .nav-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+}
+body.coarse-pointer .t2i-split-quickbutton,
+body.coarse-pointer .batch-gear-button {
+    min-width: 44px;
+    min-height: 44px;
+}
+
+/* Tab bars (top nav + every sub-nav) scroll horizontally instead of wrapping or clipping on narrow screens. */
+body.small-window .nav-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;               /* Firefox */
+    -webkit-overflow-scrolling: touch;   /* iOS momentum */
+    scroll-snap-type: x proximity;
+}
+body.small-window .nav-tabs::-webkit-scrollbar {
+    display: none;                       /* WebKit */
+}
+body.small-window .nav-tabs .nav-item {
+    flex: 0 0 auto;
+}
+body.small-window .nav-tabs .nav-link {
+    scroll-snap-align: start;
+    white-space: nowrap;
+}
+
+/* Suppress vertical overscroll / pull-to-refresh so swiping a sidebar open or scrolling a panel never
+   reloads the page mid-generation. Horizontal overscroll is left alone for the tab strips above. */
+body.small-window {
+    overscroll-behavior-y: none;
+}
+
+/* Momentum scrolling inside the scrollable panels on touch. */
+body.coarse-pointer .input-sidebar,
+body.coarse-pointer .current_image_batch,
+body.coarse-pointer .browser_container {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Keyboard avoidance: when the on-screen keyboard is open (detected via visualViewport in mobile_core.js),
+   lift the floating prompt + Generate button so they stay above the keyboard. A transform doesn't fight the
+   layout engine's inline sizing, and reverts cleanly when the keyboard closes. */
+body.small-window.kb-open .alt_prompt_region {
+    transform: translateY(calc(-1 * var(--kb-inset, 0px)));
+    transition: transform 0.15s ease-out;
+}
+
+/* Bottom safe-area breathing room for the Generate button row in an installed PWA (home indicator). */
+body.pwa-standalone.small-window .alt-prompt-buttons-wrapper {
+    padding-bottom: env(safe-area-inset-bottom);
+}
