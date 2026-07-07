@@ -52,7 +52,7 @@ public class MobileEnhancementsExtension : Extension
     public async Task ServeServiceWorker(HttpContext context)
     {
         context.Response.ContentType = "text/javascript";
-        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers["Cache-Control"] = "no-cache";
         context.Response.StatusCode = 200;
         string body = File.ReadAllText($"{FilePath}Assets/sw.js");
         await context.Response.WriteAsync($"const SWARM_VARY = \"{Utilities.EscapeJsonString(Utilities.VaryID)}\";\n{body}");
