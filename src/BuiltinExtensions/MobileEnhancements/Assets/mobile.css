@@ -19,3 +19,17 @@ body.coarse-pointer .alt_prompt_textboxes input {
 body.pwa-standalone {
     padding-top: env(safe-area-inset-top);
 }
+
+/* --- Phase 2: fullscreen image viewer touch --- */
+
+/* Own all touch gestures over the image area on touch devices so the browser doesn't try to pan/zoom the
+   page mid-pinch. Scoped to the image wrap only, so the metadata/button area below stays natively scrollable
+   and tappable. The mobile touch layer drives zoom/pan/swipe here. */
+body.coarse-pointer .imageview_modal_imagewrap {
+    touch-action: none;
+}
+
+/* The inner container is translated during swipe-to-navigate and swipe-to-dismiss; hint the compositor. */
+body.coarse-pointer .imageview_modal_inner_div {
+    will-change: transform;
+}
