@@ -12,6 +12,7 @@ class MobileEnhancements {
         this.fixViewport();
         this.markStandalone();
         this.registerServiceWorker();
+        this.setupKeyboardHandling();
     }
 
     /** True when the current pointer is touch-like (phones/tablets), used to gate touch-only behaviors. */
@@ -56,6 +57,26 @@ class MobileEnhancements {
         if (this.isCoarsePointer()) {
             document.body.classList.add('coarse-pointer');
         }
+    }
+
+    /**
+     * Track the on-screen keyboard via the visual viewport and expose its height as the `--kb-inset` CSS
+     * variable plus a `kb-open` body class. mobile.css uses these to lift the floating prompt above the
+     * keyboard. On Android (viewport `interactive-widget=resizes-content`) the layout already resizes, so the
+     * inset stays ~0; this mainly helps iOS Safari, which overlays the keyboard without resizing.
+     */
+    setupKeyboardHandling() {
+        if (!window.visualViewport) {
+            return;
+        }
+        let vv = window.visualViewport;
+        let update = () => {
+            let inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+            document.body.style.setProperty('--kb-inset', `${inset}px`);
+            document.body.classList.toggle('kb-open', inset > 120);
+        };
+        vv.addEventListener('resize', update);
+        vv.addEventListener('scroll', update);
     }
 
     /** Register the root-scoped service worker (served from /sw.js) for installability + offline fallback. */
