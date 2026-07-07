@@ -17,6 +17,7 @@ public class MobileEnhancementsExtension : Extension
     public override void OnInit()
     {
         ScriptFiles.Add("Assets/mobile_core.js");
+        ScriptFiles.Add("Assets/mobile_fullview_touch.js");
         StyleSheetFiles.Add("Assets/mobile.css");
         OtherAssets.Add("Assets/offline.html");
         OtherAssets.Add("Assets/icons/icon-192.png");
