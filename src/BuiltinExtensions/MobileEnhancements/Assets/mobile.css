@@ -95,3 +95,28 @@ body.small-window.kb-open .alt_prompt_region {
 body.pwa-standalone.small-window .alt-prompt-buttons-wrapper {
     padding-bottom: env(safe-area-inset-bottom);
 }
+
+/* --- Phase 4: connection banner --- */
+
+/* Slide-in "connection lost" banner (created by mobile_network.js). Shown on any viewport when the browser
+   reports the network is down; clears automatically when it returns. */
+.mobile-connection-banner {
+    position: fixed;
+    left: 50%;
+    top: calc(env(safe-area-inset-top) + 0.5rem);
+    transform: translateX(-50%) translateY(-200%);
+    z-index: 100000;
+    background: var(--background-gray-danger, #361f1f);
+    color: #fff;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: transform 0.25s ease-out;
+    pointer-events: none;
+    max-width: 90vw;
+    text-align: center;
+}
+.mobile-connection-banner.visible {
+    transform: translateX(-50%) translateY(0);
+}
