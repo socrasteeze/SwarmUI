@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SwarmUI - Offline</title>
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: #161616;
+            color: #e6e6e6;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        }
+        .offline-wrap {
+            box-sizing: border-box;
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem calc(1.5rem + env(safe-area-inset-right)) calc(2rem + env(safe-area-inset-bottom)) calc(1.5rem + env(safe-area-inset-left));
+        }
+        .offline-icon {
+            width: 96px;
+            height: 96px;
+            margin-bottom: 1.5rem;
+            opacity: 0.9;
+        }
+        .offline-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0 0 0.5rem;
+        }
+        .offline-msg {
+            font-size: 1rem;
+            line-height: 1.5;
+            max-width: 26rem;
+            color: #a8a8a8;
+            margin: 0 0 1.75rem;
+        }
+        .offline-retry {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #fff;
+            background: #6c3fd1;
+            border: none;
+            border-radius: 0.6rem;
+            padding: 0.85rem 2rem;
+            min-height: 44px;
+            cursor: pointer;
+        }
+        .offline-retry:active {
+            background: #5a33b0;
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-wrap">
+        <img class="offline-icon" src="/ExtensionFile/MobileEnhancementsExtension/Assets/icons/icon-192.png" alt="SwarmUI" />
+        <h1 class="offline-title">You're offline</h1>
+        <p class="offline-msg">SwarmUI needs a connection to its server to generate. Reconnect to your network, then try again.</p>
+        <button class="offline-retry" onclick="location.reload()">Retry</button>
+    </div>
+    <script>
+        // Auto-recover the moment the browser reports the network is back.
+        window.addEventListener('online', () => location.reload());
+    </script>
+</body>
+</html>
