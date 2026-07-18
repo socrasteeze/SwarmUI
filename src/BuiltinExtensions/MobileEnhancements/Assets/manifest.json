@@ -34,5 +34,14 @@
             "short_name": "Generate",
             "url": "/Text2Image"
         }
-    ]
+    ],
+    "share_target": {
+        "action": "/ShareTarget",
+        "method": "GET",
+        "params": {
+            "url": "url",
+            "text": "text",
+            "title": "title"
+        }
+    }
 }
