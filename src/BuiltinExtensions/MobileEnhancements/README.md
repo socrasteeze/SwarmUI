@@ -9,6 +9,7 @@ It is intentionally built as a self-contained extension (new files only, zero ed
 - **PWA installability**: serves a web manifest (`/manifest.json`) and a root-scoped service worker (`/sw.js`), and injects the `theme-color` / apple-mobile-web-app / touch-icon `<head>` tags. The service worker is deliberately conservative — network-first for HTML/JS/CSS (so a server update is never stuck behind a stale cache), cache-first only for long-lived static assets (icons, fonts), and an offline fallback page for navigations. It never touches `/API/`, `/View/`, `/Output/`, or `/Audio/`.
 - **Viewport fix**: replaces the core `maximum-scale=1.0` viewport (which blocks pinch zoom) with a mobile-friendly one that restores pinch zoom, enables iOS safe-area insets, and lets the on-screen keyboard resize content.
 - **Mobile CSS**: scoped under `body.small-window` / `body.coarse-pointer` / `body.pwa-standalone` so desktop is untouched.
+- **Civitai share-to-download**: the manifest declares a `share_target`, so when installed the app appears in the OS share sheet. Sharing a Civitai model link routes to the `/ShareTarget` route, which redirects into the app; `mobile_share.js` then opens the Utilities > Model Downloader tab and prefills the shared URL so its Civitai metadata loads automatically. Non-Civitai shares open the downloader empty.
 
 ## Icons
 
