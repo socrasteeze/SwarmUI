@@ -32,6 +32,17 @@ body.pwa-standalone {
 
 /* --- Phase 2: fullscreen image viewer touch --- */
 
+/* The fullscreen image-view modal is a Bootstrap modal fixed to the true physical viewport (body's own
+   safe-area padding above doesn't apply to it - body never becomes a containing block for it). Its CSS
+   hard-splits 100vh into the image area (calc(100vh - 7rem)) and a flat 7rem band underneath for the
+   action buttons + metadata, with no safe-area accounting, so that band's content (buttons first, then
+   metadata) sits right up against the home-indicator dead zone on an installed PWA. border-box keeps this
+   padding inside the existing 7rem band instead of growing past it, same technique as body.pwa-standalone. */
+body.pwa-standalone .imageview_popup_modal_undertext:not(.minimized-mode) {
+    box-sizing: border-box;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
 /* Own all touch gestures over the image area on touch devices so the browser doesn't try to pan/zoom the
    page mid-pinch. Scoped to the image wrap only, so the metadata/button area below stays natively scrollable
    and tappable. The mobile touch layer drives zoom/pan/swipe here. */
