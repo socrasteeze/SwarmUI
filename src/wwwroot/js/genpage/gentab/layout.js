@@ -142,6 +142,9 @@ class GenTabLayout {
         this.imageEditorSizeBarDrag = false;
         this.isSmallWindow = this.mobileDesktopLayout == 'auto' ? window.innerWidth < 768 : this.mobileDesktopLayout == 'mobile';
         this.antiDup = false;
+        this.swipeStartX = -1;
+        this.swipeStartY = -1;
+        this.minSwipeDelta = Math.min(100, window.innerWidth * 0.4);
         if (this.isSmallWindow) {
             this.bottomShut = true;
             this.leftShut = true;
@@ -258,31 +261,40 @@ class GenTabLayout {
         this.leftSplitBarButton.innerHTML = leftShut ? '&#x21DB;' : '&#x21DA;';
         this.bottomSplitBarButton.innerHTML = bottomShut ? '&#x290A;' : '&#x290B;';
         let altHeight = this.altRegion.style.display == 'none' ? '0px' : `${this.altRegion.offsetHeight}px`;
+        // The bottom safe-area inset (env(safe-area-inset-bottom), applied as body padding for installed
+        // PWAs) shrinks the actually-visible content box, but every height below is otherwise computed off
+        // the raw 100vh/49vh viewport. Without subtracting it, the top section + bottom bar together are
+        // sized to assume more vertical space than truly exists, and body's overflow:hidden silently clips
+        // that many pixels off the bottom of the bottom bar - including the always-visible current-LoRAs
+        // strip inside it. rootTop already self-corrects for the top inset (measured live via
+        // getBoundingClientRect), so only the bottom side needs this explicit correction.
+        let safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+        let vh = `(100vh - ${safeBottom}px)`;
         if (this.bottomSectionBarPos != -1 || bottomShut) {
             let bottomBarHeight = this.bottomInfoBar.offsetHeight;
             let addedHeight = this.isSmallWindow ? '0.4rem' : '2.8rem';
             let fixed = bottomShut ? `(${rootTop}px + ${addedHeight} + ${bottomBarHeight}px)` : `${this.bottomSectionBarPos}px`;
-            this.leftSplitBar.style.height = `calc(100vh - ${fixed})`;
-            this.rightSplitBar.style.height = `calc(100vh - ${fixed} - 5px)`;
-            this.inputSidebar.style.height = `calc(100vh - ${fixed})`;
-            this.mainImageArea.style.height = `calc(100vh - ${fixed})`;
-            this.currentImageWrapbox.style.height = `calc(100vh - ${fixed} - ${altHeight})`;
-            this.editorSizebar.style.height = `calc(100vh - ${fixed} - ${altHeight})`;
-            this.currentImageBatch.style.height = `calc(100vh - ${fixed})`;
-            this.topSection.style.height = `calc(100vh - ${fixed})`;
+            this.leftSplitBar.style.height = `calc(${vh} - ${fixed})`;
+            this.rightSplitBar.style.height = `calc(${vh} - ${fixed} - 5px)`;
+            this.inputSidebar.style.height = `calc(${vh} - ${fixed})`;
+            this.mainImageArea.style.height = `calc(${vh} - ${fixed})`;
+            this.currentImageWrapbox.style.height = `calc(${vh} - ${fixed} - ${altHeight})`;
+            this.editorSizebar.style.height = `calc(${vh} - ${fixed} - ${altHeight})`;
+            this.currentImageBatch.style.height = `calc(${vh} - ${fixed})`;
+            this.topSection.style.height = `calc(${vh} - ${fixed})`;
             this.bottomBar.style.height = `calc(${fixed} - 45px)`;
         }
         else {
-            this.leftSplitBar.style.height = 'calc(49vh)';
-            this.rightSplitBar.style.height = 'calc(49vh)';
+            this.leftSplitBar.style.height = `calc(49vh - ${safeBottom}px)`;
+            this.rightSplitBar.style.height = `calc(49vh - ${safeBottom}px)`;
             this.inputSidebar.style.height = '';
             this.mainImageArea.style.height = '';
-            this.currentImageWrapbox.style.height = `calc(49vh - ${altHeight} + 1rem)`;
-            this.editorSizebar.style.height = `calc(49vh - ${altHeight})`;
+            this.currentImageWrapbox.style.height = `calc(49vh - ${altHeight} + 1rem - ${safeBottom}px)`;
+            this.editorSizebar.style.height = `calc(49vh - ${altHeight} - ${safeBottom}px)`;
             this.currentImageBatch.style.height = '';
             this.topSection.style.height = '';
             let bottomBarHeight = this.bottomInfoBar.offsetHeight;
-            this.bottomBar.style.height = `calc(49vh - 30px)`;
+            this.bottomBar.style.height = `calc(49vh - 30px - ${safeBottom}px)`;
         }
         if (imageEditor) {
             imageEditor.resize();
@@ -315,7 +327,9 @@ class GenTabLayout {
                 browserUtil.makeVisible(tab.contentElem);
             });
         }
-        this.reapplyPositions();
+        // No reapplyPositions() call here: altPromptSizeHandle() below (called later in this same init())
+        // triggers its own reapplyPositions(), and nothing between here and there changes layout state -
+        // an immediate call here would just be a redundant full layout pass on every page load.
         this.leftSplitBar.addEventListener('mousedown', (e) => {
             if (this.isSmallWindow) {
                 return;
@@ -434,11 +448,54 @@ class GenTabLayout {
             this.bottomBarDrag = false;
             this.imageEditorSizeBarDrag = false;
         });
+        document.addEventListener('touchstart', (e) => {
+            if (e.touches.length == 1 && !['BUTTON', 'INPUT', 'TEXTAREA'].includes(e.target.tagName) && !e.target.isContentEditable && !findParentOfClass(e.target, 'model-block')) {
+                this.swipeStartX = e.touches.item(0).pageX;
+                this.swipeStartY = e.touches.item(0).pageY;
+            }
+            else {
+                this.swipeStartX = -1;
+                this.swipeStartY = -1;
+            }
+        });
         document.addEventListener('touchend', (e) => {
             this.leftBarDrag = false;
             this.rightBarDrag = false;
             this.bottomBarDrag = false;
             this.imageEditorSizeBarDrag = false;
+            if (e.changedTouches.length != 1) {
+                this.swipeStartX = -1;
+                this.swipeStartY = -1;
+            }
+            // Vertical-only swipe: up opens the bottom tool bar (eg LoRAs), down closes it back to the image view.
+            // Horizontal swipe (left/right sidebar toggling) was removed - it doubled as a false trigger while
+            // selecting/highlighting prompt text, which is a much more common gesture than the sidebar swipe.
+            if (this.swipeStartX != -1 && this.swipeStartY != -1 && this.isSmallWindow) {
+                let deltaX = e.changedTouches.item(0).pageX - this.swipeStartX;
+                let deltaY = e.changedTouches.item(0).pageY - this.swipeStartY;
+                let allShut = this.leftShut && this.rightSectionBarPos <= 0 && this.bottomShut;
+                // The bottom safe-area inset (env(safe-area-inset-bottom), applied as body padding for
+                // installed PWAs) is dead space below the real content - excluding it from the "swipe from
+                // bottom inward" zone keeps that trigger area anchored to the actual visible/grabbable
+                // content instead of shrinking by that padding amount underneath it.
+                let safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+                let contentHeight = window.innerHeight - safeBottom;
+                if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > this.minSwipeDelta) {
+                    // Swipe from anywhere towards bottom = close bottom bar
+                    if (!this.bottomShut && deltaY > 0) {
+                        this.setBottomShut(true);
+                        this.reapplyPositions();
+                    }
+                    // Swipe from bottom inward = open bottom bar
+                    else if (this.swipeStartY > contentHeight * 5 / 6 && deltaY < 0 && allShut) {
+                        this.setBottomShut(false);
+                        this.bottomSectionBarPos = window.innerHeight + 200;
+                        this.reapplyPositions();
+                    }
+                }
+                this.swipeStartX = -1;
+                this.swipeStartY = -1;
+            }
         });
         for (let tab of getRequiredElementById('bottombartabcollection').getElementsByTagName('a')) {
             tab.addEventListener('click', (e) => {

@@ -303,7 +303,7 @@ function autoRepersistParams() {
     }
 }
 
-function genInputs(delay_final = false) {
+function genInputs(delay_final = false, includePresets = true) {
     let runnables = [];
     let groupsClose = [];
     let groupsEnable = [];
@@ -313,7 +313,7 @@ function genInputs(delay_final = false) {
             ['main_inputs_area_hidden', 'new_preset_modal_hidden_inputs', (p) => (!p.visible || isPrompt(p)), false]]) {
         let area = getRequiredElementById(areaData[0]);
         area.innerHTML = '';
-        let presetArea = areaData[1] ? getRequiredElementById(areaData[1]) : null;
+        let presetArea = (areaData[1] && includePresets) ? getRequiredElementById(areaData[1]) : null;
         let html = '', presetHtml = '';
         let isMain = areaData[3];
         if (isMain && defaultPromptVisible) {
@@ -376,7 +376,7 @@ function genInputs(delay_final = false) {
                         runnables.push(newData.runnable);
                     }
                 }
-                if (isPrompt(param) ? isMain : true) {
+                if (presetArea && (isPrompt(param) ? isMain : true)) {
                     let presetParam = JSON.parse(JSON.stringify(param));
                     presetParam.toggleable = true;
                     let presetData = getHtmlForParam(presetParam, "preset_input_", true);

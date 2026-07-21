@@ -822,7 +822,10 @@ function genpageLoad() {
             paramConfig.loadUserParamConfigTab();
             autoRepersistParams();
             setInterval(autoRepersistParams, 60 * 60 * 1000); // Re-persist again hourly if UI left over
-            genInputs();
+            // Skip the New-Preset-modal duplicate build on initial load - it doubles this call's DOM-build
+            // and select2-init work for a modal most page loads never open. Built lazily on first use
+            // (see ensurePresetInputsBuilt() in presets.js), and normally on every later genInputs() call.
+            genInputs(false, false);
             genToolsList();
             reviseStatusBar();
             getRequiredElementById('advanced_options_checkbox').checked = localStorage.getItem('display_advanced') == 'true';
