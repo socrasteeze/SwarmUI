@@ -328,7 +328,7 @@ public class WebServer
             {
                 string fname = $"ExtensionFile/{e.ExtensionName}/{script}";
                 ExtensionSharedFiles.Add(fname, new(() => File.ReadAllText($"{e.FilePath}{script}")));
-                scripts.Append($"<script src=\"{fname}?vary={Utilities.VaryID}\"></script>\n");
+                scripts.Append($"<script defer src=\"{fname}?vary={Utilities.VaryID}\"></script>\n");
             }
             foreach (string css in e.StyleSheetFiles)
             {

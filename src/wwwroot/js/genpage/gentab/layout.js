@@ -142,9 +142,6 @@ class GenTabLayout {
         this.imageEditorSizeBarDrag = false;
         this.isSmallWindow = this.mobileDesktopLayout == 'auto' ? window.innerWidth < 768 : this.mobileDesktopLayout == 'mobile';
         this.antiDup = false;
-        this.swipeStartX = -1;
-        this.swipeStartY = -1;
-        this.minSwipeDelta = Math.min(100, window.innerWidth * 0.4);
         if (this.isSmallWindow) {
             this.bottomShut = true;
             this.leftShut = true;
@@ -437,74 +434,11 @@ class GenTabLayout {
             this.bottomBarDrag = false;
             this.imageEditorSizeBarDrag = false;
         });
-        document.addEventListener('touchstart', (e) => {
-            if (e.touches.length == 1 && !['BUTTON', 'INPUT'].includes(e.target.tagName) && !findParentOfClass(e.target, 'model-block')) {
-                this.swipeStartX = e.touches.item(0).pageX;
-                this.swipeStartY = e.touches.item(0).pageY;
-            }
-            else {
-                this.swipeStartX = -1;
-                this.swipeStartY = -1;
-            }
-        });
         document.addEventListener('touchend', (e) => {
             this.leftBarDrag = false;
             this.rightBarDrag = false;
             this.bottomBarDrag = false;
             this.imageEditorSizeBarDrag = false;
-            if (e.changedTouches.length != 1) {
-                this.swipeStartX = -1;
-                this.swipeStartY = -1;
-            }
-            if (this.swipeStartX != -1 && this.swipeStartY != -1 && this.isSmallWindow) {
-                let deltaX = e.changedTouches.item(0).pageX - this.swipeStartX;
-                let deltaY = e.changedTouches.item(0).pageY - this.swipeStartY;
-                let allShut = this.leftShut && this.rightSectionBarPos <= 0 && this.bottomShut;
-                if (Math.abs(deltaX) > Math.abs(deltaY)) {
-                    if (Math.abs(deltaX) > this.minSwipeDelta) {
-                        // TODO: Mobile bar shuts need a smooth animation
-                        // Swipe from anywhere towards left = close left bar
-                        if (!this.leftShut && deltaX < 0) {
-                            this.setLeftShut(true);
-                            this.leftSectionBarPos = 0;
-                            this.reapplyPositions();
-                        }
-                        // Swipe from anywhere towards right = close right bar
-                        else if (this.rightSectionBarPos > 0 && deltaX > 0) {
-                            this.rightSectionBarPos = 0;
-                            this.reapplyPositions();
-                        }
-                        // Swipe from left inward = open left bar
-                        else if (this.swipeStartX < window.innerWidth / 6 && deltaX > 0 && allShut) {
-                            this.setLeftShut(false);
-                            this.leftSectionBarPos = window.innerWidth;
-                            this.reapplyPositions();
-                        }
-                        // Swipe from right inward = open right bar
-                        else if (this.swipeStartX > window.innerWidth * 5 / 6 && deltaX < 0 && allShut) {
-                            this.rightSectionBarPos = window.innerWidth;
-                            this.reapplyPositions();
-                        }
-                    }
-                }
-                else {
-                    if (Math.abs(deltaY) > this.minSwipeDelta) {
-                        // Swipe from anywhere towards bottom = close bottom bar
-                        if (!this.bottomShut && deltaY > 0) {
-                            this.setBottomShut(true);
-                            this.reapplyPositions();
-                        }
-                        // Swipe from bottom inward = open bottom bar
-                        else if (this.swipeStartY > window.innerHeight * 5 / 6 && deltaY < 0 && allShut) {
-                            this.setBottomShut(false);
-                            this.bottomSectionBarPos = window.innerHeight + 200;
-                            this.reapplyPositions();
-                        }
-                    }
-                }
-                this.swipeStartX = -1;
-                this.swipeStartY = -1;
-            }
         });
         for (let tab of getRequiredElementById('bottombartabcollection').getElementsByTagName('a')) {
             tab.addEventListener('click', (e) => {

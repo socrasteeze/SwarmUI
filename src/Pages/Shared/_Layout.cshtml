@@ -30,11 +30,11 @@
         }
     }
     <link id="favicon" rel="shortcut icon" href="favicon.ico" />
-    <script src="js/lib/jquery.min.js"></script>
-    <script src="js/lib/bootstrap.min.js"></script>
-    <script src="js/lib/select2.min.js"></script>
-    <script src="js/util.js?vary=@Utilities.VaryID"></script>
-    <script src="js/translator.js?vary=@Utilities.VaryID"></script>
+    <script defer src="js/lib/jquery.min.js"></script>
+    <script defer src="js/lib/bootstrap.min.js"></script>
+    <script defer src="js/lib/select2.min.js"></script>
+    <script defer src="js/util.js?vary=@Utilities.VaryID"></script>
+    <script defer src="js/translator.js?vary=@Utilities.VaryID"></script>
 </head>
 <body>
     <div class="top-status-bar-wrapper"><div class="top-status-bar" id="top_status_bar"></div></div>
@@ -42,8 +42,8 @@
         @WebUtil.Toast("error_toast_box", "Error", "", "error_toast_content", "", false)
     </div>
     @RenderBody()
-    <script src="js/permissions.js?vary=@Utilities.VaryID"></script>
-    <script src="js/site.js?vary=@Utilities.VaryID"></script>
+    <script defer src="js/permissions.js?vary=@Utilities.VaryID"></script>
+    <script defer src="js/site.js?vary=@Utilities.VaryID"></script>
     <div id="version_display" class="version-display">SwarmUI v<span>@Utilities.Version</span><span> (@Program.CurrentGitDate)</span></div>
     @RenderSection("Scripts", required: false)
 </body>
