@@ -161,7 +161,7 @@ body.small-window .welcome_message {
    nav height; the safe-area inset is stacked on for the home indicator. z-indexes stay under Bootstrap modals
    / the fullscreen image viewer (~1055) so those still cover the shell. */
 body.small-window.mobile-shell-active {
-    --shell-nav-h: 3.4rem;
+    --shell-nav-h: 3rem;
     box-sizing: border-box;
     padding-bottom: calc(var(--shell-nav-h) + env(safe-area-inset-bottom));
 }
