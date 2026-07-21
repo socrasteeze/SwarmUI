@@ -6,17 +6,28 @@
 
 /* iOS Safari auto-zooms the page when focusing an input whose computed font is under 16px.
    Force every interactive field to 16px on touch devices so focus never triggers that zoom.
-   Scoped to body.coarse-pointer, so desktop rendering is untouched. */
+   Scoped to body.coarse-pointer, so desktop rendering is untouched. Beyond plain input/textarea/select,
+   also covers the wildcard experimental contenteditable editor and the select2 dropdown search field
+   (the latter needs matching specificity to beat select2.min.css's own font-size rule). */
 body.coarse-pointer input,
 body.coarse-pointer textarea,
-body.coarse-pointer select {
+body.coarse-pointer select,
+body.coarse-pointer .editable-textbox[contenteditable] {
+    font-size: 16px;
+}
+body.coarse-pointer .select2-container .select2-search--inline .select2-search__field {
     font-size: 16px;
 }
 
-/* Installed PWA (viewport-fit=cover): push the app content clear of the top safe area (status bar / notch).
-   The layout's height math reads the root div's live top offset, so it self-corrects to this padding. */
+/* Installed PWA (viewport-fit=cover): push the app content clear of the safe areas (status bar / notch
+   at top, home-indicator curve at bottom). border-box keeps this padding inside the existing 100vh box
+   instead of growing past it, since body is position:fixed + overflow:hidden and would otherwise clip
+   that same amount off the bottom. The layout's height math reads the root div's live top offset, so
+   it self-corrects around this padding. */
 body.pwa-standalone {
+    box-sizing: border-box;
     padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* --- Phase 2: fullscreen image viewer touch --- */
