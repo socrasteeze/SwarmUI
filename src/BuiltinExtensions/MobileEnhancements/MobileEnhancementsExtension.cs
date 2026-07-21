@@ -22,6 +22,7 @@ public class MobileEnhancementsExtension : Extension
         ScriptFiles.Add("Assets/mobile_fullview_touch.js");
         ScriptFiles.Add("Assets/mobile_network.js");
         ScriptFiles.Add("Assets/mobile_share.js");
+        ScriptFiles.Add("Assets/mobile_shell.js");
         StyleSheetFiles.Add("Assets/mobile.css");
         OtherAssets.Add("Assets/offline.html");
         OtherAssets.Add("Assets/icons/icon-192.png");
