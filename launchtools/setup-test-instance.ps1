@@ -161,7 +161,7 @@ if ($FixPaths) {
             Set-Content -Path $file -Value $text -NoNewline
             Write-Ok "Fixed paths in $name."
         } else {
-            Write-Ok "$name had no source-base paths (likely relative — nothing to fix)."
+            Write-Ok "$name had no source-base paths (likely relative - nothing to fix)."
         }
     }
     Write-Warn2 "Still review Backends.fds by hand if your ComfyUI path was set outside the install folder."
