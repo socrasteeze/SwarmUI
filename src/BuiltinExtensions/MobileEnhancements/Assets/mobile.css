@@ -4,13 +4,12 @@
 
 /* --- Phase 1: PWA + touch input baseline --- */
 
-/* iOS Safari auto-zooms the page when focusing an input whose font is under 16px. Bump the interactive
-   fields in the parameter sidebar and prompt so focusing them never triggers that jarring zoom. */
-body.coarse-pointer .input-sidebar input,
-body.coarse-pointer .input-sidebar textarea,
-body.coarse-pointer .input-sidebar select,
-body.coarse-pointer .alt_prompt_textboxes textarea,
-body.coarse-pointer .alt_prompt_textboxes input {
+/* iOS Safari auto-zooms the page when focusing an input whose computed font is under 16px.
+   Force every interactive field to 16px on touch devices so focus never triggers that zoom.
+   Scoped to body.coarse-pointer, so desktop rendering is untouched. */
+body.coarse-pointer input,
+body.coarse-pointer textarea,
+body.coarse-pointer select {
     font-size: 16px;
 }
 
