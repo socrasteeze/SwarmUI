@@ -142,6 +142,7 @@ class GenTabLayout {
         this.imageEditorSizeBarDrag = false;
         this.isSmallWindow = this.mobileDesktopLayout == 'auto' ? window.innerWidth < 768 : this.mobileDesktopLayout == 'mobile';
         this.antiDup = false;
+        this.reapplyScheduled = false;
         this.swipeStartX = -1;
         this.swipeStartY = -1;
         this.minSwipeDelta = Math.min(100, window.innerWidth * 0.4);
@@ -224,12 +225,17 @@ class GenTabLayout {
         let barTopLeft = leftShut ? `0px` : this.leftSectionBarPos == -1 ? (this.isSmallWindow ? `14rem` : `28rem`) : `${this.leftSectionBarPos}px`;
         let barTopRight = this.rightSectionBarPos == -1 ? (this.isSmallWindow ? `4rem` : `21rem`) : `${this.rightSectionBarPos}px`;
         let curImgWidth = `100vw - ${barTopLeft} - ${barTopRight} - 10px`;
-        // TODO: this 'eval()' hack to read the size in advance is a bit cursed.
-        let fontRem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-        let curImgWidthNum = eval(curImgWidth.replace(/vw/g, `* ${window.innerWidth * 0.01}`).replace(/rem/g, `* ${fontRem}`).replace(/px/g, ''));
-        if (curImgWidthNum < 400 && !this.isSmallWindow) {
-            barTopRight = `${barTopRight} + ${400 - curImgWidthNum}px`;
-            curImgWidth = `100vw - ${barTopLeft} - ${barTopRight} - 10px`;
+        // The 'eval()' hack reads the pixel width in advance, but its only consumer is the min-width nudge
+        // below, which is gated on !isSmallWindow - so on mobile the whole computation is dead. Skip it there
+        // (avoids the eval + getComputedStyle on every rAF pass while typing a prompt on a phone).
+        if (!this.isSmallWindow) {
+            // TODO: this 'eval()' hack to read the size in advance is a bit cursed.
+            let fontRem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+            let curImgWidthNum = eval(curImgWidth.replace(/vw/g, `* ${window.innerWidth * 0.01}`).replace(/rem/g, `* ${fontRem}`).replace(/px/g, ''));
+            if (curImgWidthNum < 400) {
+                barTopRight = `${barTopRight} + ${400 - curImgWidthNum}px`;
+                curImgWidth = `100vw - ${barTopLeft} - ${barTopRight} - 10px`;
+            }
         }
         if (this.isSmallWindow && (this.rightSectionBarPos > 0 || !this.bottomShut)) {
             this.altRegion.style.visibility = 'hidden';
@@ -309,6 +315,21 @@ class GenTabLayout {
             container.style.height = `calc(100% - ${offset}px)`;
         }
         browserUtil.makeVisible(document);
+    }
+
+    /** Coalesces high-frequency reapplyPositions() requests into a single pass per animation frame.
+     * Prompt typing fires an 'input' event per keystroke, and iOS Safari fires a stream of visualViewport
+     * 'resize' events while the on-screen keyboard animates - routing those through here collapses each burst
+     * to one layout pass on the next frame instead of one synchronous full relayout per event. */
+    scheduleReapply() {
+        if (this.reapplyScheduled) {
+            return;
+        }
+        this.reapplyScheduled = true;
+        requestAnimationFrame(() => {
+            this.reapplyScheduled = false;
+            this.reapplyPositions();
+        });
     }
 
     /** Internal initialization of the generate tab. */
@@ -535,7 +556,7 @@ class GenTabLayout {
         });
         this.altText.addEventListener('input', () => {
             setCookie(`lastparam_input_prompt`, this.altText.value, getParamMemoryDays());
-            this.reapplyPositions();
+            this.scheduleReapply();
         });
         this.altNegText.addEventListener('input', (e) => {
             let inputNegPrompt = document.getElementById('input_negativeprompt');
@@ -555,14 +576,14 @@ class GenTabLayout {
         });
         this.altNegText.addEventListener('input', () => {
             setCookie(`lastparam_input_negativeprompt`, this.altNegText.value, getParamMemoryDays());
-            this.reapplyPositions();
+            this.scheduleReapply();
         });
         this.altPromptSizeHandle();
         new ResizeObserver(this.altPromptSizeHandle.bind(this)).observe(this.altText);
         new ResizeObserver(this.altPromptSizeHandle.bind(this)).observe(this.altNegText);
         textPromptAddKeydownHandler(this.altText);
         textPromptAddKeydownHandler(this.altNegText);
-        addEventListener("resize", this.reapplyPositions.bind(this));
+        addEventListener("resize", this.scheduleReapply.bind(this));
         textPromptAddKeydownHandler(getRequiredElementById('edit_wildcard_contents'));
         this.buildConfigArea();
     }
