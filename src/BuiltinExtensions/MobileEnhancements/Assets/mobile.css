@@ -152,3 +152,187 @@ body.small-window .welcome_message {
 .mobile-connection-banner.visible {
     transform: translateX(-50%) translateY(0);
 }
+
+/* --- Native app shell (mobile only; built by mobile_shell.js; opt-out via the More sheet) --- */
+
+/* Reserve space for the fixed bottom nav by growing body's padding-bottom. reapplyPositions() already reads
+   getComputedStyle(body).paddingBottom and subtracts it from every height (the safe-area fix), so the whole
+   layout sizes itself above the nav automatically - no core layout edit needed. --shell-nav-h is the tappable
+   nav height; the safe-area inset is stacked on for the home indicator. z-indexes stay under Bootstrap modals
+   / the fullscreen image viewer (~1055) so those still cover the shell. */
+body.small-window.mobile-shell-active {
+    --shell-nav-h: 3.4rem;
+    box-sizing: border-box;
+    padding-bottom: calc(var(--shell-nav-h) + env(safe-area-inset-bottom));
+}
+
+/* Bottom tab bar. */
+.mobile-bottom-nav {
+    display: none;
+}
+body.small-window.mobile-shell-active .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(var(--shell-nav-h) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 900;
+    background: var(--background, #161616);
+    border-top: 1px solid var(--shadow, #3f3f46);
+}
+.mobile-nav-item {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    color: var(--text-soft, #aaa);
+    font-size: 0.66rem;
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+}
+.mobile-nav-item svg {
+    width: 22px;
+    height: 22px;
+}
+.mobile-nav-item.active {
+    color: var(--emphasis, #7855e1);
+}
+
+/* Floating "Options" button that opens the parameters drawer (hidden while any sheet/drawer is open). */
+.mobile-options-fab {
+    display: none;
+}
+body.small-window.mobile-shell-active .mobile-options-fab {
+    display: block;
+    position: fixed;
+    right: 0.8rem;
+    bottom: calc(var(--shell-nav-h) + env(safe-area-inset-bottom) + 0.8rem);
+    z-index: 900;
+    background: var(--emphasis, #7855e1);
+    color: var(--button-text, #fff);
+    border: none;
+    border-radius: 2rem;
+    padding: 0.6rem 1.1rem;
+    font-size: 0.85rem;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+}
+body.shell-drawer-open .mobile-options-fab,
+body.shell-more-open .mobile-options-fab {
+    display: none;
+}
+
+/* Parameters drawer: the core #input_sidebar (.input-sidebar) is repositioned in-place as a bottom sheet.
+   !important is required to beat the inline display/width/height reapplyPositions() writes onto it. */
+.mobile-drawer-backdrop,
+.mobile-sheet-backdrop {
+    display: none;
+}
+body.small-window.mobile-shell-active.shell-drawer-open .input-sidebar {
+    display: flex !important;
+    flex-direction: column;
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: calc(var(--shell-nav-h) + env(safe-area-inset-bottom)) !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 72vh !important;
+    z-index: 950;
+    padding-top: 1.3rem;
+    border-top-left-radius: 1rem;
+    border-top-right-radius: 1rem;
+    background: var(--background-panel, #202020);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+    overflow-y: auto;
+    transform: translateY(110%);
+    transition: transform 0.28s ease-out;
+}
+body.small-window.mobile-shell-active.shell-drawer-open.shell-drawer-shown .input-sidebar {
+    transform: translateY(0) !important;
+}
+body.small-window.mobile-shell-active.shell-drawer-open .input-sidebar::before {
+    content: '';
+    position: absolute;
+    top: 0.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2.4rem;
+    height: 0.28rem;
+    border-radius: 1rem;
+    background: var(--text-soft, #aaa);
+}
+body.small-window.mobile-shell-active.shell-drawer-open .mobile-drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 940;
+    opacity: 0;
+    transition: opacity 0.28s ease-out;
+}
+body.small-window.mobile-shell-active.shell-drawer-open.shell-drawer-shown .mobile-drawer-backdrop {
+    opacity: 1;
+}
+
+/* More sheet + its backdrop. */
+.mobile-more-sheet {
+    display: none;
+}
+body.small-window.mobile-shell-active .mobile-more-sheet {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 970;
+    background: var(--background-panel, #202020);
+    border-top-left-radius: 1rem;
+    border-top-right-radius: 1rem;
+    padding: 1rem 1rem calc(env(safe-area-inset-bottom) + 1rem);
+    transform: translateY(110%);
+    transition: transform 0.28s ease-out;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+}
+body.small-window.mobile-shell-active.shell-more-open .mobile-more-sheet {
+    transform: translateY(0);
+}
+body.small-window.mobile-shell-active.shell-more-open .mobile-sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 960;
+}
+.mobile-sheet-handle {
+    width: 2.4rem;
+    height: 0.28rem;
+    border-radius: 1rem;
+    background: var(--text-soft, #aaa);
+    margin: 0 auto 1rem;
+}
+.mobile-more-item {
+    background: none;
+    border: none;
+    text-align: left;
+    color: var(--text, #E4E4E4);
+    font-size: 1rem;
+    padding: 0.9rem 0.5rem;
+    min-height: 44px;
+    border-bottom: 1px solid var(--shadow, #3f3f46);
+    cursor: pointer;
+}
+.mobile-more-toggle {
+    color: var(--text-soft, #aaa);
+    border-bottom: none;
+    margin-top: 0.5rem;
+}
