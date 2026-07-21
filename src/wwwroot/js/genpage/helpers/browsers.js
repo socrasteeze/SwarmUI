@@ -431,6 +431,13 @@ class GenPageBrowserClass {
             let popoverId = `${this.id}-${id}`;
             let buttons = desc.buttons.filter(b => !b.multi_only);
             if (buttons.length > 0) {
+                // popoverId is index-based, so a stale popover from a previous render (eg before a
+                // navigate()/refresh rebuilt `container`'s contents with a different file at this same
+                // index) can still exist here now that popovers live in document.body instead of inside
+                // `container` - container.innerHTML='' no longer cleans them up. Remove any leftover
+                // before creating the new one, so getElementById/doPopover can't resolve to a stale popover
+                // still bound (via its buttons' onclick closures) to the wrong file.
+                document.getElementById(`popover_${popoverId}`)?.remove();
                 let menuDiv = createDiv(`popover_${popoverId}`, 'sui-popover sui_popover_model');
                 for (let button of buttons) {
                     let buttonElem;
