@@ -193,6 +193,13 @@ function getPresetTypes(prefix) {
     return gen_param_types.filter(type => !type.toggleable || getRequiredElementById(`${prefix}_${type.id}_toggle`).checked);
 }
 
+/** Builds the New-Preset-modal's duplicate parameter inputs on first use, since initial page load skips them (see genInputs() call in main.js). Cheap to call repeatedly - only rebuilds while the preset modal area is still empty. */
+function ensurePresetInputsBuilt() {
+    if (getRequiredElementById('new_preset_modal_inputs').innerHTML.trim() == '') {
+        genInputs();
+    }
+}
+
 function clearPresetView() {
     preset_to_edit = null;
     getRequiredElementById('preset_advanced_options_checkbox').checked = false;
@@ -237,6 +244,7 @@ let editPresetTitle = translatable('Edit Preset');
 let presetOverrideMsg = translatable('Overridden by preset(s):');
 
 function create_new_preset_button() {
+    ensurePresetInputsBuilt();
     clearPresetView();
     getRequiredElementById('new_preset_name').value = presetBrowser.folder;
     getRequiredElementById('new_preset_modal_title').innerText = createNewPresetTitle.get();
@@ -498,6 +506,7 @@ function duplicatePreset(preset) {
 }
 
 function editPreset(preset) {
+    ensurePresetInputsBuilt();
     clearPresetView();
     preset_to_edit = preset;
     presetHelpers.enableImageElem.checked = false;

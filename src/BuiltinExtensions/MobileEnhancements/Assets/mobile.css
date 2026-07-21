@@ -60,7 +60,10 @@ body.coarse-pointer .batch-gear-button {
     min-height: 44px;
 }
 
-/* Tab bars (top nav + every sub-nav) scroll horizontally instead of wrapping or clipping on narrow screens. */
+/* Tab bars (top nav + every sub-nav) scroll horizontally instead of wrapping or clipping on narrow screens.
+   modern.css sets an unconditional 20px on .nav-tabs; at that size 2-3 tab labels barely fit (or get
+   clipped) on a phone-width viewport, forcing users to zoom the whole page out to compensate. Shrinking
+   to match the site's own 14px body baseline keeps labels legible while actually fitting the screen. */
 body.small-window .nav-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -68,6 +71,7 @@ body.small-window .nav-tabs {
     scrollbar-width: none;               /* Firefox */
     -webkit-overflow-scrolling: touch;   /* iOS momentum */
     scroll-snap-type: x proximity;
+    font-size: 14px;
 }
 body.small-window .nav-tabs::-webkit-scrollbar {
     display: none;                       /* WebKit */
@@ -104,6 +108,13 @@ body.small-window.kb-open .alt_prompt_region {
 /* Bottom safe-area breathing room for the Generate button row in an installed PWA (home indicator). */
 body.pwa-standalone.small-window .alt-prompt-buttons-wrapper {
     padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* The welcome/tip banner is 150% of the 14px body baseline (21px) on desktop, where it has room to spare.
+   On a phone-width viewport that wraps the tip text across many lines and eats most of the screen.
+   min-height on .welcome-message-wrapper is in em, so it shrinks along with this automatically. */
+body.small-window .welcome_message {
+    font-size: 100%;
 }
 
 /* --- Phase 4: connection banner --- */

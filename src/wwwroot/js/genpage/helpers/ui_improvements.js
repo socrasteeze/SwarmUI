@@ -539,7 +539,10 @@ class UIImprovementHandler {
             elem.value = val;
         }
         let buttons = [...elem.options].filter(o => o.style.display != 'none').map(o => { return { key_html: o.dataset.cleanname, title: o.title, key: o.innerText, searchable: `${o.dataset.cleanname} ${o.innerText} ${o.value}`, action: () => { o.selected = true; triggerChangeFor(elem); } }; });
-        this.lastPopover = new AdvancedPopover(popId, buttons, true, rect.x, rect.y, elem.parentElement, elem.selectedIndex < 0 ? null : elem.selectedOptions[0].innerText, 0);
+        // document.body (not elem.parentElement): a position:fixed popover nested inside a
+        // -webkit-overflow-scrolling:touch panel (eg the sidebar, on iOS Safari) becomes trapped inside
+        // that ancestor's new containing block and renders clipped/covered instead of floating over the page.
+        this.lastPopover = new AdvancedPopover(popId, buttons, true, rect.x, rect.y, document.body, elem.selectedIndex < 0 ? null : elem.selectedOptions[0].innerText, 0);
         e.preventDefault();
         e.stopPropagation();
         return false;
