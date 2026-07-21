@@ -451,12 +451,11 @@ class GenPageBrowserClass {
                     }
                     menuDiv.appendChild(buttonElem);
                 }
-                if (before) {
-                    container.insertBefore(menuDiv, before);
-                }
-                else {
-                    container.appendChild(menuDiv);
-                }
+                // Appended to document.body (not `container`) so this position:fixed popover isn't
+                // trapped inside a -webkit-overflow-scrolling:touch ancestor on iOS Safari, which turns
+                // it into a new containing block and makes the popup render clipped/covered instead of
+                // floating over the page. doPopover() looks this up by ID, so parentage doesn't matter.
+                document.body.appendChild(menuDiv);
             }
             let img = document.createElement('img');
             img.addEventListener('click', () => {
