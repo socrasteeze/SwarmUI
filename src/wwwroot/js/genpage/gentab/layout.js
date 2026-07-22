@@ -276,6 +276,13 @@ class GenTabLayout {
         // getBoundingClientRect), so only the bottom side needs this explicit correction.
         let safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
         let vh = `(100vh - ${safeBottom}px)`;
+        // currentImageWrapbox/editorSizebar height is "available space minus altHeight" below, with a 6rem
+        // floor via max(): altHeight (the floating prompt bar's own live height - text boxes + any pasted
+        // images) can grow larger than the space actually left over, especially on a short mobile viewport.
+        // Without the floor that calc goes negative (clamped to 0 by the browser) and the image/batch preview
+        // area - along with its "Image"/"Batch" tabs - disappears entirely, while main-image-area's own
+        // overflow:hidden simultaneously clips the prompt textboxes/Generate button out of view instead of
+        // growing to fit them. The floor keeps a minimum sliver of the image area visible either way.
         if (this.bottomSectionBarPos != -1 || bottomShut) {
             let bottomBarHeight = this.bottomInfoBar.offsetHeight;
             let addedHeight = this.isSmallWindow ? '0.4rem' : '2.8rem';
@@ -284,8 +291,8 @@ class GenTabLayout {
             this.rightSplitBar.style.height = `calc(${vh} - ${fixed} - 5px)`;
             this.inputSidebar.style.height = `calc(${vh} - ${fixed})`;
             this.mainImageArea.style.height = `calc(${vh} - ${fixed})`;
-            this.currentImageWrapbox.style.height = `calc(${vh} - ${fixed} - ${altHeight})`;
-            this.editorSizebar.style.height = `calc(${vh} - ${fixed} - ${altHeight})`;
+            this.currentImageWrapbox.style.height = `calc(max(6rem, ${vh} - ${fixed} - ${altHeight}))`;
+            this.editorSizebar.style.height = `calc(max(6rem, ${vh} - ${fixed} - ${altHeight}))`;
             this.currentImageBatch.style.height = `calc(${vh} - ${fixed})`;
             this.topSection.style.height = `calc(${vh} - ${fixed})`;
             this.bottomBar.style.height = `calc(${fixed} - 45px)`;
@@ -295,8 +302,8 @@ class GenTabLayout {
             this.rightSplitBar.style.height = `calc(49vh - ${safeBottom}px)`;
             this.inputSidebar.style.height = '';
             this.mainImageArea.style.height = '';
-            this.currentImageWrapbox.style.height = `calc(49vh - ${altHeight} + 1rem - ${safeBottom}px)`;
-            this.editorSizebar.style.height = `calc(49vh - ${altHeight} - ${safeBottom}px)`;
+            this.currentImageWrapbox.style.height = `calc(max(6rem, 49vh - ${altHeight} + 1rem - ${safeBottom}px))`;
+            this.editorSizebar.style.height = `calc(max(6rem, 49vh - ${altHeight} - ${safeBottom}px))`;
             this.currentImageBatch.style.height = '';
             this.topSection.style.height = '';
             let bottomBarHeight = this.bottomInfoBar.offsetHeight;

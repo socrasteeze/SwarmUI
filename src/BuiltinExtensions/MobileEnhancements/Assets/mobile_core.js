@@ -13,6 +13,22 @@ class MobileEnhancements {
         this.markStandalone();
         this.registerServiceWorker();
         this.setupKeyboardHandling();
+        this.tagOptionalTopTabs();
+    }
+
+    /** Mark the Simple and Comfy Workflow top tabs so mobile.css can hide them on small windows - they have
+     * no shared class to target directly (class-selectors-only convention), and both are reachable another
+     * way on mobile (the app shell's More sheet has a "Simple Mode" shortcut; Comfy Workflow is a power-user
+     * desktop feature). Runs once at load; these tabs are server-rendered and never rebuilt afterward. */
+    tagOptionalTopTabs() {
+        let simpleTab = document.getElementById('simpletabbutton');
+        if (simpleTab) {
+            simpleTab.classList.add('mobile-optional-tab');
+        }
+        let comfyTab = document.getElementById('maintab_comfyworkflow');
+        if (comfyTab) {
+            comfyTab.classList.add('mobile-optional-tab');
+        }
     }
 
     /** True when the current pointer is touch-like (phones/tablets), used to gate touch-only behaviors. */
