@@ -128,6 +128,28 @@ body.small-window .welcome_message {
     font-size: 100%;
 }
 
+/* Simple and Comfy Workflow are rarely used from a phone and eat scarce top-tab-strip width; hide them when
+   the small-window (mobile) layout is active. Tagged .mobile-optional-tab by mobile_core.js since neither has
+   a shared class to target directly. Hiding the link is enough - its parent <li> has no other content, so it
+   collapses to nothing; the More sheet's "Simple Mode" button still reaches Simple via a plain .click(). */
+body.small-window .mobile-optional-tab {
+    display: none;
+}
+
+/* Cap how tall the pasted-image prompt strip can grow. Each added image was previously allowed up to 128px,
+   wrapping to more rows as more were pasted, with no ceiling - genpage.css's .main-image-area (the ancestor
+   that contains both the image/batch previews and this prompt bar) clips overflow instead of resizing, so
+   past a certain point the growth didn't make the page taller, it just clipped the actual prompt textboxes
+   and Generate button out of the visible area. Scrolling internally here keeps that growth bounded no matter
+   how many images are pasted. */
+body.small-window .alt-prompt-added-image-area {
+    max-height: 5.5rem;
+    overflow-y: auto;
+}
+body.small-window .alt-prompt-image {
+    max-height: 4.5rem;
+}
+
 /* --- Phase 4: connection banner --- */
 
 /* Slide-in "connection lost" banner (created by mobile_network.js). Shown on any viewport when the browser
