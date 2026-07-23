@@ -116,8 +116,11 @@ body.small-window.kb-open .alt_prompt_region {
     transition: transform 0.15s ease-out;
 }
 
-/* Bottom safe-area breathing room for the Generate button row in an installed PWA (home indicator). */
-body.pwa-standalone.small-window .alt-prompt-buttons-wrapper {
+/* Bottom safe-area breathing room for the Generate button row in an installed PWA (home indicator).
+   Classic layout only (:not(.mobile-shell-active)): with the app shell active, body's own padding already
+   reserves the nav bar + inset below the whole layout, so this would stack a second inset of dead space
+   between the Generate button and the nav bar. */
+body.pwa-standalone.small-window:not(.mobile-shell-active) .alt-prompt-buttons-wrapper {
     padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -131,9 +134,12 @@ body.small-window .welcome_message {
 /* Simple and Comfy Workflow are rarely used from a phone and eat scarce top-tab-strip width; hide them when
    the small-window (mobile) layout is active. Tagged .mobile-optional-tab by mobile_core.js since neither has
    a shared class to target directly. Hiding the link is enough - its parent <li> has no other content, so it
-   collapses to nothing; the More sheet's "Simple Mode" button still reaches Simple via a plain .click(). */
+   collapses to nothing; the More sheet's "Simple Mode" button still reaches Simple via a plain .click().
+   !important is required: comfy_workflow_editor_helper.js's featureSetChangedCallbacks handler force-shows the
+   Comfy Workflow tab via inline style.display = 'block' every time a comfyui backend (re)connects, which on a
+   PWA re-fires whenever the app resumes - the inline style would otherwise win over this class rule. */
 body.small-window .mobile-optional-tab {
-    display: none;
+    display: none !important;
 }
 
 /* Cap how tall the pasted-image prompt strip can grow. Each added image was previously allowed up to 128px,
@@ -184,8 +190,14 @@ body.small-window .alt-prompt-image {
    / the fullscreen image viewer (~1055) so those still cover the shell. */
 body.small-window.mobile-shell-active {
     --shell-nav-h: 3rem;
+    /* The nav overlaps the bottom safe-area inset by 10px: riding the full inset (34px on home-indicator
+       iPhones) left the icons floating visibly high above the bezel. 10px back still keeps them ~24px clear
+       of the screen edge (the home-indicator zone is ~13px), and max() pins zero-inset devices at 0 so
+       nothing shifts there. Tune the 10px here only - every other shell rule derives from this var, and
+       layout.js live-reads body's computed padding-bottom, so the height math follows automatically. */
+    --shell-nav-inset: max(calc(env(safe-area-inset-bottom) - 10px), 0px);
     box-sizing: border-box;
-    padding-bottom: calc(var(--shell-nav-h) + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--shell-nav-h) + var(--shell-nav-inset));
 }
 
 /* Bottom tab bar. */
@@ -198,8 +210,8 @@ body.small-window.mobile-shell-active .mobile-bottom-nav {
     left: 0;
     right: 0;
     bottom: 0;
-    height: calc(var(--shell-nav-h) + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom);
+    height: calc(var(--shell-nav-h) + var(--shell-nav-inset));
+    padding-bottom: var(--shell-nav-inset);
     z-index: 900;
     background: var(--background, #161616);
     border-top: 1px solid var(--shadow, #3f3f46);
@@ -235,7 +247,7 @@ body.small-window.mobile-shell-active .mobile-options-fab {
     display: block;
     position: fixed;
     right: 0.8rem;
-    bottom: calc(var(--shell-nav-h) + env(safe-area-inset-bottom) + 0.8rem);
+    bottom: calc(var(--shell-nav-h) + var(--shell-nav-inset) + 0.8rem);
     z-index: 900;
     background: var(--emphasis, #7855e1);
     color: var(--button-text, #fff);
@@ -264,7 +276,7 @@ body.small-window.mobile-shell-active.shell-drawer-open .input-sidebar {
     left: 0 !important;
     right: 0 !important;
     top: auto !important;
-    bottom: calc(var(--shell-nav-h) + env(safe-area-inset-bottom)) !important;
+    bottom: calc(var(--shell-nav-h) + var(--shell-nav-inset)) !important;
     width: 100vw !important;
     max-width: 100vw !important;
     height: 72vh !important;
