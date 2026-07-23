@@ -1,10 +1,14 @@
 {
+    "id": "/",
     "name": "SwarmUI",
     "short_name": "SwarmUI",
     "description": "Modular AI image generation UI.",
     "start_url": "/Text2Image",
     "scope": "/",
     "display": "standalone",
+    "launch_handler": {
+        "client_mode": "navigate-existing"
+    },
     "orientation": "any",
     "background_color": "#161616",
     "theme_color": "#161616",

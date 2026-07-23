@@ -22,6 +22,11 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
     event.waitUntil((async () => {
+        // Let the browser start the navigation fetch in parallel with worker startup, instead of the page
+        // request waiting on this worker to boot first. No-op where unsupported (e.g. Safari).
+        if (self.registration.navigationPreload) {
+            await self.registration.navigationPreload.enable();
+        }
         const keep = [CACHE_STATIC, CACHE_ASSET];
         const names = await caches.keys();
         await Promise.all(names.map(n => keep.includes(n) ? null : caches.delete(n)));
@@ -101,6 +106,16 @@ self.addEventListener('fetch', event => {
     if (request.mode == 'navigate') {
         event.respondWith((async () => {
             try {
+                // Use the preloaded response when navigation preload kicked it off already (see activate);
+                // cache it under the same rules networkFirst would so the offline fallback stays in sync.
+                const preload = await event.preloadResponse;
+                if (preload) {
+                    if (preload.ok) {
+                        const cache = await caches.open(CACHE_STATIC);
+                        cache.put(request, preload.clone());
+                    }
+                    return preload;
+                }
                 return await networkFirst(request, CACHE_STATIC);
             }
             catch (err) {
