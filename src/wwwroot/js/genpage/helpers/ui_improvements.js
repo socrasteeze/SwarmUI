@@ -214,18 +214,32 @@ class AdvancedPopover {
         let extraHeight = (this.textInput ? this.textInput.offsetHeight : 0) + 32;
         let rawExpected = Math.min(this.expectedHeight, this.heightLimit);
         let expected = rawExpected + extraHeight;
-        if (this.targetY + expected < window.innerHeight) {
+        // Anchor the flip/clamp math to the visible band (visual viewport) rather than the full layout viewport.
+        // On mobile - notably an iOS standalone PWA with the on-screen keyboard open - the keyboard shrinks the
+        // visual viewport and can scroll the layout viewport up (nonzero visualViewport.offsetTop) while leaving
+        // window.innerHeight unchanged. targetY (from getBoundingClientRect) and position:fixed are both
+        // layout-viewport-relative, so the visible region in those coordinates is [offsetTop, offsetTop + height].
+        // Using innerHeight instead pins the flip-above clamp to layout-y 0, which sits above the visible band and
+        // strands the autocomplete popover off the top of the screen. On desktop offsetTop is 0 and height equals
+        // innerHeight, so this is identical to the prior behavior.
+        let viewTop = 0;
+        let viewBottom = window.innerHeight;
+        if (window.visualViewport) {
+            viewTop = window.visualViewport.offsetTop;
+            viewBottom = viewTop + window.visualViewport.height;
+        }
+        if (this.targetY + expected < viewBottom) {
             y = this.targetY;
             maxHeight = rawExpected;
         }
-        else if (this.flipYHeight != null && this.targetY > window.innerHeight / 2) {
-            y = Math.max(0, this.targetY - this.flipYHeight - expected);
+        else if (this.flipYHeight != null && this.targetY > viewTop + (viewBottom - viewTop) / 2) {
+            y = Math.max(viewTop, this.targetY - this.flipYHeight - expected);
             this.popover.classList.add('sui_popover_reverse');
-            maxHeight = Math.min(this.targetY - this.flipYHeight - 32, rawExpected);
+            maxHeight = Math.min(this.targetY - this.flipYHeight - 32 - viewTop, rawExpected);
         }
         else {
             y = this.targetY;
-            maxHeight = window.innerHeight - y - extraHeight - 10;
+            maxHeight = viewBottom - y - extraHeight - 10;
         }
         this.popover.style.top = `${y}px`;
         this.optionArea.style.maxHeight = `${maxHeight}px`;
