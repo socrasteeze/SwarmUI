@@ -138,6 +138,37 @@ class MobileShell {
         if (this.sidebar) {
             this.wireDrawerSwipe(this.sidebar);
         }
+        let grip = document.createElement('div');
+        grip.className = 'mobile-drawer-grip';
+        this.wireGripDismiss(grip);
+        document.body.appendChild(grip);
+        this.drawerGrip = grip;
+    }
+
+    /** The grab strip over the drawer's pill handle: drag down (or tap) always dismisses, independent of the
+     * sidebar's scroll position (unlike the in-content swipe, which only arms when scrolled to the top). */
+    wireGripDismiss(el) {
+        let startY = 0;
+        let moved = false;
+        el.addEventListener('touchstart', (e) => {
+            startY = e.touches[0].clientY;
+            moved = false;
+        }, { passive: true });
+        el.addEventListener('touchmove', (e) => {
+            let dy = e.touches[0].clientY - startY;
+            if (Math.abs(dy) > 10) {
+                moved = true;
+            }
+            if (dy > 45) {
+                this.closeDrawer();
+            }
+        }, { passive: true });
+        el.addEventListener('touchend', () => {
+            // A still tap on the pill closes too (drag tracking above suppresses this after a real drag).
+            if (!moved) {
+                this.closeDrawer();
+            }
+        });
     }
 
     /** Swipe-down-from-top dismissal for the drawer, active only when the drawer content is scrolled to the top. */
