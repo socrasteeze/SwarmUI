@@ -19,6 +19,17 @@ body.coarse-pointer .select2-container .select2-search--inline .select2-search__
     font-size: 16px;
 }
 
+/* Bounded bottom safe-area inset. iOS standalone PWAs can report env(safe-area-inset-bottom) wildly
+   inflated (observed ~100px on the target device - the physical-pixel value of the 34pt home indicator
+   instead of the CSS-px one), which ballooned every bottom-inset consumer below into a huge dead band.
+   All bottom-inset math in this file uses this capped var instead of raw env(); 34px is the largest
+   legitimate iPhone value (Android edge-to-edge bars can be slightly larger, but overlap only hits
+   non-interactive padding). */
+body.pwa-standalone,
+body.small-window {
+    --safe-bottom: min(env(safe-area-inset-bottom), 34px);
+}
+
 /* Installed PWA (viewport-fit=cover): push the app content clear of the safe areas (status bar / notch
    at top, home-indicator curve at bottom). border-box keeps this padding inside the existing 100vh box
    instead of growing past it, since body is position:fixed + overflow:hidden and would otherwise clip
@@ -27,7 +38,7 @@ body.coarse-pointer .select2-container .select2-search--inline .select2-search__
 body.pwa-standalone {
     box-sizing: border-box;
     padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--safe-bottom);
 }
 
 /* --- Phase 2: fullscreen image viewer touch --- */
@@ -40,7 +51,7 @@ body.pwa-standalone {
    padding inside the existing 7rem band instead of growing past it, same technique as body.pwa-standalone. */
 body.pwa-standalone .imageview_popup_modal_undertext:not(.minimized-mode) {
     box-sizing: border-box;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--safe-bottom);
 }
 
 /* Own all touch gestures over the image area on touch devices so the browser doesn't try to pan/zoom the
@@ -121,7 +132,7 @@ body.small-window.kb-open .alt_prompt_region {
    reserves the nav bar + inset below the whole layout, so this would stack a second inset of dead space
    between the Generate button and the nav bar. */
 body.pwa-standalone.small-window:not(.mobile-shell-active) .alt-prompt-buttons-wrapper {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--safe-bottom);
 }
 
 /* The welcome/tip banner is 150% of the 14px body baseline (21px) on desktop, where it has room to spare.
@@ -193,9 +204,10 @@ body.small-window.mobile-shell-active {
     /* The nav overlaps the bottom safe-area inset by 10px: riding the full inset (34px on home-indicator
        iPhones) left the icons floating visibly high above the bezel. 10px back still keeps them ~24px clear
        of the screen edge (the home-indicator zone is ~13px), and max() pins zero-inset devices at 0 so
-       nothing shifts there. Tune the 10px here only - every other shell rule derives from this var, and
-       layout.js live-reads body's computed padding-bottom, so the height math follows automatically. */
-    --shell-nav-inset: max(calc(env(safe-area-inset-bottom) - 10px), 0px);
+       nothing shifts there. Derives from --safe-bottom (capped), not raw env() - see that var's comment.
+       Tune the 10px here only - every other shell rule derives from this var, and layout.js live-reads
+       body's computed padding-bottom, so the height math follows automatically. */
+    --shell-nav-inset: max(calc(var(--safe-bottom) - 10px), 0px);
     box-sizing: border-box;
     padding-bottom: calc(var(--shell-nav-h) + var(--shell-nav-inset));
 }
@@ -304,6 +316,24 @@ body.small-window.mobile-shell-active.shell-drawer-open .input-sidebar::before {
     border-radius: 1rem;
     background: var(--text-soft, #aaa);
 }
+/* Invisible grab strip overlaying the drawer's top edge (the pill handle area). The in-content swipe below
+   only arms when the sidebar is scrolled to the very top (its scroll position persists from prior use, so
+   that's rarely true) - this strip dismisses reliably no matter the scroll state. touch-action: none keeps
+   the browser from contending for the gesture; mobile_shell.js closes on drag-down or tap. */
+.mobile-drawer-grip {
+    display: none;
+}
+body.small-window.mobile-shell-active.shell-drawer-open .mobile-drawer-grip {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--shell-nav-h) + var(--shell-nav-inset) + 72vh - 2.4rem);
+    height: 2.4rem;
+    z-index: 951;
+    touch-action: none;
+    background: transparent;
+}
 body.small-window.mobile-shell-active.shell-drawer-open .mobile-drawer-backdrop {
     display: block;
     position: fixed;
@@ -332,7 +362,7 @@ body.small-window.mobile-shell-active .mobile-more-sheet {
     background: var(--background-panel, #202020);
     border-top-left-radius: 1rem;
     border-top-right-radius: 1rem;
-    padding: 1rem 1rem calc(env(safe-area-inset-bottom) + 1rem);
+    padding: 1rem 1rem calc(var(--safe-bottom) + 1rem);
     transform: translateY(110%);
     transition: transform 0.28s ease-out;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
