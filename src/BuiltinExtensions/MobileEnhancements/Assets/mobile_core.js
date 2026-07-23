@@ -90,6 +90,14 @@ class MobileEnhancements {
             let inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
             document.body.style.setProperty('--kb-inset', `${inset}px`);
             document.body.classList.toggle('kb-open', inset > 120);
+            // iOS standalone-PWA keyboard bug: opening the keyboard scrolls the whole layout viewport up to
+            // keep the focused input visible, and dismissal often leaves that scroll behind - the page stays
+            // shifted up with a dead black band at the bottom (fixed elements like the shell nav ride up with
+            // it). The page never legitimately scrolls (body is position:fixed + overflow:hidden), so whenever
+            // the keyboard is closed and any leftover shift exists, snap the viewport back.
+            if (inset <= 1 && (window.scrollY != 0 || vv.pageTop > 0 || vv.offsetTop > 0)) {
+                window.scrollTo(0, 0);
+            }
         };
         vv.addEventListener('resize', update);
         vv.addEventListener('scroll', update);

@@ -113,6 +113,7 @@ class MobileShell {
                 this.clickById(btn.dataset.target);
             });
         }
+        this.wireDragDismiss(sheet, () => this.closeMore(), false);
         document.body.appendChild(backdrop);
         document.body.appendChild(sheet);
         this.moreSheet = sheet;
@@ -140,14 +141,15 @@ class MobileShell {
         }
         let grip = document.createElement('div');
         grip.className = 'mobile-drawer-grip';
-        this.wireGripDismiss(grip);
+        this.wireDragDismiss(grip, () => this.closeDrawer(), true);
         document.body.appendChild(grip);
         this.drawerGrip = grip;
     }
 
-    /** The grab strip over the drawer's pill handle: drag down (or tap) always dismisses, independent of the
-     * sidebar's scroll position (unlike the in-content swipe, which only arms when scrolled to the top). */
-    wireGripDismiss(el) {
+    /** Drag-down-to-dismiss for a shell surface: dismisses once the finger travels 45px downward, regardless
+     * of any inner scroll state. With tapCloses, a still tap dismisses too (used for the drawer's grab strip,
+     * where the whole element is a handle; not for surfaces whose children are buttons). */
+    wireDragDismiss(el, dismiss, tapCloses) {
         let startY = 0;
         let moved = false;
         el.addEventListener('touchstart', (e) => {
@@ -160,15 +162,17 @@ class MobileShell {
                 moved = true;
             }
             if (dy > 45) {
-                this.closeDrawer();
+                dismiss();
             }
         }, { passive: true });
-        el.addEventListener('touchend', () => {
-            // A still tap on the pill closes too (drag tracking above suppresses this after a real drag).
-            if (!moved) {
-                this.closeDrawer();
-            }
-        });
+        if (tapCloses) {
+            el.addEventListener('touchend', () => {
+                // A still tap on the handle closes too (drag tracking above suppresses this after a real drag).
+                if (!moved) {
+                    dismiss();
+                }
+            });
+        }
     }
 
     /** Swipe-down-from-top dismissal for the drawer, active only when the drawer content is scrolled to the top. */
