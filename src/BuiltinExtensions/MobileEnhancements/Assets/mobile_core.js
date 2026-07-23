@@ -101,6 +101,10 @@ class MobileEnhancements {
         };
         vv.addEventListener('resize', update);
         vv.addEventListener('scroll', update);
+        // The stranded-shift bug (see above) can also be triggered by touch gestures dragging the layout
+        // viewport (observed with the swipe-up-for-bottom-bar gesture), not just the keyboard - catch plain
+        // window scrolls too so every shift path hits the snap-back.
+        window.addEventListener('scroll', update, { passive: true });
     }
 
     /** Register the root-scoped service worker (served from /sw.js) for installability + offline fallback. */
