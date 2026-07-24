@@ -414,3 +414,35 @@ body.small-window.mobile-shell-active.shell-more-open .mobile-sheet-backdrop {
     border-bottom: none;
     margin-top: 0.5rem;
 }
+
+/* --- Model/preset browser cards: fit the phone column instead of overflowing it --- */
+/* The "Cards" display modes carry fixed rem widths (Small 22rem, normal 30rem, Big 40rem) - all wider
+   than the narrow browser column on a phone. genpage.css's .browser-content-container is width:100% with
+   overflow:auto, so any card wider than it makes the list scroll sideways, and a stray horizontal drag
+   slips the whole panel off-axis (the "accidentally scroll left/right" the user hit on Small Cards). On
+   small windows, make every card span the container width one-per-row and lay it out as flex: the
+   thumbnail keeps its fixed size (flex:0 0 auto so it never shrinks), the description takes whatever width
+   is left (flex:1 with min-width:0 so its text wraps instead of forcing overflow). box-sizing:border-box
+   keeps the 1px border inside that 100%, and zeroing the horizontal margins stops them pushing past it.
+   Heights stay exactly as the base .model-block* rules set them - this only constrains width. Applies to
+   the model browser and every other browser that reuses .model-block (presets, etc.). */
+body.small-window .model-block,
+body.small-window .model-block-small,
+body.small-window .model-block-big {
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin-left: 0;
+    margin-right: 0;
+}
+body.small-window .model-block img {
+    flex: 0 0 auto;
+}
+body.small-window .model-descblock,
+body.small-window .model-block-small .model-descblock,
+body.small-window .model-block-big .model-descblock {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+}
