@@ -19,6 +19,19 @@ body.coarse-pointer .select2-container .select2-search--inline .select2-search__
     font-size: 16px;
 }
 
+/* Mobile density pass: shrink non-input UI text so the phone layout reads less congested.
+   The 16px floor above is the ONLY hard limit iOS imposes, and it applies solely to focusable form
+   fields (input/textarea/select/contenteditable) - every other bit of text has no zoom constraint. So on
+   phone-width viewports we drop the body baseline from site.css's 14px to 13px. font-size cascades to
+   inherited / %-based / em-based text but NOT to px or rem values, which means the 16px inputs, the 44px
+   touch targets, and all the rem-based paddings/gaps stay exactly as they are - this shrinks text only,
+   never tap ergonomics or spacing. Scoped to body.small-window so desktop is byte-for-byte unchanged.
+   The welcome banner (font-size: 100% below) and any other %/em chrome ride this down automatically.
+   Tune the 13px here to make the whole UI a notch smaller/larger; it's the single density lever. */
+body.small-window {
+    font-size: 13px;
+}
+
 /* Bounded bottom safe-area inset. iOS standalone PWAs can report env(safe-area-inset-bottom) wildly
    inflated (observed ~100px on the target device - the physical-pixel value of the 34pt home indicator
    instead of the CSS-px one), which ballooned every bottom-inset consumer below into a huge dead band.
@@ -85,7 +98,8 @@ body.coarse-pointer .batch-gear-button {
 /* Tab bars (top nav + every sub-nav) scroll horizontally instead of wrapping or clipping on narrow screens.
    modern.css sets an unconditional 20px on .nav-tabs; at that size 2-3 tab labels barely fit (or get
    clipped) on a phone-width viewport, forcing users to zoom the whole page out to compensate. Shrinking
-   to match the site's own 14px body baseline keeps labels legible while actually fitting the screen. */
+   to match the site's own body baseline keeps labels legible while actually fitting the screen. Kept in
+   lockstep with the 13px density-pass baseline above so the top nav gains the same breathing room. */
 body.small-window .nav-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -93,7 +107,7 @@ body.small-window .nav-tabs {
     scrollbar-width: none;               /* Firefox */
     -webkit-overflow-scrolling: touch;   /* iOS momentum */
     scroll-snap-type: x proximity;
-    font-size: 14px;
+    font-size: 13px;
 }
 body.small-window .nav-tabs::-webkit-scrollbar {
     display: none;                       /* WebKit */
