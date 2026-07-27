@@ -615,6 +615,7 @@ function listPresetFolderAndFiles(path, isRefresh, callback, depth) {
                 }
             }
         }
+        folders.sort((a, b) => a.localeCompare(b));
         callback(folders, files);
         if (fix) {
             fix();
