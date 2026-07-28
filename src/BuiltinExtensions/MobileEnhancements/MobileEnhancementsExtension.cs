@@ -29,6 +29,18 @@ public class MobileEnhancementsExtension : Extension
         OtherAssets.Add("Assets/icons/icon-512.png");
         OtherAssets.Add("Assets/icons/icon-maskable-512.png");
         OtherAssets.Add("Assets/icons/apple-touch-icon-180.png");
+        // Theme stylesheets go in OtherAssets, NOT StyleSheetFiles - StyleSheetFiles would inject this on every
+        // page regardless of which theme the user picked. Registered here in OnInit because WebServer.PreInit()
+        // (which calls RegisteredThemes.Clear()) runs after OnPreInit but before OnInit.
+        OtherAssets.Add("Assets/theme_mobile.css");
+        // Layers the fork's touch/QoL overrides on top of the stock Modern Dark stack. modern.css supplies
+        // structure plus derived variables but not the palette - modern_dark.css must stay in the list or
+        // --background / --emphasis / --button-background resolve to nothing. That's why this uses the raw
+        // ThemeData overload rather than the single-path extension convenience overload, which can only emit
+        // one stylesheet. The theme file loads last of the three, so it wins the cascade against site.css,
+        // genpage.css and modern.css at equal specificity without needing !important.
+        Program.Web.RegisterTheme(new("mobile_dark", "Mobile Dark (Fork)",
+            ["/css/themes/modern.css", "/css/themes/modern_dark.css", $"/ExtensionFile/{ExtensionName}/Assets/theme_mobile.css"], true));
     }
 
     /// <inheritdoc/>

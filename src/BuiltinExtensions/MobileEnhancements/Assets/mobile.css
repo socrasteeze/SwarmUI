@@ -138,6 +138,15 @@ body.coarse-pointer .browser_container {
    layout engine's inline sizing, and reverts cleanly when the keyboard closes. */
 body.small-window.kb-open .alt_prompt_region {
     transform: translateY(calc(-1 * var(--kb-inset, 0px)));
+}
+
+/* The lift transition is scoped to the open/close edge only (kb-animating, set by mobile_core.js), not left
+   live on the element. --kb-inset is recomputed on every scroll frame while the keyboard is open, and a live
+   transition restarts its tween each time, so the bar eased toward a target that had already moved - visible
+   as the bar trailing the viewport during scroll. Deliberately not requiring .kb-open: on close that class is
+   removed in the same style recalc, and transitions are started from the after-change style, so the close
+   direction still animates. */
+body.small-window.kb-animating .alt_prompt_region {
     transition: transform 0.15s ease-out;
 }
 
