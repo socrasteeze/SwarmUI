@@ -1,0 +1,175 @@
+/* Fork theme override layer - "Mobile Dark (Fork)", registered as theme id `mobile_dark` in
+   MobileEnhancementsExtension.OnInit().
+
+   WHY THIS FILE EXISTS
+   The theme system is the sanctioned extension seam for visual changes, and it is the only layer that
+   loads *after* the core stylesheets. _Layout.cshtml emits, in order: bootstrap -> select2 -> site.css ->
+   the page's own @section Header (genpage.css) -> @WebServer.PageHeaderExtra (every extension stylesheet,
+   including mobile.css) -> the selected theme's CSSPaths. So a rule here beats site.css, genpage.css,
+   modern.css and mobile.css at equal specificity, with no !important and no specificity hacks. Anything
+   that has to outrank core CSS belongs in this file rather than in mobile.css.
+
+   WHAT THIS FILE IS NOT
+   It is not a palette. The theme registers three stylesheets - modern.css (structure + derived variables),
+   modern_dark.css (the raw palette: --background, --emphasis, --button-background, --button-text, ...),
+   then this file. Selecting this theme therefore gives you stock Modern Dark plus the overrides below.
+   Do not redefine palette variables here; change modern_dark's values only by adding a deliberate,
+   documented override.
+
+   SCOPING RULES
+   This theme is selectable on desktop too, so an unscoped rule here changes desktop. Scope to
+   body.small-window / body.coarse-pointer / body.pwa-standalone, or to a device-capability media query,
+   unless the change is explicitly wanted everywhere.
+
+   Log every core class selector overridden here in the coupling watchlist in
+   docs/MobilePWA-Optimization-Plan.md - each one is a hardcoded value that core could move out from
+   under us. A handful is fine. A long list means this file is fighting the codebase; stop and reassess
+   rather than pushing through. */
+
+/* ============================================================================================
+   Sticky hover
+   ============================================================================================
+   On a touch screen there is no pointer to move away, so :hover latches after a tap and stays lit
+   until you tap somewhere else. Controls end up looking permanently pressed, and card/tab hover
+   states are indistinguishable from the real "selected" states they were designed to resemble.
+
+   PRIMITIVE: @media (hover: none), not body.coarse-pointer. Hover is a device capability, so a
+   touchscreen laptop (which reports hover: hover, because its primary pointer is a mouse) keeps
+   working hover, while a phone gets none. body.coarse-pointer is set once at load from
+   (pointer: coarse) and would strip hover from those hybrids. This also keeps the desktop promise:
+   with a mouse the query does not match, every rule below is inert, and the theme is byte-for-byte
+   Modern Dark.
+
+   WHY SELECTOR-LEVEL AND NOT VARIABLE-LEVEL: the tempting version of this is six lines pointing
+   --button-background-hover and friends at their resting counterparts. That is wrong - those
+   variables are also load-bearing for three *non-hover* states, which would silently lose their
+   styling: the select2 dropdown highlighted option (site.css:655), toggled compare-modal buttons
+   (.image_fullview_extra_buttons [aria-pressed="true"], genpage.css:890), and the selected image
+   editor tool (.image-editor-tool-selected, genpage.css:1572, which uses
+   --danger-button-background-hover as its resting colour). So each hover rule is restated back to
+   its resting value by hand instead.
+
+   Deliberately partial: this covers what a phone user actually taps - buttons, tab strips, image
+   and model cards, browser lists, parameter group headers. Image-editor internals, the colour
+   picker, admin user management and the backend management rows are left alone; they are desktop
+   surfaces, and every extra selector here is a hardcoded core value that can move out from under
+   us. Media controls (.video-controls / .audio-controls) are already fine - they ship their own
+   :active scale.
+
+   Reveal-on-hover controls were audited and deliberately NOT neutralised: the card menu button
+   (genpage.css:471) and the pasted-image remove button (genpage.css:1408) both rest at opacity 0.7
+   rather than 0, so they stay reachable on touch. Neutralising those would be the one change here
+   that could make a control unreachable. */
+@media (hover: none) {
+
+    /* Buttons. Resting values from site.css:557 / genpage.css:16 / genpage.css:44 / genpage.css:567. */
+    .basic-button:hover,
+    .basic-button.btn-primary:hover,
+    .generate-button:hover,
+    .refresh-button:hover {
+        background-color: var(--button-background);
+        color: var(--button-text);
+    }
+    .interrupt-button:hover {
+        background-color: var(--danger-button-background);
+        color: var(--danger-button-foreground);
+    }
+    /* The Generate / center buttons are styled by ID in modern.css (#alt_generate_button:hover), which no
+       class selector can outrank - !important is the only lever, since this file must not use id selectors.
+       Resting pair is modern.css:382-391. */
+    .alt-prompt-generate-button:hover,
+    .alt-prompt-center-button:hover {
+        background: var(--emphasis-soft) !important;
+    }
+    .auto-input-qbutton:hover {
+        background-color: transparent;
+        color: color-mix(in srgb, var(--qbutton) 60%, var(--background)) !important;
+    }
+    .text_button:hover {
+        color: var(--text);
+        text-decoration: underline;
+    }
+    .preset-remove-button:hover {
+        background-color: transparent;
+    }
+    .button-starred-image:hover {
+        background-color: var(--star);
+    }
+    .batch-gear-button:hover {
+        color: color-mix(in srgb, var(--text) 70%, var(--background));
+        background-color: color-mix(in srgb, transparent 50%, var(--background));
+    }
+
+    /* Tab strips. modern.css groups the resting and hover background/border together and only shifts
+       colour on hover, so restoring --text-soft is the whole fix. .active must keep its own colour. */
+    .nav-tabs .nav-link:not(.active):hover {
+        color: var(--text-soft);
+    }
+
+    /* Image and model cards. This is the highest-value case: the latched hover highlight is the same
+       visual language as .model-selected, so a stale one reads as "this model is selected". genpage.css:313
+       sets the background, modern.css:501 groups .image-block:hover with .model-selected and marks the
+       background !important - hence the !important here. Excluding .model-selected keeps the genuine
+       selected state intact, since those elements then never match this rule. */
+    .image-block:hover:not(.model-selected) {
+        background: transparent !important;
+        border: 1px solid transparent;
+    }
+    .model-block img:hover {
+        border: none;
+    }
+    .model-block-menu-button:hover {
+        background-color: color-mix(in srgb, transparent 80%, var(--background)) !important;
+        border: 1px solid transparent;
+        color: var(--text);
+    }
+    .sui_popover_model_button:hover {
+        background-color: transparent;
+        color: var(--text);
+    }
+
+    /* Browser lists. None of the three declare colour or text-decoration at rest - they inherit - so
+       resetting to inherit/none is exact. The folder tree's selected class is a sibling at lower
+       specificity, so it has to be excluded or a latched hover would erase it. */
+    .browser-folder-tree-part:not(.browser-folder-tree-part-selected):hover,
+    .browser-details-list-entry:hover,
+    .browser-list-entry-text:hover {
+        color: inherit;
+        text-decoration: none;
+    }
+
+    /* Parameter group headers. Only the symbol chip's background is restored; its hover colour resolves to
+       the same value as its resting colour, and .input-group-header-activated's !important background
+       already outranks this, so activated groups keep their highlight for free. */
+    .input-group .input-group-header:hover .auto-symbol {
+        background-color: var(--button-background);
+    }
+    .input-group-header-activated:hover .auto-symbol {
+        background: var(--box-selected-border-stronger) !important;
+    }
+
+    /* Hovering the status bar hides it outright (site.css:86), which on touch means one stray tap can
+       remove it until you tap elsewhere. */
+    .top-status-bar-wrapper:hover {
+        display: block;
+    }
+
+    /* Press feedback. Neutralising hover leaves these controls with no visual response to a tap at all,
+       so the colours the hover states used to carry are re-pointed at :active, where they belong on
+       touch. Same look, correct trigger. */
+    .basic-button:active,
+    .generate-button:active,
+    .refresh-button:active {
+        background-color: color-mix(in srgb, var(--button-background) 70%, white);
+    }
+    .interrupt-button:active {
+        background-color: var(--danger-button-background-hover);
+    }
+    .alt-prompt-generate-button:active,
+    .alt-prompt-center-button:active {
+        background: color-mix(in srgb, var(--emphasis) 70%, white) !important;
+    }
+    .image-block:active:not(.model-selected) {
+        background: rgba(0, 0, 0, 0.2) !important;
+    }
+}

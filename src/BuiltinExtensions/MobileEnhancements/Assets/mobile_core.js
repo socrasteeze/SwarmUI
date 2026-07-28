@@ -86,10 +86,29 @@ class MobileEnhancements {
             return;
         }
         let vv = window.visualViewport;
+        let kbOpen = false;
+        let animTimer = null;
         let update = () => {
             let inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
             document.body.style.setProperty('--kb-inset', `${inset}px`);
-            document.body.classList.toggle('kb-open', inset > 120);
+            let nowOpen = inset > 120;
+            if (nowOpen != kbOpen) {
+                kbOpen = nowOpen;
+                document.body.classList.toggle('kb-open', nowOpen);
+                // Animate only across the open/close edge. --kb-inset is recomputed on every scroll frame too
+                // (offsetTop changes as iOS scrolls the layout viewport under an open keyboard), and mobile.css's
+                // transition would restart its tween on each of those - making the prompt bar visibly chase the
+                // viewport instead of tracking it. kb-animating scopes the transition to the edge; the timer
+                // clears it a hair after the 0.15s tween ends.
+                document.body.classList.add('kb-animating');
+                if (animTimer) {
+                    clearTimeout(animTimer);
+                }
+                animTimer = setTimeout(() => {
+                    document.body.classList.remove('kb-animating');
+                    animTimer = null;
+                }, 200);
+            }
             // iOS standalone-PWA keyboard bug: opening the keyboard scrolls the whole layout viewport up to
             // keep the focused input visible, and dismissal often leaves that scroll behind - the page stays
             // shifted up with a dead black band at the bottom (fixed elements like the shell nav ride up with
