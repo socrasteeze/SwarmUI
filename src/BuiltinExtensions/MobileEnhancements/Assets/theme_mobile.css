@@ -173,3 +173,58 @@
         background: rgba(0, 0, 0, 0.2) !important;
     }
 }
+
+/* ============================================================================================
+   Visible QoL pass
+   ============================================================================================
+   Everything below is scoped to body.small-window, so the theme stays byte-for-byte Modern Dark on
+   a desktop-width window even though it is selectable there. Unlike the sticky-hover section above
+   (which only removes a wrong state and is invisible until you tap something), these are meant to
+   be noticeable on the phone. */
+
+/* Vertical rhythm in parameter and preset lists. modern.css gives every parameter row a flat
+   `padding: 5px 10px` (modern.css:278) tuned for a mouse and a tall panel; at the 13px mobile
+   baseline the rows run together into an undifferentiated block that is tiring to scan. A little
+   more vertical padding plus a hairline rule gives each row a visible boundary - the rule does the
+   real work, since it separates rows without spending vertical space. Kept off the last row so a
+   collapsed group does not end on a stray line. */
+body.small-window .input-group .input-group-content>div {
+    padding-top: 7px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+}
+body.small-window .input-group .input-group-content>div:last-child {
+    border-bottom: none;
+}
+
+/* Primary action prominence. The Generate button rests at --emphasis-soft (#665694), a muted purple
+   that sits close to the surrounding panel chrome on a small screen. On a phone this is the one
+   control that must be unmistakable, so it gets the full accent (--emphasis, #7855e1). Scoped to
+   the class rather than the id, so it needs !important to outrank modern.css's #alt_generate_button
+   rule - this file must not use id selectors. */
+body.small-window .alt-prompt-generate-button {
+    background: var(--emphasis) !important;
+    font-weight: bold;
+}
+
+/* Scroll affordance on the horizontal tab strips. mobile.css makes .nav-tabs horizontally
+   scrollable with the scrollbar hidden, which leaves no signal that there is anything past the
+   right edge - the strip reads as a complete row of tabs. Fading the last 1.5rem implies the
+   content continues. Deliberately a static mask rather than a scroll-position-aware one: that
+   needs JS or scroll-driven animations, and the failure mode of a static fade (a slight fade still
+   present when scrolled to the end) is cosmetic. */
+body.small-window .nav-tabs {
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
+    mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
+}
+
+/* Disabled-state clarity. site.css fades disabled button text to 60% opacity against a background
+   that is itself only 40% mixed - legible at 14px on a monitor, ambiguous at the 13px mobile
+   baseline in daylight, where a disabled Generate reads as merely un-pressed. Deepens the
+   background difference and lightens the text so the two states separate at a glance. */
+body.small-window .basic-button:disabled {
+    background-color: color-mix(in srgb, var(--button-background) 25%, var(--background));
+    color: color-mix(in srgb, var(--button-text) 45%, transparent);
+    border-color: color-mix(in srgb, var(--button-border) 50%, transparent);
+}
+
