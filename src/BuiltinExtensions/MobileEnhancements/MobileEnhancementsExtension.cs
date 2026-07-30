@@ -62,15 +62,12 @@ public class MobileEnhancementsExtension : Extension
         WebServer.WebApp.MapGet("/manifest.json", ServeManifest);
         WebServer.WebApp.MapGet("/sw.js", ServeServiceWorker);
         WebServer.WebApp.MapGet("/ShareTarget", ServeShareTarget);
-        // The standalone mobile client. Mapped at "/m" ONLY - a trailing slash would break both the
-        // relative "API/..." URL built by util.js sendJsonToServer and the WebSocket address from
-        // getWSAddress (both strip after the last '/'), so "/m/" gets a hard redirect instead.
+        // The standalone mobile client. ASP.NET Core normalizes trailing slashes in route TEMPLATES, so
+        // "/m" and "/m/" are the same pattern - mapping both throws AmbiguousMatchException on every request.
+        // One mapping handles both URLs; ServeMobileClient redirects the trailing-slash form itself, because
+        // a page served at "/m/" breaks the relative "API/..." URL from util.js sendJsonToServer and the
+        // WebSocket address from getWSAddress (both strip after the last '/').
         WebServer.WebApp.MapGet("/m", ServeMobileClient);
-        WebServer.WebApp.MapGet("/m/", (HttpContext context) =>
-        {
-            context.Response.Redirect("/m");
-            return Task.CompletedTask;
-        });
         WebServer.PageHeaderExtra = new(WebServer.PageHeaderExtra.Value + BuildHeadTags());
     }
 
@@ -83,6 +80,12 @@ public class MobileEnhancementsExtension : Extension
     /// markup cannot drift from upstream).</summary>
     public async Task ServeMobileClient(HttpContext context)
     {
+        if (context.Request.Path.HasValue && context.Request.Path.Value.EndsWith('/'))
+        {
+            context.Response.Redirect("/m");
+            await context.Response.CompleteAsync();
+            return;
+        }
         if (!Program.ServerSettings.IsInstalled)
         {
             context.Response.Redirect("/Install");
