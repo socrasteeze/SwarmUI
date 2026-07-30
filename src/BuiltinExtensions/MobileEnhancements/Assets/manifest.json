@@ -3,7 +3,7 @@
     "name": "SwarmUI",
     "short_name": "SwarmUI",
     "description": "Modular AI image generation UI.",
-    "start_url": "/Text2Image",
+    "start_url": "/m",
     "scope": "/",
     "display": "standalone",
     "launch_handler": {
@@ -36,7 +36,7 @@
         {
             "name": "Generate",
             "short_name": "Generate",
-            "url": "/Text2Image"
+            "url": "/m"
         }
     ],
     "share_target": {

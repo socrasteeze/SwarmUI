@@ -1,0 +1,541 @@
+/** MobileEnhancements standalone client - Create tab: preset strip, prompt + prompt-image strip, quick
+ * params, LoRA sheet, advanced chips, generate bar, grid form. All state lives in mState; this file is DOM. */
+class MCreate {
+
+    constructor() {
+        /** Cached LoRA model list from ListModels (fetched lazily on first sheet open). */
+        this.loraList = null;
+        /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip). */
+        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'aspectratio', 'loras', 'loraweights', 'promptimages'];
+    }
+
+    /** Builds the Create panel once. */
+    build(panel) {
+        this.panel = panel;
+        this.presetStrip = mUI.el('div', 'm-preset-strip');
+        panel.appendChild(this.presetStrip);
+        let promptWrap = mUI.el('div', 'm-prompt-wrap');
+        this.promptBox = mUI.el('textarea', 'm-prompt-box');
+        this.promptBox.placeholder = 'Type your prompt, or paste an image...';
+        this.promptBox.rows = 3;
+        this.promptBox.addEventListener('input', () => {
+            mState.params['prompt'] = this.promptBox.value;
+            mState.save();
+            this.autoGrow(this.promptBox);
+        });
+        this.promptBox.addEventListener('paste', (e) => this.onPaste(e));
+        promptWrap.appendChild(this.promptBox);
+        this.imageStrip = mUI.el('div', 'm-image-strip');
+        promptWrap.appendChild(this.imageStrip);
+        panel.appendChild(promptWrap);
+        panel.appendChild(this.buildQuickParams());
+        let negWrap = mUI.el('details', 'm-neg-wrap');
+        this.negSummary = mUI.el('summary', 'm-neg-summary', 'Negative prompt');
+        negWrap.appendChild(this.negSummary);
+        this.negBox = mUI.el('textarea', 'm-neg-box');
+        this.negBox.rows = 2;
+        this.negBox.addEventListener('input', () => {
+            mState.params['negativeprompt'] = this.negBox.value;
+            mState.save();
+        });
+        negWrap.appendChild(this.negBox);
+        this.negWrap = negWrap;
+        panel.appendChild(negWrap);
+        this.loraButton = mUI.el('button', 'm-wide-button');
+        this.loraButton.addEventListener('click', () => this.openLoraSheet());
+        panel.appendChild(this.loraButton);
+        this.advChips = mUI.el('div', 'm-adv-chips');
+        panel.appendChild(this.advChips);
+        let genBar = mUI.el('div', 'm-gen-bar');
+        this.interruptButton = mUI.el('button', 'm-interrupt-button', 'Interrupt');
+        this.interruptButton.style.display = 'none';
+        this.interruptButton.addEventListener('click', () => mGen.interrupt());
+        genBar.appendChild(this.interruptButton);
+        this.genButton = mUI.el('button', 'm-generate-button', 'Generate');
+        this.wireGenerateButton();
+        genBar.appendChild(this.genButton);
+        panel.appendChild(genBar);
+        let fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.multiple = true;
+        fileInput.style.display = 'none';
+        fileInput.addEventListener('change', () => {
+            for (let file of fileInput.files) {
+                this.addImageFile(file);
+            }
+            fileInput.value = '';
+        });
+        panel.appendChild(fileInput);
+        this.fileInput = fileInput;
+        mState.onChange(() => this.render());
+        mGen.onFrame((kind, data) => {
+            if (kind == 'status') {
+                this.interruptButton.style.display = mGen.queueTotal > 0 ? '' : 'none';
+            }
+        });
+        this.render();
+    }
+
+    /** Generate on tap; long-press (600ms) opens the grid form. */
+    wireGenerateButton() {
+        let holdTimer = null;
+        let held = false;
+        let start = () => {
+            held = false;
+            holdTimer = setTimeout(() => {
+                held = true;
+                this.openGridSheet();
+            }, 600);
+        };
+        let cancel = () => {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+        };
+        this.genButton.addEventListener('touchstart', start, { passive: true });
+        this.genButton.addEventListener('touchend', (e) => {
+            cancel();
+            if (!held) {
+                e.preventDefault();
+                this.doGenerate();
+            }
+        });
+        this.genButton.addEventListener('touchmove', cancel, { passive: true });
+        this.genButton.addEventListener('contextmenu', (e) => e.preventDefault());
+        this.genButton.addEventListener('click', (e) => {
+            if (e.detail > 0 && !('ontouchstart' in window)) {
+                this.doGenerate();
+            }
+        });
+    }
+
+    /** Fires one generation batch and jumps to the Images tab. */
+    doGenerate() {
+        let input = mState.buildGenInput();
+        if (!`${input['prompt'] || ''}`.trim() && !input['promptimages'] && mState.activePresets.length == 0) {
+            mUI.note('Type a prompt or pick a preset first.');
+            return;
+        }
+        mGen.generate(input);
+        location.hash = 'images';
+    }
+
+    /** Re-renders every dynamic region from state. */
+    render() {
+        this.renderPresets();
+        if (document.activeElement != this.promptBox) {
+            this.promptBox.value = mState.params['prompt'] || '';
+            this.autoGrow(this.promptBox);
+        }
+        if (document.activeElement != this.negBox) {
+            this.negBox.value = mState.params['negativeprompt'] || '';
+        }
+        if ((mState.params['negativeprompt'] || '') != '') {
+            this.negWrap.open = true;
+        }
+        this.renderImageStrip();
+        this.renderQuickParams();
+        let loras = mState.getLoras();
+        this.loraButton.textContent = `LoRAs (${loras.length})`;
+        this.renderAdvChips();
+    }
+
+    /** Preset chip strip: starred first, tap toggles, selection order preserved (merge order). */
+    renderPresets() {
+        this.presetStrip.innerHTML = '';
+        if (mState.presets.length == 0) {
+            this.presetStrip.appendChild(mUI.el('span', 'm-strip-empty', 'No presets yet - create some in the full UI.'));
+            return;
+        }
+        let sorted = [...mState.presets].sort((a, b) => (b.is_starred ? 1 : 0) - (a.is_starred ? 1 : 0));
+        for (let preset of sorted) {
+            let chip = mUI.el('button', 'm-preset-chip');
+            if (preset.preview_image) {
+                let img = document.createElement('img');
+                img.src = preset.preview_image;
+                img.loading = 'lazy';
+                chip.appendChild(img);
+            }
+            chip.appendChild(mUI.el('span', 'm-preset-chip-title', preset.title));
+            chip.classList.toggle('m-selected', mState.activePresets.includes(preset.title));
+            chip.addEventListener('click', () => {
+                let idx = mState.activePresets.indexOf(preset.title);
+                if (idx == -1) {
+                    mState.activePresets.push(preset.title);
+                }
+                else {
+                    mState.activePresets.splice(idx, 1);
+                }
+                mState.changed();
+            });
+            this.presetStrip.appendChild(chip);
+        }
+    }
+
+    /** Prompt-image strip: thumbs, remove, add tile, long-press drag reorder (DOM order == request order). */
+    renderImageStrip() {
+        this.imageStrip.innerHTML = '';
+        for (let i = 0; i < mState.promptImages.length; i++) {
+            let entry = mState.promptImages[i];
+            let tile = mUI.el('div', 'm-image-tile');
+            tile.dataset.index = `${i}`;
+            let img = document.createElement('img');
+            img.src = entry.kind == 'data' ? entry.value : `${getImageOutPrefix()}/${entry.value}`;
+            tile.appendChild(img);
+            let remove = mUI.el('span', 'm-image-tile-remove', '×');
+            remove.addEventListener('click', () => {
+                mState.promptImages.splice(i, 1);
+                mState.changed();
+            });
+            tile.appendChild(remove);
+            this.wireReorder(tile);
+            this.imageStrip.appendChild(tile);
+        }
+        let add = mUI.el('button', 'm-image-tile m-image-add', '+');
+        add.addEventListener('click', () => this.fileInput.click());
+        this.imageStrip.appendChild(add);
+    }
+
+    /** Long-press (150ms) arms a horizontal drag that live-reorders the tile among its siblings; on release
+     * the promptImages array is rebuilt from DOM order. We own this DOM, so order is authoritative here. */
+    wireReorder(tile) {
+        let armTimer = null;
+        let dragging = false;
+        tile.addEventListener('touchstart', (e) => {
+            armTimer = setTimeout(() => {
+                dragging = true;
+                tile.classList.add('m-dragging');
+            }, 150);
+        }, { passive: true });
+        tile.addEventListener('touchmove', (e) => {
+            if (!dragging) {
+                if (armTimer) {
+                    clearTimeout(armTimer);
+                    armTimer = null;
+                }
+                return;
+            }
+            e.preventDefault();
+            let x = e.touches.item(0).clientX;
+            for (let sibling of this.imageStrip.querySelectorAll('.m-image-tile:not(.m-image-add)')) {
+                if (sibling == tile) {
+                    continue;
+                }
+                let rect = sibling.getBoundingClientRect();
+                let mid = rect.left + rect.width / 2;
+                if (x < mid && tile.compareDocumentPosition(sibling) & Node.DOCUMENT_POSITION_PRECEDING) {
+                    this.imageStrip.insertBefore(tile, sibling);
+                    break;
+                }
+                if (x > mid && tile.compareDocumentPosition(sibling) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                    this.imageStrip.insertBefore(tile, sibling.nextSibling);
+                    break;
+                }
+            }
+        }, { passive: false });
+        tile.addEventListener('touchend', () => {
+            if (armTimer) {
+                clearTimeout(armTimer);
+                armTimer = null;
+            }
+            if (dragging) {
+                dragging = false;
+                tile.classList.remove('m-dragging');
+                let order = [];
+                for (let t of this.imageStrip.querySelectorAll('.m-image-tile:not(.m-image-add)')) {
+                    order.push(mState.promptImages[parseInt(t.dataset.index)]);
+                }
+                mState.promptImages = order;
+                mState.changed();
+            }
+        });
+    }
+
+    /** Clipboard paste: image items become prompt images (the user's screenshot-paste flow). */
+    onPaste(e) {
+        let items = (e.clipboardData || {}).items || [];
+        let found = false;
+        for (let item of items) {
+            if (item.type && item.type.startsWith('image/')) {
+                found = true;
+                this.addImageFile(item.getAsFile());
+            }
+        }
+        if (found) {
+            e.preventDefault();
+        }
+    }
+
+    /** Reads a File to a data URI and appends it to the prompt images. */
+    addImageFile(file) {
+        if (!file) {
+            return;
+        }
+        let reader = new FileReader();
+        reader.onload = () => {
+            mState.promptImages.push({ 'kind': 'data', 'value': reader.result });
+            mState.changed();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    /** Quick params row: seed lock + value, images count, aspect ratio. */
+    buildQuickParams() {
+        let row = mUI.el('div', 'm-quick-row');
+        let seedWrap = mUI.el('div', 'm-quick-item');
+        this.seedLock = mUI.el('button', 'm-seed-lock');
+        this.seedLock.addEventListener('click', () => {
+            mState.seedLocked = !mState.seedLocked;
+            if (mState.seedLocked && (!mState.params['seed'] || `${mState.params['seed']}` == '-1')) {
+                mState.params['seed'] = `${Math.floor(Math.random() * 2147483647)}`;
+            }
+            mState.changed();
+        });
+        seedWrap.appendChild(this.seedLock);
+        this.seedInput = document.createElement('input');
+        this.seedInput.type = 'text';
+        this.seedInput.inputMode = 'numeric';
+        this.seedInput.className = 'm-seed-input';
+        this.seedInput.addEventListener('input', () => {
+            mState.params['seed'] = this.seedInput.value;
+            mState.save();
+        });
+        seedWrap.appendChild(this.seedInput);
+        row.appendChild(seedWrap);
+        this.imagesGroup = mUI.el('div', 'm-quick-item m-seg-group');
+        for (let n of ['1', '2', '4']) {
+            let btn = mUI.el('button', 'm-seg-button', n);
+            btn.dataset.count = n;
+            btn.addEventListener('click', () => {
+                mState.params['images'] = n;
+                mState.changed();
+            });
+            this.imagesGroup.appendChild(btn);
+        }
+        row.appendChild(this.imagesGroup);
+        this.aspectSelect = document.createElement('select');
+        this.aspectSelect.className = 'm-aspect-select';
+        this.aspectSelect.addEventListener('change', () => {
+            mState.params['aspectratio'] = this.aspectSelect.value;
+            mState.changed();
+        });
+        row.appendChild(this.aspectSelect);
+        return row;
+    }
+
+    /** Syncs the quick-param controls from state. */
+    renderQuickParams() {
+        this.seedLock.textContent = mState.seedLocked ? '🔒' : '🎲';
+        this.seedLock.classList.toggle('m-selected', mState.seedLocked);
+        if (document.activeElement != this.seedInput) {
+            this.seedInput.value = mState.seedLocked ? `${mState.params['seed'] ?? ''}` : '-1';
+        }
+        this.seedInput.disabled = !mState.seedLocked;
+        for (let btn of this.imagesGroup.querySelectorAll('.m-seg-button')) {
+            btn.classList.toggle('m-selected', btn.dataset.count == `${mState.params['images'] || '1'}`);
+        }
+        let aspectMeta = mState.paramMeta['aspectratio'];
+        let values = aspectMeta && aspectMeta.values ? aspectMeta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '3:4', '9:16', 'Custom'];
+        if (this.aspectSelect.options.length != values.length) {
+            this.aspectSelect.innerHTML = '';
+            for (let v of values) {
+                let opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = v;
+                this.aspectSelect.appendChild(opt);
+            }
+        }
+        this.aspectSelect.value = mState.params['aspectratio'] || (aspectMeta ? aspectMeta.default : '1:1');
+    }
+
+    /** Advanced chips: every param set by preset/reuse without a dedicated control, X-clearable. */
+    renderAdvChips() {
+        this.advChips.innerHTML = '';
+        let keys = Object.keys(mState.params).filter(k => !this.coveredParams.includes(k));
+        for (let key of keys) {
+            let val = mState.params[key];
+            let text = `${key}: ${Array.isArray(val) ? val.join(',') : val}`;
+            if (text.length > 40) {
+                text = text.substring(0, 38) + '…';
+            }
+            let chip = mUI.el('span', 'm-adv-chip', text);
+            let x = mUI.el('span', 'm-adv-chip-x', '×');
+            x.addEventListener('click', () => {
+                delete mState.params[key];
+                mState.changed();
+            });
+            chip.appendChild(x);
+            this.advChips.appendChild(chip);
+        }
+        let link = mUI.el('a', 'm-adv-link', 'Open full UI →');
+        link.href = '/Text2Image';
+        this.advChips.appendChild(link);
+    }
+
+    /** LoRA bottom sheet: active LoRAs with weight sliders, add-picker from ListModels. */
+    openLoraSheet() {
+        let content = mUI.el('div', 'm-lora-sheet');
+        let renderRows;
+        let listWrap = mUI.el('div', 'm-lora-rows');
+        content.appendChild(listWrap);
+        renderRows = () => {
+            listWrap.innerHTML = '';
+            let loras = mState.getLoras();
+            if (loras.length == 0) {
+                listWrap.appendChild(mUI.el('div', 'm-strip-empty', 'No active LoRAs.'));
+            }
+            for (let i = 0; i < loras.length; i++) {
+                let row = mUI.el('div', 'm-lora-row');
+                let top = mUI.el('div', 'm-lora-row-top');
+                top.appendChild(mUI.el('span', 'm-lora-name', loras[i].name.split('/').pop()));
+                let readout = mUI.el('span', 'm-lora-weight-readout', `${loras[i].weight}`);
+                top.appendChild(readout);
+                let remove = mUI.el('span', 'm-lora-remove', '×');
+                remove.addEventListener('click', () => {
+                    let cur = mState.getLoras();
+                    cur.splice(i, 1);
+                    mState.setLoras(cur);
+                    renderRows();
+                });
+                top.appendChild(remove);
+                row.appendChild(top);
+                let slider = document.createElement('input');
+                slider.type = 'range';
+                slider.min = '-2';
+                slider.max = '2';
+                slider.step = '0.05';
+                slider.value = `${loras[i].weight}`;
+                slider.className = 'm-lora-slider';
+                slider.addEventListener('input', () => {
+                    readout.textContent = slider.value;
+                    let cur = mState.getLoras();
+                    cur[i].weight = parseFloat(slider.value);
+                    mState.setLoras(cur);
+                });
+                row.appendChild(slider);
+                listWrap.appendChild(row);
+            }
+        };
+        renderRows();
+        let addWrap = mUI.el('div', 'm-lora-add-wrap');
+        let search = document.createElement('input');
+        search.type = 'text';
+        search.placeholder = 'Search LoRAs to add...';
+        search.className = 'm-lora-search';
+        addWrap.appendChild(search);
+        let results = mUI.el('div', 'm-lora-results');
+        addWrap.appendChild(results);
+        let renderResults = () => {
+            results.innerHTML = '';
+            if (!this.loraList) {
+                results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
+                return;
+            }
+            let term = search.value.toLowerCase();
+            let active = mState.getLoras().map(l => l.name);
+            let shown = 0;
+            for (let model of this.loraList) {
+                if (term && !model.name.toLowerCase().includes(term) && !(model.title || '').toLowerCase().includes(term)) {
+                    continue;
+                }
+                if (active.includes(model.name)) {
+                    continue;
+                }
+                let item = mUI.el('button', 'm-lora-result', model.title || model.name);
+                item.addEventListener('click', () => {
+                    let cur = mState.getLoras();
+                    cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
+                    mState.setLoras(cur);
+                    renderRows();
+                    renderResults();
+                });
+                results.appendChild(item);
+                if (++shown >= 30) {
+                    break;
+                }
+            }
+        };
+        search.addEventListener('input', renderResults);
+        content.appendChild(addWrap);
+        if (!this.loraList) {
+            genericRequest('ListModels', { 'path': '', 'depth': 5, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
+                this.loraList = data.files || [];
+                renderResults();
+            });
+        }
+        renderResults();
+        mUI.openSheet(content);
+    }
+
+    /** Grid-gen sheet: >=2 axes, >=2 values each ("2x2+n"); longest axis is auto-placed horizontal by
+     * mGen.runGrid. Base params are the current Create state - "predetermined parameters". */
+    openGridSheet() {
+        if (typeof permissions != 'undefined' && permissions.hasPermission && !permissions.hasPermission('gridgen_generate_grids')) {
+            mUI.note('You do not have grid generation permission.');
+            return;
+        }
+        let content = mUI.el('div', 'm-grid-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Grid Generate'));
+        let axesWrap = mUI.el('div', 'm-grid-axes');
+        content.appendChild(axesWrap);
+        let axisParams = ['steps', 'cfgscale', 'seed', 'model', 'loraweights', 'prompt', 'width', 'height'].filter(p => p == 'prompt' || mState.paramMeta[p]);
+        let addAxis = () => {
+            if (axesWrap.children.length >= 3) {
+                return;
+            }
+            let row = mUI.el('div', 'm-grid-axis-row');
+            let select = document.createElement('select');
+            select.className = 'm-grid-axis-param';
+            for (let p of axisParams) {
+                let opt = document.createElement('option');
+                opt.value = p;
+                opt.textContent = p;
+                select.appendChild(opt);
+            }
+            row.appendChild(select);
+            let vals = document.createElement('input');
+            vals.type = 'text';
+            vals.placeholder = 'values, comma, separated';
+            vals.className = 'm-grid-axis-vals';
+            row.appendChild(vals);
+            axesWrap.appendChild(row);
+        };
+        addAxis();
+        addAxis();
+        let addBtn = mUI.el('button', 'm-wide-button', '+ Add axis');
+        addBtn.addEventListener('click', addAxis);
+        content.appendChild(addBtn);
+        let runBtn = mUI.el('button', 'm-generate-button m-grid-run', 'Run Grid');
+        runBtn.addEventListener('click', () => {
+            let axes = [];
+            for (let row of axesWrap.querySelectorAll('.m-grid-axis-row')) {
+                let mode = row.querySelector('.m-grid-axis-param').value;
+                let vals = row.querySelector('.m-grid-axis-vals').value.trim();
+                if (vals) {
+                    axes.push({ 'mode': mode, 'vals': vals });
+                }
+            }
+            if (axes.length < 2 || axes.some(a => MState.toList(a.vals).length < 2)) {
+                mUI.note('Grids need at least 2 axes with 2+ values each.');
+                return;
+            }
+            let base = mState.buildGenInput();
+            delete base['images'];
+            mGen.runGrid(base, axes);
+            close();
+            location.hash = 'images';
+        });
+        content.appendChild(runBtn);
+        let close = mUI.openSheet(content);
+    }
+
+    /** Auto-grows a textarea up to ~6 lines. */
+    autoGrow(box) {
+        box.style.height = 'auto';
+        box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
+    }
+}
+
+mCreate = new MCreate();
