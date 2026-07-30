@@ -41,6 +41,16 @@ public class MobileEnhancementsExtension : Extension
         // genpage.css and modern.css at equal specificity without needing !important.
         Program.Web.RegisterTheme(new("mobile_dark", "Mobile Dark (Fork)",
             ["/css/themes/modern.css", "/css/themes/modern_dark.css", $"/ExtensionFile/{ExtensionName}/Assets/theme_mobile.css"], true));
+        // Standalone mobile client ("/m") assets. index.html is deliberately NOT registered - it is only ever
+        // served by ServeMobileClient, which performs the auth check and template substitutions.
+        OtherAssets.Add("Assets/m/m.css");
+        OtherAssets.Add("Assets/m/m_state.js");
+        OtherAssets.Add("Assets/m/m_gen.js");
+        OtherAssets.Add("Assets/m/m_ui.js");
+        OtherAssets.Add("Assets/m/m_create.js");
+        OtherAssets.Add("Assets/m/m_images.js");
+        OtherAssets.Add("Assets/m/m_models.js");
+        OtherAssets.Add("Assets/m/m_app.js");
     }
 
     /// <inheritdoc/>
@@ -52,7 +62,47 @@ public class MobileEnhancementsExtension : Extension
         WebServer.WebApp.MapGet("/manifest.json", ServeManifest);
         WebServer.WebApp.MapGet("/sw.js", ServeServiceWorker);
         WebServer.WebApp.MapGet("/ShareTarget", ServeShareTarget);
+        // The standalone mobile client. Mapped at "/m" ONLY - a trailing slash would break both the
+        // relative "API/..." URL built by util.js sendJsonToServer and the WebSocket address from
+        // getWSAddress (both strip after the last '/'), so "/m/" gets a hard redirect instead.
+        WebServer.WebApp.MapGet("/m", ServeMobileClient);
+        WebServer.WebApp.MapGet("/m/", (HttpContext context) =>
+        {
+            context.Response.Redirect("/m");
+            return Task.CompletedTask;
+        });
         WebServer.PageHeaderExtra = new(WebServer.PageHeaderExtra.Value + BuildHeadTags());
+    }
+
+    /// <summary>Serves the standalone mobile client page at <c>/m</c>. Mirrors the Razor pages' auth behavior
+    /// (install check, then <see cref="WebUtil.HasValidLogin"/> - which short-circuits true when authorization is
+    /// disabled) but with real HTTP redirects since this is not a rendered view. The HTML template uses simple
+    /// token substitution: [VARY] for cache-busting, [REMAPS] for the same parameter-remap map Razor injects on
+    /// the genpage, [HEADEXTRA] for the shared PWA head tags, and [TOAST] for the error-toast markup that
+    /// site.js's showError() hard-requires (built by the same WebUtil.Toast helper as _Layout.cshtml so the
+    /// markup cannot drift from upstream).</summary>
+    public async Task ServeMobileClient(HttpContext context)
+    {
+        if (!Program.ServerSettings.IsInstalled)
+        {
+            context.Response.Redirect("/Install");
+            await context.Response.CompleteAsync();
+            return;
+        }
+        if (!WebUtil.HasValidLogin(context))
+        {
+            context.Response.Redirect("/Login");
+            await context.Response.CompleteAsync();
+            return;
+        }
+        string html = File.ReadAllText($"{FilePath}Assets/m/index.html");
+        string remaps = Newtonsoft.Json.JsonConvert.SerializeObject(SwarmUI.Text2Image.T2IParamTypes.ParameterRemaps);
+        string toast = $"<div class=\"center-toast toast-error-box\" id=\"center_toast\">{WebUtil.Toast("error_toast_box", "Error", "", "error_toast_content", "", false)}</div>";
+        html = html.Replace("[VARY]", Utilities.VaryID).Replace("[REMAPS]", remaps).Replace("[HEADEXTRA]", BuildHeadTags()).Replace("[TOAST]", toast);
+        context.Response.ContentType = "text/html";
+        context.Response.StatusCode = 200;
+        await context.Response.WriteAsync(html);
+        await context.Response.CompleteAsync();
     }
 
     /// <summary>Matches the first http(s) URL embedded inside arbitrary shared text (Android share sheets often drop

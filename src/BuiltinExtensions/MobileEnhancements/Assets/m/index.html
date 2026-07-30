@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover is required for env(safe-area-inset-*) to report real values in the installed PWA.
+         No maximum-scale: the 16px input floor in m.css already prevents iOS focus auto-zoom, and
+         touch-action: manipulation suppresses double-tap zoom, so accessibility pinch-zoom can stay enabled. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>SwarmUI Mobile</title>
+    <link rel="icon" href="/favicon.ico" />
+    [HEADEXTRA]
+    <link rel="stylesheet" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="/css/site.css?vary=[VARY]" />
+    <link rel="stylesheet" href="/css/themes/modern.css?vary=[VARY]" />
+    <link rel="stylesheet" href="/css/themes/modern_dark.css?vary=[VARY]" />
+    <link rel="stylesheet" href="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m.css?vary=[VARY]" />
+    <script>window.parameter_remaps = [REMAPS];</script>
+    <script defer src="/js/lib/jquery.min.js"></script>
+    <script defer src="/js/lib/bootstrap.min.js"></script>
+    <script defer src="/js/util.js?vary=[VARY]"></script>
+    <script defer src="/js/translator.js?vary=[VARY]"></script>
+    <script defer src="/js/permissions.js?vary=[VARY]"></script>
+    <script defer src="/js/site.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_state.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_gen.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_ui.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_create.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_images.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_models.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_app.js?vary=[VARY]"></script>
+</head>
+<body class="m-body">
+    <!-- UPSTREAM COUPLING (site.js landmine 1): site.js top-level runs
+         `inputBrowserHelper = new InputBrowserHelper()` which getRequiredElementById's this container and
+         THROWS without it, killing everything after site.js:1142. Keep this div. -->
+    <div id="input_image_browser_upload_container" style="display:none"></div>
+    <!-- UPSTREAM COUPLING (site.js landmine 2): showError() - the default error path of genericRequest and
+         makeWSRequest - hard-requires center_toast/error_toast_box/error_toast_content. [TOAST] is built
+         server-side by the same WebUtil.Toast helper _Layout.cshtml uses, so the markup cannot drift. -->
+    [TOAST]
+
+    <div class="m-app">
+        <header class="m-header">
+            <span class="m-header-title">SwarmUI</span>
+            <span class="m-queue-chip" style="display:none">0</span>
+            <a class="m-header-link" href="/Text2Image">Classic UI</a>
+        </header>
+        <main class="m-panels">
+            <section class="m-panel" data-mtab="create"></section>
+            <section class="m-panel" data-mtab="images"></section>
+            <section class="m-panel" data-mtab="models"></section>
+            <section class="m-panel" data-mtab="more"></section>
+        </main>
+        <nav class="m-bottom-nav">
+            <button class="m-nav-item" data-mdest="create"><span class="m-nav-icon">&#x270E;</span>Create</button>
+            <button class="m-nav-item" data-mdest="images"><span class="m-nav-icon">&#x25A6;</span>Images</button>
+            <button class="m-nav-item" data-mdest="models"><span class="m-nav-icon">&#x25C8;</span>Models</button>
+            <button class="m-nav-item" data-mdest="more"><span class="m-nav-icon">&#x2630;</span>More</button>
+        </nav>
+    </div>
+    <div class="m-boot-fail" style="display:none">
+        <p>The mobile client failed to start. This usually means an update changed something it depends on.</p>
+        <p><a href="/Text2Image">Open the full UI instead</a></p>
+    </div>
+</body>
+</html>
