@@ -134,6 +134,14 @@ class MCreate {
         promptWrap.appendChild(this.promptBox);
         this.imageStrip = mUI.el('div', 'm-image-strip');
         promptWrap.appendChild(this.imageStrip);
+        this.ratioRow = mUI.el('div', 'm-ratio-row');
+        let exactButton = mUI.el('button', 'm-ratio-button', 'Use image ratio');
+        exactButton.addEventListener('click', () => this.applyImageRatio(true));
+        this.ratioRow.appendChild(exactButton);
+        let closestButton = mUI.el('button', 'm-ratio-button', 'Use closest ratio');
+        closestButton.addEventListener('click', () => this.applyImageRatio(false));
+        this.ratioRow.appendChild(closestButton);
+        promptWrap.appendChild(this.ratioRow);
         panel.appendChild(promptWrap);
         panel.appendChild(this.buildQuickParams());
         let negWrap = mUI.el('details', 'm-neg-wrap');
@@ -398,6 +406,42 @@ class MCreate {
         let add = mUI.el('button', 'm-image-tile m-image-add', '+');
         add.addEventListener('click', () => this.fileInput.click());
         this.imageStrip.appendChild(add);
+        this.ratioRow.style.display = mState.promptImages.length > 0 ? '' : 'none';
+    }
+
+    /** Reads the natural size of the first prompt image (the primary one) and reports its width/height
+     * ratio, or 0 if it cannot be measured. */
+    primaryImageRatio(callback) {
+        let entry = mState.promptImages[0];
+        if (!entry) {
+            callback(0);
+            return;
+        }
+        let img = new Image();
+        img.onload = () => callback(img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 0);
+        img.onerror = () => callback(0);
+        img.src = entry.kind == 'data' ? entry.value : `${getImageOutPrefix()}/${entry.value}`;
+    }
+
+    /** Sets the aspect ratio from the primary prompt image. Exact keeps the image's real ratio (sent as
+     * Custom with computed pixels, and still scaled by whatever the Size setting says); otherwise it snaps
+     * to the nearest ratio in the picker. */
+    applyImageRatio(exact) {
+        this.primaryImageRatio(ratio => {
+            if (!ratio) {
+                mUI.note('Could not read that image\'s size.');
+                return;
+            }
+            if (exact) {
+                mState.params['aspectratio'] = 'Custom';
+                mState.customRatio = ratio;
+            }
+            else {
+                mState.params['aspectratio'] = MState.closestAspect(ratio);
+                mState.customRatio = 0;
+            }
+            mState.changed();
+        });
     }
 
     /** Long-press (150ms) arms a horizontal drag that live-reorders the tile among its siblings; on release
@@ -524,6 +568,9 @@ class MCreate {
         this.aspectSelect.className = 'm-aspect-select';
         this.aspectSelect.addEventListener('change', () => {
             mState.params['aspectratio'] = this.aspectSelect.value;
+            // Picking from the list replaces any image-matched ratio: choosing 'Custom' by hand means
+            // "leave width/height alone", not "keep scaling the ratio I matched earlier".
+            mState.customRatio = 0;
             mState.changed();
         });
         resRow.appendChild(this.aspectSelect);
@@ -557,7 +604,9 @@ class MCreate {
             btn.classList.toggle('m-selected', btn.dataset.count == `${mState.params['images'] || '1'}`);
         }
         let aspectMeta = mState.paramMeta['aspectratio'];
-        let values = aspectMeta && aspectMeta.values ? aspectMeta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '3:4', '9:16', 'Custom'];
+        let serverValues = aspectMeta && aspectMeta.values ? aspectMeta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '9:16', 'Custom'];
+        // Server ratios first, then the fork-added ones, with Custom kept last as the manual escape hatch.
+        let values = serverValues.filter(v => v != 'Custom').concat(Object.keys(MState.ExtraAspects)).concat(['Custom']);
         if (this.aspectSelect.options.length != values.length) {
             this.aspectSelect.innerHTML = '';
             for (let v of values) {
@@ -582,9 +631,12 @@ class MCreate {
      * 32-step slider: every value anyone actually uses is on it, and each entry is a thumb-sized target. */
     renderSizeSelect() {
         let meta = mState.paramMeta['sidelength'];
-        let min = meta && meta.min ? meta.min : 64;
+        // Floor at 1024 regardless of what the parameter allows: every current architecture is a 1024-native
+        // model, and the sub-1024 rungs only existed to serve SD1.x. Auto still reports a model's real native
+        // size if that model happens to be smaller - that's better information, not a rung on this ladder.
+        let min = Math.max(1024, meta && meta.min ? meta.min : 0);
         let max = meta && meta.max ? meta.max : 16384;
-        let ladder = [512, 640, 768, 896, 1024, 1152, 1280, 1536, 1792, 2048].filter(v => v >= min && v <= max);
+        let ladder = [1024, 1152, 1280, 1408, 1536, 1792, 2048].filter(v => v >= min && v <= max);
         if (this.sizeSelect.options.length != ladder.length + 1) {
             this.sizeSelect.innerHTML = '';
             let auto = document.createElement('option');
@@ -599,18 +651,18 @@ class MCreate {
             }
         }
         this.sizeSelect.value = mState.params['sidelength'] ? `${mState.params['sidelength']}` : '';
+        // The size only stops applying when there is no ratio at all to scale - ie 'Custom' picked by hand
+        // with no image-matched ratio behind it. A matched ratio, however odd, still scales with the length.
         let aspect = this.aspectSelect.value;
-        let isCustom = aspect == 'Custom' || !MState.AspectReferences[aspect];
-        this.sizeSelect.disabled = isCustom;
-        if (isCustom) {
-            let input = mState.buildGenInput();
-            let width = input['width'] || (mState.paramMeta['width'] ? mState.paramMeta['width'].default : '?');
-            let height = input['height'] || (mState.paramMeta['height'] ? mState.paramMeta['height'].default : '?');
-            this.resReadout.textContent = `Custom ${width} × ${height} — set width/height in the full UI`;
+        let hasRatio = MState.AspectReferences[aspect] || MState.ExtraAspects[aspect] || (aspect == 'Custom' && mState.customRatio);
+        this.sizeSelect.disabled = !hasRatio;
+        let res = mState.previewResolution();
+        if (!hasRatio) {
+            this.resReadout.textContent = res ? `Custom ${res[0]} × ${res[1]} — set width/height in the full UI` : 'Custom — set width/height in the full UI';
             return;
         }
-        let res = mState.previewResolution();
-        this.resReadout.textContent = res ? `${res[0]} × ${res[1]}` : '';
+        let label = aspect == 'Custom' && mState.customRatio ? 'matched to image' : aspect;
+        this.resReadout.textContent = res ? `${res[0]} × ${res[1]} (${label})` : '';
     }
 
     /** Advanced chips: every param set by preset/reuse without a dedicated control, X-clearable. */
