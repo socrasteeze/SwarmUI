@@ -88,7 +88,7 @@ class MModels {
         if (thumb) {
             card.appendChild(thumb);
         }
-        card.appendChild(mUI.modelText(model, phrase => mUI.addToPrompt(phrase)));
+        card.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag()));
         if (this.subtype == 'Stable-Diffusion' && mState.params['model'] == model.name) {
             card.classList.add('m-selected');
         }

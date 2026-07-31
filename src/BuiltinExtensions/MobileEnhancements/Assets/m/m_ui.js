@@ -55,7 +55,8 @@ class MUI {
 
     /** The text block of a model row: name, subtitle, and the trigger phrase when the model declares one.
      * Trigger phrases are the reason a LoRA row needs more than a name - onTrigger, when given, makes the
-     * phrase a tappable chip that appends it to the prompt. */
+     * phrase a tappable chip. The chip shows the literal phrase (so you know what you are getting) but the
+     * callback is what decides what gets inserted; mCreate inserts the `<trigger>` tag rather than the text. */
     modelText(model, onTrigger) {
         let text = this.el('div', 'm-model-text');
         text.appendChild(this.el('div', 'm-model-name', this.modelName(model.name)));
@@ -80,14 +81,6 @@ class MUI {
             text.appendChild(row);
         }
         return text;
-    }
-
-    /** Appends text to the prompt (used by trigger-phrase chips), comma-separated. */
-    addToPrompt(text) {
-        let current = `${mState.params['prompt'] || ''}`.trim();
-        mState.params['prompt'] = current ? `${current}, ${text}` : text;
-        mState.changed();
-        this.note(`Added to prompt: ${text}`);
     }
 
     /** Registers a tab: build(panel) runs once lazily, onShow(panel) runs every activation. */
