@@ -161,6 +161,13 @@ class MCreate {
             this.autoGrow(this.promptBox);
         });
         this.promptBox.addEventListener('paste', (e) => this.onPaste(e));
+        // Remember where the caret was. By the time a trigger chip is tapped the box has long since lost
+        // focus to a bottom sheet, so "insert at the cursor" has to mean the last cursor position.
+        for (let event of ['keyup', 'click', 'select', 'input', 'blur']) {
+            this.promptBox.addEventListener(event, () => {
+                this.promptCaret = getTextSelRange(this.promptBox)[0];
+            });
+        }
         promptWrap.appendChild(this.promptBox);
         this.imageStrip = mUI.el('div', 'm-image-strip');
         promptWrap.appendChild(this.imageStrip);
@@ -727,6 +734,40 @@ class MCreate {
         // Create page it was spending a whole row on a third copy.
     }
 
+    /** Inserts text into the prompt at the remembered caret (end of prompt if there isn't one), spacing it
+     * off from its neighbours without inventing punctuation. Works on mState rather than the textarea
+     * because render() rewrites the box from state whenever it isn't focused - which it never is here, the
+     * caller is a chip inside a bottom sheet. */
+    insertIntoPrompt(text) {
+        let current = `${mState.params['prompt'] || ''}`;
+        let caret = this.promptCaret == null ? current.length : Math.min(this.promptCaret, current.length);
+        let before = current.substring(0, caret);
+        let after = current.substring(caret);
+        let insert = text;
+        if (before.length > 0 && !/\s$/.test(before)) {
+            insert = ` ${insert}`;
+        }
+        if (after.length > 0 && !/^\s/.test(after)) {
+            insert = `${insert} `;
+        }
+        mState.params['prompt'] = before + insert + after;
+        this.promptCaret = (before + insert).length;
+        mState.changed();
+    }
+
+    /** Inserts the `<trigger>` prompt tag, which the server expands to the trigger phrases of the current
+     * model AND every active LoRA. That is the whole set in one tag, so a second copy would repeat all of
+     * them - hence the guard. Inserting the tag rather than the literal phrase also means the prompt stays
+     * correct when LoRAs are swapped afterwards. */
+    insertTriggerTag() {
+        if (`${mState.params['prompt'] || ''}`.includes('<trigger>')) {
+            mUI.note('<trigger> is already in your prompt - it covers every active LoRA.');
+            return;
+        }
+        this.insertIntoPrompt('<trigger>');
+        mUI.note('Added <trigger> to the prompt.');
+    }
+
     /** The cached LoRA model object for a name, or a minimal stand-in before the list has loaded. */
     loraByName(name) {
         for (let model of (this.loraList || [])) {
@@ -759,7 +800,7 @@ class MCreate {
                 if (thumb) {
                     top.appendChild(thumb);
                 }
-                top.appendChild(mUI.modelText(model, phrase => mUI.addToPrompt(phrase)));
+                top.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag()));
                 let readout = mUI.el('span', 'm-lora-weight-readout', `${loras[i].weight}`);
                 top.appendChild(readout);
                 let remove = mUI.el('span', 'm-lora-remove', '×');
