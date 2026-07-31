@@ -48,9 +48,7 @@ class MGenSocket {
             this.socket.send(JSON.stringify(data));
             return;
         }
-        this.socket = makeWSRequest('GenerateText2ImageWS', input, data => this.handleFrame(data), 0, err => {
-            this.emit('error', err);
-        });
+        this.socket = makeWSRequest('GenerateText2ImageWS', input, data => this.handleFrame(data), 0, err => this.failed(err));
         let closeWatch = () => {
             if (this.socket && this.socket.readyState == WebSocket.CLOSED) {
                 this.socket = null;
@@ -60,6 +58,23 @@ class MGenSocket {
             setTimeout(closeWatch, 2000);
         };
         setTimeout(closeWatch, 2000);
+    }
+
+    /** Surfaces a failed generation. This must show the error itself: passing an errorHandle to
+     * makeWSRequest REPLACES that helper's default showError path, so anything this swallows is gone.
+     * Emitting to listeners is not enough - nothing was subscribed to 'error', which is why a failing
+     * generation used to look like the Generate button doing nothing at all. */
+    failed(err) {
+        console.error('generation failed', err);
+        this.releaseWakeLock();
+        this.stopPolling();
+        this.emit('error', err);
+        try {
+            showError(`Generation failed: ${err}`);
+        }
+        catch (e) {
+            console.error('could not show generation error', e);
+        }
     }
 
     /** Handles one inbound WS frame (makeWSRequest already routes {error} frames to the error handler). */
@@ -153,9 +168,7 @@ class MGenSocket {
             'showOutputs': true,
         };
         this.acquireWakeLock();
-        makeWSRequest('GridGenRun', input, data => this.handleFrame(data), 0, err => {
-            this.emit('error', err);
-        });
+        makeWSRequest('GridGenRun', input, data => this.handleFrame(data), 0, err => this.failed(err));
     }
 
     /** Debounced haptic pulse on image completion. */

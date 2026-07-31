@@ -37,13 +37,28 @@ class MCreate {
         this.previewWrap.appendChild(head);
         this.previewGrid = mUI.el('div', 'm-preview-grid');
         this.previewWrap.appendChild(this.previewGrid);
+        // Shown from the instant Generate is tapped until the first frame lands. Queueing behind a loading
+        // model can take a while, and without this the whole screen sits unchanged - indistinguishable from
+        // a button that did nothing.
+        this.previewPending = mUI.el('div', 'm-preview-pending');
+        this.previewPending.appendChild(mUI.el('div', 'm-preview-pending-label', 'Queued...'));
+        this.previewPending.appendChild(mUI.el('div', 'm-preview-pending-bar'));
+        this.previewWrap.appendChild(this.previewPending);
+        this.pending = false;
         this.renderPreviewState();
     }
 
-    /** Syncs the preview's collapsed/empty classes and the toggle glyph. */
+    /** Marks a batch as requested; cleared by the first frame or by a failure. */
+    setPending(pending) {
+        this.pending = pending;
+        this.renderPreviewState();
+    }
+
+    /** Syncs the preview's collapsed/empty/pending classes and the toggle glyph. */
     renderPreviewState() {
         let count = Object.keys(this.liveTiles).length;
-        this.previewWrap.classList.toggle('m-preview-empty', count == 0);
+        this.previewWrap.classList.toggle('m-preview-empty', count == 0 && !this.pending);
+        this.previewPending.style.display = this.pending && count == 0 ? '' : 'none';
         this.previewWrap.classList.toggle('m-preview-collapsed', this.previewCollapsed);
         this.previewToggle.textContent = this.previewCollapsed ? '▾ Preview' : '▴ Preview';
         this.previewGrid.style.gridTemplateColumns = `repeat(${count > 1 ? 2 : 1}, 1fr)`;
@@ -80,6 +95,12 @@ class MCreate {
         }
         else if (kind == 'status' && this.interruptButton) {
             this.interruptButton.style.display = mGen.queueTotal > 0 ? '' : 'none';
+        }
+        else if (kind == 'error') {
+            this.setPending(false);
+        }
+        if (kind == 'progress' || kind == 'image') {
+            this.pending = false;
         }
     }
 
@@ -245,6 +266,7 @@ class MCreate {
         if (document.activeElement && document.activeElement.blur) {
             document.activeElement.blur();
         }
+        this.setPending(true);
         mGen.generate(input);
     }
 
@@ -584,12 +606,9 @@ class MCreate {
         this.sizeSelect = document.createElement('select');
         this.sizeSelect.className = 'm-size-select';
         this.sizeSelect.addEventListener('change', () => {
-            if (this.sizeSelect.value == '') {
-                delete mState.params['sidelength'];
-            }
-            else {
-                mState.params['sidelength'] = this.sizeSelect.value;
-            }
+            // Empty string, not delete: '' means "the user chose Auto", absent means "never set", and only
+            // the latter gets seeded to 1024. Deleting here would make Auto snap straight back to 1024.
+            mState.params['sidelength'] = this.sizeSelect.value;
             mState.changed();
         });
         resRow.appendChild(this.sizeSelect);
@@ -644,20 +663,33 @@ class MCreate {
         let min = Math.max(1024, meta && meta.min ? meta.min : 0);
         let max = meta && meta.max ? meta.max : 16384;
         let ladder = [1024, 1152, 1280, 1408, 1536, 1792, 2048].filter(v => v >= min && v <= max);
+        // A stored side length below the new floor (or off the ladder entirely) is carried as its own option
+        // rather than silently snapping - reusing params from an old image must reproduce that image.
+        let stored = parseInt(mState.params['sidelength']) || 0;
+        if (stored && !ladder.includes(stored)) {
+            ladder = [...ladder, stored].sort((a, b) => a - b);
+        }
         if (this.sizeSelect.options.length != ladder.length + 1) {
             this.sizeSelect.innerHTML = '';
-            let auto = document.createElement('option');
-            auto.value = '';
-            auto.textContent = 'Auto size';
-            this.sizeSelect.appendChild(auto);
             for (let v of ladder) {
                 let opt = document.createElement('option');
                 opt.value = `${v}`;
                 opt.textContent = `${v}px`;
                 this.sizeSelect.appendChild(opt);
             }
+            let auto = document.createElement('option');
+            auto.value = '';
+            auto.textContent = 'Auto (model native)';
+            this.sizeSelect.appendChild(auto);
         }
-        this.sizeSelect.value = mState.params['sidelength'] ? `${mState.params['sidelength']}` : '';
+        // Seeded rather than left blank so the default is a concrete, visible 1024 instead of an "Auto" that
+        // resolves somewhere else - a Qwen checkpoint's native size is 1328, which is not what you expect to
+        // get from a control showing no number.
+        if (!mState.params['sidelength'] && mState.params['sidelength'] !== '') {
+            mState.params['sidelength'] = `${ladder.includes(1024) ? 1024 : ladder[0]}`;
+            mState.save();
+        }
+        this.sizeSelect.value = `${mState.params['sidelength']}`;
         // The size only stops applying when there is no ratio at all to scale - ie 'Custom' picked by hand
         // with no image-matched ratio behind it. A matched ratio, however odd, still scales with the length.
         let aspect = this.aspectSelect.value;

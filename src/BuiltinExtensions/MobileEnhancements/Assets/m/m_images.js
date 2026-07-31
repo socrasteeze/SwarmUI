@@ -5,9 +5,22 @@
  * not here, so generating never has to navigate away from the prompt box. */
 class MImages {
 
+    /** Sort options, label -> the ListImages sortBy/sortReverse pair it maps to. */
+    static SortModes = {
+        'Newest first': ['Date', true],
+        'Oldest first': ['Date', false],
+        'Name A-Z': ['Name', false],
+        'Name Z-A': ['Name', true]
+    };
+
     constructor() {
         /** Current history folder path ('' = root). */
         this.folder = '';
+        /** Current sort mode label (a key of MImages.SortModes), persisted across sessions. */
+        this.sortMode = localStorage.getItem('m_client_img_sort') || 'Newest first';
+        if (!MImages.SortModes[this.sortMode]) {
+            this.sortMode = 'Newest first';
+        }
         /** Parsed history entries: {src, fullsrc, url, metadata}. */
         this.entries = [];
         /** How many history entries are currently rendered (chunked). */
@@ -20,6 +33,26 @@ class MImages {
     /** Builds the Images panel once. */
     build(panel) {
         this.panel = panel;
+        let bar = mUI.el('div', 'm-images-bar');
+        this.sortSelect = document.createElement('select');
+        this.sortSelect.className = 'm-sort-select';
+        for (let label in MImages.SortModes) {
+            let opt = document.createElement('option');
+            opt.value = label;
+            opt.textContent = label;
+            this.sortSelect.appendChild(opt);
+        }
+        this.sortSelect.value = this.sortMode;
+        this.sortSelect.addEventListener('change', () => {
+            this.sortMode = this.sortSelect.value;
+            localStorage.setItem('m_client_img_sort', this.sortMode);
+            this.refresh();
+        });
+        bar.appendChild(this.sortSelect);
+        let refreshButton = mUI.el('button', 'm-refresh-button', '⟳');
+        refreshButton.addEventListener('click', () => this.refresh());
+        bar.appendChild(refreshButton);
+        panel.appendChild(bar);
         this.folderChips = mUI.el('div', 'm-folder-chips');
         panel.appendChild(this.folderChips);
         this.grid = mUI.el('div', 'm-image-grid');
@@ -57,7 +90,8 @@ class MImages {
     /** Fetches the current folder's history. */
     refresh() {
         this.dirty = false;
-        genericRequest('ListImages', { 'path': this.folder, 'depth': 1, 'sortBy': 'Date', 'sortReverse': true }, data => {
+        let [sortBy, sortReverse] = MImages.SortModes[this.sortMode];
+        genericRequest('ListImages', { 'path': this.folder, 'depth': 1, 'sortBy': sortBy, 'sortReverse': sortReverse }, data => {
             this.renderFolders(data.folders || []);
             let prefix = this.folder == '' ? '' : `${this.folder}/`;
             this.entries = (data.files || []).map(f => {
