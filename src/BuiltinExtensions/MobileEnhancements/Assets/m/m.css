@@ -78,7 +78,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding: 0.6rem 0.8rem;
+    padding: 0.5rem 0.7rem;
     box-sizing: border-box;
 }
 .m-panel.m-tab-active {
@@ -215,12 +215,21 @@
     font-size: 26px;
     border-style: dashed;
 }
+/* No images attached: the add tile has nothing to sit alongside, so it drops from a thumbnail-sized
+   square to a plain control and gives the height back to the prompt. */
+.m-image-strip-empty .m-image-add {
+    width: auto;
+    height: 2.4rem;
+    line-height: 1;
+    font-size: 18px;
+    padding: 0 1.1rem;
+}
 
 .m-quick-row {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    margin-top: 0.6rem;
+    margin-top: 0.4rem;
     flex-wrap: wrap;
 }
 .m-quick-item {
@@ -405,10 +414,43 @@
     padding: 0.3rem 0.7rem;
 }
 
-/* --- Model picker --- */
+/* --- Create panel layout --- */
+/* Flex column purely so the generate bar can take the leftover height with margin-top:auto instead of
+   leaving a dead gap under it on a short page. Children are pinned to their natural height - without
+   flex:0 0 auto the flex default would shrink the prompt box to fit. */
+.m-create-panel.m-tab-active {
+    display: flex;
+    flex-direction: column;
+}
+.m-create-panel > * {
+    flex: 0 0 auto;
+}
+.m-create-panel .m-gen-bar {
+    margin-top: auto;
+}
+.m-picker-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+.m-picker-button {
+    flex: 1 1 0;
+    min-width: 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .m-model-button.m-selected {
     border-color: var(--emphasis);
 }
+
+/* --- Shared model rows (checkpoint picker, LoRA picker, active LoRAs) --- */
 .m-model-results {
     display: flex;
     flex-direction: column;
@@ -420,31 +462,58 @@
     align-items: center;
     gap: 0.6rem;
     text-align: left;
-    background: none;
-    border: none;
     border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
     color: var(--text);
     padding: 0.4rem 0.2rem;
     min-height: 48px;
 }
-.m-model-result img {
-    width: 40px;
-    height: 40px;
+.m-model-thumb,
+.m-lora-thumb {
+    width: 44px;
+    height: 44px;
     object-fit: cover;
     border-radius: 0.3rem;
     flex: 0 0 auto;
 }
-.m-model-result.m-selected {
+.m-model-result.m-selected .m-model-name {
     color: var(--emphasis);
 }
-.m-model-result-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.m-model-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+/* Names wrap to a second line rather than truncating: a folder of models whose metadata titles are all
+   the same string is exactly the case where the tail of the file name is the only distinguishing part. */
+.m-model-name {
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+}
+.m-model-sub {
+    color: var(--text-soft);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+.m-model-trigger {
+    margin-top: 0.15rem;
+}
+.m-trigger-chip {
+    background: color-mix(in srgb, var(--emphasis) 20%, var(--background-panel));
+    color: var(--text);
+    border: 1px solid color-mix(in srgb, var(--emphasis) 45%, transparent);
+    border-radius: 0.8rem;
+    padding: 0.1rem 0.5rem;
+    font-size: 11px;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: left;
+}
+.m-trigger-text {
+    color: var(--text-soft);
+    font-size: 11px;
 }
 
 .m-neg-wrap {
-    margin-top: 0.6rem;
+    margin-top: 0.4rem;
 }
 .m-neg-summary {
     color: var(--text-soft);
@@ -466,7 +535,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.35rem;
-    margin-top: 0.6rem;
+    margin-top: 0.4rem;
     align-items: center;
 }
 .m-adv-chip {
@@ -486,19 +555,15 @@
     font-weight: bold;
     padding: 0.2rem;
 }
-.m-adv-link {
-    color: var(--emphasis);
-    text-decoration: none;
-}
 
 .m-gen-bar {
     position: sticky;
     bottom: 0;
     display: flex;
     gap: 0.5rem;
-    padding: 0.5rem 0;
+    padding: 0.4rem 0;
     background: var(--background);
-    margin-top: 0.8rem;
+    margin-top: 0.5rem;
 }
 .m-generate-button {
     flex: 1;
@@ -580,11 +645,9 @@
     align-items: center;
     gap: 0.5rem;
 }
-.m-lora-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.m-lora-row-top .m-model-text {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 .m-lora-weight-readout {
     color: var(--emphasis);
@@ -612,7 +675,10 @@
     display: flex;
     flex-direction: column;
 }
-.m-lora-result {
+.m-lora-results .m-model-result:last-child {
+    border-bottom: none;
+}
+.m-model-plain-row {
     text-align: left;
     background: none;
     border: none;
@@ -620,6 +686,7 @@
     color: var(--text);
     padding: 0.6rem 0.2rem;
     min-height: 44px;
+    width: 100%;
 }
 
 /* --- Grid sheet --- */
@@ -760,11 +827,8 @@
     aspect-ratio: 1;
     object-fit: cover;
 }
-.m-model-card-title {
+.m-model-card .m-model-text {
     padding: 0.35rem 0.4rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 .m-model-card.m-selected {
     border-color: var(--emphasis);
@@ -805,7 +869,9 @@
 
 /* Touch feedback (hover: none = real touch devices; hybrids keep hover). */
 @media (hover: none) {
-    .m-body button:active {
+    .m-body button:active,
+    .m-model-result:active,
+    .m-model-card:active {
         filter: brightness(1.25);
     }
 }
