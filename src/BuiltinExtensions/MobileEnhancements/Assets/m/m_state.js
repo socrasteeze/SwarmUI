@@ -25,6 +25,10 @@ class MState {
         this.modelClasses = {};
         /** Wildcard file names from ListT2IParams (used by prompt autocompletion). */
         this.wildcards = [];
+        /** Numeric width/height ratio backing a 'Custom' aspect selection (eg matched from a prompt image),
+         * or 0 when 'Custom' means "whatever width/height are already set". Kept out of params because it is
+         * a client-side concept - the server only ever sees the resulting width/height. */
+        this.customRatio = 0;
         /** Callbacks fired after any state change that should re-render the Create surface. */
         this.changeListeners = [];
     }
@@ -79,7 +83,48 @@ class MState {
         if (width) {
             return width;
         }
-        return this.modelNativeSize(input['model']) || 512;
+        return this.modelNativeSize(input['model']) || 1024;
+    }
+
+    /** Width/height for an arbitrary numeric ratio at a given side length: the same area-matched idea as the
+     * genpage's "match this image's aspect ratio" branch (params.js, sqrt(512*512*ratio)), but solved
+     * directly at the target side length instead of computing a 512-reference and scaling it. That skips one
+     * rounding step, so the area lands exactly on sideLength^2 and the extreme ratios stay honest - via the
+     * scaled form, 3:1 at 1024 came out 3.5% off. Rounds to 16 like the server's own aspect table path.
+     * Only used for ratios the server has no table entry for; table ratios stay server-computed. */
+    static dimsForRatio(ratio, sideLength) {
+        if (!ratio || !sideLength) {
+            return null;
+        }
+        return [roundTo(Math.sqrt(sideLength * sideLength * ratio), 16), roundTo(Math.sqrt(sideLength * sideLength / ratio), 16)];
+    }
+
+    /** Every aspect ratio the picker offers, label -> numeric width/height ratio. */
+    static allAspectRatios() {
+        let all = {};
+        for (let key in MState.AspectReferences) {
+            all[key] = MState.AspectReferences[key][0] / MState.AspectReferences[key][1];
+        }
+        for (let key in MState.ExtraAspects) {
+            all[key] = MState.ExtraAspects[key];
+        }
+        return all;
+    }
+
+    /** The offered aspect ratio closest to a numeric ratio, compared in log space so that being 10% off is
+     * judged the same whether the image is wide or tall. */
+    static closestAspect(ratio) {
+        let all = MState.allAspectRatios();
+        let best = null;
+        let bestDelta = 0;
+        for (let key in all) {
+            let delta = Math.abs(Math.log(ratio / all[key]));
+            if (best == null || delta < bestDelta) {
+                best = key;
+                bestDelta = delta;
+            }
+        }
+        return best;
     }
 
     /** The width/height the server will derive for an aspect ratio at a given side length, or null for an
@@ -96,6 +141,9 @@ class MState {
      * Derived from a real buildGenInput() so the on-screen readout cannot drift from what gets sent. */
     previewResolution() {
         let input = this.buildGenInput();
+        if (input['width'] && input['height']) {
+            return [parseInt(input['width']), parseInt(input['height'])];
+        }
         return MState.resolutionFor(input['aspectratio'], parseInt(input['sidelength']));
     }
 
@@ -169,12 +217,23 @@ class MState {
         // both what the picker implies and what keeps the recorded metadata honest. 'Custom' is the opposite
         // case: the server ignores side length there, so it must not be sent.
         let aspect = input['aspectratio'];
+        let sideLength = this.resolveSideLength(input);
         if (aspect && MState.AspectReferences[aspect]) {
-            input['sidelength'] = `${this.resolveSideLength(input)}`;
+            input['sidelength'] = `${sideLength}`;
             delete input['width'];
             delete input['height'];
         }
         else {
+            // Ratios the server has no table entry for - the fork-added ones, and any ratio matched from a
+            // prompt image - are resolved to concrete pixels here and sent as 'Custom'. The label the picker
+            // shows is a client-side concept; the server only ever sees Custom plus a width and height.
+            let ratio = MState.ExtraAspects[aspect] || (aspect == 'Custom' ? this.customRatio : 0);
+            let dims = MState.dimsForRatio(ratio, sideLength);
+            if (dims) {
+                input['aspectratio'] = 'Custom';
+                input['width'] = `${dims[0]}`;
+                input['height'] = `${dims[1]}`;
+            }
             delete input['sidelength'];
         }
         if (this.promptImages.length > 0) {
@@ -279,6 +338,7 @@ class MState {
                 'params': this.params,
                 'activePresets': this.activePresets,
                 'seedLocked': this.seedLocked,
+                'customRatio': this.customRatio,
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
             };
             localStorage.setItem('m_client_state', JSON.stringify(data));
@@ -301,6 +361,7 @@ class MState {
             }
             this.activePresets = data.activePresets || [];
             this.seedLocked = !!data.seedLocked;
+            this.customRatio = data.customRatio || 0;
             this.promptImages = (data.promptImagePaths || []).map(path => ({ 'kind': 'path', 'value': path }));
         }
         catch (e) {
@@ -324,6 +385,20 @@ MState.AspectReferences = {
     '5:8': [384, 608],
     '9:16': [384, 672],
     '9:21': [320, 768]
+};
+
+/** Fork-added aspect ratios the server's table does not carry, label -> width/height. These cannot be sent
+ * as an aspectratio value (the server would not recognise them and would silently fall back to raw
+ * width/height), so buildGenInput converts them to 'Custom' plus computed pixels. */
+MState.ExtraAspects = {
+    '3:1': 3 / 1,
+    '2:1': 2 / 1,
+    '7:4': 7 / 4,
+    '7:5': 7 / 5,
+    '5:7': 5 / 7,
+    '4:7': 4 / 7,
+    '1:2': 1 / 2,
+    '1:3': 1 / 3
 };
 
 mState = new MState();

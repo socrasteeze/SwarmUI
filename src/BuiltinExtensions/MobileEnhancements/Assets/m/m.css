@@ -279,6 +279,21 @@
 .m-size-select:disabled {
     opacity: 0.45;
 }
+.m-ratio-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+.m-ratio-button {
+    flex: 1 1 0;
+    min-width: 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 40px;
+    padding: 0 0.4rem;
+}
 .m-res-readout {
     margin-top: 0.35rem;
     color: var(--text-soft);
