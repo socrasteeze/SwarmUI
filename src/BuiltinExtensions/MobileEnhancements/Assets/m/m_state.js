@@ -19,8 +19,12 @@ class MState {
         this.paramMeta = {};
         /** Preset objects from GetMyUserData ({title, description, param_map, preview_image, is_starred}). */
         this.presets = [];
-        /** Model name lists from ListT2IParams (subtype -> [[name, class], ...]). */
+        /** Model name lists from ListT2IParams (subtype -> [[name, classId], ...]). */
         this.models = {};
+        /** Model class data from ListT2IParams (classId -> {standard_width, standard_height, ...}). */
+        this.modelClasses = {};
+        /** Wildcard file names from ListT2IParams (used by prompt autocompletion). */
+        this.wildcards = [];
         /** Callbacks fired after any state change that should re-render the Create surface. */
         this.changeListeners = [];
     }
@@ -45,6 +49,54 @@ class MState {
             this.paramMeta[param.id] = param;
         }
         this.models = data.models || {};
+        this.modelClasses = data.model_classes || {};
+        this.wildcards = data.wildcards || [];
+    }
+
+    /** The selected model's native side length, via its model class's standard width. 0 when unknown. */
+    modelNativeSize(modelName) {
+        if (!modelName) {
+            return 0;
+        }
+        for (let entry of (this.models['Stable-Diffusion'] || [])) {
+            if (entry[0] == modelName) {
+                let clazz = this.modelClasses[entry[1]];
+                return clazz && clazz.standard_width ? clazz.standard_width : 0;
+            }
+        }
+        return 0;
+    }
+
+    /** Resolves the side length for an outgoing input: an explicit pick wins, then any width the input
+     * already carries (so a 1024 preset switched to 16:9 scales the way you'd expect rather than
+     * collapsing to the 512 default), then the selected model's native size, then 512. */
+    resolveSideLength(input) {
+        let explicit = parseInt(input['sidelength']);
+        if (explicit) {
+            return explicit;
+        }
+        let width = parseInt(input['width']);
+        if (width) {
+            return width;
+        }
+        return this.modelNativeSize(input['model']) || 512;
+    }
+
+    /** The width/height the server will derive for an aspect ratio at a given side length, or null for an
+     * aspect ratio with no reference entry. Mirrors T2IParamInput.GetImageWidth/GetImageHeight exactly. */
+    static resolutionFor(aspect, sideLength) {
+        let ref = MState.AspectReferences[aspect];
+        if (!ref || !sideLength) {
+            return null;
+        }
+        return [roundTo(ref[0] * (sideLength / 512), 16), roundTo(ref[1] * (sideLength / 512), 16)];
+    }
+
+    /** The width/height the next generation will actually use, or null when it is not aspect-driven.
+     * Derived from a real buildGenInput() so the on-screen readout cannot drift from what gets sent. */
+    previewResolution() {
+        let input = this.buildGenInput();
+        return MState.resolutionFor(input['aspectratio'], parseInt(input['sidelength']));
     }
 
     /** Normalizes a list-ish param value (JS array, or comma/pipe-joined string) to a real array. */
@@ -109,6 +161,21 @@ class MState {
             if (preset && preset.param_map) {
                 this.applyPresetMap(input, preset.param_map);
             }
+        }
+        // Resolution. An aspect ratio on its own does nothing server-side: T2IParamInput.GetImageWidth only
+        // consults the aspect table when a side length is ALSO present, and otherwise falls through to raw
+        // width/height (default 512) - so a picked aspect ratio was silently ignored. Whenever a known
+        // aspect ratio is active we therefore resolve a concrete side length and drop width/height, which is
+        // both what the picker implies and what keeps the recorded metadata honest. 'Custom' is the opposite
+        // case: the server ignores side length there, so it must not be sent.
+        let aspect = input['aspectratio'];
+        if (aspect && MState.AspectReferences[aspect]) {
+            input['sidelength'] = `${this.resolveSideLength(input)}`;
+            delete input['width'];
+            delete input['height'];
+        }
+        else {
+            delete input['sidelength'];
         }
         if (this.promptImages.length > 0) {
             input['promptimages'] = this.promptImages.map(img => img.value);
@@ -241,5 +308,22 @@ class MState {
         }
     }
 }
+
+/** Reference width/height per aspect ratio at a 512 side length. UPSTREAM COUPLING: this table and the
+ * scaling math in resolutionFor must stay identical to T2IParamInput.ResolutionAspectReferences (C#) and
+ * to aspectRatios in genpage params.js - the server does the real computation, this copy only powers the
+ * on-screen readout, so a drift here shows up as a readout that lies about the output size. */
+MState.AspectReferences = {
+    '1:1': [512, 512],
+    '4:3': [576, 448],
+    '3:2': [608, 416],
+    '8:5': [608, 384],
+    '16:9': [672, 384],
+    '21:9': [768, 320],
+    '2:3': [416, 608],
+    '5:8': [384, 608],
+    '9:16': [384, 672],
+    '9:21': [320, 768]
+};
 
 mState = new MState();
