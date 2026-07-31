@@ -80,16 +80,15 @@ class MModels {
         }
     }
 
-    /** One model card: preview + title; tap = select (checkpoint) or add (LoRA). */
+    /** One model card: preview, file name, metadata title, trigger phrase; tap = select (checkpoint) or
+     * add (LoRA). Named by file rather than metadata title - see mUI.modelName for why. */
     buildCard(model) {
         let card = mUI.el('div', 'm-model-card');
-        if (model.preview_image) {
-            let img = document.createElement('img');
-            img.src = model.preview_image;
-            img.loading = 'lazy';
-            card.appendChild(img);
+        let thumb = mUI.modelThumb(model, null);
+        if (thumb) {
+            card.appendChild(thumb);
         }
-        card.appendChild(mUI.el('div', 'm-model-card-title', model.title || model.name.split('/').pop()));
+        card.appendChild(mUI.modelText(model, phrase => mUI.addToPrompt(phrase)));
         if (this.subtype == 'Stable-Diffusion' && mState.params['model'] == model.name) {
             card.classList.add('m-selected');
         }
@@ -97,7 +96,7 @@ class MModels {
             if (this.subtype == 'Stable-Diffusion') {
                 mState.params['model'] = model.name;
                 mState.changed();
-                mUI.note(`Model set: ${model.title || model.name}`);
+                mUI.note(`Model set: ${mUI.modelName(model.name)}`);
                 for (let other of this.grid.querySelectorAll('.m-model-card')) {
                     other.classList.remove('m-selected');
                 }
@@ -109,7 +108,7 @@ class MModels {
                     cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
                     mState.setLoras(cur);
                 }
-                mUI.note(`LoRA added: ${model.title || model.name}`);
+                mUI.note(`LoRA added: ${mUI.modelName(model.name)}`);
             }
         });
         return card;

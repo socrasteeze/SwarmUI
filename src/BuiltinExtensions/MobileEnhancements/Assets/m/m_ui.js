@@ -20,6 +20,76 @@ class MUI {
         return elem;
     }
 
+    /** Primary display name for a model: file name, no folders, no extension. Deliberately NOT the metadata
+     * title - titles routinely repeat across every file in a series (a folder of "Anima" checkpoints all
+     * report the title "Anima"), so a title-first list is a list of identical rows. The file name is the
+     * thing that actually differs, and it is what the model is called everywhere else. */
+    modelName(name) {
+        let short = `${name || ''}`.split('/').pop();
+        return short.replace(/\.(safetensors|ckpt|sft|gguf|engine|pt|bin)$/i, '');
+    }
+
+    /** Secondary line for a model: the metadata title when it says something the file name doesn't, else
+     * the containing folder. Empty when neither adds anything. */
+    modelSubtitle(model) {
+        let primary = this.modelName(model.name);
+        let title = `${model.title || ''}`.trim();
+        if (title && title.toLowerCase() != primary.toLowerCase()) {
+            return title;
+        }
+        let name = `${model.name || ''}`;
+        return name.includes('/') ? name.substring(0, name.lastIndexOf('/')) : '';
+    }
+
+    /** Thumbnail for a model, or null when it has no preview image. */
+    modelThumb(model, className) {
+        if (!model.preview_image) {
+            return null;
+        }
+        let img = document.createElement('img');
+        img.className = className;
+        img.src = model.preview_image;
+        img.loading = 'lazy';
+        return img;
+    }
+
+    /** The text block of a model row: name, subtitle, and the trigger phrase when the model declares one.
+     * Trigger phrases are the reason a LoRA row needs more than a name - onTrigger, when given, makes the
+     * phrase a tappable chip that appends it to the prompt. */
+    modelText(model, onTrigger) {
+        let text = this.el('div', 'm-model-text');
+        text.appendChild(this.el('div', 'm-model-name', this.modelName(model.name)));
+        let subtitle = this.modelSubtitle(model);
+        if (subtitle) {
+            text.appendChild(this.el('div', 'm-model-sub', subtitle));
+        }
+        let trigger = `${model.trigger_phrase || ''}`.trim();
+        if (trigger) {
+            let row = this.el('div', 'm-model-trigger');
+            if (onTrigger) {
+                let button = this.el('button', 'm-trigger-chip', `+ ${trigger}`);
+                button.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    onTrigger(trigger);
+                });
+                row.appendChild(button);
+            }
+            else {
+                row.appendChild(this.el('span', 'm-trigger-text', trigger));
+            }
+            text.appendChild(row);
+        }
+        return text;
+    }
+
+    /** Appends text to the prompt (used by trigger-phrase chips), comma-separated. */
+    addToPrompt(text) {
+        let current = `${mState.params['prompt'] || ''}`.trim();
+        mState.params['prompt'] = current ? `${current}, ${text}` : text;
+        mState.changed();
+        this.note(`Added to prompt: ${text}`);
+    }
+
     /** Registers a tab: build(panel) runs once lazily, onShow(panel) runs every activation. */
     registerTab(name, build, onShow) {
         this.tabs[name] = { 'build': build, 'onShow': onShow };

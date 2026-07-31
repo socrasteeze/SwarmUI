@@ -115,12 +115,21 @@ class MCreate {
     /** Builds the Create panel once. */
     build(panel) {
         this.panel = panel;
+        // Flex column so the generate bar's margin-top:auto can claim the leftover height when the page is
+        // short; when it is tall, the bar's position:sticky takes over and it stays pinned while scrolling.
+        panel.classList.add('m-create-panel');
         panel.appendChild(this.previewWrap);
         this.presetStrip = mUI.el('div', 'm-preset-strip');
         panel.appendChild(this.presetStrip);
-        this.modelButton = mUI.el('button', 'm-wide-button m-model-button');
+        // Model and LoRAs share one row: two taps that open two sheets, no reason to spend two rows on them.
+        this.pickerRow = mUI.el('div', 'm-picker-row');
+        this.modelButton = mUI.el('button', 'm-picker-button m-model-button');
         this.modelButton.addEventListener('click', () => this.openModelSheet());
-        panel.appendChild(this.modelButton);
+        this.pickerRow.appendChild(this.modelButton);
+        this.loraButton = mUI.el('button', 'm-picker-button');
+        this.loraButton.addEventListener('click', () => this.openLoraSheet());
+        this.pickerRow.appendChild(this.loraButton);
+        panel.appendChild(this.pickerRow);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
         this.promptBox = mUI.el('textarea', 'm-prompt-box');
         this.promptBox.placeholder = 'Type your prompt, or paste an image...';
@@ -156,9 +165,6 @@ class MCreate {
         negWrap.appendChild(this.negBox);
         this.negWrap = negWrap;
         panel.appendChild(negWrap);
-        this.loraButton = mUI.el('button', 'm-wide-button');
-        this.loraButton.addEventListener('click', () => this.openLoraSheet());
-        panel.appendChild(this.loraButton);
         this.advChips = mUI.el('div', 'm-adv-chips');
         panel.appendChild(this.advChips);
         let genBar = mUI.el('div', 'm-gen-bar');
@@ -306,18 +312,22 @@ class MCreate {
         let name = mState.params['model'];
         if (!name) {
             let fromPreset = mState.buildGenInput()['model'];
-            this.modelButton.textContent = fromPreset ? `Model: ${MCreate.shortName(fromPreset)} (preset)` : 'Model: server default';
+            this.modelButton.textContent = fromPreset ? `${mUI.modelName(fromPreset)} (preset)` : 'Model: default';
             this.modelButton.classList.remove('m-selected');
             return;
         }
-        this.modelButton.textContent = `Model: ${MCreate.shortName(name)}`;
+        this.modelButton.textContent = mUI.modelName(name);
         this.modelButton.classList.add('m-selected');
     }
 
-    /** Last path segment of a model name, without the file extension. */
-    static shortName(name) {
-        let short = `${name}`.split('/').pop();
-        return short.replace(/\.(safetensors|ckpt|sft|gguf|engine)$/i, '');
+    /** Search filter shared by both pickers: matches the file name, the folder path, the metadata title,
+     * and the trigger phrase, so a LoRA can be found by the word you actually type into prompts. */
+    static filterModels(list, term) {
+        let low = `${term || ''}`.toLowerCase().trim();
+        if (!low) {
+            return list;
+        }
+        return list.filter(model => `${model.name || ''} ${model.title || ''} ${model.trigger_phrase || ''}`.toLowerCase().includes(low));
     }
 
     /** Checkpoint picker sheet. Same shape as the LoRA sheet: search plus a lazily fetched list. */
@@ -334,7 +344,7 @@ class MCreate {
         let close = null;
         let renderResults = () => {
             results.innerHTML = '';
-            let clear = mUI.el('button', 'm-lora-result', 'Use server default');
+            let clear = mUI.el('button', 'm-model-plain-row', 'Use server default');
             clear.addEventListener('click', () => {
                 delete mState.params['model'];
                 mState.changed();
@@ -345,20 +355,14 @@ class MCreate {
                 results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
-            let term = search.value.toLowerCase();
             let shown = 0;
-            for (let model of this.modelList) {
-                if (term && !model.name.toLowerCase().includes(term) && !(model.title || '').toLowerCase().includes(term)) {
-                    continue;
+            for (let model of MCreate.filterModels(this.modelList, search.value)) {
+                let item = mUI.el('div', 'm-model-result');
+                let thumb = mUI.modelThumb(model, 'm-model-thumb');
+                if (thumb) {
+                    item.appendChild(thumb);
                 }
-                let item = mUI.el('button', 'm-model-result');
-                if (model.preview_image) {
-                    let img = document.createElement('img');
-                    img.src = model.preview_image;
-                    img.loading = 'lazy';
-                    item.appendChild(img);
-                }
-                item.appendChild(mUI.el('span', 'm-model-result-title', model.title || MCreate.shortName(model.name)));
+                item.appendChild(mUI.modelText(model, null));
                 if (mState.params['model'] == model.name) {
                     item.classList.add('m-selected');
                 }
@@ -406,6 +410,9 @@ class MCreate {
         let add = mUI.el('button', 'm-image-tile m-image-add', '+');
         add.addEventListener('click', () => this.fileInput.click());
         this.imageStrip.appendChild(add);
+        // With no images attached the add tile shrinks to a plain button rather than holding a full
+        // thumbnail-sized square of empty space open at the top of every session.
+        this.imageStrip.classList.toggle('m-image-strip-empty', mState.promptImages.length == 0);
         this.ratioRow.style.display = mState.promptImages.length > 0 ? '' : 'none';
     }
 
@@ -684,9 +691,18 @@ class MCreate {
             chip.appendChild(x);
             this.advChips.appendChild(chip);
         }
-        let link = mUI.el('a', 'm-adv-link', 'Open full UI →');
-        link.href = '/Text2Image';
-        this.advChips.appendChild(link);
+        // No "Open full UI" link here - the header and the More tab both already carry one, and on a short
+        // Create page it was spending a whole row on a third copy.
+    }
+
+    /** The cached LoRA model object for a name, or a minimal stand-in before the list has loaded. */
+    loraByName(name) {
+        for (let model of (this.loraList || [])) {
+            if (model.name == name) {
+                return model;
+            }
+        }
+        return { 'name': name };
     }
 
     /** LoRA bottom sheet: active LoRAs with weight sliders, add-picker from ListModels. */
@@ -704,7 +720,14 @@ class MCreate {
             for (let i = 0; i < loras.length; i++) {
                 let row = mUI.el('div', 'm-lora-row');
                 let top = mUI.el('div', 'm-lora-row-top');
-                top.appendChild(mUI.el('span', 'm-lora-name', loras[i].name.split('/').pop()));
+                // Look the full model up so an active LoRA shows the same thumbnail and trigger phrase as it
+                // does in the picker; falls back to a bare name until the lazy ListModels call lands.
+                let model = this.loraByName(loras[i].name);
+                let thumb = mUI.modelThumb(model, 'm-lora-thumb');
+                if (thumb) {
+                    top.appendChild(thumb);
+                }
+                top.appendChild(mUI.modelText(model, phrase => mUI.addToPrompt(phrase)));
                 let readout = mUI.el('span', 'm-lora-weight-readout', `${loras[i].weight}`);
                 top.appendChild(readout);
                 let remove = mUI.el('span', 'm-lora-remove', '×');
@@ -748,17 +771,18 @@ class MCreate {
                 results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
-            let term = search.value.toLowerCase();
             let active = mState.getLoras().map(l => l.name);
             let shown = 0;
-            for (let model of this.loraList) {
-                if (term && !model.name.toLowerCase().includes(term) && !(model.title || '').toLowerCase().includes(term)) {
-                    continue;
-                }
+            for (let model of MCreate.filterModels(this.loraList, search.value)) {
                 if (active.includes(model.name)) {
                     continue;
                 }
-                let item = mUI.el('button', 'm-lora-result', model.title || model.name);
+                let item = mUI.el('div', 'm-model-result');
+                let thumb = mUI.modelThumb(model, 'm-model-thumb');
+                if (thumb) {
+                    item.appendChild(thumb);
+                }
+                item.appendChild(mUI.modelText(model, null));
                 item.addEventListener('click', () => {
                     let cur = mState.getLoras();
                     cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
@@ -777,6 +801,9 @@ class MCreate {
         if (!this.loraList) {
             genericRequest('ListModels', { 'path': '', 'depth': 5, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
                 this.loraList = data.files || [];
+                // The active rows are re-rendered too: until this lands they show a bare name, with no
+                // thumbnail and no trigger phrase, because those live on the model object not in params.
+                renderRows();
                 renderResults();
             });
         }
