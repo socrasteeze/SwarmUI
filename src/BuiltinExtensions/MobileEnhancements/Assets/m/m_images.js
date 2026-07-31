@@ -1,12 +1,11 @@
-/** MobileEnhancements standalone client - unified Images surface.
- * One grid: live tiles for the current batch (fed by WS gen_progress/image frames, keyed
- * `${request_id}_${batch_index}`) above history tiles from ListImages (metadata arrives inline per file).
- * Tap opens a viewer overlay with swipe prev/next and the per-image actions. */
+/** MobileEnhancements standalone client - image history surface.
+ * History tiles from ListImages (metadata arrives inline per file), chunk-rendered, with folder chips.
+ * Tap opens a viewer overlay with swipe prev/next and the per-image actions - that viewer is shared,
+ * mCreate's live preview tiles open it too. The live batch itself lives on the Create tab (mCreate),
+ * not here, so generating never has to navigate away from the prompt box. */
 class MImages {
 
     constructor() {
-        /** Live tiles by `${request_id}_${batch_index}`. */
-        this.liveTiles = {};
         /** Current history folder path ('' = root). */
         this.folder = '';
         /** Parsed history entries: {src, fullsrc, url, metadata}. */
@@ -23,8 +22,6 @@ class MImages {
         this.panel = panel;
         this.folderChips = mUI.el('div', 'm-folder-chips');
         panel.appendChild(this.folderChips);
-        this.liveGrid = mUI.el('div', 'm-image-grid m-live-grid');
-        panel.appendChild(this.liveGrid);
         this.grid = mUI.el('div', 'm-image-grid');
         panel.appendChild(this.grid);
         this.sentinel = mUI.el('div', 'm-scroll-sentinel');
@@ -40,66 +37,12 @@ class MImages {
         }
     }
 
-    /** WS frame handling: live tile lifecycle. */
+    /** WS frame handling: the live tiles belong to mCreate, so all this surface needs to know is that
+     * new files exist and the history listing is stale. */
     onFrame(kind, data) {
-        if (kind == 'progress') {
-            let tile = this.getLiveTile(`${data.request_id}_${data.batch_index}`);
-            if (data.preview) {
-                tile.querySelector('img').src = data.preview;
-            }
-            let pct = Math.round((data.overall_percent || 0) * 100);
-            tile.querySelector('.m-tile-progress').style.width = `${pct}%`;
-        }
-        else if (kind == 'image') {
-            let tile = this.getLiveTile(`${data.request_id}_${data.batch_index}`);
-            let img = tile.querySelector('img');
-            let url = data.image.startsWith('data:') ? data.image : `${data.image}`;
-            img.src = url;
-            tile.dataset.metadata = data.metadata || '';
-            tile.dataset.url = url;
-            tile.classList.add('m-tile-done');
-            tile.querySelector('.m-tile-progress').style.width = '';
+        if (kind == 'image' || kind == 'wake') {
             this.dirty = true;
         }
-        else if (kind == 'discard') {
-            for (let key in this.liveTiles) {
-                if (data.includes(parseInt(key.split('_').pop()))) {
-                    this.liveTiles[key].remove();
-                    delete this.liveTiles[key];
-                }
-            }
-        }
-        else if (kind == 'wake') {
-            this.dirty = true;
-        }
-    }
-
-    /** Gets or creates a live tile. A new request_id clears finished tiles from older requests (mirrors the
-     * genpage Batch view the fork owner uses as the real preview). */
-    getLiveTile(key) {
-        if (this.liveTiles[key]) {
-            return this.liveTiles[key];
-        }
-        let requestId = key.substring(0, key.lastIndexOf('_'));
-        for (let existing in this.liveTiles) {
-            if (!existing.startsWith(`${requestId}_`) && this.liveTiles[existing].classList.contains('m-tile-done')) {
-                this.liveTiles[existing].remove();
-                delete this.liveTiles[existing];
-            }
-        }
-        let tile = mUI.el('div', 'm-image-tile-cell m-live-tile');
-        let img = document.createElement('img');
-        tile.appendChild(img);
-        let bar = mUI.el('div', 'm-tile-progress');
-        tile.appendChild(bar);
-        tile.addEventListener('click', () => {
-            if (tile.dataset.url) {
-                this.openViewer({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata, 'fullsrc': this.urlToPath(tile.dataset.url) });
-            }
-        });
-        this.liveTiles[key] = tile;
-        this.liveGrid.appendChild(tile);
-        return tile;
     }
 
     /** Best-effort conversion of a served image URL back to an output-root-relative path (for star/delete). */

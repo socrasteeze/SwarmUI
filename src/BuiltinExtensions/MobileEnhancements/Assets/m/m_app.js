@@ -14,8 +14,12 @@ class MApp {
                 });
                 genericRequest('GetMyUserData', {}, data => {
                     mState.presets = data.presets || [];
+                    // The autocompletion list rides this same response - no extra request, and it is
+                    // null unless the user configured a source, in which case the feature stays inert.
+                    mAutoComplete.loadFrom(data);
                     mState.changed();
                 });
+                mAutoComplete.loadSettings();
                 mGen.pollStatus();
             });
             mUI.registerTab('create', p => mCreate.build(p), null);

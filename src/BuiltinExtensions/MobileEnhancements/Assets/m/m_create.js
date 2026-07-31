@@ -1,19 +1,126 @@
-/** MobileEnhancements standalone client - Create tab: preset strip, prompt + prompt-image strip, quick
- * params, LoRA sheet, advanced chips, generate bar, grid form. All state lives in mState; this file is DOM. */
+/** MobileEnhancements standalone client - Create tab: live preview, preset strip, model picker, prompt +
+ * prompt-image strip, quick params, LoRA sheet, advanced chips, generate bar, grid form. All state lives in
+ * mState; this file is DOM. The live batch preview lives here rather than on the Images tab so that
+ * generating never navigates away from the prompt box - mImages owns history plus the shared viewer. */
 class MCreate {
 
     constructor() {
         /** Cached LoRA model list from ListModels (fetched lazily on first sheet open). */
         this.loraList = null;
-        /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip). */
-        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'aspectratio', 'loras', 'loraweights', 'promptimages'];
+        /** Cached checkpoint list from ListModels (fetched lazily on first model sheet open). */
+        this.modelList = null;
+        /** Live preview tiles by `${request_id}_${batch_index}`. */
+        this.liveTiles = {};
+        /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip).
+         * width/height are covered because the resolution controls own them - see mState.buildGenInput. */
+        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages'];
+        /** Whether the user has manually collapsed the preview. */
+        this.previewCollapsed = localStorage.getItem('m_client_preview_collapsed') == 'yes';
+        // The preview is built here, detached, rather than in build(). Generation frames can arrive before
+        // the Create panel has ever been built (deep-link to #models, then generate), and a tile handler
+        // that assumed its container existed is exactly the crash this ordering avoids.
+        this.buildPreview();
+        mGen.onFrame((kind, data) => this.onFrame(kind, data));
+    }
+
+    /** Builds the (initially detached) live preview block. */
+    buildPreview() {
+        this.previewWrap = mUI.el('div', 'm-create-preview m-preview-empty');
+        let head = mUI.el('div', 'm-preview-head');
+        this.previewToggle = mUI.el('button', 'm-preview-toggle');
+        this.previewToggle.addEventListener('click', () => {
+            this.previewCollapsed = !this.previewCollapsed;
+            localStorage.setItem('m_client_preview_collapsed', this.previewCollapsed ? 'yes' : 'no');
+            this.renderPreviewState();
+        });
+        head.appendChild(this.previewToggle);
+        this.previewWrap.appendChild(head);
+        this.previewGrid = mUI.el('div', 'm-preview-grid');
+        this.previewWrap.appendChild(this.previewGrid);
+        this.renderPreviewState();
+    }
+
+    /** Syncs the preview's collapsed/empty classes and the toggle glyph. */
+    renderPreviewState() {
+        let count = Object.keys(this.liveTiles).length;
+        this.previewWrap.classList.toggle('m-preview-empty', count == 0);
+        this.previewWrap.classList.toggle('m-preview-collapsed', this.previewCollapsed);
+        this.previewToggle.textContent = this.previewCollapsed ? '▾ Preview' : '▴ Preview';
+        this.previewGrid.style.gridTemplateColumns = `repeat(${count > 1 ? 2 : 1}, 1fr)`;
+        this.previewGrid.style.setProperty('--m-preview-cell-h', count > 1 ? '19dvh' : '38dvh');
+    }
+
+    /** WS frame handling for the live preview tiles. */
+    onFrame(kind, data) {
+        if (kind == 'progress') {
+            let tile = this.getLiveTile(`${data.request_id}_${data.batch_index}`);
+            if (data.preview) {
+                tile.querySelector('img').src = data.preview;
+            }
+            let pct = Math.round((data.overall_percent || 0) * 100);
+            tile.querySelector('.m-tile-progress').style.width = `${pct}%`;
+        }
+        else if (kind == 'image') {
+            let tile = this.getLiveTile(`${data.request_id}_${data.batch_index}`);
+            let url = data.image.startsWith('data:') ? data.image : `${data.image}`;
+            tile.querySelector('img').src = url;
+            tile.dataset.metadata = data.metadata || '';
+            tile.dataset.url = url;
+            tile.classList.add('m-tile-done');
+            tile.querySelector('.m-tile-progress').style.width = '';
+        }
+        else if (kind == 'discard') {
+            for (let key in this.liveTiles) {
+                if (data.includes(parseInt(key.split('_').pop()))) {
+                    this.liveTiles[key].remove();
+                    delete this.liveTiles[key];
+                }
+            }
+            this.renderPreviewState();
+        }
+        else if (kind == 'status' && this.interruptButton) {
+            this.interruptButton.style.display = mGen.queueTotal > 0 ? '' : 'none';
+        }
+    }
+
+    /** Gets or creates a live preview tile. A new request_id clears finished tiles from older requests
+     * (mirrors the genpage Batch view the fork owner uses as the real preview). */
+    getLiveTile(key) {
+        if (this.liveTiles[key]) {
+            return this.liveTiles[key];
+        }
+        let requestId = key.substring(0, key.lastIndexOf('_'));
+        for (let existing in this.liveTiles) {
+            if (!existing.startsWith(`${requestId}_`) && this.liveTiles[existing].classList.contains('m-tile-done')) {
+                this.liveTiles[existing].remove();
+                delete this.liveTiles[existing];
+            }
+        }
+        let tile = mUI.el('div', 'm-preview-cell');
+        let img = document.createElement('img');
+        tile.appendChild(img);
+        let bar = mUI.el('div', 'm-tile-progress');
+        tile.appendChild(bar);
+        tile.addEventListener('click', () => {
+            if (tile.dataset.url) {
+                mImages.openViewer({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata, 'fullsrc': mImages.urlToPath(tile.dataset.url) });
+            }
+        });
+        this.liveTiles[key] = tile;
+        this.previewGrid.appendChild(tile);
+        this.renderPreviewState();
+        return tile;
     }
 
     /** Builds the Create panel once. */
     build(panel) {
         this.panel = panel;
+        panel.appendChild(this.previewWrap);
         this.presetStrip = mUI.el('div', 'm-preset-strip');
         panel.appendChild(this.presetStrip);
+        this.modelButton = mUI.el('button', 'm-wide-button m-model-button');
+        this.modelButton.addEventListener('click', () => this.openModelSheet());
+        panel.appendChild(this.modelButton);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
         this.promptBox = mUI.el('textarea', 'm-prompt-box');
         this.promptBox.placeholder = 'Type your prompt, or paste an image...';
@@ -68,12 +175,9 @@ class MCreate {
         });
         panel.appendChild(fileInput);
         this.fileInput = fileInput;
+        mAutoComplete.enableFor(this.promptBox, 'prompt');
+        mAutoComplete.enableFor(this.negBox, 'negativeprompt');
         mState.onChange(() => this.render());
-        mGen.onFrame((kind, data) => {
-            if (kind == 'status') {
-                this.interruptButton.style.display = mGen.queueTotal > 0 ? '' : 'none';
-            }
-        });
         this.render();
     }
 
@@ -111,20 +215,29 @@ class MCreate {
         });
     }
 
-    /** Fires one generation batch and jumps to the Images tab. */
+    /** Fires one generation batch. Stays on this tab - the preview is right here. */
     doGenerate() {
         let input = mState.buildGenInput();
         if (!`${input['prompt'] || ''}`.trim() && !input['promptimages'] && mState.activePresets.length == 0) {
             mUI.note('Type a prompt or pick a preset first.');
             return;
         }
+        mAutoComplete.hide();
+        if (this.previewCollapsed) {
+            this.previewCollapsed = false;
+            localStorage.setItem('m_client_preview_collapsed', 'no');
+            this.renderPreviewState();
+        }
+        if (document.activeElement && document.activeElement.blur) {
+            document.activeElement.blur();
+        }
         mGen.generate(input);
-        location.hash = 'images';
     }
 
     /** Re-renders every dynamic region from state. */
     render() {
         this.renderPresets();
+        this.renderModelButton();
         if (document.activeElement != this.promptBox) {
             this.promptBox.value = mState.params['prompt'] || '';
             this.autoGrow(this.promptBox);
@@ -172,6 +285,95 @@ class MCreate {
             });
             this.presetStrip.appendChild(chip);
         }
+    }
+
+    /** Model button label. Hidden entirely when the user lacks the model parameter permission, since
+     * ListT2IParams only reports parameters the session is allowed to set. */
+    renderModelButton() {
+        if (!mState.paramMeta['model']) {
+            this.modelButton.style.display = 'none';
+            return;
+        }
+        this.modelButton.style.display = '';
+        let name = mState.params['model'];
+        if (!name) {
+            let fromPreset = mState.buildGenInput()['model'];
+            this.modelButton.textContent = fromPreset ? `Model: ${MCreate.shortName(fromPreset)} (preset)` : 'Model: server default';
+            this.modelButton.classList.remove('m-selected');
+            return;
+        }
+        this.modelButton.textContent = `Model: ${MCreate.shortName(name)}`;
+        this.modelButton.classList.add('m-selected');
+    }
+
+    /** Last path segment of a model name, without the file extension. */
+    static shortName(name) {
+        let short = `${name}`.split('/').pop();
+        return short.replace(/\.(safetensors|ckpt|sft|gguf|engine)$/i, '');
+    }
+
+    /** Checkpoint picker sheet. Same shape as the LoRA sheet: search plus a lazily fetched list. */
+    openModelSheet() {
+        let content = mUI.el('div', 'm-lora-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Model'));
+        let search = document.createElement('input');
+        search.type = 'text';
+        search.placeholder = 'Search checkpoints...';
+        search.className = 'm-lora-search';
+        content.appendChild(search);
+        let results = mUI.el('div', 'm-model-results');
+        content.appendChild(results);
+        let close = null;
+        let renderResults = () => {
+            results.innerHTML = '';
+            let clear = mUI.el('button', 'm-lora-result', 'Use server default');
+            clear.addEventListener('click', () => {
+                delete mState.params['model'];
+                mState.changed();
+                close();
+            });
+            results.appendChild(clear);
+            if (!this.modelList) {
+                results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
+                return;
+            }
+            let term = search.value.toLowerCase();
+            let shown = 0;
+            for (let model of this.modelList) {
+                if (term && !model.name.toLowerCase().includes(term) && !(model.title || '').toLowerCase().includes(term)) {
+                    continue;
+                }
+                let item = mUI.el('button', 'm-model-result');
+                if (model.preview_image) {
+                    let img = document.createElement('img');
+                    img.src = model.preview_image;
+                    img.loading = 'lazy';
+                    item.appendChild(img);
+                }
+                item.appendChild(mUI.el('span', 'm-model-result-title', model.title || MCreate.shortName(model.name)));
+                if (mState.params['model'] == model.name) {
+                    item.classList.add('m-selected');
+                }
+                item.addEventListener('click', () => {
+                    mState.params['model'] = model.name;
+                    mState.changed();
+                    close();
+                });
+                results.appendChild(item);
+                if (++shown >= 40) {
+                    break;
+                }
+            }
+        };
+        search.addEventListener('input', renderResults);
+        if (!this.modelList) {
+            genericRequest('ListModels', { 'path': '', 'depth': 5, 'subtype': 'Stable-Diffusion', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
+                this.modelList = data.files || [];
+                renderResults();
+            });
+        }
+        renderResults();
+        close = mUI.openSheet(content);
     }
 
     /** Prompt-image strip: thumbs, remove, add tile, long-press drag reorder (DOM order == request order). */
@@ -281,8 +483,9 @@ class MCreate {
         reader.readAsDataURL(file);
     }
 
-    /** Quick params row: seed lock + value, images count, aspect ratio. */
+    /** Quick params row: seed lock + value, images count, aspect ratio, side length, resolution readout. */
     buildQuickParams() {
+        let wrap = mUI.el('div', 'm-quick-wrap');
         let row = mUI.el('div', 'm-quick-row');
         let seedWrap = mUI.el('div', 'm-quick-item');
         this.seedLock = mUI.el('button', 'm-seed-lock');
@@ -315,14 +518,31 @@ class MCreate {
             this.imagesGroup.appendChild(btn);
         }
         row.appendChild(this.imagesGroup);
+        wrap.appendChild(row);
+        let resRow = mUI.el('div', 'm-quick-row');
         this.aspectSelect = document.createElement('select');
         this.aspectSelect.className = 'm-aspect-select';
         this.aspectSelect.addEventListener('change', () => {
             mState.params['aspectratio'] = this.aspectSelect.value;
             mState.changed();
         });
-        row.appendChild(this.aspectSelect);
-        return row;
+        resRow.appendChild(this.aspectSelect);
+        this.sizeSelect = document.createElement('select');
+        this.sizeSelect.className = 'm-size-select';
+        this.sizeSelect.addEventListener('change', () => {
+            if (this.sizeSelect.value == '') {
+                delete mState.params['sidelength'];
+            }
+            else {
+                mState.params['sidelength'] = this.sizeSelect.value;
+            }
+            mState.changed();
+        });
+        resRow.appendChild(this.sizeSelect);
+        wrap.appendChild(resRow);
+        this.resReadout = mUI.el('div', 'm-res-readout');
+        wrap.appendChild(this.resReadout);
+        return wrap;
     }
 
     /** Syncs the quick-param controls from state. */
@@ -347,7 +567,50 @@ class MCreate {
                 this.aspectSelect.appendChild(opt);
             }
         }
-        this.aspectSelect.value = mState.params['aspectratio'] || (aspectMeta ? aspectMeta.default : '1:1');
+        // Seed the state from the shown default rather than leaving it unset: an absent aspectratio is not
+        // the same as the displayed one, and the difference is invisible - the picker would read "1:1"
+        // while the server fell through to its raw width/height defaults.
+        if (!mState.params['aspectratio']) {
+            mState.params['aspectratio'] = aspectMeta && aspectMeta.default ? aspectMeta.default : '1:1';
+            mState.save();
+        }
+        this.aspectSelect.value = mState.params['aspectratio'];
+        this.renderSizeSelect();
+    }
+
+    /** Side-length ladder plus the live width x height readout. A ladder rather than the desktop's
+     * 32-step slider: every value anyone actually uses is on it, and each entry is a thumb-sized target. */
+    renderSizeSelect() {
+        let meta = mState.paramMeta['sidelength'];
+        let min = meta && meta.min ? meta.min : 64;
+        let max = meta && meta.max ? meta.max : 16384;
+        let ladder = [512, 640, 768, 896, 1024, 1152, 1280, 1536, 1792, 2048].filter(v => v >= min && v <= max);
+        if (this.sizeSelect.options.length != ladder.length + 1) {
+            this.sizeSelect.innerHTML = '';
+            let auto = document.createElement('option');
+            auto.value = '';
+            auto.textContent = 'Auto size';
+            this.sizeSelect.appendChild(auto);
+            for (let v of ladder) {
+                let opt = document.createElement('option');
+                opt.value = `${v}`;
+                opt.textContent = `${v}px`;
+                this.sizeSelect.appendChild(opt);
+            }
+        }
+        this.sizeSelect.value = mState.params['sidelength'] ? `${mState.params['sidelength']}` : '';
+        let aspect = this.aspectSelect.value;
+        let isCustom = aspect == 'Custom' || !MState.AspectReferences[aspect];
+        this.sizeSelect.disabled = isCustom;
+        if (isCustom) {
+            let input = mState.buildGenInput();
+            let width = input['width'] || (mState.paramMeta['width'] ? mState.paramMeta['width'].default : '?');
+            let height = input['height'] || (mState.paramMeta['height'] ? mState.paramMeta['height'].default : '?');
+            this.resReadout.textContent = `Custom ${width} × ${height} — set width/height in the full UI`;
+            return;
+        }
+        let res = mState.previewResolution();
+        this.resReadout.textContent = res ? `${res[0]} × ${res[1]}` : '';
     }
 
     /** Advanced chips: every param set by preset/reuse without a dedicated control, X-clearable. */
@@ -480,7 +743,7 @@ class MCreate {
         content.appendChild(mUI.el('div', 'm-sheet-title', 'Grid Generate'));
         let axesWrap = mUI.el('div', 'm-grid-axes');
         content.appendChild(axesWrap);
-        let axisParams = ['steps', 'cfgscale', 'seed', 'model', 'loraweights', 'prompt', 'width', 'height'].filter(p => p == 'prompt' || mState.paramMeta[p]);
+        let axisParams = ['steps', 'cfgscale', 'seed', 'model', 'loraweights', 'prompt', 'sidelength', 'aspectratio'].filter(p => p == 'prompt' || mState.paramMeta[p]);
         let addAxis = () => {
             if (axesWrap.children.length >= 3) {
                 return;
@@ -525,7 +788,6 @@ class MCreate {
             delete base['images'];
             mGen.runGrid(base, axes);
             close();
-            location.hash = 'images';
         });
         content.appendChild(runBtn);
         let close = mUI.openSheet(content);

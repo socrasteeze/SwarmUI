@@ -269,9 +269,163 @@
     color: var(--emphasis-text, #fff);
     border-color: var(--emphasis);
 }
-.m-aspect-select {
+.m-aspect-select,
+.m-size-select {
     min-height: 44px;
     padding: 0 0.4rem;
+    flex: 1 1 0;
+    min-width: 0;
+}
+.m-size-select:disabled {
+    opacity: 0.45;
+}
+.m-res-readout {
+    margin-top: 0.35rem;
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- Live preview (sticky top of the Create panel; the generate bar is sticky at the bottom, so the
+       params scroll between the two and both stay reachable) --- */
+.m-create-preview {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--background);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.2rem;
+}
+.m-create-preview.m-preview-empty {
+    display: none;
+}
+.m-preview-head {
+    display: flex;
+    align-items: center;
+    padding: 0.15rem 0;
+}
+.m-preview-toggle {
+    background: none;
+    border: none;
+    color: var(--text-soft);
+    padding: 0.2rem 0.3rem;
+    min-height: 30px;
+}
+/* --m-preview-cell-h is set by renderPreviewState from the tile count so that a 1-up and a 2x2 batch
+   both land at roughly the same total height instead of the batch pushing the prompt off screen. */
+.m-preview-grid {
+    display: grid;
+    gap: 0.3rem;
+    /* 1-up and 2x2 fit exactly; anything larger (a big preset batch, or grid-gen cells streaming in)
+       scrolls inside this box rather than growing the sticky header down over the prompt. */
+    max-height: 40dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.m-create-preview.m-preview-collapsed .m-preview-grid {
+    display: none;
+}
+/* While the on-screen keyboard is up the visual viewport is already tiny; 40dvh of preview on top of
+   that would crowd the prompt box right when it matters most. */
+.m-body.m-kb-open .m-preview-grid {
+    display: none;
+}
+.m-preview-cell {
+    position: relative;
+    height: var(--m-preview-cell-h, 38dvh);
+    background: var(--background-panel);
+    border-radius: 0.4rem;
+    overflow: hidden;
+}
+.m-preview-cell img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* --- Autocomplete suggestion strip --- */
+.m-ac-strip {
+    display: flex;
+    gap: 0.3rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.25rem 0;
+    margin-bottom: 0.2rem;
+    scrollbar-width: none;
+}
+.m-ac-strip::-webkit-scrollbar {
+    display: none;
+}
+.m-ac-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex: 0 0 auto;
+    max-width: 70vw;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    padding: 0 0.7rem;
+    min-height: 36px;
+    white-space: nowrap;
+}
+.m-ac-chip.tag-text {
+    color: var(--tag-color, var(--text));
+}
+.m-ac-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.m-ac-chip-hint {
+    color: var(--text-soft);
+    font-size: 11px;
+}
+.m-ac-help {
+    border-style: dashed;
+    color: var(--text-soft);
+    white-space: normal;
+    max-width: 85vw;
+    padding: 0.3rem 0.7rem;
+}
+
+/* --- Model picker --- */
+.m-model-button.m-selected {
+    border-color: var(--emphasis);
+}
+.m-model-results {
+    display: flex;
+    flex-direction: column;
+    max-height: 55dvh;
+    overflow-y: auto;
+}
+.m-model-result {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+    color: var(--text);
+    padding: 0.4rem 0.2rem;
+    min-height: 48px;
+}
+.m-model-result img {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: 0.3rem;
+    flex: 0 0 auto;
+}
+.m-model-result.m-selected {
+    color: var(--emphasis);
+}
+.m-model-result-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .m-neg-wrap {
