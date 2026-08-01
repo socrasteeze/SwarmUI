@@ -512,6 +512,13 @@
 .m-model-button.m-selected {
     border-color: var(--emphasis);
 }
+/* An active preset's param_map also sets 'model' and wins over the manual pick on every generate (presets
+   apply after raw params) - this needs to read as distinctly different from a normal selection, not just a
+   different accent color, or it repeats the exact confusion it exists to prevent. */
+.m-model-button.m-overridden {
+    border-color: var(--red);
+    color: var(--red);
+}
 
 /* --- Shared model rows (checkpoint picker, LoRA picker, active LoRAs) --- */
 .m-model-results {

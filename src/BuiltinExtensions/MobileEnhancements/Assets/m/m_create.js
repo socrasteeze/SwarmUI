@@ -407,15 +407,29 @@ class MCreate {
             return;
         }
         this.modelButton.style.display = '';
-        let name = mState.params['model'];
-        if (!name) {
-            let fromPreset = mState.buildGenInput()['model'];
-            this.modelButton.textContent = fromPreset ? `${mUI.modelName(fromPreset)} (preset)` : 'Model: default';
-            this.modelButton.classList.remove('m-selected');
+        this.modelButton.classList.remove('m-selected', 'm-overridden');
+        let manual = mState.params['model'];
+        // The value that will actually be sent: buildGenInput() applies active presets AFTER the manual
+        // pick (matching the server, which applies `presets:[]` after raw params - T2IAPI.cs), so a preset
+        // that also sets 'model' wins on every generate for as long as its chip stays selected, not just
+        // once. Showing `manual` here without checking this is what made the button say "Klein" while every
+        // image still came out as the preset's "Anima" - the button must show what will actually be used.
+        let effective = mState.buildGenInput()['model'];
+        if (!effective) {
+            this.modelButton.textContent = 'Model: default';
             return;
         }
-        this.modelButton.textContent = mUI.modelName(name);
-        this.modelButton.classList.add('m-selected');
+        if (manual && effective != manual) {
+            this.modelButton.textContent = `${mUI.modelName(effective)} (preset overrides your pick)`;
+            this.modelButton.classList.add('m-overridden');
+            return;
+        }
+        if (manual) {
+            this.modelButton.textContent = mUI.modelName(manual);
+            this.modelButton.classList.add('m-selected');
+            return;
+        }
+        this.modelButton.textContent = `${mUI.modelName(effective)} (preset)`;
     }
 
     /** How deep the picker listings recurse. The pickers are flat searchable lists, not folder browsers, so
