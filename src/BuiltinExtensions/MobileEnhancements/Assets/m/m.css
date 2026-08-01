@@ -440,6 +440,11 @@
     padding: 0.25rem 0;
     margin-bottom: 0.2rem;
     scrollbar-width: none;
+    /* Reserved unconditionally, empty or not: this is a permanent element now (see m_autocomplete.js
+       enableFor), and matches a populated row's height (36px chip + this rule's own vertical padding) so
+       nothing below it moves as chips come and go while typing. */
+    min-height: 44px;
+    box-sizing: border-box;
 }
 .m-ac-strip::-webkit-scrollbar {
     display: none;
@@ -511,6 +516,14 @@
 }
 .m-model-button.m-selected {
     border-color: var(--emphasis);
+}
+/* Fixed-width rather than sharing the row equally with Model/LoRAs - it's one glyph, and giving it flex:1
+   would squeeze the two name-bearing buttons for no benefit. */
+.m-reset-button {
+    flex: 0 0 44px;
+    text-align: center;
+    font-size: 18px;
+    padding: 0;
 }
 /* An active preset's param_map also sets 'model' and wins over the manual pick on every generate (presets
    apply after raw params) - this needs to read as distinctly different from a normal selection, not just a

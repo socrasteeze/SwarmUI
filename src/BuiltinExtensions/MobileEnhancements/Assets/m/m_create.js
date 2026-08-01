@@ -214,6 +214,18 @@ class MCreate {
         this.loraButton = mUI.el('button', 'm-picker-button');
         this.loraButton.addEventListener('click', () => this.openLoraSheet());
         this.pickerRow.appendChild(this.loraButton);
+        this.resetButton = mUI.el('button', 'm-picker-button m-reset-button', '↺');
+        this.resetButton.title = 'Reset params';
+        this.resetButton.addEventListener('click', () => {
+            mUI.confirm('Reset prompt, images, model, LoRAs, and all other params to blank?', () => {
+                // Clears any suggestions left over from the prompt text this is about to erase - onInput()
+                // only recomputes on the box's own 'input' event, and this reset never fires one.
+                mAutoComplete.hide();
+                mState.resetParams();
+                mUI.note('Params reset.');
+            });
+        });
+        this.pickerRow.appendChild(this.resetButton);
         panel.appendChild(this.pickerRow);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
         this.promptBox = mUI.el('textarea', 'm-prompt-box');

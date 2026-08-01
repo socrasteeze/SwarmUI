@@ -311,6 +311,20 @@ class MState {
         }
     }
 
+    /** Resets generation params back to blank: prompt, negative, model, LoRAs, images, resolution picks,
+     * active presets, and prompt images all clear. Leaves session data (paramMeta/presets/models/wildcards)
+     * and unrelated client prefs (haptics, image sort mode, preview collapse state) untouched - this is
+     * "start a fresh generation", not "wipe the client" (that's the More tab's Reset mobile client state,
+     * which also clears localStorage and reloads). */
+    resetParams() {
+        this.params = { 'prompt': '', 'images': '1', 'seed': '-1' };
+        this.activePresets = [];
+        this.promptImages = [];
+        this.seedLocked = false;
+        this.customRatio = 0;
+        this.changed();
+    }
+
     /** Active LoRAs as [{name, weight}] from the index-aligned params arrays. */
     getLoras() {
         let names = MState.toList(this.params['loras']);
