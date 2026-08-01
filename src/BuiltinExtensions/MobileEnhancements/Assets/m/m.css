@@ -17,6 +17,12 @@
     color: var(--text);
     font-size: 13px;
     overscroll-behavior: none;
+    /* Horizontal overflow anywhere would let the page render wider than the viewport, which is a second,
+       separate way iOS ends up scaling on focus. The panels and strips all scroll inside themselves, so
+       nothing here should ever overflow sideways - this makes that structural rather than a hope. */
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 .m-body input,
 .m-body textarea,
@@ -169,6 +175,10 @@
     box-sizing: border-box;
     padding: 0.5rem;
     resize: none;
+    /* Restated rather than only inherited from the .m-body field rule: this is the one field where a
+       regression would be felt immediately (iOS zooms the page on focus below 16px), so it should survive
+       anyone reworking the shared rule. See also maximum-scale=1 in index.html. */
+    font-size: 16px;
 }
 .m-image-strip {
     display: flex;

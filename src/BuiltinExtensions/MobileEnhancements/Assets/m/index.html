@@ -3,9 +3,13 @@
 <head>
     <meta charset="utf-8" />
     <!-- viewport-fit=cover is required for env(safe-area-inset-*) to report real values in the installed PWA.
-         No maximum-scale: the 16px input floor in m.css already prevents iOS focus auto-zoom, and
-         touch-action: manipulation suppresses double-tap zoom, so accessibility pinch-zoom can stay enabled. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+         maximum-scale=1 is what actually stops iOS zooming the page when a text field takes focus. The 16px
+         font floor in m.css is still there and is still correct (nothing focusable is under it - verified),
+         but on-device it proved not to be sufficient on its own. This does NOT cost accessibility zoom:
+         since iOS 10, Safari deliberately ignores scale limits for user-initiated pinch-zoom and honours
+         them only for the automatic focus zoom, which is exactly the one we want gone. user-scalable=no is
+         deliberately NOT used - it is the blunt version and would matter on browsers that do respect it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>SwarmUI Mobile</title>
     <link rel="icon" href="/favicon.ico" />
     [HEADEXTRA]
