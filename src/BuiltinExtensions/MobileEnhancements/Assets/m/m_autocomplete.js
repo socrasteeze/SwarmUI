@@ -26,8 +26,9 @@ class MAutoComplete {
         /** Incremental narrowing cache, as in the genpage. */
         this.lastWord = null;
         this.lastResults = null;
-        /** The single strip element, moved next to whichever box is active. */
-        this.strip = null;
+        /** box -> its permanent suggestion-strip element (one per enableFor call, never removed - see
+         * enableFor for why it has to be permanent rather than inserted/removed per keystroke). */
+        this.slots = new Map();
         this.registerPrefixes();
     }
 
@@ -319,53 +320,66 @@ class MAutoComplete {
         });
     }
 
-    /** Attaches the completer to a textarea. paramId names the mState param the box writes to. */
+    /** Attaches the completer to a textarea. paramId names the mState param the box writes to. Creates one
+     * permanent strip element positioned right above the box, immediately - not lazily on first match - so
+     * it always occupies its reserved height (m.css floors .m-ac-strip's min-height). Suggestions appearing
+     * and disappearing as you type used to insert/remove the whole element, which shifted every control
+     * below it (quick params, the LoRA row) on every keystroke; now only the strip's CONTENTS change. */
     enableFor(box, paramId) {
         box.dataset.mParam = paramId;
+        let strip = mUI.el('div', 'm-ac-strip');
+        box.parentElement.insertBefore(strip, box);
+        this.slots.set(box, strip);
         box.addEventListener('input', () => this.onInput(box));
         box.addEventListener('blur', () => setTimeout(() => {
             if (document.activeElement != box) {
-                this.hide();
+                this.clearSlot(box);
             }
         }, 200));
     }
 
-    /** Hides the suggestion strip. */
-    hide() {
-        if (this.strip) {
-            this.strip.remove();
+    /** Empties one box's strip (contents only - the reserved space stays). */
+    clearSlot(box) {
+        let strip = this.slots.get(box);
+        if (strip) {
+            strip.innerHTML = '';
         }
     }
 
-    /** Rebuilds and shows the suggestion strip for the given box. */
+    /** Empties every box's strip. Used when a prompt is cleared/replaced out from under the boxes (Reset
+     * Params, Reuse Params) without the box itself ever firing an 'input' event. */
+    hide() {
+        for (let strip of this.slots.values()) {
+            strip.innerHTML = '';
+        }
+    }
+
+    /** Rebuilds the given box's suggestion strip in place. */
     onInput(box) {
+        let strip = this.slots.get(box);
+        if (!strip) {
+            return;
+        }
         let possible = [];
         try {
             possible = this.getPossibleList(box);
         }
         catch (e) {
             console.error('autocomplete failed', e);
-            this.hide();
+            strip.innerHTML = '';
             return;
         }
+        strip.innerHTML = '';
         if (possible.length == 0) {
-            this.hide();
             return;
         }
-        if (!this.strip) {
-            this.strip = mUI.el('div', 'm-ac-strip');
-        }
-        this.strip.innerHTML = '';
-        // Rendered immediately above the active box: the on-screen keyboard covers everything below it,
-        // and iOS scrolls the focused box into view, which keeps whatever sits directly above it visible.
-        box.parentElement.insertBefore(this.strip, box);
         let prompt = getTextContent(box).substring(0, getTextSelRange(box)[0]);
         let lastBrace = prompt.lastIndexOf('<');
         let wordIndex = this.findLastWordIndex(prompt);
         for (let val of possible) {
-            this.strip.appendChild(this.buildChip(box, val, prompt, lastBrace, wordIndex));
+            strip.appendChild(this.buildChip(box, val, prompt, lastBrace, wordIndex));
         }
-        this.strip.scrollLeft = 0;
+        strip.scrollLeft = 0;
     }
 
     /** One suggestion chip. Mirrors the genpage's button-building branches. */
