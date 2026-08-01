@@ -8,6 +8,21 @@ Guidance for AI coding agents working in this repository (socrasteeze's fork of 
 
 SwarmUI is a modular AI media generation web UI, in three parts: a JS/HTML browser frontend, a C# ASP.NET Core server (the main workhorse), and a Python backend (mostly upstream ComfyUI, auto-downloaded into `dlbackend/`) that runs the actual AI execution.
 
+## Naming: the three mobile surfaces
+
+Chat/reference vocabulary only — no shipped UI strings match these names.
+
+| Name | What it is | Where | Switch |
+|---|---|---|---|
+| **Genpage** | The main app page. Same page, desktop and mobile. | `/Text2Image` | — |
+| **Shell** | Fork's bottom-tab-bar + drawer reskin of Genpage. Default on a small screen. | `/Text2Image`, small screen | Off via the Shell's own "Classic Layout" toggle |
+| **Stock Mobile** | Upstream's own responsive layout. No fork UI at all. | `/Text2Image`, small screen, Shell off | On via that same toggle |
+| **`/m`** | The standalone client. Separate page, separate code, doesn't touch Genpage. | `/m` | Its own header link |
+
+Genpage/Shell/Stock Mobile are one page with one toggle, not three things. `/m` is the actual separate surface.
+
+Note: the shipped "Classic Layout" (Shell toggle) and "Classic UI" (`/m`'s escape link) both use the word "Classic" for different things — tapping "Classic UI" lands on Genpage-with-Shell, not Stock Mobile. That's a real ambiguity in the product, left as-is per the owner's call; this table exists so *we* don't also confuse the two.
+
 ## Repo map
 
 - `src/Core/` — server core: `Program.cs` (entry point), `WebServer.cs` (routes, theme registry, extension page injection), `Extension.cs` + `ExtensionsManager.cs`, `Settings.cs`
