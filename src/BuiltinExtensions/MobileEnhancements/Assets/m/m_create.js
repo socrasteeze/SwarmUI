@@ -9,8 +9,12 @@ class MCreate {
         this.loraList = null;
         /** Cached checkpoint list from ListModels (fetched lazily on first model sheet open). */
         this.modelList = null;
-        /** Live preview tiles by `${request_id}_${batch_index}`. */
+        /** Live preview tiles by `${request_id}_${batch_index}`. Only ever one batch's worth. */
         this.liveTiles = {};
+        /** Request id currently on display; a different one wipes the preview. */
+        this.currentRequest = null;
+        /** [{url, metadata}] of the last batch that actually finished, for the cancelled-batch fallback. */
+        this.lastCompleted = [];
         /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip).
          * width/height are covered because the resolution controls own them - see mState.buildGenInput. */
         this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages'];
@@ -83,6 +87,7 @@ class MCreate {
             tile.dataset.url = url;
             tile.classList.add('m-tile-done');
             tile.querySelector('.m-tile-progress').style.width = '';
+            this.snapshotCompleted();
         }
         else if (kind == 'discard') {
             for (let key in this.liveTiles) {
@@ -97,36 +102,95 @@ class MCreate {
             this.interruptButton.style.display = mGen.queueTotal > 0 ? '' : 'none';
         }
         else if (kind == 'error') {
-            this.setPending(false);
+            // A failed batch is the same situation as a cancelled one: nothing more is coming for it.
+            this.clearUnfinished();
         }
         if (kind == 'progress' || kind == 'image') {
             this.pending = false;
         }
     }
 
-    /** Gets or creates a live preview tile. A new request_id clears finished tiles from older requests
-     * (mirrors the genpage Batch view the fork owner uses as the real preview). */
-    getLiveTile(key) {
-        if (this.liveTiles[key]) {
-            return this.liveTiles[key];
-        }
-        let requestId = key.substring(0, key.lastIndexOf('_'));
-        for (let existing in this.liveTiles) {
-            if (!existing.startsWith(`${requestId}_`) && this.liveTiles[existing].classList.contains('m-tile-done')) {
-                this.liveTiles[existing].remove();
-                delete this.liveTiles[existing];
+    /** Empties the preview grid. */
+    clearTiles() {
+        this.previewGrid.innerHTML = '';
+        this.liveTiles = {};
+    }
+
+    /** Records the current batch's finished images, so a batch that gets cancelled before producing
+     * anything can fall back to the last one that did rather than leaving the preview blank. */
+    snapshotCompleted() {
+        let snapshot = [];
+        for (let key in this.liveTiles) {
+            let tile = this.liveTiles[key];
+            if (tile.classList.contains('m-tile-done') && tile.dataset.url) {
+                snapshot.push({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata || '' });
             }
         }
+        if (snapshot.length > 0) {
+            this.lastCompleted = snapshot;
+        }
+    }
+
+    /** Interrupt: in-flight tiles are never going to arrive, so drop them. If that empties the preview -
+     * a batch cancelled before it produced anything - put the last completed batch back rather than
+     * leaving a blank panel where an image used to be. */
+    clearUnfinished() {
+        for (let key in this.liveTiles) {
+            if (!this.liveTiles[key].classList.contains('m-tile-done')) {
+                this.liveTiles[key].remove();
+                delete this.liveTiles[key];
+            }
+        }
+        this.pending = false;
+        if (Object.keys(this.liveTiles).length == 0) {
+            this.restoreLastCompleted();
+        }
+        this.renderPreviewState();
+    }
+
+    /** Rebuilds the preview from the last completed batch, under a request id no live batch can match, so
+     * the next real generation replaces it the same way it would replace any other batch. */
+    restoreLastCompleted() {
+        this.clearTiles();
+        this.currentRequest = 'restored';
+        for (let i = 0; i < this.lastCompleted.length; i++) {
+            let entry = this.lastCompleted[i];
+            let tile = this.buildTile();
+            tile.querySelector('img').src = entry.url;
+            tile.dataset.url = entry.url;
+            tile.dataset.metadata = entry.metadata;
+            tile.classList.add('m-tile-done');
+            this.liveTiles[`restored_${i}`] = tile;
+            this.previewGrid.appendChild(tile);
+        }
+    }
+
+    /** One preview cell: image, progress bar, tap-to-open in the shared viewer. */
+    buildTile() {
         let tile = mUI.el('div', 'm-preview-cell');
-        let img = document.createElement('img');
-        tile.appendChild(img);
-        let bar = mUI.el('div', 'm-tile-progress');
-        tile.appendChild(bar);
+        tile.appendChild(document.createElement('img'));
+        tile.appendChild(mUI.el('div', 'm-tile-progress'));
         tile.addEventListener('click', () => {
             if (tile.dataset.url) {
                 mImages.openViewer({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata, 'fullsrc': mImages.urlToPath(tile.dataset.url) });
             }
         });
+        return tile;
+    }
+
+    /** Gets or creates a live preview tile. The preview only ever shows ONE batch: the first frame of a new
+     * request id wipes whatever was there. This is not conditioned on the old tiles being finished, which is
+     * what used to leave a cancelled generation sitting on screen next to the batch that replaced it. */
+    getLiveTile(key) {
+        if (this.liveTiles[key]) {
+            return this.liveTiles[key];
+        }
+        let requestId = key.substring(0, key.lastIndexOf('_'));
+        if (requestId != this.currentRequest) {
+            this.currentRequest = requestId;
+            this.clearTiles();
+        }
+        let tile = this.buildTile();
         this.liveTiles[key] = tile;
         this.previewGrid.appendChild(tile);
         this.renderPreviewState();
@@ -198,7 +262,12 @@ class MCreate {
         let genBar = mUI.el('div', 'm-gen-bar');
         this.interruptButton = mUI.el('button', 'm-interrupt-button', 'Interrupt');
         this.interruptButton.style.display = 'none';
-        this.interruptButton.addEventListener('click', () => mGen.interrupt());
+        this.interruptButton.addEventListener('click', () => {
+            mGen.interrupt();
+            // Anything still in flight is never going to arrive, so drop it now rather than leaving it to
+            // be swept when the next batch happens to start.
+            this.clearUnfinished();
+        });
         genBar.appendChild(this.interruptButton);
         this.genButton = mUI.el('button', 'm-generate-button', 'Generate');
         this.wireGenerateButton();
@@ -349,6 +418,26 @@ class MCreate {
         this.modelButton.classList.add('m-selected');
     }
 
+    /** How deep the picker listings recurse. The pickers are flat searchable lists, not folder browsers, so
+     * this has to reach the bottom of the tree - at the previous depth of 5, anything nested deeper simply
+     * did not exist as far as the picker was concerned. */
+    static ListDepth = 32;
+
+    /** How many rows a picker renders at once. Truncation is reported rather than silent - see buildCountRow. */
+    static ListCap = 120;
+
+    /** Footer telling you how much of the list you are actually looking at. A cap that says nothing is
+     * indistinguishable from models that are missing. */
+    buildCountRow(shown, total, noun) {
+        if (total == 0) {
+            return mUI.el('div', 'm-strip-empty', `No ${noun} match that search.`);
+        }
+        if (shown >= total) {
+            return mUI.el('div', 'm-list-count', `${total} ${noun}`);
+        }
+        return mUI.el('div', 'm-list-count', `Showing ${shown} of ${total} ${noun} - search to narrow it down`);
+    }
+
     /** Search filter shared by both pickers: matches the file name, the folder path, the metadata title,
      * and the trigger phrase, so a LoRA can be found by the word you actually type into prompts. */
     static filterModels(list, term) {
@@ -384,8 +473,9 @@ class MCreate {
                 results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
+            let matches = MCreate.filterModels(this.modelList, search.value);
             let shown = 0;
-            for (let model of MCreate.filterModels(this.modelList, search.value)) {
+            for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
                 let thumb = mUI.modelThumb(model, 'm-model-thumb');
                 if (thumb) {
@@ -401,14 +491,15 @@ class MCreate {
                     close();
                 });
                 results.appendChild(item);
-                if (++shown >= 40) {
+                if (++shown >= MCreate.ListCap) {
                     break;
                 }
             }
+            results.appendChild(this.buildCountRow(shown, matches.length, 'checkpoints'));
         };
         search.addEventListener('input', renderResults);
         if (!this.modelList) {
-            genericRequest('ListModels', { 'path': '', 'depth': 5, 'subtype': 'Stable-Diffusion', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
+            genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'Stable-Diffusion', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
                 this.modelList = data.files || [];
                 renderResults();
             });
@@ -845,11 +936,9 @@ class MCreate {
                 return;
             }
             let active = mState.getLoras().map(l => l.name);
+            let matches = MCreate.filterModels(this.loraList, search.value).filter(m => !active.includes(m.name));
             let shown = 0;
-            for (let model of MCreate.filterModels(this.loraList, search.value)) {
-                if (active.includes(model.name)) {
-                    continue;
-                }
+            for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
                 let thumb = mUI.modelThumb(model, 'm-model-thumb');
                 if (thumb) {
@@ -864,15 +953,16 @@ class MCreate {
                     renderResults();
                 });
                 results.appendChild(item);
-                if (++shown >= 30) {
+                if (++shown >= MCreate.ListCap) {
                     break;
                 }
             }
+            results.appendChild(this.buildCountRow(shown, matches.length, 'LoRAs'));
         };
         search.addEventListener('input', renderResults);
         content.appendChild(addWrap);
         if (!this.loraList) {
-            genericRequest('ListModels', { 'path': '', 'depth': 5, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
+            genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
                 this.loraList = data.files || [];
                 // The active rows are re-rendered too: until this lands they show a bare name, with no
                 // thumbnail and no trigger phrase, because those live on the model object not in params.
