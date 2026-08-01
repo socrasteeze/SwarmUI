@@ -41,8 +41,8 @@ public class MobileEnhancementsExtension : Extension
         // genpage.css and modern.css at equal specificity without needing !important.
         Program.Web.RegisterTheme(new("mobile_dark", "Mobile Dark (Fork)",
             ["/css/themes/modern.css", "/css/themes/modern_dark.css", $"/ExtensionFile/{ExtensionName}/Assets/theme_mobile.css"], true));
-        // Standalone mobile client ("/m") assets. index.html is deliberately NOT registered - it is only ever
-        // served by ServeMobileClient, which performs the auth check and template substitutions.
+        // Standalone mobile client ("/simple") assets. index.html is deliberately NOT registered - it is only
+        // ever served by ServeMobileClient, which performs the auth check and template substitutions.
         OtherAssets.Add("Assets/m/m.css");
         OtherAssets.Add("Assets/m/m_state.js");
         OtherAssets.Add("Assets/m/m_gen.js");
@@ -63,16 +63,18 @@ public class MobileEnhancementsExtension : Extension
         WebServer.WebApp.MapGet("/manifest.json", ServeManifest);
         WebServer.WebApp.MapGet("/sw.js", ServeServiceWorker);
         WebServer.WebApp.MapGet("/ShareTarget", ServeShareTarget);
-        // The standalone mobile client. ASP.NET Core normalizes trailing slashes in route TEMPLATES, so
-        // "/m" and "/m/" are the same pattern - mapping both throws AmbiguousMatchException on every request.
-        // One mapping handles both URLs; ServeMobileClient redirects the trailing-slash form itself, because
-        // a page served at "/m/" breaks the relative "API/..." URL from util.js sendJsonToServer and the
-        // WebSocket address from getWSAddress (both strip after the last '/').
-        WebServer.WebApp.MapGet("/m", ServeMobileClient);
+        // The standalone mobile client. Route is "/simple", not "/m" - a bare single-letter path segment
+        // triggered command/context-menu autocomplete on the fork owner's phone keyboard when typing the URL.
+        // ASP.NET Core normalizes trailing slashes in route TEMPLATES, so "/simple" and "/simple/" are the same
+        // pattern - mapping both throws AmbiguousMatchException on every request. One mapping handles both URLs;
+        // ServeMobileClient redirects the trailing-slash form itself, because a page served at "/simple/" breaks
+        // the relative "API/..." URL from util.js sendJsonToServer and the WebSocket address from getWSAddress
+        // (both strip after the last '/').
+        WebServer.WebApp.MapGet("/simple", ServeMobileClient);
         WebServer.PageHeaderExtra = new(WebServer.PageHeaderExtra.Value + BuildHeadTags());
     }
 
-    /// <summary>Serves the standalone mobile client page at <c>/m</c>. Mirrors the Razor pages' auth behavior
+    /// <summary>Serves the standalone mobile client page at <c>/simple</c>. Mirrors the Razor pages' auth behavior
     /// (install check, then <see cref="WebUtil.HasValidLogin"/> - which short-circuits true when authorization is
     /// disabled) but with real HTTP redirects since this is not a rendered view. The HTML template uses simple
     /// token substitution: [VARY] for cache-busting, [REMAPS] for the same parameter-remap map Razor injects on
@@ -83,7 +85,7 @@ public class MobileEnhancementsExtension : Extension
     {
         if (context.Request.Path.HasValue && context.Request.Path.Value.EndsWith('/'))
         {
-            context.Response.Redirect("/m");
+            context.Response.Redirect("/simple");
             await context.Response.CompleteAsync();
             return;
         }

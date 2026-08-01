@@ -17,11 +17,11 @@ Chat/reference vocabulary only — no shipped UI strings match these names.
 | **Genpage** | The main app page. Same page, desktop and mobile. | `/Text2Image` | — |
 | **Shell** | Fork's bottom-tab-bar + drawer reskin of Genpage. Default on a small screen. | `/Text2Image`, small screen | Off via the Shell's own "Classic Layout" toggle |
 | **Stock Mobile** | Upstream's own responsive layout. No fork UI at all. | `/Text2Image`, small screen, Shell off | On via that same toggle |
-| **`/m`** | The standalone client. Separate page, separate code, doesn't touch Genpage. | `/m` | Its own header link |
+| **`/simple`** | The standalone client. Separate page, separate code, doesn't touch Genpage. | `/simple` | Its own header link |
 
-Genpage/Shell/Stock Mobile are one page with one toggle, not three things. `/m` is the actual separate surface.
+Genpage/Shell/Stock Mobile are one page with one toggle, not three things. `/simple` is the actual separate surface.
 
-Note: the shipped "Classic Layout" (Shell toggle) and "Classic UI" (`/m`'s escape link) both use the word "Classic" for different things — tapping "Classic UI" lands on Genpage-with-Shell, not Stock Mobile. That's a real ambiguity in the product, left as-is per the owner's call; this table exists so *we* don't also confuse the two.
+Note: the shipped "Classic Layout" (Shell toggle) and "Classic UI" (`/simple`'s escape link) both use the word "Classic" for different things — tapping "Classic UI" lands on Genpage-with-Shell, not Stock Mobile. That's a real ambiguity in the product, left as-is per the owner's call; this table exists so *we* don't also confuse the two.
 
 ## Repo map
 
@@ -129,8 +129,8 @@ Files this fork adds or changes relative to upstream:
     It does not also require `.kb-open`: on close, that class is removed in the same style recalc, and CSS transitions start from the after-change style — so the close direction still animates correctly.
   - `mobile.css` caps the pasted-image-prompt strip (`.alt-prompt-added-image-area`) to `max-height: 5.5rem` with `overflow-y: auto`, and shrinks `.alt-prompt-image` to `max-height: 4.5rem`. Both scoped to `body.small-window`.
     Before: each pasted image could add up to 128px with no ceiling. The strip lives inside `.main-image-area`, which clips overflow instead of growing — so enough pasted images pushed the prompt textboxes and Generate button out of the visible, clipped-off area. See the matching `layout.js` fix below.
-  - **Standalone mobile client** (2026-07, `Assets/m/**`). A mobile-first client at **`/m`**. It talks to the HTTP/WS API like a third-party client, instead of reskinning the genpage. This inverts the maintenance risk: from silent DOM/CSS couplings to loud API couplings.
-    Serving: `ServeMobileClient`, mapped in `OnPreLaunch`. `/m/` (trailing slash) hard-redirects to `/m` — a trailing slash breaks the relative `API/` URL and `getWSAddress`. It does the same auth check as Razor pages: `IsInstalled` then `WebUtil.HasValidLogin`. It serves `Assets/m/index.html` with tokens substituted: `[VARY]`, `[REMAPS]`, `[HEADEXTRA]`, `[TOAST]`.
+  - **Standalone mobile client** (2026-07, `Assets/m/**`). A mobile-first client at **`/simple`** (route named to avoid a bare `/m` - a single-letter path segment triggered command/context-menu autocomplete on the owner's phone keyboard when typing the URL; the `Assets/m/**` folder and `m`-prefixed JS/CSS internals are unchanged, since those are invisible to the user). It talks to the HTTP/WS API like a third-party client, instead of reskinning the genpage. This inverts the maintenance risk: from silent DOM/CSS couplings to loud API couplings.
+    Serving: `ServeMobileClient`, mapped in `OnPreLaunch`. `/simple/` (trailing slash) hard-redirects to `/simple` — a trailing slash breaks the relative `API/` URL and `getWSAddress`. It does the same auth check as Razor pages: `IsInstalled` then `WebUtil.HasValidLogin`. It serves `Assets/m/index.html` with tokens substituted: `[VARY]`, `[REMAPS]`, `[HEADEXTRA]`, `[TOAST]`.
     The page loads `util.js`, `translator.js`, `permissions.js`, `site.js`, in that order. It must also carry two upstream-coupled divs: `#input_image_browser_upload_container` (`site.js:1142`'s top-level `new InputBrowserHelper()` throws without it) and the `center_toast` markup (`showError`, the default error path of `genericRequest`/`makeWSRequest`, requires it — built server-side by the same `WebUtil.Toast` as `_Layout.cshtml`, so it can't drift).
 
     Client JS: 7 `.m`-prefixed class singletons, registered in `OtherAssets` (not `ScriptFiles` — that would inject them into every Razor page).
@@ -148,15 +148,15 @@ Files this fork adds or changes relative to upstream:
     Layout: normal document flow, `100dvh` flex column, per-panel scrollers, sticky bars. No fixed body, no `--kb-inset` machinery — only a visualViewport check hides the nav while typing.
     Kept invariants: 16px fields / 13px text, `--m-safe-bottom` capped at 34px, `@media (hover: none)`.
     Viewport meta carries `maximum-scale=1`. The 16px field floor alone did not stop iOS zooming on prompt focus, on-device (audited — nothing focusable is under 16px, so it wasn't a font-size regression). This costs no accessibility zoom: since iOS 10, Safari ignores scale limits for user-initiated pinch and only honors them for the automatic focus zoom. `user-scalable=no` is deliberately not used. `body` also gets `overflow-x: hidden`, closing the other route to the same symptom.
-    `manifest.json`'s `start_url` now points at `/m` — the owner's call: the installed PWA is the new client. Reverting is one line.
+    `manifest.json`'s `start_url` now points at `/simple` — the owner's call: the installed PWA is the new client. Reverting is one line.
     **Not yet device-verified** — same no-SDK authoring environment. Run the gate plus an on-device pass before relying on it.
-  - **`/m` Create-surface pass** (2026-07). All changes below are inside the extension.
+  - **`/simple` Create-surface pass** (2026-07). All changes below are inside the extension.
     - **Live preview moved onto Create.** Generating no longer navigates to Images. Batch tiles are now owned by `m_create`, sticky at the top of the Create panel; the generate bar is already sticky at the bottom, so params scroll between two fixed anchors. `m_images` now owns history plus the shared `openViewer`. Tapping a preview tile opens that same viewer — so batch-speed previews and per-image actions finally share one screen.
       The preview grid is built detached, in the `MCreate` constructor, and appended only in `build()`. This is required, not stylistic: `MImages` used to subscribe to `mGen.onFrame` from its own constructor, before its container existed — survivable only because `doGenerate()` navigated to Images first. Removing that navigation would throw on the first `gen_progress` frame for anyone deep-linked to another tab.
       The preview holds exactly one batch. A new `request_id` wipes the grid unconditionally. The old rule only evicted finished tiles — and a cancelled generation never receives its `image` frame, so it never counted as finished, and stayed on screen next to the batch that replaced it.
       Interrupt and error both drop in-flight tiles. If that empties the panel, `lastCompleted` (a snapshot of the last batch that did finish) is restored, so cancelling falls back to the most recent result instead of a blank.
       Cell height follows tile count: 38dvh for 1-up, 19dvh for a 2×2. The grid caps at 40dvh with internal scroll, so a large batch can't push the prompt off screen. It collapses under `body.m-kb-open` (already set by `m_ui.initKeyboardWatch`), plus a manual chevron saved to localStorage.
-    - **Aspect ratio actually works now.** `T2IParamInput.GetImageWidth`/`GetImageHeight` only consult the aspect table when a side length is ALSO present — otherwise they fall through to raw width/height (default 512). So `/m` sending `aspectratio` alone silently generated 512×512, whatever the picker showed.
+    - **Aspect ratio actually works now.** `T2IParamInput.GetImageWidth`/`GetImageHeight` only consult the aspect table when a side length is ALSO present — otherwise they fall through to raw width/height (default 512). So `/simple` sending `aspectratio` alone silently generated 512×512, whatever the picker showed.
       Fix: `buildGenInput` now resolves a concrete `sidelength` whenever a known aspect ratio is active, in this order:
 
       | Priority | Source |
@@ -202,7 +202,7 @@ Files this fork adds or changes relative to upstream:
 
   Three deliberate divergences from the genpage:
 
-  | Genpage behavior | `/m` behavior | Why |
+  | Genpage behavior | `/simple` behavior | Why |
   |---|---|---|
   | `getUserSetting()` reads settings-editor DOM | Best-effort `GetUserSettings` call, server defaults as fallback | `getUserSetting()` throws when the DOM is absent |
   | `AdvancedPopover` (floating, viewport-anchored) | Inline QuickType-style strip above the focused box | A floating popover needed two separate mobile-keyboard patches on the genpage already |
@@ -229,7 +229,7 @@ Files this fork adds or changes relative to upstream:
 - `src/Text2Image/T2IParamInput.cs` — **core-file edit, last resort, one dictionary entry**.
   `ResolutionAspectReferences` was missing a `"3:4"` key. Every other ratio the `AspectRatio` param offers (`T2IParamTypes.cs`'s `GetValues`) had an entry; `3:4` did not. Picking `3:4` with Side Length toggled on fell through to the raw Width/Height default — the aspect ratio was silently ignored.
   Confirmed via a second source, not guessed: `T2IParamTypes.AspectRatioToSizeReference` — a parallel table used by grid-gen and upscale — already had `3:4 = (448, 576)`. Two hand-maintained tables meant to match (both files carry "must match" comments pointing at each other and at genpage's own `params.js` `aspectRatios` array, which also already has `3:4 = (448, 576)`); one was updated when `3:4` was added to the dropdown, the other was not.
-  Added `["3:4"] = (448, 576)`, matching both existing sources exactly. `/m`'s own `MState.AspectReferences` gets the same entry, for the same reason — its own picker offered `3:4` (the option list comes straight from the server's `GetValues`) but had no matching entry in either of its own tables, so picking it did nothing.
+  Added `["3:4"] = (448, 576)`, matching both existing sources exactly. `/simple`'s own `MState.AspectReferences` gets the same entry, for the same reason — its own picker offered `3:4` (the option list comes straight from the server's `GetValues`) but had no matching entry in either of its own tables, so picking it did nothing.
 - `src/wwwroot/js/genpage/gentab/params.js`, `presets.js`, `main.js` — **core-file edits, low risk, additive**.
   Initial page load no longer builds the "New Preset" modal's duplicate parameter-panel DOM (`genInputs(false, false)` in `main.js`). It now builds lazily, on first use of that modal (`ensurePresetInputsBuilt()` in `presets.js`). This halves the parameter-DOM-build and select2-init work on every load, for sessions that never open that modal. Every other `genInputs()` caller is unaffected.
 - `src/wwwroot/js/genpage/helpers/browsers.js`, `ui_improvements.js` — **core-file edits, low risk, matches an existing pattern in the same files**.
