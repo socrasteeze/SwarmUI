@@ -54,7 +54,7 @@ class MModels {
                 this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
             }
         }, 0, err => {
-            mUI.note(`Could not list models: ${err}`);
+            mUI.warn(`Could not list models: ${err}`);
         });
     }
 

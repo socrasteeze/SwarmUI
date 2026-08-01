@@ -261,7 +261,7 @@ class MCreate {
     doGenerate() {
         let input = mState.buildGenInput();
         if (!`${input['prompt'] || ''}`.trim() && !input['promptimages'] && mState.activePresets.length == 0) {
-            mUI.note('Type a prompt or pick a preset first.');
+            mUI.warn('Type a prompt or pick a preset first.');
             return;
         }
         mAutoComplete.hide();
@@ -465,7 +465,7 @@ class MCreate {
     applyImageRatio(exact) {
         this.primaryImageRatio(ratio => {
             if (!ratio) {
-                mUI.note('Could not read that image\'s size.');
+                mUI.warn('Could not read that image\'s size.');
                 return;
             }
             if (exact) {
@@ -888,7 +888,7 @@ class MCreate {
      * mGen.runGrid. Base params are the current Create state - "predetermined parameters". */
     openGridSheet() {
         if (typeof permissions != 'undefined' && permissions.hasPermission && !permissions.hasPermission('gridgen_generate_grids')) {
-            mUI.note('You do not have grid generation permission.');
+            mUI.warn('You do not have grid generation permission.');
             return;
         }
         let content = mUI.el('div', 'm-grid-sheet');
@@ -933,7 +933,7 @@ class MCreate {
                 }
             }
             if (axes.length < 2 || axes.some(a => MState.toList(a.vals).length < 2)) {
-                mUI.note('Grids need at least 2 axes with 2+ values each.');
+                mUI.warn('Grids need at least 2 axes with 2+ values each.');
                 return;
             }
             let base = mState.buildGenInput();

@@ -102,7 +102,7 @@ class MImages {
             this.rendered = 0;
             this.renderMore();
         }, 0, err => {
-            mUI.note(`Could not load history: ${err}`);
+            mUI.warn(`Could not load history: ${err}`);
         });
     }
 
@@ -169,7 +169,7 @@ class MImages {
                 location.hash = 'create';
             }
             else {
-                mUI.note('No readable parameters on this image.');
+                mUI.warn('No readable parameters on this image.');
             }
         });
         addAction('Prompt Img', () => {

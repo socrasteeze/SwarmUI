@@ -917,10 +917,37 @@
     box-sizing: border-box;
 }
 
-/* --- Misc --- */
-.m-note-toast .toast-header strong {
-    color: var(--emphasis);
+/* --- Client toast (NOT the shared error toast: that one's header is the literal word "Error", so
+       routing confirmations through it made "Model set: ..." read as a failure). Anchored under the
+       header rather than above the nav so it never covers the Generate button. --- */
+.m-toast {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 3rem);
+    left: 50%;
+    transform: translate(-50%, -0.5rem);
+    max-width: 88vw;
+    z-index: 60;
+    padding: 0.55rem 0.9rem;
+    border-radius: 0.6rem;
+    background: var(--background-panel);
+    border: 1px solid var(--border-color);
+    color: var(--text);
+    box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+    overflow-wrap: anywhere;
 }
+.m-toast.m-toast-open {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    pointer-events: auto;
+}
+.m-toast.m-toast-warn {
+    border-color: var(--emphasis);
+}
+
+/* --- Misc --- */
 .m-boot-fail {
     padding: 2rem 1rem;
     text-align: center;
