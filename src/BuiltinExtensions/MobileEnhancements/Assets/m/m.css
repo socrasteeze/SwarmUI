@@ -741,6 +741,11 @@
 .m-lora-results .m-model-result:last-child {
     border-bottom: none;
 }
+.m-list-count {
+    color: var(--text-soft);
+    padding: 0.5rem 0.2rem;
+    text-align: center;
+}
 .m-model-plain-row {
     text-align: left;
     background: none;
