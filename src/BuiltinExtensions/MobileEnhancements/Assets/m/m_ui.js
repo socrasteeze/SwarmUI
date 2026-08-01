@@ -177,19 +177,36 @@ class MUI {
         }
     }
 
-    /** Toast an informational message by reusing the error toast box with a neutral look. */
+    /** Shows a transient message in the client's own toast.
+     * Deliberately NOT site.js's showError: that renders into the shared toast box whose header is the
+     * literal word "Error" (built server-side by WebUtil.Toast), so routing confirmations through it made
+     * "Model set: Anima" read as a failure. showError is now reserved for things that actually failed. */
+    toast(message, kind) {
+        if (!this.toastBox) {
+            this.toastBox = this.el('div', 'm-toast');
+            this.toastBox.addEventListener('click', () => this.toastBox.classList.remove('m-toast-open'));
+            document.body.appendChild(this.toastBox);
+        }
+        this.toastBox.textContent = message;
+        this.toastBox.classList.toggle('m-toast-warn', kind == 'warn');
+        this.toastBox.classList.add('m-toast-open');
+        if (this.toastTimer) {
+            clearTimeout(this.toastTimer);
+        }
+        this.toastTimer = setTimeout(() => {
+            this.toastBox.classList.remove('m-toast-open');
+            this.toastTimer = null;
+        }, kind == 'warn' ? 4000 : 2200);
+    }
+
+    /** Neutral confirmation ("Model set: ...", "Added <trigger>"). */
     note(message) {
-        try {
-            showError(message);
-            let box = document.getElementById('error_toast_box');
-            if (box) {
-                box.classList.add('m-note-toast');
-                setTimeout(() => box.classList.remove('m-note-toast'), 4000);
-            }
-        }
-        catch (e) {
-            console.log(message);
-        }
+        this.toast(message, 'info');
+    }
+
+    /** Something the user needs to fix or know went wrong, short of a transport failure. */
+    warn(message) {
+        this.toast(message, 'warn');
     }
 
     /** Hides the bottom nav while the on-screen keyboard is open (visualViewport heuristic). The layout is
