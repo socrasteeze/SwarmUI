@@ -90,13 +90,21 @@ class MState {
      * genpage's "match this image's aspect ratio" branch (params.js, sqrt(512*512*ratio)), but solved
      * directly at the target side length instead of computing a 512-reference and scaling it. That skips one
      * rounding step, so the area lands exactly on sideLength^2 and the extreme ratios stay honest - via the
-     * scaled form, 3:1 at 1024 came out 3.5% off. Rounds to 16 like the server's own aspect table path.
-     * Only used for ratios the server has no table entry for; table ratios stay server-computed. */
+     * scaled form, 3:1 at 1024 came out 3.5% off.
+     * Rounds to 64, NOT 16 (unlike the server's own native-table path, T2IParamInput.GetImageWidth/Height,
+     * which this deliberately does not mirror here): the SideLength param's own doc comment
+     * (T2IParamTypes.cs) says models "almost always want a multiple of 64", and 5:7 at a 1024 side length
+     * rounded to 16 landed on 864x1216 - 864 is a multiple of 16 but NOT of 64, and generating at that size
+     * against a Flux 2 Klein checkpoint crashed the backend with a numpy "inhomogeneous shape" error out of
+     * its position-embedding grid construction. The server's native ratio table is hand-curated to already
+     * land on 64-multiples at the standard side lengths, so it doesn't need this; these are the two paths
+     * that invent their own width/height (fork-added ratios, and an image-matched exact ratio) rather than
+     * reusing a curated pair, so they're the two places that can drift onto an unsafe size. */
     static dimsForRatio(ratio, sideLength) {
         if (!ratio || !sideLength) {
             return null;
         }
-        return [roundTo(Math.sqrt(sideLength * sideLength * ratio), 16), roundTo(Math.sqrt(sideLength * sideLength / ratio), 16)];
+        return [roundTo(Math.sqrt(sideLength * sideLength * ratio), 64), roundTo(Math.sqrt(sideLength * sideLength / ratio), 64)];
     }
 
     /** Every aspect ratio the picker offers, label -> numeric width/height ratio. */
