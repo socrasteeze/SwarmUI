@@ -180,8 +180,13 @@ function getHtmlForParam(param, prefix, isPreset = false) {
                 return {html: makeAudioInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.toggleable, !param.no_popover, !isPreset) + pop};
             case 'video':
                 return {html: makeVideoInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.toggleable, !param.no_popover, !isPreset) + pop};
+            // TODO: Proper impl for list types
             case 'image_list':
                 return {html: makeImageInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.toggleable, !param.no_popover, !isPreset) + pop};
+            case 'audio_list':
+                return {html: makeAudioInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.toggleable, !param.no_popover, !isPreset) + pop};
+            case 'video_list':
+                return {html: makeVideoInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.toggleable, !param.no_popover, !isPreset) + pop};
         }
         console.log(`Cannot generate input for param ${param.id} of type ${param.type} - unknown type`);
         return null;
@@ -888,6 +893,30 @@ function toggle_advanced_checkbox_manual() {
     toggle_advanced();
 }
 
+/** Adds prompt image, audio, and video data and metadata from an added-image-area to a generation input. */
+function addPromptMediaToInput(input, addedImageArea, extraMetadata) {
+    let mediaTypes = { IMG: 'promptimages', AUDIO: 'promptaudios', VIDEO: 'promptvideos' };
+    for (let tagName in mediaTypes) {
+        let media = [...addedImageArea.querySelectorAll('.alt-prompt-image')].filter(c => c.tagName == tagName);
+        if (media.length > 0) {
+            let paramId = mediaTypes[tagName];
+            input[paramId] = media.map(item => item.dataset.filedata);
+            let filenames = media.map(item => item.dataset.filename || null);
+            let resolutions = media.map(item => item.dataset.resolution || null);
+            let durations = media.map(item => item.dataset.duration || null);
+            if (filenames.some(value => value)) {
+                extraMetadata[`${paramId}_filename`] = filenames;
+            }
+            if (resolutions.some(value => value)) {
+                extraMetadata[`${paramId}_resolution`] = resolutions;
+            }
+            if (durations.some(value => value)) {
+                extraMetadata[`${paramId}_duration`] = durations;
+            }
+        }
+    }
+}
+
 function getGenInput(input_overrides = {}, input_preoverrides = {}) {
     let input = JSON.parse(JSON.stringify(input_preoverrides));
     let extraMetadata = {};
@@ -935,10 +964,7 @@ function getGenInput(input_overrides = {}, input_preoverrides = {}) {
             let addedImageArea = container.querySelector('.added-image-area');
             if (addedImageArea) {
                 addedImageArea.style.display = '';
-                let imgs = [...addedImageArea.querySelectorAll('.alt-prompt-image')].filter(c => c.tagName == "IMG");
-                if (imgs.length > 0) {
-                    input["promptimages"] = imgs.map(img => img.dataset.filedata);
-                }
+                addPromptMediaToInput(input, addedImageArea, extraMetadata);
             }
         }
     }
@@ -959,10 +985,7 @@ function getGenInput(input_overrides = {}, input_preoverrides = {}) {
         delete input['vae'];
     }
     let revisionImageArea = getRequiredElementById('alt_prompt_image_area');
-    let revisionImages = [...revisionImageArea.querySelectorAll('.alt-prompt-image')].filter(c => c.tagName == "IMG");
-    if (revisionImages.length > 0) {
-        input["promptimages"] = revisionImages.map(img => img.dataset.filedata);
-    }
+    addPromptMediaToInput(input, revisionImageArea, extraMetadata);
     if (imageEditor.active) {
         extraMetadata["used_image_editor"] = "true";
         input["initimage"] = imageEditor.getFinalImageData();
@@ -1091,8 +1114,16 @@ function setDirectParamValue(param, value, paramElem = null, forceDropdowns = fa
         $(paramElem).val(vals);
         $(paramElem).trigger('change');
     }
-    else if (param.type == "image_list") {
-        // List too messy for impl for now
+    else if (param.type == "image_list" || param.type == "audio_list" || param.type == "video_list") {
+        // List too messy for impl for now - prompt inputs we can do though
+        if (param.id == 'promptimages' || param.id == 'promptaudios' || param.id == 'promptvideos') {
+            let paths = typeof value == 'string' ? [value] : value;
+            for (let path of paths || []) {
+                if (isValidMediaPath(path)) {
+                    imagePromptAddImageData(`${getImageOutPrefix()}/${path}`, param.type.substring(0, param.type.indexOf('_')), path);
+                }
+            }
+        }
         return;
     }
     else if (param.type == "image" || param.type == "image_list" || param.type == "audio" || param.type == "video") {
@@ -1101,7 +1132,7 @@ function setDirectParamValue(param, value, paramElem = null, forceDropdowns = fa
             clearMediaFileInput(paramElem);
             return;
         }
-        if (pathVal.startsWith('inputs/') || pathVal.startsWith('raw/') || pathVal.startsWith('Starred/')) {
+        if (isValidMediaPath(pathVal)) {
             let mediaType = getMediaType(pathVal);
             let previewSrc = `${getImageOutPrefix()}/${pathVal}`;
             let baseName = pathVal.substring(pathVal.lastIndexOf('/') + 1);
