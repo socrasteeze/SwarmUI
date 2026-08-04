@@ -71,6 +71,7 @@ This fork periodically merges upstream master (`git remote add upstream https://
 3. Core-file edits only as a last resort, kept minimal/append-only, and always recorded in the Fork Delta below.
 4. After every upstream merge: re-run the verify gate (build + format + ci-test boot) and re-check the coupling watchlist in the mobile/PWA plan doc.
 5. **Never rewrite upstream commits.** Amend, rebase, reset-author, or re-sign only commits this fork authored; leave every commit reachable from `upstream/master` byte-identical. Rewriting one changes its SHA, which detaches fork history from `upstream/master` and makes each later `git merge upstream/master` re-apply that change as a conflicting duplicate. Upstream commits showing "Unverified" on GitHub (foreign committer email, no signature we can produce) is the correct, expected state for a fork — tooling that flags it, including the stop-hook git check, is reporting on commits that are not ours to fix. Note the hook's `%G?`-based check also false-negatives on our *own* signed commits whenever `gpg.ssh.allowedSignersFile` is unset in the container; confirm with `git cat-file -p <sha>` (look for a `gpgsig` header) before amending anything.
+6. **Run the `/clean` skill before any push to `master`.** It scrubs AI attribution (Co-Authored-By trailers, tool signatures, etc.) from commits and reconciles local vs. remote history before the push. This repo's default branch is `master`, not `main` — treat every `origin/main` reference in that skill as `origin/master`.
 
 ## Fork Delta (living list — keep updated)
 
