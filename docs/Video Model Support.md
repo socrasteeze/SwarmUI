@@ -7,7 +7,6 @@
 [Lightricks LTX Video](#lightricks-ltx-video) | 2024 | Lightricks | 3B DiT | Text/Image 2Video | ? | Legacy, Fast but ugly |
 [Lightricks LTX Video 2](#lightricks-ltx-video-2) | 2026 | Lightricks | 19B DiT | Text/Image 2Video+Audio | Minimal | Modern, good/mixed quality but fun |
 [Wan 2.1](#wan-21) and [2.2](#wan-22) | 2025 | Alibaba - Wan-AI | 1.3B, 5B, 14B | Text/Image 2Video | No | Modern, Great Quality |
-[Kandinsky 5](#kandinsky-5) | 2025 | Kandinsky Lab | 2B, 19B | Text/Image 2Video | No | Modern, Decent Quality |
 [MiniMax H3](#minimax-h3) | 2026 | MiniMax AI | 33B or 20B | Any2Video+Audio | Very Minimal | Modern, Incredible Quality |
 
 Support for image models and technical formats is documented in [the Model Support doc](/docs/Model%20Support.md), as well as explanation of the table columns above
@@ -19,13 +18,13 @@ Old or bad options also tracked listed:
 [Stable Video Diffusion](/docs/Obscure%20Model%20Support.md#stable-video-diffusion) | 2023 | Stability AI | 1B Unet | Image2Video | Yes | Outdated |
 [Genmo Mochi 1](/docs/Obscure%20Model%20Support.md#genmo-mochi-1-text2video) | 2024 | Genmo | 10B DiT | Text2Video | ? | Outdated |
 [Nvidia Cosmos](/docs/Obscure%20Model%20Support.md#nvidia-cosmos) | 2025 | NVIDIA | Various | Text/Image/Video 2Video | ? | Modern, very slow, poor quality |
+[Kandinsky 5](/docs/Obscure%20Model%20Support.md#kandinsky-5) | 2025 | Kandinsky Lab | 2B, 19B | Text/Image 2Video | No | Modern, Decent Quality |
 
 ## Current Recommendations
 
-Video model(s) most worth using, as of December 2025:
+Video model(s) most worth using, as of August 2026:
 
-- Wan 2.2 or 2.1, in 14B either way. It's the best you can get locally currently.
-- Kandinsky 19B looks interesting, but is new and struggling to reach its potential. Could be worth playing with.
+- MiniMax H3 is the crown champion, everything before it is outdated and irrelevant in comparison!
 
 ## Demo Gifs
 
@@ -477,26 +476,11 @@ https://github.com/user-attachments/assets/b3605901-78ed-4f13-a065-adfbc0d63232
             - For T2V, this has some visual oddities but does still mostly work
         - Wan 2.2 has an official prompting guide book: <https://alidocs.dingtalk.com/i/nodes/EpGBa2Lm8aZxe5myC99MelA2WgN7R35y>
 
-# Kandinsky 5
-
-- Kandinsky 5 Video Lite and Video Pro are supported in SwarmUI!
-    - Also the image models, docs [in the image model support doc](/docs/Model%20Support.md#kandinsky-5)
-- They come in a variety of variants, you will have to pick what you want, or experimental with several.
-    - Do you want "Lite" or "Pro"?
-        - Lite is a 2B (very small) video model with a variety of distilled and other variants. Its quality is not quite on par with competitors like Wan 14B, but its small size makes it easier to run.
-            - Files are here <https://huggingface.co/collections/kandinskylab/kandinsky-50-video-lite>
-                - NoCFG or Distilled16Steps are the fastest variants, SFT is supposedly the best quality.
-        - Pro is a 19B (very large) video model with only different quality tune variants.
-            - Files are here <https://huggingface.co/collections/kandinskylab/kandinsky-50-video-pro>
-                - You probably want the SFT 10s version.
-- At time of writing, the current implementation has bugs, and some hacks are used to workaround them. Not all features work. What does work is kinda bad.
-- **Parameters:**
-    - These vary heavily based on model you choose.
-    - **CFG Scale:** for regular models, regular CFG such as `5` works. For CFG-distill and step distill, use CFG of `1`.
-    - **Steps:** For regular, 20 or higher is used. For Step Distill, 16 is the target. Going lower will work but with a severe quality hit.
-    - **Resolution:** All video models primarily target a side length of 640. Higher resolutions can work, Pro handles 960x960 fine.
-
 # MiniMax H3
+
+https://github.com/user-attachments/assets/f20a2d4c-a667-47e1-9da8-82b3e1d55792
+
+*(The test prompt is frankly too easy for H3! Note the prompt doesn't specify audio so the video produced nonsense. This is a prompt issue not a model bug.)*
 
 - The [MiniMax H3](<https://modelscope.cn/models/MiniMax/MiniMax-H3>) (Hailuo 3) family of video models is supported in SwarmUI!
 - It comes in two primary flavors: "FL2AV", "Ref2AV"
@@ -511,7 +495,19 @@ https://github.com/user-attachments/assets/b3605901-78ed-4f13-a065-adfbc0d63232
     - **Prompt:** Works best with long proper LLM prompts, but short ones still go fine
         - The model generates audio, so remember to prompt for what the audio should be
         - You can prompt for multiple shots at different times in the video and it will work
-        - They use very long complex example prompts with a structured format. See below for an example for the ref model.
+        - They use very long complex example prompts with a structured format. See below for a simple text2video example
+            <details>
+                <summary>Click to view example prompt</summary>
+            
+            ```text
+            integrated_multimodal_description:
+            [Shot 1] Cinematic, medium wide shot, pushing in slowly. In the cavernous, dimly lit bridge of a starship, sleek metallic consoles with glowing amber displays flank a massive, curved observation window. A female captain, in her late 40s with an athletic build and short silver-streaked black hair, stands in the center midground. She wears a structured, high-collared dark navy military tunic with silver chest insignias. Her back is to the camera, silhouetted against the cool, ambient starlight pouring through the thick glass. She stands perfectly still with her hands clasped tightly behind her back. Outside the window, a massive armada of jagged, dark grey dreadnoughts hovers in tight formation against a deep purple space nebula. The fleet's massive rear thrusters begin to glow with an intense, escalating bright blue light.
+            [Shot 2] At 00:04.500, the camera cuts to a close-up of the captain's face and shakes strongly. The brilliant blue-white light from the fleet's gathering energy reflects vividly in her dark eyes. Suddenly, a blinding white flash floods through the window, completely washing out the background as the fleet jumps to hyperspace. The sheer spatial force violently jolts the bridge, causing the captain from Shot 1 to stagger slightly forward, her shoulders tensing as she visibly braces herself against the physical tremors. As the intense white light fades abruptly, leaving only the dim, empty expanse of the purple nebula reflected on her starkly lit skin, her jaw clenches, and she slowly closes her eyes in the newly emptied space.
+            overall_soundscape: A low, resonant hum of the ship's ambient life support systems serves as the baseline, soon drowned out by an audible, escalating, high-pitched electronic whine as the fleet outside charges its hyperdrives. A massive, deafening, bass-heavy boom and sharp crackle erupts during the blinding flash, accompanied by the loud metallic creaking, rattling, and deep thuds of the bridge's bulkheads vibrating under immense physical stress. The intense roaring impact then cuts abruptly back to a hollow, echoing room tone, leaving only the faint, steady hum of the isolated bridge.
+            non_diegetic_music: Cinematic space-opera orchestral score, slow tempo, featuring a solitary, mournful French horn melody over deep, sustained string dissonances that build rapidly in volume and intensity, swelling to a massive orchestral peak before snapping immediately into silence right after the jump.
+            ```
+            </details>
+        - See below for an example for the ref model.
             <details>
                 <summary>Click to view example prompt</summary>
 
@@ -565,7 +561,9 @@ You can also attach audio files freely (up to a max of 3). In the prompt you can
 
 You can also attach video files freely (up to a max of 3). In the prompt you can type something like `Match the motion displayed in <Video 1>` to reference the video.
 
-(TODO: What about videos with audio?)
+If you want to use the audio from a video file, click the `☰` hamburger menu on the attached video and click `Split Audio`.
+
+Prompt inputs all are labeled eg `Img 1: ...`, these numbers correctly correspond to the number in eg `<Picture 1>`.
 
 ### MiniMax H3 Image Generation
 
@@ -580,6 +578,7 @@ This is not optimal. Quality is messy, and it of course adds motion artifacts. T
 ### Stable Video Diffusion
 ### Genmo Mochi 1 (Text2Video)
 ### NVIDIA Cosmos
+### Kandinsky 5
 
 These obscure/old/bad/unpopular/etc. models have been moved to [Obscure Model Support](/docs/Obscure%20Model%20Support.md#video-models)
 
