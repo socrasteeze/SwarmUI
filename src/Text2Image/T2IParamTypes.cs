@@ -38,8 +38,12 @@ public enum T2IParamDataType
     IMAGE_LIST,
     /// <summary>Raw audio data file.</summary>
     AUDIO,
+    /// <summary>List of audio files.</summary>
+    AUDIO_LIST,
     /// <summary>Raw video data file.</summary>
     VIDEO,
+    /// <summary>List of video files.</summary>
+    VIDEO_LIST,
 }
 
 /// <summary>Which format to display a number in.</summary>
@@ -239,7 +243,9 @@ public class T2IParamTypes
         if (t.IsAssignableTo(typeof(List<string>))) { return T2IParamDataType.LIST; }
         if (t.IsAssignableTo(typeof(List<Image>))) { return T2IParamDataType.IMAGE_LIST; }
         if (t.IsAssignableTo(typeof(AudioFile))) { return T2IParamDataType.AUDIO; }
+        if (t.IsAssignableTo(typeof(List<AudioFile>))) { return T2IParamDataType.AUDIO_LIST; }
         if (t.IsAssignableTo(typeof(VideoFile))) { return T2IParamDataType.VIDEO; }
+        if (t.IsAssignableTo(typeof(List<VideoFile>))) { return T2IParamDataType.VIDEO_LIST; }
         return T2IParamDataType.UNSET;
     }
 
@@ -257,7 +263,9 @@ public class T2IParamTypes
             T2IParamDataType.LIST => typeof(List<string>),
             T2IParamDataType.IMAGE_LIST => typeof(List<Image>),
             T2IParamDataType.AUDIO => typeof(AudioFile),
+            T2IParamDataType.AUDIO_LIST => typeof(List<AudioFile>),
             T2IParamDataType.VIDEO => typeof(VideoFile),
+            T2IParamDataType.VIDEO_LIST => typeof(List<VideoFile>),
             _ => null
         };
     }
@@ -329,10 +337,12 @@ public class T2IParamTypes
     public static T2IRegisteredParam<double> CFGScale, VariationSeedStrength, InitImageCreativity, InitImageResetToNorm, InitImageNoise, RefinerControl, RefinerUpscale, RefinerCFGScale, ReVisionStrength, AltResolutionHeightMult,
         FreeUBlock1, FreeUBlock2, FreeUSkip1, FreeUSkip2, GlobalRegionFactor, EndStepsEarly, SamplerSigmaMin, SamplerSigmaMax, SamplerRho, VideoAugmentationLevel, VideoCFG, VideoMinCFG, Video2VideoCreativity, VideoSwapPercent, VideoExtendSwapPercent, IP2PCFG2, RegionalObjectCleanupFactor, SigmaShift, SegmentThresholdMax, SegmentCFGScale, FluxGuidanceScale, Text2AudioDuration;
     public static T2IRegisteredParam<Image> InitImage, MaskImage, VideoEndFrame;
-    public static T2IRegisteredParam<AudioFile> VideoAudioInput, VideoAudioReference;
+    public static T2IRegisteredParam<AudioFile> VideoAudioInput;
     public static T2IRegisteredParam<T2IModel> Model, RefinerModel, VAE, RegionalObjectInpaintingModel, SegmentModel, VideoModel, VideoSwapModel, RefinerVAE, ClipLModel, ClipGModel, ClipVisionModel, T5XXLModel, LLaVAModel, LLaMAModel, QwenModel, MistralModel, GemmaModel, GptOssModel, VideoExtendModel, VideoExtendSwapModel, NegativeModel;
     public static T2IRegisteredParam<List<string>> Loras, LoraWeights, LoraTencWeights, LoraSectionConfinement;
     public static T2IRegisteredParam<List<Image>> PromptImages;
+    public static T2IRegisteredParam<List<AudioFile>> PromptAudios;
+    public static T2IRegisteredParam<List<VideoFile>> PromptVideos;
     public static T2IRegisteredParam<bool> OutputIntermediateImages, DoNotSave, DoNotSaveIntermediates, ControlNetPreviewOnly, RevisionZeroPrompt, RemoveBackground, NoSeedIncrement, NoPreviews, VideoBoomerang, ModelSpecificEnhancements, UseInpaintingEncode, MaskCompositeUnthresholded, SaveSegmentMask, InitImageRecompositeMask, UseReferenceOnly, RefinerDoTiling, AutomaticVAE, ZeroNegative, FluxDisableGuidance, SmartImagePromptResizing, NoLoadModels, NoInternalSpecialHandling, ForwardRawBackendData, ForwardSwarmData, NegativeModelIncludeLoras, ContinueAfterErrors,
         PlaceholderParamGroupStarred, PlaceholderParamGroupUser1, PlaceholderParamGroupUser2, PlaceholderParamGroupUser3;
 
@@ -375,7 +385,13 @@ public class T2IParamTypes
             "", Clean: ApplyStringEdit, Examples: ["a photo of a cat", "a cartoonish drawing of an astronaut"], OrderPriority: -100, VisibleNormally: false, ViewType: ParamViewType.PROMPT, ChangeWeight: -5
             ));
         PromptImages = Register<List<Image>>(new("Prompt Images", "Images to include with the prompt, for eg ReVision or UnCLIP.\nIf this parameter is visible, you've done something wrong - this parameter is tracked internally.",
-            "", IgnoreIf: "", OrderPriority: -95, VisibleNormally: false, IsAdvanced: true, ImageShouldResize: false, ChangeWeight: 2, HideFromMetadata: true // Has special internal handling
+            "", IgnoreIf: "", OrderPriority: -95, VisibleNormally: false, IsAdvanced: true, ImageShouldResize: false, ChangeWeight: 2 // Has special internal handling
+            ));
+        PromptAudios = Register<List<AudioFile>>(new("Prompt Audios", "Audio files to include with the prompt.\nIf this parameter is visible, you've done something wrong - this parameter is tracked internally.",
+            "", IgnoreIf: "", OrderPriority: -94, VisibleNormally: false, IsAdvanced: true, ChangeWeight: 2 // Has special internal handling
+            ));
+        PromptVideos = Register<List<VideoFile>>(new("Prompt Videos", "Videos to include with the prompt.\nIf this parameter is visible, you've done something wrong - this parameter is tracked internally.",
+            "", IgnoreIf: "", OrderPriority: -93, VisibleNormally: false, IsAdvanced: true, ChangeWeight: 2 // Has special internal handling
             ));
         NegativePrompt = Register<string>(new("Negative Prompt", "Like the input prompt text, but describe what NOT to generate.\nTell the AI things you don't want to see.",
             "", IgnoreIf: "", Clean: ApplyStringEdit, Examples: ["ugly, bad, gross", "lowres, low quality"], OrderPriority: -90, ViewType: ParamViewType.PROMPT, ChangeWeight: -5, VisibleNormally: false
@@ -626,9 +642,6 @@ public class T2IParamTypes
             ));
         VideoAudioInput = Register<AudioFile>(new("Video Audio Input", "If generating a video with a model that supports audio input, this is the audio input.",
             null, OrderPriority: 3, Group: GroupAdvancedVideo, Permission: Permissions.ParamVideo, FeatureFlag: "video", DoNotPreview: true, IsAdvanced: true
-            ));
-        VideoAudioReference = Register<AudioFile>(new("Video Audio Reference", "If generating a video with a model that supports reference audio (eg LTX-2.3 IC-Lora), this input adds the reference audio.",
-            null, OrderPriority: 3.5, Group: GroupAdvancedVideo, Permission: Permissions.ParamVideo, FeatureFlag: "video", DoNotPreview: true, IsAdvanced: true
             ));
         GroupAdvancedVideoObscure = new("Video Obscure Options", Open: false, OrderPriority: 50, IsAdvanced: true, Toggles: false, Description: "You almost never need these.", Parent: GroupAdvancedVideo);
         VideoMinCFG = Register<double>(new("Video Min CFG", "The minimum CFG to use for video generation.\nVideos start with max CFG on first frame, and then reduce to this CFG. Set to -1 to disable.\nOnly used for SVD.",
@@ -1102,25 +1115,28 @@ public class T2IParamTypes
                 }
                 return origVal;
             case T2IParamDataType.IMAGE_LIST:
+            case T2IParamDataType.AUDIO_LIST:
+            case T2IParamDataType.VIDEO_LIST:
                 {
                     string splitter = val.Contains("\n|||\n") ? "\n|||\n" : "|";
                     string[] rawSplit = val.Split(splitter, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                     for (int i = 0; i < rawSplit.Length; i++)
                     {
                         string partVal = rawSplit[i];
+                        if (partVal.StartsWith("inputs/") || partVal.StartsWith("raw/") || partVal.StartsWith("Starred/"))
+                        {
+                            string filename = partVal;
+                            partVal = FilePathToDataString(session, filename, $"for param {type.Name}");
+                            rawSplit[i] = new JObject() { ["filename"] = filename, ["data"] = partVal }.ToString();
+                        }
                         if (partVal.StartsWith("data:"))
                         {
                             partVal = partVal.After(',');
                         }
-                        if (partVal.StartsWith("inputs/") || partVal.StartsWith("raw/") || partVal.StartsWith("Starred/"))
-                        {
-                            partVal = FilePathToDataString(session, partVal, $"for param {type.Name}");
-                            rawSplit[i] = partVal;
-                        }
                         if (!ValidBase64Matcher.IsOnlyMatches(partVal) || partVal.Length < 10)
                         {
                             string shortText = partVal.Length > 10 ? partVal[..10] + "..." : partVal;
-                            throw new SwarmUserErrorException($"Invalid image-list value for param {type.Name} - '{origVal}' - must be a valid base64 string - got '{shortText}'");
+                            throw new SwarmUserErrorException($"Invalid {type.Type.ToString().ToLowerFast().Replace('_', '-')} value for param {type.Name} - '{origVal}' - must be a valid base64 string - got '{shortText}'");
                         }
                     }
                     return rawSplit.JoinString(splitter);

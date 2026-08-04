@@ -289,6 +289,14 @@ public class T2IParamInput
         {
             return imgList.Select(img => img.AsBase64).JoinString("|");
         }
+        else if (val is List<AudioFile> audioList)
+        {
+            return audioList.Select(audio => audio.AsBase64).JoinString("|");
+        }
+        else if (val is List<VideoFile> videoList)
+        {
+            return videoList.Select(video => video.AsBase64).JoinString("|");
+        }
         else if (val is List<string> strList)
         {
             return strList.JoinString(",");
@@ -328,6 +336,11 @@ public class T2IParamInput
                 return JToken.FromObject(mf.SourceFilePath);
             }
             return null;
+        }
+        if (val is IEnumerable<MediaFile> mediaFiles)
+        {
+            List<string> sourceFiles = [.. mediaFiles.Where(file => !string.IsNullOrEmpty(file.SourceFilePath)).Select(file => file.SourceFilePath)];
+            return sourceFiles.Count > 0 ? JArray.FromObject(sourceFiles) : null;
         }
         if (val is string str)
         {
