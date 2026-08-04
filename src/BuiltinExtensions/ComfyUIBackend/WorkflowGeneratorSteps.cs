@@ -1258,9 +1258,9 @@ public class WorkflowGeneratorSteps
                 g.CurrentMedia = new WGNodeData([vaceNode, 2], g, WGNodeData.DT_LATENT_VIDEO, g.CurrentCompat()) { Width = width, Height = height, Frames = frames };
                 g.FinalTrimLatent = [vaceNode, 3];
             }
-            if (g.IsLTXV2() && g.UserInput.TryGet(T2IParamTypes.VideoAudioReference, out AudioFile audio))
+            if (g.IsLTXV2() && g.UserInput.TryGet(T2IParamTypes.VideoAudioReference, out AudioFile ltxAudio))
             {
-                string audioNode = g.CreateAudioLoadNode(audio, "${videoaudioinput}");
+                string audioNode = g.CreateAudioLoadNode(ltxAudio, "${videoaudioreference}");
                 string refNode = g.CreateNode("LTXVReferenceAudio", new JObject()
                 {
                     ["model"] = g.CurrentModel.Path,
@@ -1569,7 +1569,7 @@ public class WorkflowGeneratorSteps
                         g.CurrentMedia = decoded;
                         return;
                     }
-                    g.CurrentMedia = decoded.EncodeToLatent(g.CurrentVae, "25");
+                    g.CurrentMedia = decoded.WithMaskedAudio(g.CurrentAudioVae).EncodeToLatent(g.CurrentVae, "25");
                 }
                 else if (modelMustReencode || doPixelUpscale || doSave || g.MaskShrunkInfo.BoundsNode is not null)
                 {
@@ -1625,7 +1625,7 @@ public class WorkflowGeneratorSteps
                     }
                     if (modelMustReencode || doPixelUpscale)
                     {
-                        g.CurrentMedia = decoded.EncodeToLatent(g.CurrentVae, "25");
+                        g.CurrentMedia = decoded.WithMaskedAudio(g.CurrentAudioVae).EncodeToLatent(g.CurrentVae, "25");
                     }
                 }
                 if (doUpscale && upscaleMethod.StartsWith("latent-"))
