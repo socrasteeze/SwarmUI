@@ -25,6 +25,18 @@ function setGroupAdvancedOverride(groupId, enable) {
     }
 }
 
+/** Returns the resolution rounding precision for the current model compat class (16 for most models, some may be higher or lower). */
+function getResolutionPrecision() {
+    let compatId = currentModelHelper.curCompatClass;
+    if (compatId) {
+        let compat = modelsHelpers.compatClasses[compatId];
+        if (compat?.resolutionPrecision) {
+            return compat.resolutionPrecision;
+        }
+    }
+    return 16;
+}
+
 class AspectRatio {
     constructor(id, width, height, altLogic = null) {
         this.id = id;
@@ -41,13 +53,14 @@ class AspectRatio {
                 return [newWidth, newHeight];
             }
         }
+        let precision = getResolutionPrecision();
         if (inWidth != inHeight) {
-            inWidth = roundTo(Math.sqrt(inWidth * inHeight), 16);
+            inWidth = roundTo(Math.sqrt(inWidth * inHeight), precision);
             inHeight = inWidth;
         }
         // NOTE: This math must match T2IParamInput GetImageWidth
-        let width = roundTo(this.width * (inWidth <= 0 ? 512 : inWidth) / 512, 16);
-        let height = roundTo(this.height * (inHeight <= 0 ? 512 : inHeight) / 512, 16);
+        let width = roundTo(this.width * (inWidth <= 0 ? 512 : inWidth) / 512, precision);
+        let height = roundTo(this.height * (inHeight <= 0 ? 512 : inHeight) / 512, precision);
         return [width, height];
     }
 }
@@ -900,22 +913,22 @@ function getGenInput(input_overrides = {}, input_preoverrides = {}) {
         let val = getInputVal(elem, true);
         if (val != null) {
             input[type.id] = val;
-        }
-        if (type.type == 'image') {
-            extraMetadata[`${type.id}_filename`] = elem.dataset.filename;
-            extraMetadata[`${type.id}_resolution`] = elem.dataset.resolution;
-            if (elem.dataset.duration) {
+            if (type.type == 'image') {
+                extraMetadata[`${type.id}_filename`] = elem.dataset.filename;
+                extraMetadata[`${type.id}_resolution`] = elem.dataset.resolution;
+                if (elem.dataset.duration) {
+                    extraMetadata[`${type.id}_duration`] = elem.dataset.duration;
+                }
+            }
+            else if (type.type == 'video') {
+                extraMetadata[`${type.id}_filename`] = elem.dataset.filename;
+                extraMetadata[`${type.id}_resolution`] = elem.dataset.resolution;
                 extraMetadata[`${type.id}_duration`] = elem.dataset.duration;
             }
-        }
-        else if (type.type == 'video') {
-            extraMetadata[`${type.id}_filename`] = elem.dataset.filename;
-            extraMetadata[`${type.id}_resolution`] = elem.dataset.resolution;
-            extraMetadata[`${type.id}_duration`] = elem.dataset.duration;
-        }
-        else if (type.type == 'audio') {
-            extraMetadata[`${type.id}_filename`] = elem.dataset.filename;
-            extraMetadata[`${type.id}_duration`] = elem.dataset.duration;
+            else if (type.type == 'audio') {
+                extraMetadata[`${type.id}_filename`] = elem.dataset.filename;
+                extraMetadata[`${type.id}_duration`] = elem.dataset.duration;
+            }
         }
         if (type.id == 'prompt') {
             let container = findParentOfClass(elem, 'auto-input');
@@ -1083,11 +1096,19 @@ function setDirectParamValue(param, value, paramElem = null, forceDropdowns = fa
         return;
     }
     else if (param.type == "image" || param.type == "image_list" || param.type == "audio" || param.type == "video") {
-        if (typeof value == 'string' && value.startsWith('inputs/')) {
-            let previewSrc = `${getImageOutPrefix()}/${value}`;
-            setMediaFileDirect(paramElem, previewSrc, param.type, value, value, () => {
-                paramElem.dataset.filedata = value;
+        let pathVal = value == null ? '' : `${value}`;
+        if (!pathVal) {
+            clearMediaFileInput(paramElem);
+            return;
+        }
+        if (pathVal.startsWith('inputs/') || pathVal.startsWith('raw/') || pathVal.startsWith('Starred/')) {
+            let mediaType = getMediaType(pathVal);
+            let previewSrc = `${getImageOutPrefix()}/${pathVal}`;
+            let baseName = pathVal.substring(pathVal.lastIndexOf('/') + 1);
+            setMediaFileDirect(paramElem, previewSrc, mediaType, baseName, pathVal, () => {
+                paramElem.dataset.filedata = pathVal;
             });
+            paramElem.dataset.filedata = pathVal;
             return;
         }
         // do not edit raw data files directly (eg data URLs), this will just misbehave
