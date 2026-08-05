@@ -29,6 +29,13 @@
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_gen.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_ui.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_autocomplete.js?vary=[VARY]"></script>
+    <!-- TagDex character/artist picker. Loaded by explicit URL because /simple builds its own script list rather
+         than using WebServer.PageFooterExtra, so another extension has no injection hook here. tagdex_core.js is a
+         ScriptFiles entry of TagDexExtension, which is still fetchable at this route; m_tagdex.js is an OtherAssets
+         entry so it does not also load on every Razor page. Must come after m_autocomplete.js (it wraps
+         MAutoComplete) and before m_create.js. -->
+    <script defer src="/ExtensionFile/TagDexExtension/Assets/tagdex_core.js?vary=[VARY]"></script>
+    <script defer src="/ExtensionFile/TagDexExtension/Assets/m_tagdex.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_create.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_images.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_models.js?vary=[VARY]"></script>
