@@ -74,9 +74,18 @@ set DOTNET_CLI_UI_LANGUAGE="en"
 .\src\bin\live_release\SwarmUI.exe %*
 
 rem Exit code 42 means restart, anything else = don't.
+rem Fork edit: re-enter through launch-fork.bat when present, so an in-app restart stays inside the fork wrapper
+rem rather than dropping back to the stock launcher. launch-fork.bat sees SWARM_FORK_CHECKED and skips its upstream
+rem fetch on the way back through, so a restart costs no extra network round trip and shows no banner.
+rem Also called by explicit path: cmd will not search the current directory when NoDefaultCurrentDirectoryInExePath
+rem is set, and the bare name fails there with "not recognized".
 if %ERRORLEVEL% EQU 42 (
     echo Restarting...
-    call launch-windows.bat %*
+    if exist "%~dp0launch-fork.bat" (
+        call "%~dp0launch-fork.bat" %*
+    ) else (
+        call "%~dp0launch-windows.bat" %*
+    )
 )
 
 IF %ERRORLEVEL% NEQ 0 ( pause )
