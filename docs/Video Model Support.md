@@ -495,6 +495,10 @@ https://github.com/user-attachments/assets/f20a2d4c-a667-47e1-9da8-82b3e1d55792
     - **Prompt:** Works best with long proper LLM prompts, but short ones still go fine
         - The model generates audio, so remember to prompt for what the audio should be
         - You can prompt for multiple shots at different times in the video and it will work
+        - [Base Guide Here](<https://modelscope.cn/models/MiniMax/MiniMax-H3/file/view/master/docs%2FVIDEO_PROMPT_WRITING_GUIDE_base_en.md?status=1>) and [Ref Guide Here](<https://modelscope.cn/models/MiniMax/MiniMax-H3/file/view/master/docs%252FVIDEO_PROMPT_WRITING_GUIDE_ref_en.md?status=1>)
+        - For verbal speech, use this format `<d>[English] something to say here</d>`
+        - Identify speakers with the subject marks `(S1)`, (and `(S2)` and etc). or combine them eg `(S1,S2)`
+        - The keys in their structured format eg `non_diegetic_music: ` are useful for separating parts of the prompt.
         - They use very long complex example prompts with a structured format. See below for a simple text2video example
             <details>
                 <summary>Click to view example prompt</summary>
@@ -564,6 +568,8 @@ You can also attach video files freely (up to a max of 3). In the prompt you can
 If you want to use the audio from a video file, click the `☰` hamburger menu on the attached video and click `Split Audio`.
 
 Prompt inputs all are labeled eg `Img 1: ...`, these numbers correctly correspond to the number in eg `<Picture 1>`.
+
+Note that the Ref model crunches its inputs a bit (they pass through the text encoder) so quality will suffer compared to use FL2VA with a dedicated first frame.
 
 ### MiniMax H3 Image Generation
 
