@@ -278,10 +278,14 @@ public class Installation
         }
         string path = $"{Environment.GetFolderPath(Environment.SpecialFolder.Desktop)}/SwarmUI.url";
         string curDir = Directory.GetCurrentDirectory().TrimEnd('\\');
+        // Fork edit: point the installer's shortcut at the fork launcher when it exists, so every entry point into
+        // Swarm goes through the same wrapper. Falls back to the stock launcher, so this stays correct on a plain
+        // checkout that has no launch-fork.bat.
+        string launcher = File.Exists($"{curDir}\\launch-fork.bat") ? "launch-fork.bat" : "launch-windows.bat";
         string content =
             $"""
             [InternetShortcut]
-            URL="{curDir}\launch-windows.bat"
+            URL="{curDir}\{launcher}"
             IconFile="{curDir}\src\wwwroot\favicon.ico"
             IconIndex=0
             """;
