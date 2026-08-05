@@ -71,7 +71,26 @@ public class MobileEnhancementsExtension : Extension
         // the relative "API/..." URL from util.js sendJsonToServer and the WebSocket address from getWSAddress
         // (both strip after the last '/').
         WebServer.WebApp.MapGet("/simple", ServeMobileClient);
+        // Legacy route. The client shipped at "/m" before the rename above, and that rename left nothing
+        // behind, so every pre-rename entry point started landing on the 404 page. The installed PWA is the
+        // one that matters: a home-screen app captures its start_url at INSTALL time and iOS never re-reads
+        // manifest.json for an app that is already installed, so changing start_url does not migrate anyone
+        // who installed before the rename - their app icon still opens "/m" forever. Bookmarks, home-screen
+        // links and shared URLs have the same problem. Redirecting costs nothing and rescues all of them;
+        // the rename was only ever about not having to TYPE a single-letter path, and a redirect nobody
+        // types does not bring that back.
+        WebServer.WebApp.MapGet("/m", ServeLegacyClientRedirect);
         WebServer.PageHeaderExtra = new(WebServer.PageHeaderExtra.Value + BuildHeadTags());
+    }
+
+    /// <summary>Redirects the pre-rename <c>/m</c> route to the current <c>/simple</c> client. Temporary
+    /// (302) rather than permanent on purpose - a 301 is cached by the browser indefinitely and would make
+    /// the path impossible to reuse later. Any query string is carried across; the fragment never reaches
+    /// the server and is preserved by the browser across the redirect on its own.</summary>
+    public async Task ServeLegacyClientRedirect(HttpContext context)
+    {
+        context.Response.Redirect($"/simple{context.Request.QueryString}");
+        await context.Response.CompleteAsync();
     }
 
     /// <summary>Serves the standalone mobile client page at <c>/simple</c>. Mirrors the Razor pages' auth behavior
