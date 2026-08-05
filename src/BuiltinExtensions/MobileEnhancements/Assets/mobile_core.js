@@ -76,54 +76,116 @@ class MobileEnhancements {
     }
 
     /**
-     * Track the on-screen keyboard via the visual viewport and expose its height as the `--kb-inset` CSS
-     * variable plus a `kb-open` body class. mobile.css uses these to lift the floating prompt above the
-     * keyboard. On Android (viewport `interactive-widget=resizes-content`) the layout already resizes, so the
-     * inset stays ~0; this mainly helps iOS Safari, which overlays the keyboard without resizing.
+     * Keep the floating prompt bar above the on-screen keyboard, by publishing the exact lift it needs as
+     * the `--kb-inset` CSS variable plus a `kb-open` body class for mobile.css to apply.
+     *
+     * The lift is MEASURED, not derived from a viewport formula. The bar's real distance below the visible
+     * band is the only quantity that matters, and it is the one thing that stays true no matter how iOS
+     * splits a keyboard appearance between shrinking the visual viewport, offsetting it inside an unchanged
+     * layout viewport, and scrolling the document. The previous open-loop version computed
+     * `innerHeight - vv.height - vv.offsetTop` and only applied it when that exceeded 120px, which failed in
+     * two ways at once: the value is the lift still OUTSTANDING after whatever iOS already shifted (so it
+     * shrinks as offsetTop grows), and gating it on a fixed threshold therefore discarded every genuinely
+     * needed lift under 120px. That left a dead zone - reproduced at offsetTop 280 of a 380px keyboard,
+     * where 100px of lift was still required, the class was dropped, and the bar sat 44px under the
+     * keyboard. Scrolling nudged offsetTop back across the threshold, which is exactly the reported "scroll
+     * the whole page and the prompt forces itself up and gets stickied".
+     *
+     * On Android (viewport `interactive-widget=resizes-content`) the layout already resizes, so the measured
+     * overlap is naturally 0 and this stays inert; it mainly matters on iOS, which overlays the keyboard.
      */
     setupKeyboardHandling() {
         if (!window.visualViewport) {
             return;
         }
         let vv = window.visualViewport;
-        let kbOpen = false;
+        let lift = 0;
         let animTimer = null;
+        let scheduled = false;
+        let measure = () => {
+            let region = document.getElementById('alt_prompt_region');
+            // Absent on every page but the generate tab, and display:none whenever layout.js hides the bar.
+            if (!region || region.offsetParent == null) {
+                return 0;
+            }
+            // getBoundingClientRect and visualViewport offsets are both layout-viewport-relative, so the
+            // visible band is [offsetTop, offsetTop + height] in the same coordinate space as the rect.
+            // The lift already applied is added back to recover the bar's untransformed position - without
+            // that this would be reading its own output, measure an overlap of zero, drop the lift, and
+            // oscillate on every frame.
+            let naturalBottom = region.getBoundingClientRect().bottom + lift;
+            return Math.max(0, Math.round(naturalBottom - (vv.offsetTop + vv.height)));
+        };
+        // "Is the keyboard up" is a different question from "how far must the bar move", and needs a
+        // different measure: how much height the keyboard is occupying, which is shift-independent. Note
+        // offsetTop is deliberately NOT subtracted here - subtracting it is what made the old combined
+        // value collapse toward zero as iOS shifted the viewport, so a keyboard that was plainly open read
+        // as closed. Only used to gate the snap-back below.
+        let keyboardOpen = () => {
+            return window.innerHeight - vv.height > 120;
+        };
         let update = () => {
-            let inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-            document.body.style.setProperty('--kb-inset', `${inset}px`);
-            let nowOpen = inset > 120;
-            if (nowOpen != kbOpen) {
-                kbOpen = nowOpen;
-                document.body.classList.toggle('kb-open', nowOpen);
-                // Animate only across the open/close edge. --kb-inset is recomputed on every scroll frame too
-                // (offsetTop changes as iOS scrolls the layout viewport under an open keyboard), and mobile.css's
-                // transition would restart its tween on each of those - making the prompt bar visibly chase the
-                // viewport instead of tracking it. kb-animating scopes the transition to the edge; the timer
-                // clears it a hair after the 0.15s tween ends.
-                document.body.classList.add('kb-animating');
-                if (animTimer) {
-                    clearTimeout(animTimer);
+            let needed = measure();
+            if (needed != lift) {
+                let wasLifted = lift > 0;
+                lift = needed;
+                document.body.style.setProperty('--kb-inset', `${lift}px`);
+                if ((lift > 0) != wasLifted) {
+                    document.body.classList.toggle('kb-open', lift > 0);
+                    // Animate only across the lifted/not-lifted edge. The lift is re-measured on every scroll
+                    // frame too (offsetTop changes as iOS scrolls the layout viewport under an open keyboard),
+                    // and mobile.css's transition would restart its tween on each of those - making the prompt
+                    // bar visibly chase the viewport instead of tracking it. kb-animating scopes the transition
+                    // to the edge; the timer clears it a hair after the 0.15s tween ends.
+                    document.body.classList.add('kb-animating');
+                    if (animTimer) {
+                        clearTimeout(animTimer);
+                    }
+                    animTimer = setTimeout(() => {
+                        document.body.classList.remove('kb-animating');
+                        animTimer = null;
+                    }, 200);
                 }
-                animTimer = setTimeout(() => {
-                    document.body.classList.remove('kb-animating');
-                    animTimer = null;
-                }, 200);
             }
             // iOS standalone-PWA keyboard bug: opening the keyboard scrolls the whole layout viewport up to
             // keep the focused input visible, and dismissal often leaves that scroll behind - the page stays
             // shifted up with a dead black band at the bottom (fixed elements like the shell nav ride up with
             // it). The page never legitimately scrolls (body is position:fixed + overflow:hidden), so whenever
-            // the keyboard is closed and any leftover shift exists, snap the viewport back.
-            if (inset <= 1 && (window.scrollY != 0 || vv.pageTop > 0 || vv.offsetTop > 0)) {
+            // the keyboard is down and a leftover shift exists, snap the viewport back. Gated on the keyboard
+            // rather than on the lift: pages without a prompt bar (and moments when the bar happens to need no
+            // lift) never need a lift either, and snapping there would fight iOS scrolling a focused sidebar
+            // field into view while its keyboard is still up.
+            if (!keyboardOpen() && (window.scrollY != 0 || vv.pageTop > 0 || vv.offsetTop > 0)) {
                 window.scrollTo(0, 0);
             }
         };
-        vv.addEventListener('resize', update);
-        vv.addEventListener('scroll', update);
+        // Coalesce to one measurement per frame: measure() forces layout, and iOS emits a dense stream of
+        // resize/scroll events while the keyboard animates. Same pattern as layout.js scheduleReapply.
+        let schedule = () => {
+            if (scheduled) {
+                return;
+            }
+            scheduled = true;
+            requestAnimationFrame(() => {
+                scheduled = false;
+                update();
+            });
+        };
+        vv.addEventListener('resize', schedule);
+        vv.addEventListener('scroll', schedule);
         // The stranded-shift bug (see above) can also be triggered by touch gestures dragging the layout
         // viewport (observed with the swipe-up-for-bottom-bar gesture), not just the keyboard - catch plain
         // window scrolls too so every shift path hits the snap-back.
-        window.addEventListener('scroll', update, { passive: true });
+        window.addEventListener('scroll', schedule, { passive: true });
+        // The bar's own height changes independently of the viewport (typing wraps the textarea, pasted
+        // images grow the strip). While lifted, that moves its bottom edge and silently invalidates the
+        // measurement, so re-measure whenever the bar itself resizes.
+        if (window.ResizeObserver) {
+            let region = document.getElementById('alt_prompt_region');
+            if (region) {
+                new ResizeObserver(schedule).observe(region);
+            }
+        }
     }
 
     /** Register the root-scoped service worker (served from /sw.js) for installability + offline fallback. */
