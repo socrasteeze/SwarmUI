@@ -407,7 +407,12 @@ class PromptTabCompleteClass {
             buttons.push(button);
         }
         let rect = box.getBoundingClientRect();
-        this.popover = new AdvancedPopover('prompt_suggest', buttons, false, rect.x, rect.y + box.offsetHeight + 6, box.parentElement, null, box.offsetHeight + 6, 250);
+        // Rooted at document.body, not box.parentElement: .sui-popover is position:fixed, and any ancestor
+        // carrying a transform becomes the containing block for fixed descendants - which would resolve
+        // reposition()'s viewport-space top/left against the prompt region instead of the screen. The mobile
+        // keyboard lift puts exactly such a transform on .alt_prompt_region. document.body is what every
+        // other AdvancedPopover call site already passes; these two were the only exceptions.
+        this.popover = new AdvancedPopover('prompt_suggest', buttons, false, rect.x, rect.y + box.offsetHeight + 6, document.body, null, box.offsetHeight + 6, 250);
     }
 }
 
@@ -565,7 +570,12 @@ class PromptPlusButton {
             triggerChangeFor(this.altTextBox);
         }});
         let rect = this.addButton.getBoundingClientRect();
-        this.popover = new AdvancedPopover('prompt_plus_menu', buttons, true, rect.x, rect.y + this.addButton.offsetHeight + 6, this.addButton.parentElement, null, this.addButton.offsetHeight + 6, 250);
+        // document.body rather than the add button's wrapper - see the matching note in showTabComplete.
+        // Parented inside .alt_prompt_region this menu rendered far below the screen whenever the mobile
+        // keyboard was up, because the lift transform made that region the containing block for this
+        // position:fixed element. Dismissing the keyboard removed the transform and it snapped back into
+        // place, which is why navigating away and back appeared to "fix" it.
+        this.popover = new AdvancedPopover('prompt_plus_menu', buttons, true, rect.x, rect.y + this.addButton.offsetHeight + 6, document.body, null, this.addButton.offsetHeight + 6, 250);
     }
 
     segmentModalClear() {
