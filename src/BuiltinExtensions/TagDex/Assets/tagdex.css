@@ -1,0 +1,194 @@
+/* TagDex - Characters browse tab styling.
+   Class selectors only, per AGENTS.md. All colors come from theme variables so the tab tracks whatever theme is
+   active without per-theme rules. No !important anywhere - nothing here overrides an existing rule. */
+
+.tagdex-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.tagdex-controls {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.5rem 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--shadow);
+}
+
+.tagdex-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+
+.tagdex-facet-row {
+    margin-bottom: 0.2rem;
+}
+
+.tagdex-search-wrap {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+}
+
+.tagdex-search {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 16px;
+    padding: 0.3rem 0.5rem;
+    color: var(--text);
+    background: var(--background-soft);
+    border: 1px solid var(--shadow);
+    border-radius: 0.3rem;
+}
+
+.tagdex-select {
+    max-width: 14rem;
+    font-size: 0.9rem;
+    padding: 0.25rem 0.35rem;
+    color: var(--text);
+    background: var(--background-soft);
+    border: 1px solid var(--shadow);
+    border-radius: 0.3rem;
+}
+
+.tagdex-button {
+    flex: 0 0 auto;
+    min-height: 2rem;
+}
+
+.tagdex-status {
+    font-size: 0.85rem;
+    color: var(--text-soft);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 1.4rem;
+}
+
+.tagdex-more {
+    min-height: 1.6rem;
+    padding: 0 0.5rem;
+    font-size: 0.8rem;
+}
+
+.tagdex-browser {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Card body. The browser writes this block as innerHTML in Cards format. */
+.tagdex-card-name {
+    display: block;
+    font-weight: bold;
+    word-break: break-word;
+}
+
+.tagdex-card-sub {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-soft);
+    word-break: break-word;
+}
+
+.tagdex-card-count {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-soft);
+    margin-top: 0.1rem;
+}
+
+.tagdex-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+    margin-top: 0.3rem;
+}
+
+.tagdex-chip {
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.15rem 0.4rem;
+    color: var(--text-soft);
+    background: var(--button-background);
+    border: 1px solid var(--shadow);
+    border-radius: 0.8rem;
+    cursor: pointer;
+}
+
+.tagdex-chip:hover {
+    color: var(--text);
+    background: var(--button-background-hover);
+}
+
+.tagdex-chip:active {
+    background: var(--button-background-press);
+}
+
+/* Empty state / download panel. */
+.tagdex-empty {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.tagdex-empty-inner {
+    max-width: 40rem;
+    margin: 0 auto;
+    color: var(--text);
+}
+
+.tagdex-empty-note {
+    font-size: 0.9rem;
+    color: var(--text-soft);
+}
+
+.tagdex-code {
+    padding: 0.05rem 0.25rem;
+    background: var(--background-soft);
+    border-radius: 0.2rem;
+}
+
+.tagdex-download-list {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.tagdex-download-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    background: var(--background-soft);
+    border-radius: 0.3rem;
+}
+
+.tagdex-download-label {
+    flex: 0 0 11rem;
+    font-weight: bold;
+}
+
+.tagdex-download-status {
+    flex: 1 1 12rem;
+    font-size: 0.85rem;
+    color: var(--text-soft);
+}
+
+/* Mobile. The 16px search field is deliberate - anything smaller triggers iOS focus zoom. */
+body.small-window .tagdex-select {
+    max-width: 100%;
+    flex: 1 1 8rem;
+}
+
+body.small-window .tagdex-download-label {
+    flex: 1 1 100%;
+}
+
+body.small-window .tagdex-chip {
+    min-height: 1.6rem;
+    padding: 0.2rem 0.5rem;
+}
