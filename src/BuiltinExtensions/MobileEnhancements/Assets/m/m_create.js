@@ -200,10 +200,17 @@ class MCreate {
     /** Builds the Create panel once. */
     build(panel) {
         this.panel = panel;
-        // Flex column so the generate bar's margin-top:auto can claim the leftover height when the page is
-        // short; when it is tall, the bar's position:sticky takes over and it stays pinned while scrolling.
+        // Flex column so children keep their natural height rather than being shrunk to fit (see m.css).
         panel.classList.add('m-create-panel');
         panel.appendChild(this.previewWrap);
+        this.archRow = mUI.el('div', 'm-arch-row');
+        this.archSelect = mUI.el('select', 'm-arch-select');
+        this.archSelect.addEventListener('change', () => {
+            mState.archFilter = this.archSelect.value;
+            mState.changed();
+        });
+        this.archRow.appendChild(this.archSelect);
+        panel.appendChild(this.archRow);
         this.presetStrip = mUI.el('div', 'm-preset-strip');
         panel.appendChild(this.presetStrip);
         // Model and LoRAs share one row: two taps that open two sheets, no reason to spend two rows on them.
@@ -227,6 +234,24 @@ class MCreate {
         });
         this.pickerRow.appendChild(this.resetButton);
         panel.appendChild(this.pickerRow);
+        // Generate/Interrupt sit directly ABOVE the prompt box rather than at the foot of the panel. At the
+        // foot they were sticky to the bottom of the layout viewport, which is exactly where the on-screen
+        // keyboard is - so the one moment you most want to tap Generate (having just finished typing) was
+        // the one moment it was buried. Above the prompt it rides along with whatever iOS scrolls into view.
+        let genBar = mUI.el('div', 'm-gen-bar');
+        this.interruptButton = mUI.el('button', 'm-interrupt-button', 'Interrupt');
+        this.interruptButton.style.display = 'none';
+        this.interruptButton.addEventListener('click', () => {
+            mGen.interrupt();
+            // Anything still in flight is never going to arrive, so drop it now rather than leaving it to
+            // be swept when the next batch happens to start.
+            this.clearUnfinished();
+        });
+        genBar.appendChild(this.interruptButton);
+        this.genButton = mUI.el('button', 'm-generate-button', 'Generate');
+        this.wireGenerateButton();
+        genBar.appendChild(this.genButton);
+        panel.appendChild(genBar);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
         this.promptBox = mUI.el('textarea', 'm-prompt-box');
         this.promptBox.placeholder = 'Type your prompt, or paste an image...';
@@ -271,20 +296,6 @@ class MCreate {
         panel.appendChild(negWrap);
         this.advChips = mUI.el('div', 'm-adv-chips');
         panel.appendChild(this.advChips);
-        let genBar = mUI.el('div', 'm-gen-bar');
-        this.interruptButton = mUI.el('button', 'm-interrupt-button', 'Interrupt');
-        this.interruptButton.style.display = 'none';
-        this.interruptButton.addEventListener('click', () => {
-            mGen.interrupt();
-            // Anything still in flight is never going to arrive, so drop it now rather than leaving it to
-            // be swept when the next batch happens to start.
-            this.clearUnfinished();
-        });
-        genBar.appendChild(this.interruptButton);
-        this.genButton = mUI.el('button', 'm-generate-button', 'Generate');
-        this.wireGenerateButton();
-        genBar.appendChild(this.genButton);
-        panel.appendChild(genBar);
         let fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = 'image/*';
@@ -360,6 +371,7 @@ class MCreate {
 
     /** Re-renders every dynamic region from state. */
     render() {
+        this.renderArch();
         this.renderPresets();
         this.renderModelButton();
         if (document.activeElement != this.promptBox) {
@@ -379,6 +391,33 @@ class MCreate {
         this.renderAdvChips();
     }
 
+    /** Architecture picker: one entry per preset folder. Hidden unless there are at least two groups to
+     * choose between, since a single-group picker is a control that can only ever say one thing. A stored
+     * filter naming a group that no longer exists falls back to "all" rather than showing an empty strip. */
+    renderArch() {
+        let groups = mState.presetGroups();
+        if (groups.length < 2) {
+            this.archRow.style.display = 'none';
+            return;
+        }
+        this.archRow.style.display = '';
+        if (mState.archFilter && !groups.includes(mState.archFilter)) {
+            mState.archFilter = '';
+        }
+        this.archSelect.innerHTML = '';
+        let all = document.createElement('option');
+        all.value = '';
+        all.textContent = 'All architectures';
+        this.archSelect.appendChild(all);
+        for (let group of groups) {
+            let option = document.createElement('option');
+            option.value = group;
+            option.textContent = group;
+            this.archSelect.appendChild(option);
+        }
+        this.archSelect.value = mState.archFilter;
+    }
+
     /** Preset chip strip: starred first, tap toggles, selection order preserved (merge order). */
     renderPresets() {
         this.presetStrip.innerHTML = '';
@@ -386,7 +425,17 @@ class MCreate {
             this.presetStrip.appendChild(mUI.el('span', 'm-strip-empty', 'No presets yet - create some in the full UI.'));
             return;
         }
-        let sorted = [...mState.presets].sort((a, b) => (b.is_starred ? 1 : 0) - (a.is_starred ? 1 : 0));
+        // An ACTIVE preset always shows, even when the architecture filter would hide it. Filtering it out
+        // of the strip would not deactivate it - it would keep merging into every generation with no chip
+        // left on screen to tap off, which is a trap rather than a filter.
+        let visible = mState.presets.filter(preset => !mState.archFilter
+            || MState.presetGroup(preset.title) == mState.archFilter
+            || mState.activePresets.includes(preset.title));
+        if (visible.length == 0) {
+            this.presetStrip.appendChild(mUI.el('span', 'm-strip-empty', `No presets under "${mState.archFilter}".`));
+            return;
+        }
+        let sorted = [...visible].sort((a, b) => (b.is_starred ? 1 : 0) - (a.is_starred ? 1 : 0));
         for (let preset of sorted) {
             let chip = mUI.el('button', 'm-preset-chip');
             if (preset.preview_image) {
@@ -395,7 +444,13 @@ class MCreate {
                 img.loading = 'lazy';
                 chip.appendChild(img);
             }
-            chip.appendChild(mUI.el('span', 'm-preset-chip-title', preset.title));
+            // With a group selected the folder prefix is the same on every visible chip, so it is spending
+            // scarce chip width to say nothing. Under "all" it is the only architecture cue there is.
+            let label = preset.title;
+            if (mState.archFilter && label.startsWith(`${mState.archFilter}/`)) {
+                label = label.substring(mState.archFilter.length + 1);
+            }
+            chip.appendChild(mUI.el('span', 'm-preset-chip-title', label));
             chip.classList.toggle('m-selected', mState.activePresets.includes(preset.title));
             chip.addEventListener('click', () => {
                 let idx = mState.activePresets.indexOf(preset.title);
@@ -474,6 +529,30 @@ class MCreate {
         return list.filter(model => `${model.name || ''} ${model.title || ''} ${model.trigger_phrase || ''}`.toLowerCase().includes(low));
     }
 
+    /** Narrows a picker list to the selected architecture and builds the row that explains what happened.
+     * Returns {list, row}, where row is null when there is nothing worth saying - no filter selected, or a
+     * filter that turned out to hide nothing. The escape hatch is deliberate: the group's compat classes are
+     * inferred from what its presets happen to select, so it can be wrong, and a picker that silently omits
+     * a model with no way to get it back is worse than no filter at all. */
+    applyArchFilter(list, subtype, state, rerender) {
+        if (!mState.archFilter) {
+            return { 'list': list, 'row': null };
+        }
+        let narrowed = mState.filterByArch(list, subtype);
+        if (narrowed.length == list.length) {
+            return { 'list': list, 'row': null };
+        }
+        let row = mUI.el('button', 'm-arch-note');
+        row.textContent = state.showAll
+            ? `Showing all - tap to limit to ${mState.archFilter}`
+            : `Limited to ${mState.archFilter}, ${list.length - narrowed.length} hidden - tap to show all`;
+        row.addEventListener('click', () => {
+            state.showAll = !state.showAll;
+            rerender();
+        });
+        return { 'list': state.showAll ? list : narrowed, 'row': row };
+    }
+
     /** Checkpoint picker sheet. Same shape as the LoRA sheet: search plus a lazily fetched list. */
     openModelSheet() {
         let content = mUI.el('div', 'm-lora-sheet');
@@ -486,6 +565,7 @@ class MCreate {
         let results = mUI.el('div', 'm-model-results');
         content.appendChild(results);
         let close = null;
+        let archState = { 'showAll': false };
         let renderResults = () => {
             results.innerHTML = '';
             let clear = mUI.el('button', 'm-model-plain-row', 'Use server default');
@@ -499,7 +579,11 @@ class MCreate {
                 results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
-            let matches = MCreate.filterModels(this.modelList, search.value);
+            let arch = this.applyArchFilter(this.modelList, 'Stable-Diffusion', archState, renderResults);
+            if (arch.row) {
+                results.appendChild(arch.row);
+            }
+            let matches = MCreate.filterModels(arch.list, search.value);
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
@@ -648,6 +732,21 @@ class MCreate {
                 }
                 mState.promptImages = order;
                 mState.changed();
+            }
+        });
+        // A touch the system takes away mid-drag (incoming call, notification, gesture escalation) never
+        // fires touchend, so without this the tile keeps 'dragging' and its half-transparent styling for the
+        // rest of the session. The half-finished DOM order is discarded rather than committed - a cancelled
+        // drag should leave the order it started with, and rendering from state is what restores it.
+        tile.addEventListener('touchcancel', () => {
+            if (armTimer) {
+                clearTimeout(armTimer);
+                armTimer = null;
+            }
+            if (dragging) {
+                dragging = false;
+                tile.classList.remove('m-dragging');
+                this.renderImageStrip();
             }
         });
     }
@@ -955,14 +1054,21 @@ class MCreate {
         addWrap.appendChild(search);
         let results = mUI.el('div', 'm-lora-results');
         addWrap.appendChild(results);
+        let archState = { 'showAll': false };
         let renderResults = () => {
             results.innerHTML = '';
             if (!this.loraList) {
                 results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
+            // LoRAs are filtered by the same compat classes as checkpoints, which is what compat classes are
+            // for - an SDXL LoRA on a Flux checkpoint is not a near miss, it simply does not load.
+            let arch = this.applyArchFilter(this.loraList, 'LoRA', archState, renderResults);
+            if (arch.row) {
+                results.appendChild(arch.row);
+            }
             let active = mState.getLoras().map(l => l.name);
-            let matches = MCreate.filterModels(this.loraList, search.value).filter(m => !active.includes(m.name));
+            let matches = MCreate.filterModels(arch.list, search.value).filter(m => !active.includes(m.name));
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');

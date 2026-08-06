@@ -29,6 +29,9 @@ class MState {
          * or 0 when 'Custom' means "whatever width/height are already set". Kept out of params because it is
          * a client-side concept - the server only ever sees the resulting width/height. */
         this.customRatio = 0;
+        /** Selected architecture group (a preset-title folder prefix), or '' for "all". Purely a client-side
+         * browsing filter over presets and the model/LoRA pickers - never sent to the server. */
+        this.archFilter = '';
         /** Callbacks fired after any state change that should re-render the Create surface. */
         this.changeListeners = [];
     }
@@ -333,6 +336,75 @@ class MState {
         this.changed();
     }
 
+    /** The architecture group a preset belongs to: its title's leading folder segment ('ill/PLATT Pose' ->
+     * 'ill'). Presets saved at the root of the preset list have no group and return ''. */
+    static presetGroup(title) {
+        let slash = `${title || ''}`.indexOf('/');
+        return slash == -1 ? '' : title.substring(0, slash);
+    }
+
+    /** Every group that has at least one preset, sorted. */
+    presetGroups() {
+        let groups = new Set();
+        for (let preset of this.presets) {
+            let group = MState.presetGroup(preset.title);
+            if (group) {
+                groups.add(group);
+            }
+        }
+        return [...groups].sort((a, b) => a.localeCompare(b));
+    }
+
+    /** The compat class of one model, via the class id that ListT2IParams already shipped alongside it.
+     * Null when the model is unknown or its class declares no compat class. Uses no extra request: both
+     * `models` and `modelClasses` are loaded once at boot. */
+    compatClassOf(subtype, modelName) {
+        if (!modelName) {
+            return null;
+        }
+        for (let entry of (this.models[subtype] || [])) {
+            if (entry[0] == modelName) {
+                let clazz = this.modelClasses[entry[1]];
+                return clazz && clazz.compat_class ? clazz.compat_class : null;
+            }
+        }
+        return null;
+    }
+
+    /** The compat classes an architecture group covers, inferred from the checkpoints its presets select.
+     * Empty when the group names no resolvable model - callers must treat empty as "don't filter" rather
+     * than "match nothing", or a group of presets that only set a sampler would hide every model. */
+    groupCompatClasses(group) {
+        let classes = new Set();
+        if (!group) {
+            return classes;
+        }
+        for (let preset of this.presets) {
+            if (MState.presetGroup(preset.title) != group || !preset.param_map) {
+                continue;
+            }
+            let compat = this.compatClassOf('Stable-Diffusion', preset.param_map['model']);
+            if (compat) {
+                classes.add(compat);
+            }
+        }
+        return classes;
+    }
+
+    /** Filters a ListModels result down to the selected architecture. Models whose compat class we cannot
+     * determine are kept: unknown is not the same as incompatible, and silently hiding a model the user can
+     * see in the full UI is worse than showing one extra. */
+    filterByArch(models, subtype) {
+        let classes = this.groupCompatClasses(this.archFilter);
+        if (classes.size == 0) {
+            return models;
+        }
+        return models.filter(model => {
+            let compat = this.compatClassOf(subtype, model.name);
+            return !compat || classes.has(compat);
+        });
+    }
+
     /** Active LoRAs as [{name, weight}] from the index-aligned params arrays. */
     getLoras() {
         let names = MState.toList(this.params['loras']);
@@ -361,6 +433,7 @@ class MState {
                 'activePresets': this.activePresets,
                 'seedLocked': this.seedLocked,
                 'customRatio': this.customRatio,
+                'archFilter': this.archFilter,
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
             };
             localStorage.setItem('m_client_state', JSON.stringify(data));
@@ -384,6 +457,7 @@ class MState {
             this.activePresets = data.activePresets || [];
             this.seedLocked = !!data.seedLocked;
             this.customRatio = data.customRatio || 0;
+            this.archFilter = data.archFilter || '';
             this.promptImages = (data.promptImagePaths || []).map(path => ({ 'kind': 'path', 'value': path }));
         }
         catch (e) {
