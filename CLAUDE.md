@@ -228,7 +228,35 @@ Files this fork adds or changes relative to upstream:
 
   Only the flat entry list is built, not the genpage's per-first-character buckets — their "optimize" flag is never set to true upstream, so building them would be pure memory cost.
   Tag colors come free from `site.css`'s `.tag-type-0..9`. Text splicing comes free from `util.js`'s textarea-aware `getTextContent`/`setTextSelRange`.
-  The suggestion strip is a permanent per-box element (`MAutoComplete.slots`, a `box -> strip` map), created once in `enableFor` and never removed — only its contents change per keystroke. It used to be a single shared element, inserted before and removed from whichever box was focused; every appearance or disappearance of a suggestion shifted everything below it (quick params, the LoRA row). `m.css`'s `.m-ac-strip` now carries `min-height: 44px`, matching a populated row, so the reserved space is constant and only the chips inside it change.
+  The suggestion strip is a permanent per-box element (`MAutoComplete.slots`, a `box -> strip` map), created once in `enableFor` and never removed — only its contents change per keystroke. It used to be a single shared element, inserted before and removed from whichever box was focused; every appearance or disappearance of a suggestion shifted everything below it (quick params, the LoRA row). The reserved space is constant and only the chips inside it change.
+- **`/simple` prompting-ergonomics pass** (2026-08). Three moves, all inside the extension, all driven by what the on-screen keyboard covers.
+  - **Generate/Interrupt moved above the prompt box.** `.m-gen-bar` was `position: sticky; bottom: 0` at the foot of the Create panel — which is where the keyboard is. The moment you most want Generate (having just finished typing) was the one moment it was buried. It is now plain in-flow, directly above the prompt, so it rides along with whatever iOS scrolls into view. `margin-top: auto` went with the sticky; the panel stays `display: flex` only so children keep their natural height.
+  - **Autocomplete strip moved below the prompt box, and pins to the top of the keyboard.** The strip now lives in an `.m-ac-slot` wrapper inserted after the box. The wrapper is what holds the 44px of flow space open; the strip itself is what moves. Three things are load-bearing:
+
+    | Decision | Why |
+    |---|---|
+    | Pinning is driven by `mUI.keyboardOpen()`, not by focus | Focus arrives before the keyboard animates in, and on desktop it arrives with no keyboard at all — pinning on focus would fix the strip to the bottom of the window for no reason. `MAutoComplete.updatePin()` re-runs on every visualViewport `resize`/`scroll`. |
+    | A pinned strip is reparented to `document.body` | `.m-panel` carries `-webkit-overflow-scrolling: touch`, which on iOS makes WebKit the containing block for `position: fixed` descendants. Left in the panel it would position against the panel, not the screen. Same trap and same remedy as the `browsers.js`/`ui_improvements.js` popover fix. |
+    | `.m-ac-strip.m-ac-pinned` has no `.m-kb-open` qualifier, and no `transition` | The qualifier would strand a body-parented strip mid-document the instant the class dropped. The transition would restart its tween on every scroll frame — the documented genpage keyboard-lift trailing bug. |
+
+    `--m-kb-inset` (`innerHeight - vv.height - vv.offsetTop`, published by `mUI.initKeyboardWatch`) is the anchor. That formula is correct *here* — it is the gap to the bottom of the visible band, and `position: fixed` coordinates are layout-viewport space. It is the wrong formula for "is a keyboard up", which is why `keyboardOpen()` is a separate measure that does not subtract `offsetTop`. Two questions, two measures.
+    Suggestion chips now `preventDefault` on `mousedown`, so tapping one does not blur the box, dismiss the keyboard, and slide the strip out from under the finger mid-tap.
+  - **Architecture picker** (`mState.archFilter`, `.m-arch-select` at the top of Create). Groups come from the preset title's leading folder segment (`ill/PLATT Pose` → `ill`), which is how the fork owner already organizes presets. Selecting one filters the preset strip and both model pickers.
+    Group → compat class is inferred from the checkpoints the group's presets select, resolved entirely from data already in memory: `ListT2IParams` ships `models` (`subtype -> [[name, classId]]`) and `model_classes` (`classId -> {compat_class}`). No extra request, and it works before the lazy `ListModels` fetch lands.
+    Four guards, each covering a way a filter can lie:
+
+    | Guard | Why |
+    |---|---|
+    | An empty compat-class set means "don't filter" | A group whose presets only set a sampler resolves to nothing, and would otherwise hide every model. |
+    | Models with an unknown compat class are kept | Unknown is not incompatible. Silently omitting a model the user can see in the full UI is the worse failure. |
+    | Active presets always render, filtered out or not | Hiding a chip does not deactivate it — it would keep merging into every generation with nothing left to tap off. |
+    | Each picker gets a "show all" toggle row stating how many are hidden | The inference is a guess about the user's naming, so it needs a visible escape hatch. |
+
+    Hidden entirely below two groups. A stored filter naming a group that no longer exists falls back to "all".
+  - **Prompt-image tiles opt out of the OS long-press.** `-webkit-touch-callout: none` plus `user-select: none` on `.m-image-tile`, and `-webkit-user-drag: none` on its `img`. The long-press that arms a reorder drag is the same gesture iOS uses to start a text selection and raise the image callout menu, so holding a tile highlighted it and popped "Save Image" over the strip. There is no JS fix — `preventDefault` on `touchstart` would also kill the tap.
+    `touch-action` is deliberately **not** set on the tile. `pan-y` would stop the browser stealing the drag, but it would also stop the strip scrolling horizontally from a tile, which is a worse bug than the one being fixed.
+    `wireReorder` also gained a `touchcancel` handler. A touch the system takes away mid-drag never fires `touchend`, which left the tile stuck at `dragging = true` and half-transparent for the rest of the session.
+  - **Not device-verified.** No headless browser driver is available in this environment, and the real risks here are iOS-specific (the containing-block trap, the callout suppression, the keyboard-inset math). Build, format, and JS/CSS syntax pass; nobody has typed into it on a phone.
 - `src/BuiltinExtensions/TagDex/**` — the character/artist tag picker, for booru-trained anime models (Anima, IllustriousXL, NoobAI). **Zero core-file edits.** Full detail in `docs/TagDex-Plan.md`; the essentials:
 
   Inline prompt typeahead (type `miku`, get `hatsune miku, vocaloid`) plus an auto-wired Characters browse tab with facet filters and per-character core-tag chips. Data is the [`Laxhar/noob-wiki`](https://huggingface.co/datasets/Laxhar/noob-wiki) HuggingFace dataset — the same source AnimaDex is built from, but an unauthenticated download rather than a token-gated export. Four datasets, 1.16M rows total, downloaded on demand from inside the app.

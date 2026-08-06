@@ -187,6 +187,11 @@
     margin-top: 0.4rem;
     -webkit-overflow-scrolling: touch;
 }
+/* The long-press that arms a reorder drag is the same gesture the OS uses to start a text selection and to
+   raise the image callout menu ("Save Image", "Copy"). Left alone, holding a tile highlights it and pops a
+   menu over the strip, and the drag is fighting a native selection the whole way. There is no JS fix for
+   this - preventDefault on touchstart would also kill the tap - so the tile opts out of both up front.
+   -webkit-touch-callout is the iOS-only half (the menu); user-select is the half that draws the highlight. */
 .m-image-tile {
     position: relative;
     flex: 0 0 auto;
@@ -197,12 +202,19 @@
     overflow: hidden;
     background: var(--background-panel);
     padding: 0;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 .m-image-tile img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     pointer-events: none;
+    /* Belt and braces: an <img> is natively draggable, which on desktop starts a ghost-image drag and on
+       some Android builds a "copy image" long-press of its own. */
+    -webkit-user-drag: none;
+    user-select: none;
 }
 .m-image-tile.m-dragging {
     opacity: 0.6;
@@ -319,8 +331,8 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* --- Live preview (sticky top of the Create panel; the generate bar is sticky at the bottom, so the
-       params scroll between the two and both stay reachable) --- */
+/* --- Live preview (sticky top of the Create panel, so it stays visible while the params scroll under it.
+       The generate bar is NOT sticky - it rides just above the prompt box instead) --- */
 .m-create-preview {
     position: sticky;
     top: 0;
@@ -431,6 +443,13 @@
 }
 
 /* --- Autocomplete suggestion strip --- */
+/* The slot is the flow element and the strip is what moves. Height is reserved here, unconditionally and
+   whether or not the strip is currently pinned to the keyboard, so that neither typing (chips coming and
+   going) nor the keyboard opening shifts anything below it. */
+.m-ac-slot {
+    min-height: 44px;
+    margin-bottom: 0.2rem;
+}
 .m-ac-strip {
     display: flex;
     gap: 0.3rem;
@@ -438,13 +457,33 @@
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     padding: 0.25rem 0;
-    margin-bottom: 0.2rem;
     scrollbar-width: none;
-    /* Reserved unconditionally, empty or not: this is a permanent element now (see m_autocomplete.js
-       enableFor), and matches a populated row's height (36px chip + this rule's own vertical padding) so
-       nothing below it moves as chips come and go while typing. */
+    /* Matches a populated row's height (36px chip + this rule's own vertical padding). */
     min-height: 44px;
     box-sizing: border-box;
+}
+/* Pinned to the top of the on-screen keyboard. The class is set only while a keyboard is genuinely up and
+   the owning box has focus (m_autocomplete.js updatePin), so it needs no .m-kb-open qualifier - and must not
+   have one, since a pinned strip is reparented to document.body and would be stranded mid-document if the
+   rule stopped applying. --m-kb-inset is the gap between the bottom of the layout viewport and the bottom of
+   the visible band, which is the correct anchor for position:fixed (fixed coordinates are layout-viewport
+   space) - see m_ui.js initKeyboardWatch. Deliberately given no transition: the value is recomputed on every
+   visualViewport scroll frame, and a transition would restart its tween each frame and leave the strip
+   trailing behind the keyboard - the documented genpage keyboard-lift bug. */
+.m-ac-strip.m-ac-pinned {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--m-kb-inset, 0px);
+    z-index: 900;
+    padding: 0.25rem 0.7rem;
+    background: var(--background);
+    border-top: 1px solid var(--border-color);
+}
+/* An empty pinned strip would be a bare bordered bar sitting on the keyboard saying nothing. Safe to hide
+   only in the pinned state, where it is out of flow and hiding it therefore shifts nothing. */
+.m-ac-strip.m-ac-pinned:empty {
+    display: none;
 }
 .m-ac-strip::-webkit-scrollbar {
     display: none;
@@ -483,9 +522,8 @@
 }
 
 /* --- Create panel layout --- */
-/* Flex column purely so the generate bar can take the leftover height with margin-top:auto instead of
-   leaving a dead gap under it on a short page. Children are pinned to their natural height - without
-   flex:0 0 auto the flex default would shrink the prompt box to fit. */
+/* Children are pinned to their natural height - without flex:0 0 auto the flex default would shrink the
+   prompt box to fit. */
 .m-create-panel.m-tab-active {
     display: flex;
     flex-direction: column;
@@ -493,8 +531,26 @@
 .m-create-panel > * {
     flex: 0 0 auto;
 }
-.m-create-panel .m-gen-bar {
-    margin-top: auto;
+/* --- Architecture picker --- */
+.m-arch-row {
+    margin-bottom: 0.4rem;
+}
+.m-arch-select {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 40px;
+    padding: 0 0.4rem;
+}
+/* The "limited to X / show all" escape hatch inside the model and LoRA pickers. */
+.m-arch-note {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-soft);
+    padding: 0.4rem 0.2rem;
+    min-height: 40px;
 }
 .m-picker-row {
     display: flex;
@@ -639,14 +695,13 @@
     padding: 0.2rem;
 }
 
+/* Sits above the prompt box, in normal flow. It used to be sticky to the bottom of the panel, which put it
+   underneath the on-screen keyboard exactly when it was wanted; see the build() comment in m_create.js. */
 .m-gen-bar {
-    position: sticky;
-    bottom: 0;
     display: flex;
     gap: 0.5rem;
     padding: 0.4rem 0;
     background: var(--background);
-    margin-top: 0.5rem;
 }
 .m-generate-button {
     flex: 1;

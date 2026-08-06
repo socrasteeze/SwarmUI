@@ -29,6 +29,12 @@ class MAutoComplete {
         /** box -> its permanent suggestion-strip element (one per enableFor call, never removed - see
          * enableFor for why it has to be permanent rather than inserted/removed per keystroke). */
         this.slots = new Map();
+        /** box -> the in-flow wrapper its strip lives in when it is not pinned to the keyboard. */
+        this.wraps = new Map();
+        /** The box that currently has focus, or null. Only its strip is eligible to be pinned. */
+        this.focusedBox = null;
+        /** Whether the visualViewport listeners behind updatePin have been registered (once, lazily). */
+        this.pinWatchInstalled = false;
         this.registerPrefixes();
     }
 
@@ -321,21 +327,75 @@ class MAutoComplete {
     }
 
     /** Attaches the completer to a textarea. paramId names the mState param the box writes to. Creates one
-     * permanent strip element positioned right above the box, immediately - not lazily on first match - so
-     * it always occupies its reserved height (m.css floors .m-ac-strip's min-height). Suggestions appearing
+     * permanent strip element positioned right BELOW the box, immediately - not lazily on first match - so
+     * it always occupies its reserved height (m.css floors .m-ac-slot's min-height). Suggestions appearing
      * and disappearing as you type used to insert/remove the whole element, which shifted every control
-     * below it (quick params, the LoRA row) on every keystroke; now only the strip's CONTENTS change. */
+     * below it (quick params, the LoRA row) on every keystroke; now only the strip's CONTENTS change.
+     *
+     * The strip lives inside a wrapper rather than sitting in the flow directly. While the keyboard is up
+     * and this box has focus the strip goes position:fixed onto the top of the keyboard (see .m-ac-pinned
+     * in m.css) - the wrapper is what keeps its 44px of flow space reserved when it does, so nothing below
+     * jumps as the keyboard opens and closes. */
     enableFor(box, paramId) {
         box.dataset.mParam = paramId;
+        let slot = mUI.el('div', 'm-ac-slot');
         let strip = mUI.el('div', 'm-ac-strip');
-        box.parentElement.insertBefore(strip, box);
+        slot.appendChild(strip);
+        box.parentElement.insertBefore(slot, box.nextSibling);
         this.slots.set(box, strip);
+        this.wraps.set(box, slot);
         box.addEventListener('input', () => this.onInput(box));
+        box.addEventListener('focus', () => {
+            this.focusedBox = box;
+            this.updatePin();
+        });
         box.addEventListener('blur', () => setTimeout(() => {
             if (document.activeElement != box) {
+                if (this.focusedBox == box) {
+                    this.focusedBox = null;
+                }
+                this.updatePin();
                 this.clearSlot(box);
             }
         }, 200));
+        this.initPinWatch();
+    }
+
+    /** Re-evaluates pinning whenever the keyboard comes or goes. Focus alone is not the trigger: focus
+     * arrives before the keyboard animates in, and on a desktop browser it arrives with no keyboard at all -
+     * pinning on focus there would fix the strip to the bottom of the window for no reason. */
+    initPinWatch() {
+        if (this.pinWatchInstalled || !window.visualViewport) {
+            return;
+        }
+        this.pinWatchInstalled = true;
+        window.visualViewport.addEventListener('resize', () => this.updatePin());
+        window.visualViewport.addEventListener('scroll', () => this.updatePin());
+    }
+
+    /** Pins the focused box's strip to the top of the keyboard, and returns every other strip to its flow
+     * slot. Only ever pins while a keyboard is actually up.
+     *
+     * Reparenting to document.body is load-bearing, not tidiness: .m-panel carries
+     * -webkit-overflow-scrolling: touch, and on iOS that makes WebKit the containing block for
+     * position:fixed descendants. A strip left inside the panel would be positioned against the panel rather
+     * than the screen and land nowhere near the keyboard. Same trap, and same remedy, as the genpage
+     * popovers that had to be rooted at document.body. */
+    updatePin() {
+        let wanted = mUI.keyboardOpen() ? this.focusedBox : null;
+        for (let [box, strip] of this.slots) {
+            let pinned = box == wanted;
+            if (strip.classList.contains('m-ac-pinned') == pinned) {
+                continue;
+            }
+            strip.classList.toggle('m-ac-pinned', pinned);
+            if (pinned) {
+                document.body.appendChild(strip);
+            }
+            else {
+                this.wraps.get(box).appendChild(strip);
+            }
+        }
     }
 
     /** Empties one box's strip (contents only - the reserved space stays). */
@@ -419,6 +479,10 @@ class MAutoComplete {
         if (!clickable) {
             return chip;
         }
+        // Keep the caret (and therefore the keyboard) where it is. Without this the tap moves focus to the
+        // chip, which on iOS dismisses the keyboard - and the keyboard going down is what un-pins the strip,
+        // so the chip would be sliding away underneath the finger at the moment it is being pressed.
+        chip.addEventListener('mousedown', (e) => e.preventDefault());
         chip.addEventListener('click', () => {
             let areaPre = prompt.substring(0, index);
             let areaPost = getTextContent(box).substring(getTextSelRange(box)[0]);
