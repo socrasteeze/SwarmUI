@@ -124,7 +124,7 @@ Permissions: `tagdex_use` (USER) to search and read; `tagdex_manage` (POWERUSERS
 
 1. **Browser pass.** Nothing has been clicked by a human. Type in the prompt box, open the tab, click a card, click a chip, generate a reference image. This is the real outstanding gate — thumbnail generation in particular has only been verified as far as "it compiles, registers, and its dependencies are correct", never actually run against a live backend.
 2. **Batch thumbnail sweep.** One card at a time works; there is no "generate all visible". The server-side queue already serializes correctly, so this is a UI loop plus a cancel affordance.
-3. **`/simple` browse sheet.** Typeahead works; there is no sheet. Mounting one needs a guarded one-line call in `m_create.js`'s `build()`.
+3. **`/simple` browse sheet.** Typeahead works, and More → TagDex datasets now handles downloading, but there is still no sheet for *browsing* characters. Mounting one needs a guarded one-line call in `m_create.js`'s `build()`.
 4. **Multi-word typing.** Typing `hatsune mi` matches on `mi` only and would splice as `hatsune hatsune miku, vocaloid`. This wart is inherited from upstream — its own entries store `low` with underscores while `word` is a single space-delimited token, so upstream cannot match multi-word tags either. Fixing it means wrapping `onInput` or `findLastWordIndex`, both of which would degrade the user's own tag completion. Documented, not fixed. The intended path (`miku` → `hatsune miku, vocaloid`) is unaffected.
 
 ## Coupling watchlist — re-check after every upstream merge
@@ -137,6 +137,9 @@ Permissions: `tagdex_use` (USER) to search and read; `tagdex_manage` (POWERUSERS
 | `browsers.js` `GenPageBrowserClass` ctor (:75), `describe` contract (~413-432) | Unconditional `desc.buttons.filter` and `file.data.src`. Breakage is loud. This file is already fork-modified. |
 | `browsers.js` `refillTree` `/` splitting (~285-332) | The copyright-slug hazard (fact 3). |
 | `browsers.js` `update()` folder-only cache (~246) | Every search/facet change must use `lightRefresh()`, never `update()`, or results go stale within a folder. |
+| `browsers.js` `refresh()` (~198-210) and first-build listener registration (~790-814) | After a download of the *active* dataset, `tagdex_tab.js` calls `refresh()` — `lightRefresh()` would leave a stale folder tree for anyone not at root. The `if (!this.hasGenerated)` block is also why the browser is never reconstructed: its document listeners are never removed. |
+| `permissions.js` `hasPermission` fail-open before load (:53-56), `gather()` at `setTimeout(0)` (:7-9) | The dataset UI gates on `tagdex_manage`. Genpage is safe (session-ready callback); `/simple` must check at sheet-open, never at row build. |
+| `m_ui.js` `registerMoreItem` / `m_app.js` `buildMore` | Fork-owned both sides. If the More tab stops appending `mUI.moreItems`, the `/simple` dataset sheet silently disappears. |
 | `WebServer.cs:345-359` tab discovery | Tab silently disappears. |
 | `WebServer.cs:330` `ScriptFiles` → `ExtensionSharedFiles` | `/simple` stops loading `tagdex_core.js`. |
 | `m_autocomplete.js` `getPossibleList` (~233), `buildChip` (~386) | Fork-owned, so only our own changes can break it. |

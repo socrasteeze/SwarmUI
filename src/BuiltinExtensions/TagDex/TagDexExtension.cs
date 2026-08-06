@@ -37,6 +37,9 @@ public partial class TagDexExtension : Extension
         // The /simple hook goes in OtherAssets, not ScriptFiles: ScriptFiles injects on every Razor page, where
         // MAutoComplete does not exist. It is loaded explicitly by MobileEnhancements' Assets/m/index.html.
         OtherAssets.Add("Assets/m_tagdex.js");
+        // Same reasoning for the stylesheet: StyleSheetFiles would inject it into every Razor page, and it is only
+        // ever wanted on /simple.
+        OtherAssets.Add("Assets/m_tagdex.css");
         TagDexData.Init();
         API.RegisterAPICall(TagDexListSources, false, PermUseTagDex);
         API.RegisterAPICall(TagDexSearchEntries, false, PermUseTagDex);

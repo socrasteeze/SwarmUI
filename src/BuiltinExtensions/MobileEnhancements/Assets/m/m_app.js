@@ -78,6 +78,12 @@ class MApp {
             });
         });
         list.appendChild(clear);
+        for (let i = 0; i < mUI.moreItems.length; i++) {
+            let entry = mUI.moreItems[i];
+            let item = mUI.el('button', 'm-more-item', entry.label);
+            item.addEventListener('click', () => entry.onClick());
+            list.appendChild(item);
+        }
         panel.appendChild(list);
     }
 }

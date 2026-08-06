@@ -6,6 +6,8 @@ class MUI {
         this.tabs = {};
         /** Whether each tab has been built yet (lazy build on first show). */
         this.built = {};
+        /** Extra More-tab rows contributed by other extensions: [{label, onClick}]. */
+        this.moreItems = [];
     }
 
     /** Creates an element with a class and optional text. */
@@ -86,6 +88,13 @@ class MUI {
     /** Registers a tab: build(panel) runs once lazily, onShow(panel) runs every activation. */
     registerTab(name, build, onShow) {
         this.tabs[name] = { 'build': build, 'onShow': onShow };
+    }
+
+    /** Registers one extra row at the bottom of the More tab, so another extension can add an entry without
+     * editing m_app.js. Call at script load: the More tab builds lazily on first activation, and every script
+     * that could register runs before m_app.js, which is loaded last. */
+    registerMoreItem(label, onClick) {
+        this.moreItems.push({ 'label': label, 'onClick': onClick });
     }
 
     /** Wires the router and bottom nav. Call once after all tabs are registered. */

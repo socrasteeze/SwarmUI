@@ -18,6 +18,10 @@
     <link rel="stylesheet" href="/css/themes/modern.css?vary=[VARY]" />
     <link rel="stylesheet" href="/css/themes/modern_dark.css?vary=[VARY]" />
     <link rel="stylesheet" href="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m.css?vary=[VARY]" />
+    <!-- TagDex dataset sheet styling. Loaded by explicit URL for the same reason as its two scripts below: /simple
+         builds its own asset list rather than using WebServer.PageHeaderExtra, so another extension has no
+         injection hook here. Must come after m.css, whose conventions it layers on. -->
+    <link rel="stylesheet" href="/ExtensionFile/TagDexExtension/Assets/m_tagdex.css?vary=[VARY]" />
     <script>window.parameter_remaps = [REMAPS];</script>
     <script defer src="/js/lib/jquery.min.js"></script>
     <script defer src="/js/lib/bootstrap.min.js"></script>

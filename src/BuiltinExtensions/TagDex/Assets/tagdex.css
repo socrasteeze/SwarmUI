@@ -126,9 +126,12 @@
     background: var(--button-background-press);
 }
 
-/* Empty state / download panel. */
+/* Empty state / download panel. Shrink-to-content rather than grow: the manage drawer is a sibling that follows
+   this block, and a growing empty state would push it to the bottom of the tab with a gap under the prose that
+   explains it. min-height 0 is what lets overflow-y actually scroll it on a short viewport. */
 .tagdex-empty {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    min-height: 0;
     overflow-y: auto;
     padding: 1rem;
 }
@@ -150,11 +153,14 @@
     border-radius: 0.2rem;
 }
 
+/* Matches .tagdex-empty-inner's column so the rows stay aligned with the prose above them in the no-data state,
+   and do not stretch across an ultrawide monitor when the drawer is opened over results. */
 .tagdex-download-list {
-    margin-top: 1rem;
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
+    max-width: 40rem;
+    margin: 0 auto;
 }
 
 .tagdex-download-row {
@@ -176,6 +182,26 @@
     flex: 1 1 12rem;
     font-size: 0.85rem;
     color: var(--text-soft);
+}
+
+/* Dataset manage drawer. Reachable from the control row at any time, so a second dataset can still be added after
+   the first one is installed. The height cap matters: .tagdex-browser is flex 1 1 auto with min-height 0, so an
+   uncapped drawer could squeeze the results area down to nothing. */
+.tagdex-manage {
+    flex: 0 0 auto;
+    max-height: 40vh;
+    overflow-y: auto;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--shadow);
+}
+
+.tagdex-manage-count {
+    margin-left: 0.35rem;
+    color: var(--text-soft);
+}
+
+.tagdex-button-active {
+    background: var(--button-background-press);
 }
 
 /* Mobile. The 16px search field is deliberate - anything smaller triggers iOS focus zoom. */

@@ -62,7 +62,7 @@ class MTagDexClass {
         mAutoComplete.registerPrefix('character', 'Booru character or artist trigger', (prefix) => {
             tagDexCore.ensureLoaded();
             if (tagDexCore.status != 'ready') {
-                return ['\nCharacter data not downloaded yet.'];
+                return ['\nNo character data yet - get it from More > TagDex datasets.'];
             }
             if (!prefix || prefix.length < 2) {
                 return ['\nType at least two characters.'];
@@ -86,7 +86,183 @@ class MTagDexClass {
         });
         mAutoComplete.registerAltPrefix('char', 'character');
     }
+
+    /** Adds the dataset row to the More tab. Separate from install(): that one bails when MAutoComplete is absent,
+     * and the datasets sheet is worth having either way. */
+    installMoreItem() {
+        if (typeof mUI == 'undefined' || !mUI.registerMoreItem) {
+            return;
+        }
+        mUI.registerMoreItem('TagDex datasets', () => this.openDatasetSheet());
+    }
+
+    /** The dataset download/manage sheet. Without it /simple is a dead end - the `<character:` handler can only
+     * report that there is no data, with no way to act on it.
+     *
+     * One download at a time, deliberately. The genpage drawer preserves in-flight rows across a list rebuild;
+     * here the simpler rule is to disable every action while one runs, which makes that whole class of stranded-
+     * row bug unreachable. Two large CSVs at once over cellular is not a phone use case worth the machinery. */
+    openDatasetSheet() {
+        let content = mUI.el('div', 'm-tagdex-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'TagDex datasets'));
+        let results = mUI.el('div', 'm-tagdex-results');
+        content.appendChild(results);
+        // Checked at sheet-open rather than at page boot: permissions.hasPermission() fails OPEN before the
+        // session lands, and a deep link to #more can build that tab before GetNewSession returns. By the time
+        // someone has tapped through to here, the session is up. The list itself needs only tagdex_use, so it
+        // renders for everyone and only the action buttons are withheld.
+        // One shared mutable context rather than snapshot parameters. `busy` has to be read live at click time: a
+        // render-time copy would leave every other row's button still believing nothing was running.
+        let ctx = {
+            'sources': null,
+            'busy': false,
+            'canManage': typeof permissions == 'undefined' || !permissions.hasPermission || permissions.hasPermission('tagdex_manage')
+        };
+        ctx.render = () => {
+            results.innerHTML = '';
+            if (!ctx.sources) {
+                results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
+                return;
+            }
+            for (let i = 0; i < ctx.sources.length; i++) {
+                let source = ctx.sources[i];
+                if (!source.downloadable && !source.present) {
+                    // A locally supplied dataset that was never dropped in has nothing to show and nothing to do.
+                    continue;
+                }
+                results.appendChild(this.buildDatasetRow(ctx, source));
+            }
+            if (!ctx.canManage) {
+                results.appendChild(mUI.el('div', 'm-list-count', 'Downloading needs the TagDex manage permission.'));
+            }
+        };
+        ctx.refresh = () => {
+            ctx.busy = false;
+            this.fetchSources(fresh => {
+                ctx.sources = fresh;
+                ctx.render();
+            });
+        };
+        let close = mUI.openSheet(content);
+        ctx.render();
+        ctx.refresh();
+        return close;
+    }
+
+    /** Fetches the dataset list. Needs only tagdex_use, so it works for every account. */
+    fetchSources(callback) {
+        genericRequest('TagDexListSources', {}, data => {
+            callback(data.sources || []);
+        }, 0, error => {
+            mUI.warn(`Could not list datasets: ${error}`);
+            callback([]);
+        });
+    }
+
+    /** Builds one dataset row for the sheet. */
+    buildDatasetRow(ctx, source) {
+        let row = mUI.el('div', 'm-tagdex-row');
+        let info = mUI.el('div', 'm-tagdex-info');
+        info.appendChild(mUI.el('div', 'm-tagdex-name', source.label));
+        let status = mUI.el('div', 'm-tagdex-status', this.statusFor(source));
+        info.appendChild(status);
+        row.appendChild(info);
+        if (!ctx.canManage) {
+            return row;
+        }
+        let actions = mUI.el('div', 'm-tagdex-actions');
+        if (source.downloadable) {
+            let download = mUI.el('button', 'm-tagdex-action', source.present ? 'Re-download' : 'Download');
+            download.disabled = ctx.busy;
+            download.addEventListener('click', () => {
+                if (ctx.busy) {
+                    // The disabled attribute is only a render-time snapshot, so say why rather than no-op.
+                    mUI.warn('Another dataset operation is already running.');
+                    return;
+                }
+                ctx.busy = true;
+                download.disabled = true;
+                status.textContent = 'Starting...';
+                makeWSRequest('TagDexDownloadSource', { 'source': source.id }, data => {
+                    if (data.status == 'downloading') {
+                        let percent = Math.round((data.current_percent || 0) * 100);
+                        let mb = Math.round((data.downloaded || 0) / (1024 * 1024));
+                        let totalMb = Math.round((data.total || 0) / (1024 * 1024));
+                        status.textContent = `Downloading ${percent}% (${mb} / ${totalMb} MB)`;
+                    }
+                    else if (data.status == 'parsing') {
+                        status.textContent = 'Parsing...';
+                    }
+                    else if (data.success) {
+                        // The index the typeahead already fetched is now stale.
+                        tagDexCore.status = 'unloaded';
+                        tagDexCore.shards = [];
+                        mUI.note(`${source.label}: ${data.rows.toLocaleString()} rows ready.`);
+                        ctx.refresh();
+                    }
+                }, 0, error => {
+                    // An errorHandle replaces makeWSRequest's own showError path, so this owes the user a visible
+                    // failure - otherwise a rejected download looks exactly like a dead button.
+                    status.textContent = 'Failed.';
+                    mUI.warn(`${source.label}: ${error}`);
+                    ctx.busy = false;
+                    download.disabled = false;
+                });
+            });
+            actions.appendChild(download);
+        }
+        if (source.present) {
+            actions.appendChild(this.buildActionButton(ctx, source, 'Reload', 'TagDexReloadSource', true));
+        }
+        if (source.loaded) {
+            actions.appendChild(this.buildActionButton(ctx, source, 'Unload', 'TagDexUnloadSource', false));
+        }
+        row.appendChild(actions);
+        return row;
+    }
+
+    /** Builds a Reload or Unload button. `dataChanged` clears the typeahead's cached index, which a reload needs
+     * (the file may have been edited) and an unload must not do - refetching would pull the dataset straight back
+     * into memory and free nothing. */
+    buildActionButton(ctx, source, label, route, dataChanged) {
+        let button = mUI.el('button', 'm-tagdex-action', label);
+        button.disabled = ctx.busy;
+        button.addEventListener('click', () => {
+            if (ctx.busy) {
+                mUI.warn('Another dataset operation is already running.');
+                return;
+            }
+            ctx.busy = true;
+            button.disabled = true;
+            genericRequest(route, { 'source': source.id }, data => {
+                if (dataChanged) {
+                    tagDexCore.status = 'unloaded';
+                    tagDexCore.shards = [];
+                }
+                mUI.note(`${source.label}: ${label.toLowerCase()}ed.`);
+                ctx.refresh();
+            }, 0, error => {
+                mUI.warn(`${source.label}: ${error}`);
+                ctx.busy = false;
+                button.disabled = false;
+            });
+        });
+        return button;
+    }
+
+    /** One-line state description for a dataset. */
+    statusFor(source) {
+        if (!source.present) {
+            return 'Not downloaded';
+        }
+        if (!source.loaded) {
+            return source.downloadable ? 'Installed, not in memory' : 'Supplied locally, not in memory';
+        }
+        let prefix = source.downloadable ? 'Installed' : 'Supplied locally';
+        return `${prefix} - ${source.rows.toLocaleString()} of ${source.total_rows.toLocaleString()} rows`;
+    }
 }
 
 mTagDex = new MTagDexClass();
 mTagDex.install();
+mTagDex.installMoreItem();
