@@ -1,0 +1,54 @@
+/* TagDex - dataset sheet styling for the /simple standalone client.
+   A separate sheet from tagdex.css on purpose: that one is written against genpage classes and `basic-button`, is
+   not mobile-sized, and is injected into Razor pages only. This file is loaded explicitly by Assets/m/index.html
+   alongside the two TagDex scripts, and follows m.css's conventions - class selectors only, theme variables for
+   every color, 44px touch targets, and no !important. */
+
+.m-tagdex-sheet {
+    padding-bottom: 0.4rem;
+}
+
+.m-tagdex-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 0.2rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+}
+
+/* Full-width so the actions always wrap onto their own line: dataset labels are long enough that sharing a row
+   with three buttons would squeeze both. */
+.m-tagdex-info {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+.m-tagdex-name {
+    font-weight: bold;
+}
+
+.m-tagdex-status {
+    font-size: 12px;
+    color: var(--text-soft);
+}
+
+.m-tagdex-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.m-tagdex-action {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.3rem 0.8rem;
+    min-height: 44px;
+    font-size: 14px;
+}
+
+.m-tagdex-action:disabled {
+    opacity: 0.5;
+}

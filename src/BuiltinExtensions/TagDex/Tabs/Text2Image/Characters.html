@@ -1,11 +1,11 @@
 <div class="tagdex-root">
     <div class="tagdex-controls">
         <div class="tagdex-row">
-            <select id="tagdex_source" class="tagdex-select auto-dropdown" title="Which dataset to browse"></select>
-            <div class="tagdex-search-wrap">
+            <select id="tagdex_source" class="tagdex-select auto-dropdown tagdex-data-control" title="Which dataset to browse"></select>
+            <div class="tagdex-search-wrap tagdex-data-control">
                 <input type="text" id="tagdex_search" class="tagdex-search" placeholder="Search characters..." autocomplete="off" />
             </div>
-            <select id="tagdex_sort" class="tagdex-select auto-dropdown" title="Sort order">
+            <select id="tagdex_sort" class="tagdex-select auto-dropdown tagdex-data-control" title="Sort order">
                 <option value="relevance">Best match</option>
                 <option value="count">Most posts</option>
                 <option value="solo_count">Most solo posts</option>
@@ -13,9 +13,10 @@
                 <option value="avg_score" class="tagdex-scored-sort">Highest quality score</option>
                 <option value="name">Name A-Z</option>
             </select>
-            <button id="tagdex_refresh" class="basic-button tagdex-button" title="Reload results">&#x21bb;</button>
+            <button id="tagdex_refresh" class="basic-button tagdex-button tagdex-data-control" title="Reload results">&#x21bb;</button>
+            <button id="tagdex_manage_toggle" class="basic-button tagdex-button" title="Download or manage tag datasets" data-requiredpermission="tagdex_manage"><span class="translate">Datasets</span><span class="tagdex-manage-count" id="tagdex_manage_count"></span></button>
         </div>
-        <div class="tagdex-row tagdex-facet-row" id="tagdex_facets"></div>
+        <div class="tagdex-row tagdex-facet-row tagdex-data-control" id="tagdex_facets"></div>
         <div class="tagdex-status" id="tagdex_status"></div>
     </div>
     <div class="tagdex-empty" id="tagdex_empty" style="display:none;">
@@ -23,16 +24,19 @@
             <h3 class="translate">No character data yet</h3>
             <p>
                 This picker reads the booru tag vocabulary that Anima, IllustriousXL and NoobAI were trained on.
-                Download a dataset to start: 244,932 characters and 419,789 artists, from the
+                Pick a dataset below to download: 244,932 characters and 419,789 artists, from the
                 <a href="https://huggingface.co/datasets/Laxhar/noob-wiki" target="_blank" rel="noopener">Laxhar/noob-wiki</a>
                 dataset on HuggingFace.
             </p>
             <p class="tagdex-empty-note">
-                Nothing is downloaded until you click. You can also drop your own CSV into
+                Nothing is downloaded until you click, and you can reopen this list any time with the Datasets
+                button above. You can also drop your own CSV into
                 <code class="tagdex-code">Data/TagDex/</code> using the same column names.
             </p>
-            <div class="tagdex-download-list" id="tagdex_download_list"></div>
         </div>
+    </div>
+    <div class="tagdex-manage" id="tagdex_manage" style="display:none;">
+        <div class="tagdex-download-list" id="tagdex_download_list"></div>
     </div>
     <div class="browser_container tagdex-browser" id="tagdex_browser_container"></div>
 </div>

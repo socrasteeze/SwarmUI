@@ -34,6 +34,10 @@ class TagDexTabClass {
         this.pageSize = 100;
         /** In-flight download source IDs. */
         this.downloading = {};
+        /** Live download row elements, keyed by source ID, so a running download's row survives a list rebuild. */
+        this.downloadRows = {};
+        /** Whether the dataset manage drawer is open. */
+        this.manageOpen = false;
         /** Whether a reference-image generation is currently running. The server serializes these anyway; this just
          * keeps the UI from queueing a pile of them behind one click each. */
         this.generatingThumb = false;
@@ -59,8 +63,11 @@ class TagDexTabClass {
         });
     }
 
-    /** Fetches the dataset list and decides between the empty state and the browser. */
-    loadSources(callback) {
+    /** Fetches the dataset list and decides between the empty state and the browser.
+     * `reloadFacets` false skips the facet round trip when the caller knows the active dataset's contents did not
+     * change. A switch of the active dataset reloads them regardless of the flag - this method can change
+     * this.source itself, which no caller can predict. */
+    loadSources(callback = null, reloadFacets = true) {
         genericRequest('TagDexListSources', {}, data => {
             this.sources = data.sources;
             if (data.prefs) {
@@ -83,32 +90,71 @@ class TagDexTabClass {
             let hasData = present.length > 0;
             getRequiredElementById('tagdex_empty').style.display = hasData ? 'none' : 'block';
             getRequiredElementById('tagdex_browser_container').style.display = hasData ? '' : 'none';
-            getRequiredElementById('tagdex_source').parentElement.style.display = hasData ? '' : 'none';
+            // Hide the per-dataset query controls one at a time rather than hiding the row they sit in: the row
+            // also carries the Datasets button, which has to stay reachable when there is nothing to query yet.
+            // Restore with '' and never a literal - the class spans a select (inline-block), a div (block), and
+            // the facet row (flex).
+            let dataControls = document.querySelectorAll('.tagdex-data-control');
+            for (let i = 0; i < dataControls.length; i++) {
+                dataControls[i].style.display = hasData ? '' : 'none';
+            }
             this.buildDownloadList();
             if (!hasData) {
+                this.setManageOpen(true);
                 return;
             }
+            let previousSource = this.source;
             if (!present.some(s => s.id == this.source)) {
                 this.source = present[0].id;
             }
             sourceSelect.value = this.source;
             this.syncSortOptions();
-            this.loadFacets();
+            if (reloadFacets || previousSource != this.source) {
+                this.loadFacets();
+            }
+            if (previousSource != this.source) {
+                // A live browser is still showing the old dataset's results, and ensureBrowser() no-ops once one
+                // exists, so the caller's callback cannot cover this.
+                this.requery();
+            }
             if (callback) {
                 callback();
             }
         });
     }
 
-    /** Renders the per-dataset download rows in the empty state. */
+    /** Renders the per-dataset rows in the manage drawer, and updates the toggle button's installed count. */
     buildDownloadList() {
         let container = getRequiredElementById('tagdex_download_list');
         container.innerHTML = '';
         if (!this.sources) {
             return;
         }
+        let downloadable = 0;
+        let installed = 0;
+        // The toggle carries data-requiredpermission, but the drawer force-opens itself when there is no data at
+        // all, so a user without the permission would still be shown buttons that can only fail with an opaque
+        // websocket error. init() runs from sessionReadyCallbacks, so permissions have loaded and this cannot
+        // fail open the way it would at page boot.
+        let canManage = typeof permissions == 'undefined' || !permissions.hasPermission || permissions.hasPermission('tagdex_manage');
         for (let i = 0; i < this.sources.length; i++) {
             let source = this.sources[i];
+            if (source.downloadable) {
+                // Tallied here rather than in a separate pass so the badge can never disagree with the rows on
+                // screen: absent local datasets are skipped below, so counting all of this.sources would overstate.
+                downloadable++;
+                if (source.present) {
+                    installed++;
+                }
+            }
+            if (this.downloading[source.id] && this.downloadRows[source.id]) {
+                // startDownload's progress callback holds this row's own button and status nodes. Building a fresh
+                // pair would leave the running download writing into a detached element, while the new button
+                // looked live but silently no-opped on the this.downloading guard. innerHTML = '' orphans children
+                // without destroying them or their listeners, so re-appending restores the row intact.
+                container.appendChild(this.downloadRows[source.id]);
+                continue;
+            }
             if (!source.downloadable) {
                 // Locally supplied datasets (the anima-styles export) have nothing to fetch. Listing them with a
                 // dead Download button would read as broken.
@@ -124,6 +170,9 @@ class TagDexTabClass {
                 localStatus.className = 'tagdex-download-status';
                 localStatus.innerText = `Supplied locally - ${source.rows.toLocaleString()} of ${source.total_rows.toLocaleString()} entries loaded`;
                 localRow.appendChild(localLabel);
+                if (canManage) {
+                    this.addManageButtons(localRow, source);
+                }
                 localRow.appendChild(localStatus);
                 container.appendChild(localRow);
                 continue;
@@ -137,14 +186,100 @@ class TagDexTabClass {
             status.className = 'tagdex-download-status';
             status.id = `tagdex_dl_status_${source.id}`;
             status.innerText = source.present ? `Installed - ${source.rows.toLocaleString()} of ${source.total_rows.toLocaleString()} rows loaded` : '';
-            let button = document.createElement('button');
-            button.className = 'basic-button tagdex-button';
-            button.innerText = source.present ? 'Re-download' : 'Download';
-            button.addEventListener('click', () => this.startDownload(source.id, button, status));
             row.appendChild(label);
-            row.appendChild(button);
+            if (canManage) {
+                let button = document.createElement('button');
+                button.className = 'basic-button tagdex-button';
+                button.innerText = source.present ? 'Re-download' : 'Download';
+                button.addEventListener('click', () => this.startDownload(source.id, button, status));
+                row.appendChild(button);
+                this.addManageButtons(row, source);
+            }
             row.appendChild(status);
             container.appendChild(row);
+            this.downloadRows[source.id] = row;
+        }
+        if (!canManage) {
+            let note = document.createElement('div');
+            note.className = 'tagdex-download-status';
+            note.innerText = 'Downloading tag data needs the TagDex manage permission.';
+            container.appendChild(note);
+        }
+        getRequiredElementById('tagdex_manage_count').innerText = downloadable > 0 ? `${installed}/${downloadable}` : '';
+    }
+
+    /** Adds the Reload and Unload buttons to one dataset row. Both routes are tagdex_manage-gated server-side, and
+     * the drawer these live in only opens from a toggle carrying the same permission. */
+    addManageButtons(row, source) {
+        if (source.present) {
+            let reload = document.createElement('button');
+            reload.className = 'basic-button tagdex-button';
+            reload.innerText = 'Reload';
+            reload.title = 'Re-parse this dataset from disk, picking up an edited file.';
+            reload.addEventListener('click', () => {
+                reload.disabled = true;
+                genericRequest('TagDexReloadSource', { source: source.id }, data => {
+                    this.afterManageAction(source.id, true);
+                }, 0, error => {
+                    // A custom error handler replaces genericRequest's own showError path, so it owes the user a
+                    // visible failure and a button that is usable again.
+                    showError(error);
+                    reload.disabled = false;
+                });
+            });
+            row.appendChild(reload);
+        }
+        if (source.loaded) {
+            let unload = document.createElement('button');
+            unload.className = 'basic-button tagdex-button';
+            unload.innerText = 'Unload';
+            unload.title = 'Drop this dataset from memory. Searching it loads it again automatically.';
+            unload.addEventListener('click', () => {
+                unload.disabled = true;
+                genericRequest('TagDexUnloadSource', { source: source.id }, data => {
+                    this.afterManageAction(source.id, false);
+                }, 0, error => {
+                    showError(error);
+                    unload.disabled = false;
+                });
+            });
+            row.appendChild(unload);
+        }
+    }
+
+    /** Refreshes the drawer after a reload or unload.
+     * `dataChanged` separates the two cases, and the distinction is load-bearing. A reload re-parses a possibly
+     * edited file, so both the typeahead's cached index and the on-screen results are stale. An unload changes
+     * nothing on disk, so both are still accurate - and refreshing the results would be actively wrong, because
+     * TagDexSearchEntries routes through EnsureLoaded and would pull the dataset straight back into memory,
+     * freeing nothing. Unloading the active dataset is still safe for the same reason: the next query reloads it. */
+    afterManageAction(sourceId, dataChanged) {
+        let wasActive = sourceId == this.source;
+        if (dataChanged) {
+            tagDexCore.status = 'unloaded';
+            tagDexCore.shards = [];
+        }
+        this.loadSources(() => {
+            if (this.browser && wasActive && dataChanged) {
+                this.browser.refresh();
+            }
+        }, wasActive && dataChanged);
+    }
+
+    /** Shows or hides the dataset manage drawer. */
+    setManageOpen(open) {
+        this.manageOpen = open;
+        getRequiredElementById('tagdex_manage').style.display = open ? '' : 'none';
+        getRequiredElementById('tagdex_manage_toggle').classList.toggle('tagdex-button-active', open);
+    }
+
+    /** Toggle-button handler. Opening re-checks the dataset list, so a CSV dropped into Data/TagDex/ by hand shows
+     * up without a page reload. Deliberately not folded into setManageOpen: loadSources force-opens the drawer
+     * whenever there is no data, so refreshing from inside the setter would recurse forever. */
+    onManageToggle() {
+        this.setManageOpen(!this.manageOpen);
+        if (this.manageOpen) {
+            this.loadSources(null, false);
         }
     }
 
@@ -173,8 +308,24 @@ class TagDexTabClass {
                 // The index the typeahead already fetched is now stale.
                 tagDexCore.status = 'unloaded';
                 tagDexCore.shards = [];
-                this.browser = null;
-                this.loadSources(() => this.ensureBrowser());
+                // Only the downloaded dataset changed server-side - TagDexDownloadSource unloads and reloads that
+                // one ID alone - so the browser's view is stale only when it is showing that same dataset.
+                // Rebuilding it unconditionally threw away the user's folder, scroll position and search, and
+                // leaked a document mousemove/mouseup pair plus a layoutResets entry every time: browsers.js
+                // registers those under `if (!this.hasGenerated)` on first build and never removes them.
+                let wasActive = sourceId == this.source;
+                this.loadSources(() => {
+                    if (!this.browser) {
+                        // Required, not defensive: on a fresh install loadSources returns early while there is no
+                        // data, so the first download is the case that still has to construct the browser.
+                        this.ensureBrowser();
+                    }
+                    else if (wasActive) {
+                        // Full refresh, not lightRefresh: listEntries only sends withFolders at root, so a user
+                        // inside a folder would otherwise keep a tree built from the pre-download data.
+                        this.browser.refresh();
+                    }
+                }, wasActive);
             }
         }, 0, error => {
             status.innerText = `Failed: ${error}`;
@@ -209,6 +360,7 @@ class TagDexTabClass {
             this.requery();
         });
         getRequiredElementById('tagdex_refresh').addEventListener('click', () => this.requery());
+        getRequiredElementById('tagdex_manage_toggle').addEventListener('click', () => this.onManageToggle());
         // One delegated listener on the container, whose identity is stable across browser rebuilds (build() only
         // clears innerHTML). Avoids inline onclick, which would need escaping for names like "jeanne_d'arc".
         getRequiredElementById('tagdex_browser_container').addEventListener('click', event => {
