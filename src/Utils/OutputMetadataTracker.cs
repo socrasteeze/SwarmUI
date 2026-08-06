@@ -415,9 +415,19 @@ public static class OutputMetadataTracker
                 }
                 else
                 {
-                    JObject jData = fileData.ParseToJson();
-                    jData["is_starred"] = true;
-                    fileData = jData.ToString();
+                    // Only Swarm's own images carry JSON here. An A1111-style PNG puts a plain-text 'parameters'
+                    // chunk in the same slot, so this is not always parseable, and an unguarded parse threw once
+                    // per starred foreign image on every folder scan - logging a warning and, worse, discarding
+                    // that file's metadata entirely via the catch below. Non-JSON metadata is now passed through
+                    // untouched, which is already exactly what happens to the same file when it is not starred.
+                    // Text that does look like JSON but fails to parse still warns: that one is a real problem.
+                    string trimmed = fileData.TrimStart();
+                    if (trimmed.StartsWith('{'))
+                    {
+                        JObject jData = fileData.ParseToJson();
+                        jData["is_starred"] = true;
+                        fileData = jData.ToString();
+                    }
                 }
             }
         }
