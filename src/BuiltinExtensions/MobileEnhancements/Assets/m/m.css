@@ -505,6 +505,12 @@
 .m-ac-chip.tag-text {
     color: var(--tag-color, var(--text));
 }
+/* The chip Enter/Tab will take. Border only, no fill: a filled chip reads as "already applied", which is the
+   one thing this must not be confused with. */
+.m-ac-chip.m-ac-sel {
+    border-color: var(--emphasis);
+    box-shadow: inset 0 0 0 1px var(--emphasis);
+}
 .m-ac-chip-label {
     overflow: hidden;
     text-overflow: ellipsis;
