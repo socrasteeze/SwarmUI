@@ -168,6 +168,12 @@ class MUI {
             }
         }, { passive: true });
         grip.addEventListener('touchend', (e) => {
+            // A touch that ended on the grip without having started there leaves startY at -1, which made
+            // `clientY - startY` a large positive number and dismissed the sheet on a gesture the grip never
+            // saw the beginning of.
+            if (startY == -1) {
+                return;
+            }
             let delta = e.changedTouches.item(0).clientY - startY;
             sheet.style.transform = '';
             startY = -1;
