@@ -315,32 +315,64 @@ class MCreate {
         this.render();
     }
 
-    /** Generate on tap; long-press (600ms) opens the grid form. */
+    /** How far a finger may travel and still count as a tap rather than a scroll, in CSS pixels. */
+    static TapSlopPx = 10;
+
+    /** Generate on tap; long-press (600ms) opens the grid form.
+     *
+     * The finger's travel is tracked, not just the fact that it moved. Previously any touchmove cleared the
+     * long-press timer but recorded nothing, so touchend still fired a generation - meaning a scroll that
+     * merely STARTED on the button queued a batch on release. Moving the generate bar up next to the prompt
+     * put a full-width target in the middle of the scroll area and made that misfire easy to hit.
+     * The slop also stops sub-pixel jitter from cancelling a deliberate long-press, which previously made the
+     * grid sheet a coin flip to open. */
     wireGenerateButton() {
         let holdTimer = null;
         let held = false;
-        let start = () => {
-            held = false;
-            holdTimer = setTimeout(() => {
-                held = true;
-                this.openGridSheet();
-            }, 600);
-        };
-        let cancel = () => {
+        let moved = false;
+        let startX = 0;
+        let startY = 0;
+        let cancelHold = () => {
             if (holdTimer) {
                 clearTimeout(holdTimer);
                 holdTimer = null;
             }
         };
-        this.genButton.addEventListener('touchstart', start, { passive: true });
+        this.genButton.addEventListener('touchstart', (e) => {
+            held = false;
+            moved = false;
+            let touch = e.touches.item(0);
+            startX = touch ? touch.clientX : 0;
+            startY = touch ? touch.clientY : 0;
+            cancelHold();
+            holdTimer = setTimeout(() => {
+                held = true;
+                this.openGridSheet();
+            }, 600);
+        }, { passive: true });
+        this.genButton.addEventListener('touchmove', (e) => {
+            let touch = e.touches.item(0);
+            if (!touch) {
+                return;
+            }
+            if (Math.abs(touch.clientX - startX) > MCreate.TapSlopPx || Math.abs(touch.clientY - startY) > MCreate.TapSlopPx) {
+                moved = true;
+                cancelHold();
+            }
+        }, { passive: true });
         this.genButton.addEventListener('touchend', (e) => {
-            cancel();
-            if (!held) {
+            cancelHold();
+            if (!held && !moved) {
                 e.preventDefault();
                 this.doGenerate();
             }
         });
-        this.genButton.addEventListener('touchmove', cancel, { passive: true });
+        // A touch the system takes away is never a tap. Without this the flags keep their last values and a
+        // later stray touchend could still generate.
+        this.genButton.addEventListener('touchcancel', () => {
+            cancelHold();
+            moved = true;
+        });
         this.genButton.addEventListener('contextmenu', (e) => e.preventDefault());
         this.genButton.addEventListener('click', (e) => {
             if (e.detail > 0 && !('ontouchstart' in window)) {
@@ -486,7 +518,9 @@ class MCreate {
             this.modelButton.textContent = 'Model: default';
             return;
         }
-        if (manual && effective != manual) {
+        // Normalised, because a preset stores 'qwen/Foo' where the picker stores 'qwen/Foo.safetensors'.
+        // Compared raw, picking the very model a preset already sets would report it as an override.
+        if (manual && MState.stripModelExt(effective) != MState.stripModelExt(manual)) {
             this.modelButton.textContent = `${mUI.modelName(effective)} (preset overrides your pick)`;
             this.modelButton.classList.add('m-overridden');
             return;

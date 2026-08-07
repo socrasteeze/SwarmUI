@@ -355,6 +355,15 @@ class MState {
         return [...groups].sort((a, b) => a.localeCompare(b));
     }
 
+    /** A model name with its file extension removed, folders kept. The two sources of model names disagree:
+     * ListT2IParams and ListModels report 'qwen/Foo.safetensors', while a preset's param_map stores
+     * 'qwen/Foo'. Comparing them raw silently fails to match, which is what made the architecture filter
+     * resolve every preset group to zero compat classes and therefore filter nothing at all. Anything
+     * comparing a preset's model against a listed model must normalise both sides through this. */
+    static stripModelExt(name) {
+        return `${name || ''}`.replace(/\.(safetensors|ckpt|sft|gguf|engine|pt|bin)$/i, '');
+    }
+
     /** The compat class of one model, via the class id that ListT2IParams already shipped alongside it.
      * Null when the model is unknown or its class declares no compat class. Uses no extra request: both
      * `models` and `modelClasses` are loaded once at boot. */
@@ -362,8 +371,9 @@ class MState {
         if (!modelName) {
             return null;
         }
+        let wanted = MState.stripModelExt(modelName);
         for (let entry of (this.models[subtype] || [])) {
-            if (entry[0] == modelName) {
+            if (MState.stripModelExt(entry[0]) == wanted) {
                 let clazz = this.modelClasses[entry[1]];
                 return clazz && clazz.compat_class ? clazz.compat_class : null;
             }
