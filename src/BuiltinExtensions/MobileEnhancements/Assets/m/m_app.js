@@ -70,6 +70,18 @@ class MApp {
             renderHaptics();
         });
         list.appendChild(haptics);
+        // Off by default, and that default is load-bearing rather than timid - see enterWouldAccept. With it
+        // on, Enter takes the top suggestion for any word; with it off, only inside a `<tag:`.
+        let enterAccept = mUI.el('button', 'm-more-item');
+        let renderEnterAccept = () => {
+            enterAccept.textContent = `Enter accepts suggestion: ${mAutoComplete.enterAccepts ? 'Any word' : 'Only in <tags>'}`;
+        };
+        renderEnterAccept();
+        enterAccept.addEventListener('click', () => {
+            mAutoComplete.setEnterAccepts(!mAutoComplete.enterAccepts);
+            renderEnterAccept();
+        });
+        list.appendChild(enterAccept);
         // Backend pin. Visibility is re-evaluated on every state change rather than decided here: this panel
         // builds lazily on first activation, and a deep link to #more can build it before ListT2IParams has
         // landed - at which point paramMeta is empty and the row would be hidden forever. The same
