@@ -29,8 +29,17 @@ class MAutoComplete {
         /** box -> its permanent suggestion-strip element (one per enableFor call, never removed - see
          * enableFor for why it has to be permanent rather than inserted/removed per keystroke). */
         this.slots = new Map();
+        /** Whether Enter/Tab take the top suggestion for a plain word, not just inside a `<tag:`. Off by
+         * default: the matcher returns hits for essentially any English word, so an always-on Enter silently
+         * rewrites natural-language prompts. See enterWouldAccept. */
+        this.enterAccepts = localStorage.getItem('m_client_enter_accepts') == 'yes';
         this.registerPrefixes();
     }
+
+    /** How many chips the strip will build at once. The strip is a single horizontal scroller, so anything
+     * past the first handful is already unreachable in practice; this only exists to stop an uncapped
+     * `<prefix:` completer from building thousands of elements per keystroke. */
+    static MaxChips = 60;
 
     /** Parses the autocompletions payload from GetMyUserData. Null/absent leaves the feature off.
      * Only the flat list is built: the genpage's per-first-character buckets exist for an "optimize"
@@ -351,12 +360,35 @@ class MAutoComplete {
         }, 200));
     }
 
-    /** Keyboard control of the suggestion strip, matching the genpage popover: Enter or Tab takes the
-     * highlighted suggestion, Escape dismisses the strip.
+    /** Whether Enter/Tab should take the top suggestion right now, rather than doing their normal job.
      *
-     * It intercepts a key ONLY while suggestions are actually on screen. That matters most for Enter: this is
-     * a prompt textarea and a newline is a legitimate thing to want, so the moment the strip is empty (or has
-     * been dismissed with Escape) Enter goes straight back to inserting one.
+     * "Are chips showing" is NOT a usable test, and assuming it was is what broke natural-language prompts:
+     * the matcher's default mode matches any entry CONTAINING the typed word, so every ordinary English word
+     * returns a full 50 suggestions. Typing 'Remove the right subject' and pressing return therefore rewrote
+     * the last word into a booru tag ('...right to left', '...background sex'), silently destroying an edit
+     * instruction. The genpage popover has the same hazard - it auto-selects its first row and Enter takes it
+     * - so it is not a safe model to copy here.
+     *
+     * Two situations are safe:
+     *  - Inside an unclosed `<` tag (`<wildcard:R`, `<lora:`, `<character:mik`). The user is unambiguously
+     *    completing a tag, and prose cannot wander in there by accident.
+     *  - When the user has explicitly opted in (More > Enter accepts suggestion), for tag-list prompting
+     *    where every word is meant to become a booru tag.
+     * Everything else leaves Enter alone, because a newline in a prompt box is a legitimate thing to want and
+     * a corrupted prompt is far worse than a missing shortcut. */
+    enterWouldAccept(box) {
+        if (this.enterAccepts) {
+            return true;
+        }
+        // Mirrors the tag detection in getPossibleList: an unclosed '<' before the caret.
+        let prompt = getTextContent(box).substring(0, getTextSelRange(box)[0]);
+        let lastBrace = prompt.lastIndexOf('<');
+        return lastBrace != -1 && prompt.lastIndexOf('>') < lastBrace;
+    }
+
+    /** Keyboard control of the suggestion strip: Enter or Tab takes the highlighted suggestion, Escape
+     * dismisses. Enter/Tab are intercepted only when chips are on screen AND enterWouldAccept says the
+     * context is unambiguous - see there for why the second half is not optional.
      *
      * Accepting routes through the chip's own click handler rather than reimplementing the splice. The chip
      * already knows its splice anchor, and the configured suffix (', ') is baked into the entry server-side by
@@ -375,15 +407,22 @@ class MAutoComplete {
         if (chips.length == 0) {
             return;
         }
-        if (e.key == 'Enter' || e.key == 'Tab') {
+        if (e.key == 'Escape') {
+            e.preventDefault();
+            this.clearSlot(box);
+            return;
+        }
+        if ((e.key == 'Enter' || e.key == 'Tab') && this.enterWouldAccept(box)) {
             e.preventDefault();
             let selected = strip.querySelector('.m-ac-chip.m-ac-sel') || chips[0];
             selected.click();
         }
-        else if (e.key == 'Escape') {
-            e.preventDefault();
-            this.clearSlot(box);
-        }
+    }
+
+    /** Turns Enter-accepts-anywhere on or off, and remembers it. */
+    setEnterAccepts(on) {
+        this.enterAccepts = on;
+        localStorage.setItem('m_client_enter_accepts', on ? 'yes' : 'no');
     }
 
     /** Empties one box's strip (contents only - the reserved space stays). */
@@ -424,14 +463,19 @@ class MAutoComplete {
         let prompt = getTextContent(box).substring(0, getTextSelRange(box)[0]);
         let lastBrace = prompt.lastIndexOf('<');
         let wordIndex = this.findLastWordIndex(prompt);
-        for (let val of possible) {
-            strip.appendChild(this.buildChip(box, val, prompt, lastBrace, wordIndex));
+        // getPossibleList caps its own word-match list at 50, but the `<prefix:` completers do not cap at all:
+        // typing a bare `<lora:` on this install returned 18,561 entries, and building that many chip elements
+        // on every keystroke will lock up a phone. Only a handful are ever reachable in a horizontal strip.
+        let shown = Math.min(possible.length, MAutoComplete.MaxChips);
+        for (let i = 0; i < shown; i++) {
+            strip.appendChild(this.buildChip(box, possible[i], prompt, lastBrace, wordIndex));
         }
-        // Mark what Enter would take. Without it the key is a guess, since the first chip is not otherwise
-        // distinguishable from the rest. Deliberately subtle - it means "return will apply this", not
-        // "already applied", and those must not look alike.
+        // Mark what Enter would take - but ONLY when Enter would in fact take it. The highlight is the only
+        // signal the user has about whether return is about to edit their prompt or insert a newline, so
+        // showing it when Enter is inert would be worse than showing nothing. Deliberately subtle: it means
+        // "return will apply this", not "already applied", and those must not look alike.
         let first = strip.querySelector('.m-ac-chip:not(.m-ac-help)');
-        if (first) {
+        if (first && this.enterWouldAccept(box)) {
             first.classList.add('m-ac-sel');
         }
         strip.scrollLeft = 0;
