@@ -49,8 +49,16 @@ class MGenSocket {
             return;
         }
         this.socket = makeWSRequest('GenerateText2ImageWS', input, data => this.handleFrame(data), 0, err => this.failed(err));
+        // The watcher is bound to the socket it was started for. Without that binding it tested `this.socket`,
+        // which any other code path could null (onWake does) - and the null test then failed, so it
+        // rescheduled itself forever. Every socket the session ever opened left one of those behind, each
+        // waking every 2 seconds for the life of the page.
+        let watched = this.socket;
         let closeWatch = () => {
-            if (this.socket && this.socket.readyState == WebSocket.CLOSED) {
+            if (this.socket != watched) {
+                return;
+            }
+            if (!watched || watched.readyState == WebSocket.CLOSED) {
                 this.socket = null;
                 this.startPollingIfBusy();
                 return;
