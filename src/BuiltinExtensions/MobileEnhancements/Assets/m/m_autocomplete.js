@@ -345,6 +345,7 @@ class MAutoComplete {
         this.slots.set(box, strip);
         this.wraps.set(box, slot);
         box.addEventListener('input', () => this.onInput(box));
+        box.addEventListener('keydown', (e) => this.onKeyDown(box, e));
         box.addEventListener('focus', () => {
             this.focusedBox = box;
             this.updatePin();
@@ -398,6 +399,41 @@ class MAutoComplete {
         }
     }
 
+    /** Keyboard control of the suggestion strip, matching the genpage popover: Enter or Tab takes the
+     * highlighted suggestion, Escape dismisses the strip.
+     *
+     * It intercepts a key ONLY while suggestions are actually on screen. That matters most for Enter: this is
+     * a prompt textarea and a newline is a legitimate thing to want, so the moment the strip is empty (or has
+     * been dismissed with Escape) Enter goes straight back to inserting one.
+     *
+     * Accepting routes through the chip's own click handler rather than reimplementing the splice. The chip
+     * already knows its splice anchor, and the configured suffix (', ') is baked into the entry server-side by
+     * AutoCompleteListHelper.GetData - so a second code path here would be a second place for both to drift.
+     *
+     * Arrow keys are deliberately NOT bound. The strip is horizontal, so Left/Right would be the natural
+     * mapping, and those move the caret in a textarea - breaking caret movement to gain chip selection is a
+     * bad trade on a client whose primary input is a thumb. */
+    onKeyDown(box, e) {
+        let strip = this.slots.get(box);
+        if (!strip) {
+            return;
+        }
+        // Help entries (the '\n'-prefixed hints) are spans, not buttons, and have nothing to apply.
+        let chips = strip.querySelectorAll('.m-ac-chip:not(.m-ac-help)');
+        if (chips.length == 0) {
+            return;
+        }
+        if (e.key == 'Enter' || e.key == 'Tab') {
+            e.preventDefault();
+            let selected = strip.querySelector('.m-ac-chip.m-ac-sel') || chips[0];
+            selected.click();
+        }
+        else if (e.key == 'Escape') {
+            e.preventDefault();
+            this.clearSlot(box);
+        }
+    }
+
     /** Empties one box's strip (contents only - the reserved space stays). */
     clearSlot(box) {
         let strip = this.slots.get(box);
@@ -438,6 +474,13 @@ class MAutoComplete {
         let wordIndex = this.findLastWordIndex(prompt);
         for (let val of possible) {
             strip.appendChild(this.buildChip(box, val, prompt, lastBrace, wordIndex));
+        }
+        // Mark what Enter would take. Without it the key is a guess, since the first chip is not otherwise
+        // distinguishable from the rest. Deliberately subtle - it means "return will apply this", not
+        // "already applied", and those must not look alike.
+        let first = strip.querySelector('.m-ac-chip:not(.m-ac-help)');
+        if (first) {
+            first.classList.add('m-ac-sel');
         }
         strip.scrollLeft = 0;
     }
