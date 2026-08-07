@@ -70,6 +70,22 @@ class MApp {
             renderHaptics();
         });
         list.appendChild(haptics);
+        // Backend pin. Visibility is re-evaluated on every state change rather than decided here: this panel
+        // builds lazily on first activation, and a deep link to #more can build it before ListT2IParams has
+        // landed - at which point paramMeta is empty and the row would be hidden forever. The same
+        // subscription keeps the label honest when the pin is cleared from the Create tab's chip.
+        let backend = mUI.el('button', 'm-more-item');
+        backend.addEventListener('click', () => mCreate.openBackendSheet());
+        let renderBackend = () => {
+            // Absent from paramMeta means the session lacks permission to set it - ListT2IParams only reports
+            // parameters the session may actually use.
+            backend.style.display = mState.paramMeta['exactbackendid'] ? '' : 'none';
+            let current = mState.params['exactbackendid'];
+            backend.textContent = `Backend: ${current == null ? 'Automatic' : MCreate.paramValueLabel('exactbackendid', current)}`;
+        };
+        renderBackend();
+        mState.onChange(renderBackend);
+        list.appendChild(backend);
         let clear = mUI.el('button', 'm-more-item', 'Reset mobile client state');
         clear.addEventListener('click', () => {
             mUI.confirm('Clear saved prompt, presets selection, and params?', () => {

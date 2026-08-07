@@ -933,7 +933,7 @@ class MCreate {
         let keys = Object.keys(mState.params).filter(k => !this.coveredParams.includes(k));
         for (let key of keys) {
             let val = mState.params[key];
-            let text = `${key}: ${Array.isArray(val) ? val.join(',') : val}`;
+            let text = `${MCreate.paramLabel(key)}: ${MCreate.paramValueLabel(key, val)}`;
             if (text.length > 40) {
                 text = text.substring(0, 38) + '…';
             }
@@ -948,6 +948,110 @@ class MCreate {
         }
         // No "Open full UI" link here - the header and the More tab both already carry one, and on a short
         // Create page it was spending a whole row on a third copy.
+    }
+
+    /** A parameter's human name, falling back to its raw id when the server did not report it. */
+    static paramLabel(key) {
+        let meta = mState.paramMeta[key];
+        return meta && meta.name ? meta.name : key;
+    }
+
+    /** A parameter value as the server would label it. ListT2IParams splits `id///Display Name` into parallel
+     * `values` and `value_names` arrays, so a chip reading 'exactbackendid: 2' can read 'Exact Backend ID:
+     * 2: ComfyUI Self-Starting' instead. Falls through to the raw value for params with no name table. */
+    static paramValueLabel(key, val) {
+        let shown = Array.isArray(val) ? val.join(',') : `${val}`;
+        let meta = mState.paramMeta[key];
+        if (meta && meta.values && meta.value_names) {
+            let index = meta.values.indexOf(shown);
+            if (index >= 0 && meta.value_names[index]) {
+                return meta.value_names[index];
+            }
+        }
+        return shown;
+    }
+
+    /** Backend picker sheet. `exactbackendid` pins every generation to one backend, which is the point on a
+     * multi-GPU box - but it is also a foot-gun, so 'Automatic' is the first row and deletes the param rather
+     * than setting a sentinel value (the server treats the key's presence as the choice).
+     *
+     * Rows come from ListBackends, not from the param's own `values`: that list is a snapshot taken when
+     * ListT2IParams was called at boot, so it goes stale the moment a backend is added or restarted, and it
+     * carries no status or loaded model. paramMeta is the fallback for a session that may set the parameter
+     * but lacks ViewBackendsList permission. */
+    openBackendSheet() {
+        let content = mUI.el('div', 'm-lora-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Backend'));
+        let results = mUI.el('div', 'm-model-results');
+        content.appendChild(results);
+        let close = null;
+        let pick = (value) => {
+            if (value == null) {
+                delete mState.params['exactbackendid'];
+            }
+            else {
+                mState.params['exactbackendid'] = value;
+            }
+            mState.changed();
+            close();
+        };
+        let renderRows = (backends) => {
+            results.innerHTML = '';
+            let auto = mUI.el('button', 'm-model-plain-row', 'Automatic (let Swarm choose)');
+            if (mState.params['exactbackendid'] == null) {
+                auto.classList.add('m-selected');
+            }
+            auto.addEventListener('click', () => pick(null));
+            results.appendChild(auto);
+            if (backends.length == 0) {
+                results.appendChild(mUI.el('div', 'm-strip-empty', 'No backends reported.'));
+                return;
+            }
+            for (let backend of backends) {
+                let item = mUI.el('div', 'm-model-result');
+                let text = mUI.el('div', 'm-model-text');
+                text.appendChild(mUI.el('div', 'm-model-name', backend.label));
+                if (backend.sub) {
+                    text.appendChild(mUI.el('div', 'm-model-sub', backend.sub));
+                }
+                item.appendChild(text);
+                if (`${mState.params['exactbackendid']}` == backend.id) {
+                    item.classList.add('m-selected');
+                }
+                item.addEventListener('click', () => pick(backend.id));
+                results.appendChild(item);
+            }
+        };
+        // Fallback list, shown immediately so the sheet is never empty, then replaced by live data.
+        let meta = mState.paramMeta['exactbackendid'];
+        let fallback = [];
+        for (let i = 0; i < ((meta && meta.values) || []).length; i++) {
+            fallback.push({ 'id': meta.values[i], 'label': (meta.value_names || [])[i] || meta.values[i], 'sub': '' });
+        }
+        renderRows(fallback);
+        genericRequest('ListBackends', { 'nonreal': false, 'full_data': true }, data => {
+            let live = [];
+            for (let key of Object.keys(data)) {
+                let backend = data[key];
+                // The response is keyed by backend id, but skip anything that is not a backend object in
+                // case a top-level field is ever added alongside them.
+                if (!backend || backend.id == null) {
+                    continue;
+                }
+                let sub = `${backend.status}${backend.enabled ? '' : ', disabled'}`;
+                if (backend.current_model) {
+                    sub += ` - ${mUI.modelName(backend.current_model)}`;
+                }
+                live.push({ 'id': `${backend.id}`, 'label': `${backend.id}: ${backend.title}`, 'sub': sub });
+            }
+            renderRows(live);
+        }, 0, () => {
+            // Enrichment only. A session allowed to set the parameter but not to view the backend list is a
+            // legitimate configuration, and the fallback rows above already work - so this stays silent
+            // rather than throwing a toast over a sheet that is functioning.
+            console.log('ListBackends unavailable - using the parameter list instead.');
+        });
+        close = mUI.openSheet(content);
     }
 
     /** Inserts text into the prompt at the remembered caret (end of prompt if there isn't one), spacing it
