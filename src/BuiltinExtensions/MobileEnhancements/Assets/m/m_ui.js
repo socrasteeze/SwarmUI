@@ -218,34 +218,21 @@ class MUI {
         this.toast(message, 'warn');
     }
 
-    /** Hides the bottom nav while the on-screen keyboard is open, and publishes --m-kb-inset for anything
-     * that needs to sit directly on top of the keyboard (the autocomplete strip). The layout is normal-flow
-     * so iOS handles scroll-into-view natively; this only prevents the nav floating mid-screen.
-     *
-     * Two questions, two measures - conflating them is the documented bug from the genpage keyboard work:
-     *  - "is a keyboard up at all" is innerHeight - height, WITHOUT offsetTop. iOS scrolls the layout
-     *    viewport under an open keyboard, and subtracting offsetTop makes that answer shrink toward 0
-     *    mid-scroll, which would drop the class while the keyboard is still very much up.
-     *  - "where is the bottom of the visible band" is innerHeight - height - offsetTop. That IS the right
-     *    number for a position:fixed element, whose coordinates are layout-viewport space.
-     * It listens to 'scroll' as well as 'resize' because iOS moves offsetTop without ever firing a resize. */
+    /** Hides the bottom nav while the on-screen keyboard is open. The layout is normal-flow so iOS handles
+     * scroll-into-view natively; this only prevents the nav floating mid-screen. */
     initKeyboardWatch() {
         if (!window.visualViewport) {
             return;
         }
-        let vv = window.visualViewport;
-        let apply = () => {
-            let inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-            document.body.style.setProperty('--m-kb-inset', `${inset}px`);
-            document.body.classList.toggle('m-kb-open', this.keyboardOpen());
-        };
-        vv.addEventListener('resize', apply);
-        vv.addEventListener('scroll', apply);
+        let apply = () => document.body.classList.toggle('m-kb-open', this.keyboardOpen());
+        window.visualViewport.addEventListener('resize', apply);
         apply();
     }
 
-    /** Whether an on-screen keyboard is up. Shared so that everything asking this question gets the same
-     * answer from the same measure - see initKeyboardWatch for why offsetTop is deliberately not subtracted.
+    /** Whether an on-screen keyboard is up.
+     * offsetTop is deliberately NOT subtracted. iOS scrolls the layout viewport under an open keyboard, and
+     * subtracting offsetTop makes this answer shrink toward 0 mid-scroll - which would report the keyboard
+     * as closed while it is still very much up. That conflation is the documented genpage keyboard bug.
      * False on any browser without visualViewport, which is the right answer for a desktop browser. */
     keyboardOpen() {
         return !!window.visualViewport && window.innerHeight - window.visualViewport.height > 120;

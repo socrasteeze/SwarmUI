@@ -462,29 +462,9 @@
     min-height: 44px;
     box-sizing: border-box;
 }
-/* Pinned to the top of the on-screen keyboard. The class is set only while a keyboard is genuinely up and
-   the owning box has focus (m_autocomplete.js updatePin), so it needs no .m-kb-open qualifier - and must not
-   have one, since a pinned strip is reparented to document.body and would be stranded mid-document if the
-   rule stopped applying. --m-kb-inset is the gap between the bottom of the layout viewport and the bottom of
-   the visible band, which is the correct anchor for position:fixed (fixed coordinates are layout-viewport
-   space) - see m_ui.js initKeyboardWatch. Deliberately given no transition: the value is recomputed on every
-   visualViewport scroll frame, and a transition would restart its tween each frame and leave the strip
-   trailing behind the keyboard - the documented genpage keyboard-lift bug. */
-.m-ac-strip.m-ac-pinned {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: var(--m-kb-inset, 0px);
-    z-index: 900;
-    padding: 0.25rem 0.7rem;
-    background: var(--background);
-    border-top: 1px solid var(--border-color);
-}
-/* An empty pinned strip would be a bare bordered bar sitting on the keyboard saying nothing. Safe to hide
-   only in the pinned state, where it is out of flow and hiding it therefore shifts nothing. */
-.m-ac-strip.m-ac-pinned:empty {
-    display: none;
-}
+/* The strip is deliberately NOT pinned to the top of the keyboard. iOS draws its own form-accessory bar
+   (up/down arrows and Done) in that band, over web content, so a pinned strip renders behind it. Enter/Tab
+   accept the highlighted suggestion, so the strip needs to be readable, not thumb-reachable. */
 .m-ac-strip::-webkit-scrollbar {
     display: none;
 }
