@@ -26,7 +26,7 @@ class AdvancedPopover {
             this.textInput.placeholder = 'Search...';
             this.textInput.addEventListener('input', (e) => {
                 this.buildList();
-                this.optionArea.style.width = (this.optionArea.offsetWidth + this.overExtendBy) + 'px';
+                this.fitOptionAreaWidth();
             });
             this.textInput.addEventListener('keydown', (e) => {
                 this.onKeyDown(e);
@@ -45,8 +45,15 @@ class AdvancedPopover {
             this.textInput.focus();
         }
         this.created = Date.now();
-        this.optionArea.style.width = (this.optionArea.offsetWidth + this.overExtendBy) + 'px';
+        this.fitOptionAreaWidth();
         this.scrollFix();
+    }
+
+    /** Size the option list to its text content (not the parent/viewport width). */
+    fitOptionAreaWidth() {
+        this.optionArea.style.width = 'max-content';
+        let contentW = this.optionArea.offsetWidth;
+        this.optionArea.style.width = `${Math.min(contentW + this.overExtendBy, window.innerWidth - 40)}px`;
     }
 
     remove() {
@@ -212,7 +219,8 @@ class AdvancedPopover {
         let y;
         let maxHeight;
         let extraHeight = (this.textInput ? this.textInput.offsetHeight : 0) + 32;
-        let rawExpected = Math.min(this.expectedHeight, this.heightLimit);
+        let halfCap = Math.max(48, window.innerHeight * 0.45 - extraHeight);
+        let rawExpected = Math.min(this.expectedHeight, this.heightLimit, halfCap);
         let expected = rawExpected + extraHeight;
         // Anchor the flip/clamp math to the visible band (visual viewport) rather than the full layout viewport.
         // On mobile - notably an iOS standalone PWA with the on-screen keyboard open - the keyboard shrinks the
@@ -233,13 +241,17 @@ class AdvancedPopover {
             maxHeight = rawExpected;
         }
         else if (this.flipYHeight != null && this.targetY > viewTop + (viewBottom - viewTop) / 2) {
+            // viewTop-relative, matching upstream's extraHeight-based (not literal-32) maxHeight-then-expected
+            // ordering: derive maxHeight from the real visible space above the anchor first, then expected/y
+            // from that, so y and maxHeight always agree instead of being computed from independent formulas.
+            maxHeight = Math.min(Math.max(0, this.targetY - this.flipYHeight - extraHeight - viewTop), rawExpected);
+            expected = maxHeight + extraHeight;
             y = Math.max(viewTop, this.targetY - this.flipYHeight - expected);
             this.popover.classList.add('sui_popover_reverse');
-            maxHeight = Math.min(this.targetY - this.flipYHeight - 32 - viewTop, rawExpected);
         }
         else {
             y = this.targetY;
-            maxHeight = viewBottom - y - extraHeight - 10;
+            maxHeight = Math.min(rawExpected, viewBottom - y - extraHeight - 10);
         }
         this.popover.style.top = `${y}px`;
         this.optionArea.style.maxHeight = `${maxHeight}px`;
