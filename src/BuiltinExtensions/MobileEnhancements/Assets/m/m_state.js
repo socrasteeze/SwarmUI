@@ -332,7 +332,13 @@ class MState {
      * "start a fresh generation", not "wipe the client" (that's the More tab's Reset mobile client state,
      * which also clears localStorage and reloads). */
     resetParams() {
+        // The filename prefix deliberately survives: this button means "start a fresh generation", and the
+        // prefix is a label for the whole working session, not part of any one generation's settings.
+        let keepPrefix = this.params['filenameprefix'];
         this.params = { 'prompt': '', 'images': '1', 'seed': '-1' };
+        if (keepPrefix) {
+            this.params['filenameprefix'] = keepPrefix;
+        }
         this.activePresets = [];
         this.promptImages = [];
         this.seedLocked = false;

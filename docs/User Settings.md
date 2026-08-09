@@ -32,3 +32,13 @@
 - `[some parameter name here]`: the value of the parameter named. Must have exact parameter name. For example `[refinermodel]` will get you the name of the refiner model.
 
 If names overlap, a numeric index will be appended to the end, eg if `123-a cat.jpg` is your output but it already exists, `123-a cat-1.jpg` will be used.
+
+## Filename Prefix
+
+The `Filename Prefix` parameter (under the `Output Naming` group) adds short text to the start of the filename, for tagging a working session. With a prefix of `OC01` and a format of `[model]/[year][month]`, files save as `[model]/OC01[year][month]`.
+
+It is inserted automatically, so it applies whatever format is in effect - including when a preset overrides the outpath format. It only affects the filename, never the folders.
+
+To place it somewhere other than the start, put a `[filenameprefix]` tag in your format instead; the automatic insertion is skipped whenever the format contains that tag.
+
+Slashes, square brackets and dots are stripped from the prefix, and it is capped at 40 characters. A prefix that reduces to nothing is treated as unset.
