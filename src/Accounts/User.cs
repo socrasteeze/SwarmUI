@@ -462,8 +462,12 @@ public class User
         int maxLen = Settings.OutPathBuilder.MaxLenPerPart;
         DateTimeOffset time = DateTimeOffset.Now;
         OutpathFillHelper helper = new(user_input, this, $"{batchIndex}");
+        bool hasExplicitPrefixTag = false;
         string buildPathPart(string part)
         {
+            // Fork addition: note an explicit filename-prefix tag, to suppress the automatic insertion below.
+            // Tested with the same CleanTypeName the resolver uses, so every spelling that resolves is caught here.
+            hasExplicitPrefixTag |= T2IParamTypes.CleanTypeName(part) == "filenameprefix";
             string data = helper.FillPartUnformatted(part) ?? $"[{part}]";
             if (data.Length > maxLen)
             {
@@ -474,6 +478,29 @@ public class User
         }
         string path = user_input.Get(T2IParamTypes.OverrideOutpathFormat, Settings.OutPathBuilder.Format);
         path = StringConversionHelper.QuickSimpleTagFiller(path, "[", "]", buildPathPart, false);
+        // Fork addition: auto-insert the Filename Prefix parameter at the start of the filename.
+        // Done here, on the already-filled path, rather than by editing the format string: the prefix must never be
+        // parsed as tag syntax, must not be able to introduce folders, and must not escape the length cap. It also
+        // keeps every tag value's slashes already stripped (above), so the last '/' here is always a real separator.
+        // Skipped when the format placed the tag itself, so an explicit '[filenameprefix]' wins and can't double up.
+        // The ID is a literal rather than a reference to FilenamePrefixExtension.ParamId so that this stays a
+        // self-contained block with no added usings, keeping the fork's core delta minimal. The extension names this file.
+        if (!hasExplicitPrefixTag && T2IParamTypes.TryGetType("filenameprefix", out T2IParamType prefixType, user_input) && user_input.TryGetRaw(prefixType, out object prefixRaw))
+        {
+            string prefix = Utilities.StrictFilenameClean($"{prefixRaw}".Replace("[", "").Replace("]", "").Replace('\\', '/').Replace("/", "")).Trim();
+            if (prefix.Length > maxLen)
+            {
+                // Never cut between the halves of a surrogate pair. The maxLen guard matters: a MaxLenPerPart of 0
+                // is legal config, and would otherwise index prefix[-1] here.
+                int cut = maxLen > 0 && char.IsHighSurrogate(prefix[maxLen - 1]) ? maxLen - 1 : maxLen;
+                prefix = prefix[..cut].Trim();
+            }
+            if (prefix.Length > 0)
+            {
+                int lastSlash = path.LastIndexOf('/');
+                path = lastSlash < 0 ? $"{prefix}{path}" : $"{path[..(lastSlash + 1)]}{prefix}{path[(lastSlash + 1)..]}";
+            }
+        }
         if (CalculatedRole.Data.AllowUnsafeOutpaths)
         {
             return path;
