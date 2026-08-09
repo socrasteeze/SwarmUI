@@ -17,7 +17,7 @@ class MCreate {
         this.lastCompleted = [];
         /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip).
          * width/height are covered because the resolution controls own them - see mState.buildGenInput. */
-        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages'];
+        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix'];
         /** Whether the user has manually collapsed the preview. */
         this.previewCollapsed = localStorage.getItem('m_client_preview_collapsed') == 'yes';
         // The preview is built here, detached, rather than in build(). Generation frames can arrive before
@@ -872,6 +872,28 @@ class MCreate {
         wrap.appendChild(resRow);
         this.resReadout = mUI.el('div', 'm-res-readout');
         wrap.appendChild(this.resReadout);
+        // Filename prefix: a label for the saved file's name, not a generation parameter. Server-side it is
+        // inserted at the start of the filename whatever outpath format is active, so it survives presets.
+        this.prefixRow = mUI.el('div', 'm-quick-row');
+        this.prefixRow.appendChild(mUI.el('span', 'm-quick-label', 'Prefix'));
+        this.prefixInput = document.createElement('input');
+        this.prefixInput.type = 'text';
+        this.prefixInput.className = 'm-prefix-input';
+        this.prefixInput.placeholder = 'none';
+        this.prefixInput.addEventListener('input', () => {
+            let val = this.prefixInput.value.trim();
+            // Deleting rather than storing '' keeps m_client_state clean and avoids sending a no-op key.
+            if (val == '') {
+                delete mState.params['filenameprefix'];
+            }
+            else {
+                mState.params['filenameprefix'] = val;
+            }
+            // save(), not changed(): a full re-render per keystroke would fight the user's typing.
+            mState.save();
+        });
+        this.prefixRow.appendChild(this.prefixInput);
+        wrap.appendChild(this.prefixRow);
         return wrap;
     }
 
@@ -883,6 +905,13 @@ class MCreate {
             this.seedInput.value = mState.seedLocked ? `${mState.params['seed'] ?? ''}` : '-1';
         }
         this.seedInput.disabled = !mState.seedLocked;
+        // Visibility is recomputed every render rather than decided at build time: this panel can be built
+        // before ListT2IParams lands, when paramMeta is still empty, and the row would stay hidden forever.
+        // Absent from paramMeta means the session may not set the param (or the extension is disabled).
+        this.prefixRow.style.display = mState.paramMeta['filenameprefix'] ? '' : 'none';
+        if (document.activeElement != this.prefixInput) {
+            this.prefixInput.value = `${mState.params['filenameprefix'] ?? ''}`;
+        }
         for (let btn of this.imagesGroup.querySelectorAll('.m-seg-button')) {
             btn.classList.toggle('m-selected', btn.dataset.count == `${mState.params['images'] || '1'}`);
         }

@@ -278,6 +278,17 @@
 .m-seed-input:disabled {
     opacity: 0.45;
 }
+.m-quick-label {
+    font-size: 13px;
+    color: var(--text-soft);
+    flex: 0 0 auto;
+}
+.m-prefix-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 40px;
+    padding: 0 0.4rem;
+}
 .m-seg-group {
     display: flex;
 }
