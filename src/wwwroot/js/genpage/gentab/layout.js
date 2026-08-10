@@ -181,18 +181,34 @@ class GenTabLayout {
         }
     }
 
-    /** Height used for Generate layout geometry. */
+    /** Height used for Generate layout geometry.
+     * Body's own bottom padding is subtracted, because that padding is reserved dead space (the installed
+     * PWA's home-indicator safe-area inset) rather than usable content height. Doing it here rather than at
+     * each call site is deliberate: every mobile consumer - the panel height math, the topbar-collapse height
+     * math, the follow-finger drag distances, and the edge-gesture trigger zones - then agrees on one
+     * definition of "how tall is the content area". The desktop path does its own equivalent subtraction
+     * inline, since it composes CSS calc() strings rather than pixel numbers. On desktop this subtracts 0
+     * (nothing outside body.pwa-standalone sets a bottom padding), so large-window layout is unchanged. */
     getViewportHeight() {
-        return window.innerHeight;
+        return window.innerHeight - (parseFloat(getComputedStyle(document.body).paddingBottom) || 0);
     }
 
-    /** Soft-keyboard overlap below the visual viewport, in px. */
+    /** Soft-keyboard overlap below the visual viewport, in px.
+     * The formula is exact for how this value is consumed: '.mobile-keyboard-pin #alt_prompt_region' is
+     * position:fixed, whose containing block is the layout viewport, so a 'bottom' of
+     * innerHeight - (visualViewport.height + offsetTop) lands the bar's bottom edge flush on the visible
+     * band's bottom edge. Only a rounding epsilon is discarded here, NOT a minimum keyboard size: while the
+     * keyboard is up iOS scrolls the layout viewport underneath it, so offsetTop grows and the still-required
+     * inset legitimately shrinks toward 0. A larger floor (this was '< 60') therefore throws away real lifts
+     * mid-scroll - at offsetTop 340 of a 380px keyboard the bar still needs 40px, and dropping it un-pins the
+     * bar back under the keyboard. That is the "prompt sits under the keyboard, then snaps up and sticks when
+     * you scroll" report. mobilePromptFocused above is the real gate for whether a keyboard is up at all. */
     getKeyboardInset() {
         if (!this.isSmallWindow || !this.mobilePromptFocused || !window.visualViewport) {
             return 0;
         }
         let inset = Math.max(0, Math.round(window.innerHeight - (window.visualViewport.height + window.visualViewport.offsetTop)));
-        if (inset < 60) {
+        if (inset < 2) {
             return 0;
         }
         return inset;
@@ -1150,11 +1166,6 @@ class GenTabLayout {
                 let deltaX = touch.pageX - this.swipeStartX;
                 let deltaY = touch.pageY - this.swipeStartY;
                 let allShut = this.areAllMobilePanelsShut();
-                // The bottom safe-area inset (env(safe-area-inset-bottom), applied as body padding for
-                // installed PWAs) is dead space below the real content - excluding it from the "swipe from
-                // bottom inward" edge zone below keeps that trigger area anchored to the actual
-                // visible/grabbable content instead of shrinking by that padding amount underneath it.
-                let safeBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
                 if (Math.abs(deltaX) > Math.abs(deltaY)) {
                     if (Math.abs(deltaX) > this.minSwipeDelta) {
                         if (!this.leftShut && deltaX < 0) {
@@ -1176,7 +1187,10 @@ class GenTabLayout {
                         if (!this.bottomShut && deltaY > 0) {
                             this.closeMobilePanel('bottom');
                         }
-                        else if (this.swipeStartY > (this.getViewportHeight() - safeBottom) * 5 / 6 && deltaY < 0 && allShut) {
+                        // getViewportHeight() already excludes body's bottom padding (the installed-PWA
+                        // safe-area inset), so this "swipe up from the bottom edge" trigger zone stays
+                        // anchored to real grabbable content rather than counting dead space below it.
+                        else if (this.swipeStartY > this.getViewportHeight() * 5 / 6 && deltaY < 0 && allShut) {
                             this.openMobilePanel('bottom');
                         }
                     }
