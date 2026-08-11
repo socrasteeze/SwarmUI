@@ -10,9 +10,11 @@ set PATH=C:\Program Files\dotnet;%PATH%
 set DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 rem Server settings option
+rem Fork edit: explicit "origin master" rather than a bare "git pull" - forces every launch to pull only from
+rem this fork (origin), never from upstream, regardless of local branch-tracking config (branch.master.remote/.merge).
 if exist .\src\bin\always_pull (
     echo Pulling latest changes...
-    git pull
+    git pull origin master
 )
 
 if not exist .git (
