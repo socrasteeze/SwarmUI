@@ -882,6 +882,12 @@ function clearParamFilterInput() {
 }
 
 function genpageLoad() {
+    // Guarded: MobileEnhancements may be disabled, and this core file must load the page fine without it.
+    // Hidden again once swarmHasLoaded is set below, at the very end of the getSession() callback chain -
+    // this is the one span of the page's life that is ALL page-load work, start to finish.
+    if (typeof busyIndicator != 'undefined') {
+        busyIndicator.show();
+    }
     $('#toptablist').on('shown.bs.tab', function (e) {
         let versionDisp = getRequiredElementById('version_display');
         if (e.target.id == 'maintab_comfyworkflow') {
@@ -975,6 +981,9 @@ function genpageLoad() {
             automaticWelcomeMessage();
             autoTitle();
             swarmHasLoaded = true;
+            if (typeof busyIndicator != 'undefined') {
+                busyIndicator.hide();
+            }
         });
         reviseStatusInterval = setInterval(reviseStatusBar, 2000);
         window.resLoopInterval = setInterval(serverResourceLoop, 1000);

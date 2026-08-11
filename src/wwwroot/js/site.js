@@ -940,19 +940,37 @@ function makeDropdownInput(featureid, id, paramid, name, description, values, de
     return html;
 }
 
+/** Entry count above which a multiselect's <option> list is built on first open rather than at page load.
+ * See makeMultiselectInput. 500 is comfortably above every stock parameter's value list, so ordinary
+ * installs keep the original eager behavior and only genuinely huge model libraries take the lazy path. */
+let multiselectLazyThreshold = 500;
+
 function makeMultiselectInput(featureid, id, paramid, name, description, values, defaultVal, placeholder, toggles = false, popover_button = true) {
     name = escapeHtml(name);
     featureid = featureid ? ` data-feature-require="${featureid}"` : '';
     let [popover, featureid2] = getPopoverElemsFor(id, popover_button);
     featureid += featureid2;
+    // A very large value list is ruinous to build up front: it is two escapes and an <option> per entry, a
+    // multi-megabyte HTML string, that many DOM nodes to parse, and then a select2 init across all of them.
+    // Measured on a phone-class CPU with a 18.5k-entry LoRA library: 16.7 SECONDS on every single page load,
+    // for a control that is IsAdvanced + VisibleNormally:false and so is not even on screen. Emitting the
+    // <select> empty and filling it when the user first opens it costs 0.12s instead.
+    // This is safe because nothing depends on the options existing ahead of time: setDirectParamValue()
+    // already appends any option it needs before selecting it (params.js), and reads only ever look at
+    // selectedOptions. The fill is wired in params.js's 'list' runnable, off the data attribute below.
+    let lazy = values.length > multiselectLazyThreshold;
     let html = `
     <div class="auto-input auto-dropdown-box"${featureid}>
         <label>
             <span class="auto-input-name">${getToggleHtml(toggles, id, name)}${translateableHtml(name)}${popover}</span>
         </label>
-        <select class="form-select" id="${id}" data-param_id="${paramid}" autocomplete="off" data-placeholder="${escapeHtmlNoBr(placeholder)}" multiple>`;
+        <select class="form-select" id="${id}" data-param_id="${paramid}" autocomplete="off" data-placeholder="${escapeHtmlNoBr(placeholder)}"${lazy ? ' data-lazy-options="true"' : ''} multiple>`;
     for (let value of values) {
         let selected = value == defaultVal ? ' selected="true"' : '';
+        // The default still has to be present, or the control comes up blank instead of showing its value.
+        if (lazy && !selected) {
+            continue;
+        }
         html += `<option value="${escapeHtmlNoBr(value)}"${selected}>${escapeHtml(value)}</option>`;
     }
     html += `
