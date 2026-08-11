@@ -81,6 +81,9 @@ class MovableGenTab {
 /** Central handler for generate main tab layout logic. */
 class GenTabLayout {
 
+    /** Minimum gap in ms between whole-document lazy-load scans. See scheduleLazyLoadScan(). */
+    static LazyScanMs = 150;
+
     /** List of functions to run when the layout is reset to default. This should remove any variables in browser storage related to layout. */
     layoutResets = [];
     
@@ -174,6 +177,16 @@ class GenTabLayout {
         this.mobileTopbarDragFrom = 0;
         /** Whether the current touch may drive topbar collapse. */
         this.mobileTopbarCanDrag = false;
+        /** Cached layout measurements shared by the per-frame mobile paths, or null when stale. See refreshMobileMetrics(). */
+        this.mobileMetrics = null;
+        /** Pending collapse px awaiting the next frame, or null when nothing is queued. */
+        this.pendingTopbarCollapse = null;
+        /** Whether a coalescing frame is already booked for the pending collapse. */
+        this.topbarCollapseScheduled = false;
+        /** Timestamp of the last whole-document lazy-load scan. */
+        this.lastLazyScan = 0;
+        /** Trailing lazy-load scan timer, or null. */
+        this.lazyScanTimer = null;
         if (this.isSmallWindow) {
             this.bottomShut = true;
             this.leftShut = true;
@@ -284,26 +297,104 @@ class GenTabLayout {
         this.mobileTopbarDragging = false;
     }
 
+    /**
+     * Measures everything the per-frame mobile paths need, once, and caches it.
+     *
+     * setMobileTopbarCollapse() runs on every scroll event and every touchmove of a topbar drag. Measured
+     * inline, each of those calls interleaved a CSS custom-property write on the document root (which
+     * invalidates inherited style page-wide) with a getBoundingClientRect(), a getComputedStyle() and two
+     * offsetHeight reads - so every scroll frame forced several full-document synchronous reflows. Reading
+     * once per layout pass and doing pure arithmetic afterwards makes the hot path write-only.
+     *
+     * rootTopBase is the root div's top offset at zero collapse. The collapse is applied as a translateY
+     * plus an equal negative margin-bottom on #toptablist, so the following content moves up exactly 1:1
+     * with the collapse px across the whole clamped range - the live offset is recoverable by subtraction
+     * and never needs re-measuring mid-gesture.
+     */
+    refreshMobileMetrics() {
+        let tabs = getRequiredElementById('toptablist');
+        let padBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+        this.mobileMetrics = {
+            viewH: window.innerHeight - padBottom,
+            topbarMax: Math.max(0, (tabs.scrollHeight || tabs.offsetHeight) - 10),
+            rootTopBase: this.t2iRootDiv.getBoundingClientRect().top + this.mobileTopbarCollapsePx,
+            peek: this.getMobileBottomPeekPx(),
+            altHeight: this.altRegion.style.display == 'none' || this.isMobileBottomOpen() ? 0 : this.altRegion.offsetHeight
+        };
+        return this.mobileMetrics;
+    }
+
+    /** Cached mobile measurements, measuring them first if the cache is cold. */
+    getMobileMetrics() {
+        return this.mobileMetrics || this.refreshMobileMetrics();
+    }
+
     /** Progressive mobile top-tab collapse (0 = open). Follows finger / scroll. */
     setMobileTopbarCollapse(px) {
         if (!this.isSmallWindow) {
             px = 0;
         }
-        let tabs = getRequiredElementById('toptablist');
-        let max = Math.max(0, (tabs.scrollHeight || tabs.offsetHeight) - 10);
-        this.mobileTopbarCollapsePx = Math.max(0, Math.min(max, px));
+        // A direct call is authoritative - drop any value a scroll/drag frame has queued behind it, so a
+        // stale scroll position cannot land on top of (for example) hideMobileTopbar().
+        this.pendingTopbarCollapse = null;
+        let metrics = this.getMobileMetrics();
+        this.mobileTopbarCollapsePx = Math.max(0, Math.min(metrics.topbarMax, px));
         document.documentElement.style.setProperty('--mobile-topbar-collapse', `${this.mobileTopbarCollapsePx}px`);
-        let rootTop = this.t2iRootDiv.getBoundingClientRect().top;
+        let rootTop = metrics.rootTopBase - this.mobileTopbarCollapsePx;
         this.quickToolsButton.style.top = `${Math.max(2, rootTop - 12)}px`;
         this.quickToolsButton.style.right = '0.5rem';
-        let viewH = this.getViewportHeight();
-        let bottomPeek = document.body.classList.contains('mobile-keyboard-open') ? 0 : this.getMobileBottomPeekPx();
-        let topHeight = Math.max(120, viewH - rootTop - bottomPeek);
+        let bottomPeek = document.body.classList.contains('mobile-keyboard-open') ? 0 : metrics.peek;
+        let topHeight = Math.max(120, metrics.viewH - rootTop - bottomPeek);
         this.mainImageArea.style.height = `${topHeight}px`;
         this.topSection.style.height = `${topHeight}px`;
-        let altHeight = this.altRegion.style.display == 'none' || this.isMobileBottomOpen() ? 0 : this.altRegion.offsetHeight;
-        this.currentImageWrapbox.style.height = `calc(${topHeight}px - ${altHeight}px)`;
-        this.editorSizebar.style.height = `calc(${topHeight}px - ${altHeight}px)`;
+        this.currentImageWrapbox.style.height = `calc(${topHeight}px - ${metrics.altHeight}px)`;
+        this.editorSizebar.style.height = `calc(${topHeight}px - ${metrics.altHeight}px)`;
+    }
+
+    /**
+     * Queues a topbar collapse for the next animation frame, keeping only the newest value.
+     * Scroll and touchmove both fire well above display rate on a phone; collapsing a burst to one write
+     * per frame is invisible to the follow-finger feel and cuts the style-invalidation work proportionally.
+     */
+    scheduleTopbarCollapse(px) {
+        this.pendingTopbarCollapse = px;
+        if (this.topbarCollapseScheduled) {
+            return;
+        }
+        this.topbarCollapseScheduled = true;
+        requestAnimationFrame(() => {
+            this.topbarCollapseScheduled = false;
+            let target = this.pendingTopbarCollapse;
+            if (target != null) {
+                this.setMobileTopbarCollapse(target);
+            }
+        });
+    }
+
+    /**
+     * Runs the whole-document lazy-load scan, at most once per LazyScanMs and always with a trailing pass.
+     *
+     * browserUtil.makeVisible(document) selects every '.lazyload' element in the page and reads a bounding
+     * rect from each. With a model browser or the image history open that is hundreds to thousands of forced
+     * layout reads, and it closed out every single reapplyPositions() - which runs once per animation frame
+     * while typing a prompt, and for every event in the stream iOS emits while the keyboard animates.
+     * Revealing a lazy image is a "shortly" job, not a per-frame one, so throttling costs nothing visible.
+     */
+    scheduleLazyLoadScan() {
+        if (this.lazyScanTimer) {
+            return;
+        }
+        let since = performance.now() - this.lastLazyScan;
+        if (since >= GenTabLayout.LazyScanMs) {
+            this.lastLazyScan = performance.now();
+            browserUtil.makeVisible(document);
+            return;
+        }
+        this.lazyScanTimer = setTimeout(() => {
+            this.lazyScanTimer = null;
+            this.lastLazyScan = performance.now();
+            browserUtil.makeVisible(document);
+        }, GenTabLayout.LazyScanMs - since);
     }
 
     /** Fully hides the mobile top tab bar (leaves the Quick Tools peek). */
@@ -405,8 +496,13 @@ class GenTabLayout {
         }
         let deltaX = pageX - this.mobileDragStartX;
         let deltaY = pageY - this.mobileDragStartY;
+        // Cached rather than measured: this runs on every touchmove, and the reads it used to do
+        // (getComputedStyle for the viewport height, three more for the bottom peek, plus a bounding rect)
+        // were interleaved with the transform/height writes below, forcing a synchronous reflow per frame
+        // of every panel drag. The cache is refilled by the layout pass that starts the drag.
+        let metrics = this.getMobileMetrics();
         let width = window.innerWidth;
-        let height = this.getViewportHeight();
+        let height = metrics.viewH;
         let progress = 0;
         if (this.mobileDragPanel == 'left') {
             if (this.mobileDragOpening) {
@@ -433,9 +529,9 @@ class GenTabLayout {
             }
         }
         else if (this.mobileDragPanel == 'bottom') {
-            let peek = this.getMobileBottomPeekPx();
+            let peek = metrics.peek;
             let dismissGap = Math.min(52, Math.round(height * 0.07));
-            let full = Math.max(200, height - this.t2iRootDiv.getBoundingClientRect().top - dismissGap);
+            let full = Math.max(200, height - (metrics.rootTopBase - this.mobileTopbarCollapsePx) - dismissGap);
             let travel = Math.max(1, full - peek);
             let h;
             if (this.mobileDragOpening) {
@@ -611,7 +707,7 @@ class GenTabLayout {
             if (!(el instanceof Element) || !el.matches('.main_inputs_area_wrapper, .current_image_batch_core, .browser-content-container, .browser_container, .scroll-within-tab')) {
                 return;
             }
-            this.setMobileTopbarCollapse(el.scrollTop);
+            this.scheduleTopbarCollapse(el.scrollTop);
         }, true);
         document.addEventListener('focusin', (e) => {
             if (!this.isSmallWindow || !e.target || !e.target.closest) {
@@ -691,6 +787,10 @@ class GenTabLayout {
                 this.altRegion.style.top = `calc(-${this.altText.offsetHeight + this.altNegText.offsetHeight + this.altImageRegion.offsetHeight}px - 1rem - 7px)`;
             }
         }
+        // Everything above may have moved things (tab heights, prompt box growth), so the per-frame metrics
+        // cache is stale by definition here. Dropping it makes the setMobileTopbarCollapse call below the
+        // single measuring pass for this frame; every later scroll/drag frame then reads from that cache.
+        this.mobileMetrics = null;
         if (this.isSmallWindow) {
             this.setMobileTopbarCollapse(this.mobileTopbarCollapsePx);
         }
@@ -727,13 +827,14 @@ class GenTabLayout {
             let offset = container.getBoundingClientRect().top - parent.getBoundingClientRect().top;
             container.style.height = `calc(100% - ${offset}px)`;
         }
-        browserUtil.makeVisible(document);
+        this.scheduleLazyLoadScan();
     }
 
     /** Mobile overlay positioning path (small-window only). */
     reapplyMobilePositions(rootTop, viewH) {
+        let metrics = this.getMobileMetrics();
         let hideBottomPeek = this.syncMobileKeyboardState();
-        let peek = hideBottomPeek ? 0 : this.getMobileBottomPeekPx();
+        let peek = hideBottomPeek ? 0 : metrics.peek;
         let topHeight = Math.max(120, viewH - rootTop - peek);
         this.syncMobilePanelClasses();
         this.inputSidebar.style.display = '';
@@ -752,7 +853,10 @@ class GenTabLayout {
         this.bottomBar.style.height = `${this.isMobileBottomOpen() ? fullBottom : peek}px`;
         this.altRegion.style.width = '100%';
         this.altRegion.style.top = '';
-        let altHeight = this.altRegion.style.display == 'none' || this.isMobileBottomOpen() ? 0 : this.altRegion.offsetHeight;
+        // Re-measured rather than reused from the cache above: this pass may have just switched the region
+        // out of desktop widths, so its height is only trustworthy after the writes just above. This also
+        // leaves the cache holding end-of-pass values, which is what the following scroll/drag frames want.
+        let altHeight = this.isMobileBottomOpen() ? 0 : this.refreshMobileMetrics().altHeight;
         this.currentImageWrapbox.style.width = '100%';
         this.currentImageWrapbox.style.height = `calc(${topHeight}px - ${altHeight}px)`;
         this.editorSizebar.style.height = `calc(${topHeight}px - ${altHeight}px)`;
@@ -1012,7 +1116,7 @@ class GenTabLayout {
                 let deltaX = touch.pageX - this.swipeStartX;
                 let deltaY = touch.pageY - this.swipeStartY;
                 if (this.mobileTopbarDragging) {
-                    this.setMobileTopbarCollapse(this.mobileTopbarDragFrom - deltaY);
+                    this.scheduleTopbarCollapse(this.mobileTopbarDragFrom - deltaY);
                     if (e.cancelable) {
                         e.preventDefault();
                     }
@@ -1068,7 +1172,7 @@ class GenTabLayout {
                 if (this.mobileTopbarCanDrag && !this.mobileDragPanel && Math.abs(deltaY) > 8 && Math.abs(deltaY) > Math.abs(deltaX)) {
                     this.mobileTopbarDragging = true;
                     this.mobileTopbarDragFrom = this.mobileTopbarCollapsePx;
-                    this.setMobileTopbarCollapse(this.mobileTopbarDragFrom - deltaY);
+                    this.scheduleTopbarCollapse(this.mobileTopbarDragFrom - deltaY);
                     if (e.cancelable) {
                         e.preventDefault();
                     }

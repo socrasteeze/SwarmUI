@@ -47,10 +47,19 @@ body.small-window {
    at top, home-indicator curve at bottom). border-box keeps this padding inside the existing 100vh box
    instead of growing past it, since body is position:fixed + overflow:hidden and would otherwise clip
    that same amount off the bottom. The layout's height math reads the root div's live top offset, so
-   it self-corrects around this padding. */
+   it self-corrects around this padding.
+
+   The top inset comes from --safe-top (set by mobile_core.js's measureSafeAreaTop), NOT from env()
+   directly. iOS reports a top inset of 0 for home-screen web apps even under status-bar-style
+   black-translucent - the very mode that draws the app underneath the status bar - so the raw env() value
+   left the top tab strip sitting behind the clock and Dynamic Island with no padding at all. The bottom
+   inset IS reported on the same device, which is why --safe-bottom works and this did not. mobile_core.js
+   uses the reported value whenever there is one and only substitutes a measured fallback once it has
+   confirmed the app is genuinely running full-bleed. The env() in the var fallback covers the window before
+   that script runs, and non-iOS standalone where the reported value was always correct. */
 body.pwa-standalone {
     box-sizing: border-box;
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--safe-top, env(safe-area-inset-top));
     padding-bottom: var(--safe-bottom);
 }
 
@@ -166,7 +175,7 @@ body.small-window .alt-prompt-image {
 .mobile-connection-banner {
     position: fixed;
     left: 50%;
-    top: calc(env(safe-area-inset-top) + 0.5rem);
+    top: calc(var(--safe-top, env(safe-area-inset-top)) + 0.5rem);
     transform: translateX(-50%) translateY(-200%);
     z-index: 100000;
     background: var(--background-gray-danger, #361f1f);
@@ -182,6 +191,48 @@ body.small-window .alt-prompt-image {
 }
 .mobile-connection-banner.visible {
     transform: translateX(-50%) translateY(0);
+}
+
+/* --- Phase 5: discrete loading bar --- */
+
+/* Slim top-of-page loading bar (element instantiated by busy_indicator.js). Shown on any viewport, not just mobile -
+   a large model library is exactly as slow to render on desktop. Below the connection banner's z-index
+   (100000) since a real connectivity problem is the more urgent thing to notice; above everything else,
+   including the top tab strip (z-index 5) and the status bar text (z-index 100), since it exists specifically
+   to be visible during the moments something else looks frozen. Anchored to --safe-top for the same reason
+   as the connection banner: on an installed iOS PWA a bare env()/0 would sit it under the status bar. */
+.swarm-busybar {
+    position: fixed;
+    top: var(--safe-top, env(safe-area-inset-top));
+    left: 0;
+    width: 100%;
+    height: 3px;
+    z-index: 99999;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
+}
+.swarm-busybar-visible {
+    opacity: 1;
+}
+.swarm-busybar-fill {
+    position: absolute;
+    top: 0;
+    left: -35%;
+    width: 35%;
+    height: 100%;
+    background: var(--emphasis, #4a9eff);
+    animation: swarm-busybar-slide 1.1s ease-in-out infinite;
+}
+/* The animation itself only matters for operations short enough that the main thread stays free to run it -
+   for the long synchronous freezes this exists to cover, the bar is static (a paused animation frame) for
+   the freeze's duration. That's fine: a bar appearing at all, even motionless, is still the "this is
+   loading" signal a fully blank screen can't give. See busy_indicator.js's runDeferred() for why the paint
+   happens at all before a blocking task starts. */
+@keyframes swarm-busybar-slide {
+    0% { left: -35%; }
+    100% { left: 100%; }
 }
 
 /* --- Model/preset browser cards: fit the phone column instead of overflowing it --- */

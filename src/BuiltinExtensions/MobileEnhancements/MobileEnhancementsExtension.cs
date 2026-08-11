@@ -18,6 +18,7 @@ public class MobileEnhancementsExtension : Extension
     /// <inheritdoc/>
     public override void OnInit()
     {
+        ScriptFiles.Add("Assets/busy_indicator.js");
         ScriptFiles.Add("Assets/mobile_core.js");
         ScriptFiles.Add("Assets/mobile_fullview_touch.js");
         ScriptFiles.Add("Assets/mobile_network.js");

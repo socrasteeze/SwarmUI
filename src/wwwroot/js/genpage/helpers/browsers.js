@@ -1,6 +1,32 @@
 
 /** Helper utilities for browsers. */
 class BrowserUtil {
+
+    constructor() {
+        /** Elements that already have a lazy-load scan booked for the next animation frame. */
+        this.pendingVisible = new Set();
+    }
+
+    /**
+     * Books a makeVisible() pass for the next animation frame, at most one per element per frame.
+     *
+     * makeVisible() selects every '.lazyload' descendant and reads a bounding rect off each one, so on a
+     * browser holding thousands of cards (a full LoRA list, say) it is a large forced-layout pass. Scroll
+     * fires several times per frame on a touch device, and every extra pass within one frame can only
+     * reveal images the frame's first pass already revealed - the work is pure waste, and on a phone it is
+     * enough of it to visibly stall the scroll it is reacting to.
+     */
+    scheduleVisible(elem) {
+        if (this.pendingVisible.has(elem)) {
+            return;
+        }
+        this.pendingVisible.add(elem);
+        requestAnimationFrame(() => {
+            this.pendingVisible.delete(elem);
+            this.makeVisible(elem);
+        });
+    }
+
     /**
      * Make any visible images within a container actually load now.
      */
@@ -767,7 +793,7 @@ class GenPageBrowserClass {
             this.fullContentDiv.appendChild(this.headerBar);
             this.contentDiv = createDiv(`${this.id}-content`, 'browser-content-container');
             this.contentDiv.addEventListener('scroll', () => {
-                browserUtil.makeVisible(this.contentDiv);
+                browserUtil.scheduleVisible(this.contentDiv);
             });
             this.fullContentDiv.appendChild(this.contentDiv);
             this.barSpot = 0;
