@@ -231,6 +231,7 @@ function getHtmlForParam(param, prefix, isPreset = false) {
                     return {html: makeMultiselectInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.values, param.default, "Select...", param.toggleable, !param.no_popover) + pop,
                         runnable: () => {
                             $(`#${prefix}${param.id}`).select2({ theme: "bootstrap-5", width: 'style', placeholder: $(this).data('placeholder'), closeOnSelect: false });
+                            fillLazyMultiselectOnOpen(`${prefix}${param.id}`, param.values);
                         }
                     };
                 }
@@ -1176,6 +1177,61 @@ function refreshParameterValues(strong = true, refreshType = null, callback = nu
             }
             hideUnsupportableParams();
         });
+    });
+}
+
+/**
+ * Wires a multiselect that was emitted without its <option> list (see makeMultiselectInput's lazy branch)
+ * to build that list the first time the user opens it.
+ *
+ * Only does anything for selects carrying data-lazy-options, so ordinary parameters are untouched.
+ * select2's default adapter re-reads the underlying <select> on every query rather than caching at init,
+ * so appending options after initialization is enough - no destroy/re-init, and the current selection
+ * survives untouched (verified in verify-mobile-perf.mjs).
+ *
+ * The fill runs behind busy_indicator.js's runDeferred(), not inline in the event handler. Filling and then
+ * letting select2 render its results are both real synchronous costs (the render alone was measured at
+ * ~13s over 18.5k entries), and doing either inline here would freeze the tab with literally nothing on
+ * screen to say a tap was received. preventDefault() stops THIS open attempt; the deferred callback fills
+ * the list and re-triggers open() itself, at which point this same handler runs again, sees the fill flag
+ * already cleared, and steps aside for select2's own (still slow, but now at least announced) render.
+ */
+function fillLazyMultiselectOnOpen(elemId, values) {
+    let elem = document.getElementById(elemId);
+    if (!elem || !elem.dataset.lazyOptions || !values) {
+        return;
+    }
+    $(elem).on('select2:opening', (e) => {
+        if (!elem.dataset.lazyOptions) {
+            return;
+        }
+        e.preventDefault();
+        let fill = () => {
+            delete elem.dataset.lazyOptions;
+            let present = new Set([...elem.options].map(option => option.value));
+            let frag = document.createDocumentFragment();
+            for (let value of values) {
+                // Whatever is already there is either the default or a programmatically-set value; re-adding
+                // it would duplicate the entry and, for a selected one, visibly duplicate the chip.
+                if (present.has(value)) {
+                    continue;
+                }
+                let option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                frag.appendChild(option);
+            }
+            elem.appendChild(frag);
+            // Re-open now that the list is filled. This handler runs again on the way in, sees the fill flag
+            // already cleared above, and steps aside for select2's own render.
+            $(elem).select2('open');
+        };
+        if (typeof busyIndicator != 'undefined') {
+            busyIndicator.runDeferred(fill);
+        }
+        else {
+            fill();
+        }
     });
 }
 
