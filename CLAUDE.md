@@ -4,6 +4,29 @@ Guidance for AI coding agents working in this repository (socrasteeze's fork of 
 
 **[AGENTS.md](/AGENTS.md) is the canonical conventions document — read it before coding**, along with [CONTRIBUTING.md](/CONTRIBUTING.md) and any relevant skill files in `.agents/skills/`. This file only summarizes the highest-traffic rules and adds fork-specific policy.
 
+## Git identity (non-negotiable)
+
+Every commit — author AND committer — is `socrasteeze <socradeez@gmail.com>`. Local git
+config is NOT part of a clone: a fresh checkout, container, or agent sandbox inherits
+whatever global identity happens to be set there and will silently commit as someone (or
+something) else. A sibling fork in this account (`ai-toolkit`) shipped a commit with the
+right author but committer `Claude <noreply@anthropic.com>` for exactly this reason — set
+the identity once, per clone, before the first commit, and never override it afterwards:
+
+```
+git config user.name  'socrasteeze'
+git config user.email 'socradeez@gmail.com'
+```
+
+No `Co-authored-by:`, `Generated-by:`, `Assisted-by:`, or any other AI-attribution trailer,
+in any commit message, on any branch, ever. No model name (Claude, GPT, Codex, or otherwise)
+as author or committer — the `/clean` skill (mandatory before any push to `master`, see
+below) is the backstop, not the check. If a tool, hook, or the environment's global git
+config pushes toward a vendor identity, override it locally — do not let it stand. A bad
+author or committer found on a commit already made is fixed with `git commit-tree`
+(preserving parents exactly, rewriting only the identity), never with `rebase` — see
+"Never rewrite upstream commits" below for why.
+
 ## What this project is
 
 SwarmUI is a modular AI media generation web UI, in three parts: a JS/HTML browser frontend, a C# ASP.NET Core server (the main workhorse), and a Python backend (mostly upstream ComfyUI, auto-downloaded into `dlbackend/`) that runs the actual AI execution.
