@@ -26,6 +26,12 @@ custom-launch-docker.sh
 dotnet-install.sh
 docker-compose.yml
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Python
 __pycache__/
