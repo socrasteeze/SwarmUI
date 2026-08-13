@@ -441,11 +441,61 @@ public static class Utilities
         }
     }
 
+    /// <summary>A cancellable form of <see cref="ToStringFast(JToken, StringBuilder)"/> for HTTP responses.</summary>
+    public static void ToStringFast(this JToken jval, StringBuilder builder, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (jval is JObject jobj)
+        {
+            builder.Append('{');
+            if (jobj.Count > 0)
+            {
+                foreach ((string key, JToken val) in jobj)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    builder.Append('"').Append(EscapeJsonString(key)).Append("\":");
+                    val.ToStringFast(builder, cancellationToken);
+                    builder.Append(',');
+                }
+                builder.Length--;
+            }
+            builder.Append('}');
+        }
+        else if (jval is JArray jarr)
+        {
+            builder.Append('[');
+            if (jarr.Count > 0)
+            {
+                foreach (JToken val in jarr)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    val.ToStringFast(builder, cancellationToken);
+                    builder.Append(',');
+                }
+                builder.Length--;
+            }
+            builder.Append(']');
+        }
+        else
+        {
+            builder.Append(jval.ToString(Formatting.None));
+        }
+    }
+
     /// <summary>Converts a <see cref="JObject"/> to a UTF-8 string byte array.</summary>
     public static byte[] JsonToByteArray(JObject jdata)
     {
         StringBuilder builder = new(1024);
         jdata.ToStringFast(builder);
+        return builder.ToString().EncodeUTF8();
+    }
+
+    /// <summary>Converts a <see cref="JObject"/> to a UTF-8 byte array while observing request cancellation.</summary>
+    public static byte[] JsonToByteArray(JObject jdata, CancellationToken cancellationToken)
+    {
+        StringBuilder builder = new(1024);
+        jdata.ToStringFast(builder, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         return builder.ToString().EncodeUTF8();
     }
 
@@ -475,16 +525,23 @@ public static class Utilities
                 await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, cancel.Token);
                 return;
             }
-            byte[] resp = JsonToByteArray(obj);
+            using CancellationTokenSource responseCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, context.RequestAborted);
+            CancellationToken cancellationToken = responseCancel.Token;
+            byte[] resp = JsonToByteArray(obj, cancellationToken);
             context.Response.ContentType = "application/json";
             context.Response.StatusCode = status;
             context.Response.ContentLength = resp.Length;
             context.Response.Headers.CacheControl = "no-store";
-            await context.Response.BodyWriter.WriteAsync(resp, Program.GlobalProgramCancel);
+            await context.Response.BodyWriter.WriteAsync(resp, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             await context.Response.CompleteAsync();
         }
         catch (Exception ex)
         {
+            if (ex is OperationCanceledException && (context.RequestAborted.IsCancellationRequested || Program.GlobalProgramCancel.IsCancellationRequested))
+            {
+                return;
+            }
             Logs.Error($"Failing while yielding JSON output: {ex.ReadableString()}");
         }
     }

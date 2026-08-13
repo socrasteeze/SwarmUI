@@ -36,6 +36,8 @@ class MState {
         this.archFilter = '';
         /** Callbacks fired after any state change that should re-render the Create surface. */
         this.changeListeners = [];
+        /** Whether a state-change notification is already booked for the next animation frame. */
+        this.changeScheduled = false;
     }
 
     /** Registers a change listener. */
@@ -43,12 +45,20 @@ class MState {
         this.changeListeners.push(callback);
     }
 
-    /** Notifies listeners and persists. Call after any mutation. */
+    /** Persists immediately and coalesces listener redraws to one per animation frame. Slider input and the two
+     * parallel boot responses can otherwise rebuild the entire Create surface several times before a paint. */
     changed() {
         this.save();
-        for (let callback of this.changeListeners) {
-            callback();
+        if (this.changeScheduled) {
+            return;
         }
+        this.changeScheduled = true;
+        requestAnimationFrame(() => {
+            this.changeScheduled = false;
+            for (let callback of this.changeListeners) {
+                callback();
+            }
+        });
     }
 
     /** Stores param metadata from a ListT2IParams response. */
@@ -223,6 +233,14 @@ class MState {
             let preset = this.presets.find(p => p.title == title);
             if (preset && preset.param_map) {
                 this.applyPresetMap(input, preset.param_map);
+            }
+        }
+        // These two controls are always visible and explicitly user-editable. Once tapped, their stored base
+        // values must win over a preset or the buttons would appear to work while generation kept using the
+        // preset value. Untouched controls have no key in params and therefore still inherit the preset/default.
+        for (let key of ['steps', 'cfgscale']) {
+            if (key in this.params) {
+                input[key] = this.params[key];
             }
         }
         // Resolution. An aspect ratio on its own does nothing server-side: T2IParamInput.GetImageWidth only

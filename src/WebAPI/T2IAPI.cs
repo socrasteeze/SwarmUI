@@ -34,7 +34,7 @@ public static class T2IAPI
         API.RegisterAPICall(ToggleImageStarred, true, Permissions.UserStarImages);
         API.RegisterAPICall(OpenImageFolder, true, Permissions.LocalImageFolder);
         API.RegisterAPICall(DeleteImage, true, Permissions.UserDeleteImage);
-        API.RegisterAPICall(ListT2IParams, false, Permissions.FundamentalGenerateTabAccess);
+        API.RegisterAPICall((Func<Session, bool, Task<JObject>>)ListT2IParams, false, Permissions.FundamentalGenerateTabAccess);
         API.RegisterAPICall(TriggerRefresh, true, Permissions.FundamentalGenerateTabAccess); // Intentionally weird perm here: internal check for readonly vs true refresh
     }
 
@@ -1044,6 +1044,12 @@ public static class T2IAPI
         return await ListT2IParams(session);
     }
 
+    /// <summary>Returns the complete parameter payload used by legacy callers.</summary>
+    public static Task<JObject> ListT2IParams(Session session)
+    {
+        return ListT2IParams(session, false);
+    }
+
     [API.APIDescription("Get a list of available T2I parameters.",
         """
         "list":
@@ -1110,7 +1116,8 @@ public static class T2IAPI
             // (This is interface-specific data)
         }
         """)]
-    public static async Task<JObject> ListT2IParams(Session session)
+    public static async Task<JObject> ListT2IParams(Session session,
+        [API.APIParameter("If true, omit the duplicate LoRA parameter value list. The models map still includes LoRAs.")] bool compact = false)
     {
         JObject modelData = [];
         foreach (T2IModelHandler handler in Program.T2IModelSets.Values)
@@ -1140,7 +1147,11 @@ public static class T2IAPI
         }
         return new JObject()
         {
-            ["list"] = new JArray(types.Select(v => v.ToNet(session)).ToList()),
+            // The LoRAs parameter values duplicate models.LoRA. /simple uses the models map for compatibility
+            // filtering and prompt tags, then fetches rich ListModels rows only when its picker opens. Avoiding
+            // the second copy materially reduces its bootstrap payload on large libraries without changing the
+            // default response used by the genpage or extensions.
+            ["list"] = new JArray(types.Select(v => v.ToNet(session, !compact || v.ID != "loras")).ToList()),
             ["groups"] = new JArray(groups.Values.OrderBy(g => g.OrderPriority).Select(g => g.ToNet(session)).ToList()),
             ["models"] = modelData,
             ["model_compat_classes"] = modelCompatClasses,

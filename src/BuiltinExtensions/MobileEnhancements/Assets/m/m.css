@@ -311,6 +311,50 @@
     color: var(--emphasis-text, #fff);
     border-color: var(--emphasis);
 }
+.m-tune-row {
+    flex-wrap: nowrap;
+}
+.m-number-stepper {
+    display: grid;
+    grid-template-columns: 44px minmax(2.6rem, 1fr) 44px;
+    align-items: center;
+    flex: 1 1 0;
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: var(--background-panel);
+}
+.m-stepper-label {
+    grid-column: 1 / -1;
+    padding: 0.15rem 0.35rem;
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+}
+.m-stepper-button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid var(--border-color);
+    border-radius: 0;
+    background: var(--button-background);
+    color: var(--text);
+    font-size: 20px;
+}
+.m-stepper-button:first-of-type {
+    border-right: 1px solid var(--border-color);
+    border-left: 0;
+}
+.m-stepper-value {
+    min-width: 0;
+    padding: 0 0.35rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
 .m-aspect-select,
 .m-size-select {
     min-height: 44px;

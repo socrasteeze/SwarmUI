@@ -1,5 +1,5 @@
 /** Dirt-simple direct POST request sender. */
-function sendJsonToServer(url, json_input, callback, error_callback) {
+function sendJsonToServer(url, json_input, callback, error_callback, timeout = 0) {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
     xhr.responseType = 'json';
@@ -7,8 +7,13 @@ function sendJsonToServer(url, json_input, callback, error_callback) {
         callback(xhr.status, xhr.response);
     };
     xhr.onerror = error_callback;
+    if (timeout > 0) {
+        xhr.timeout = timeout;
+        xhr.ontimeout = error_callback;
+    }
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.send(JSON.stringify(json_input));
+    return xhr;
 };
 
 /** Dirt-simple direct GET request sender. */

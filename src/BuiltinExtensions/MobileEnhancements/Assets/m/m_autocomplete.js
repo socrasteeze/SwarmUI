@@ -10,13 +10,19 @@
  *    QuickType-style strip in normal flow immediately above whichever box is being typed in.
  *  - Completing individual LINES inside a wildcard file needs the async getWildcardDataFor/<AUTO-RETRY>
  *    dance. Wildcard file NAMES complete; their contents do not.
- * The completion data rides the GetMyUserData call the client already makes, and is null unless the user
- * has configured an autocompletion source - in which case this whole feature stays invisible and inert. */
+ * The completion data loads on first prompt focus, keeping a large tag CSV off the startup-critical path. If no
+ * source is configured, the payload remains null and the feature stays invisible. */
 class MAutoComplete {
 
     constructor() {
         /** Parsed completion entries, or null when the user has no autocompletion source configured. */
         this.entries = null;
+        /** Whether the lazy autocomplete request is in flight or has completed successfully. */
+        this.loadStarted = false;
+        /** Monotonic request generation used to ignore a response that arrives after the client timeout. */
+        this.loadAttempt = 0;
+        /** Earliest time another focus may retry after a failed or timed-out load. */
+        this.retryAfter = 0;
         /** Match mode: 'Bucketed' | 'Contains' | 'StartsWith'. Server default is Bucketed. */
         this.matchMode = 'Bucketed';
         /** Sort mode: 'Active' | 'Alphabetical' | 'Frequency' | 'None'. Server default is Active. */
@@ -41,7 +47,13 @@ class MAutoComplete {
      * `<prefix:` completer from building thousands of elements per keystroke. */
     static MaxChips = 60;
 
-    /** Parses the autocompletions payload from GetMyUserData. Null/absent leaves the feature off.
+    /** A stalled enrichment request must not disable autocomplete for the rest of the page lifetime. */
+    static LoadTimeoutMs = 15000;
+
+    /** Small retry backoff prevents repeated focus changes from hammering an offline server. */
+    static RetryDelayMs = 5000;
+
+    /** Parses the autocompletions payload from GetSimpleAutocompletions. Null/absent leaves the feature off.
      * Only the flat list is built: the genpage's per-first-character buckets exist for an "optimize"
      * mode whose flag is never actually set to true, so they would be pure memory cost here. */
     loadFrom(userData) {
@@ -70,6 +82,46 @@ class MAutoComplete {
             list.push(entry);
         }
         this.entries = list;
+    }
+
+    /** Loads the configured word list once, then refreshes the focused box against the now-ready entries. Prefix
+     * completers and TagDex remain usable before this lands because they do not depend on this.entries. */
+    ensureLoaded(box) {
+        if (this.loadStarted || Date.now() < this.retryAfter) {
+            return;
+        }
+        this.loadStarted = true;
+        let attempt = ++this.loadAttempt;
+        let timer = null;
+        let fail = (error) => {
+            if (attempt != this.loadAttempt) {
+                return;
+            }
+            this.loadAttempt++;
+            if (timer) {
+                clearTimeout(timer);
+            }
+            this.entries = null;
+            this.loadStarted = false;
+            this.retryAfter = Date.now() + MAutoComplete.RetryDelayMs;
+            console.warn('autocomplete load failed', error);
+        };
+        timer = setTimeout(() => fail('request timed out'), MAutoComplete.LoadTimeoutMs);
+        genericRequest('GetSimpleAutocompletions', {}, data => {
+            if (attempt != this.loadAttempt) {
+                return;
+            }
+            clearTimeout(timer);
+            if (data.warning) {
+                mUI.warn(data.warning);
+            }
+            this.loadFrom(data);
+            this.retryAfter = 0;
+            let active = document.activeElement;
+            if (active && this.slots.has(active)) {
+                this.onInput(active);
+            }
+        }, 0, fail, MAutoComplete.LoadTimeoutMs);
     }
 
     /** Best-effort read of the user's match/sort preferences. Silent on failure - the server defaults are
@@ -351,6 +403,7 @@ class MAutoComplete {
         slot.appendChild(strip);
         box.parentElement.insertBefore(slot, box);
         this.slots.set(box, strip);
+        box.addEventListener('focus', () => this.ensureLoaded(box));
         box.addEventListener('input', () => this.onInput(box));
         box.addEventListener('keydown', (e) => this.onKeyDown(box, e));
         box.addEventListener('blur', () => setTimeout(() => {

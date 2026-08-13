@@ -145,7 +145,7 @@ function makeWSRequest(url, in_data, callback, depth = 0, errorHandle = null, on
 
 let genericAjaxError = translatable(`Failed to send request to server (generic ProgressEvent). Did the server crash?`);
 
-function genericRequest(url, in_data, callback, depth = 0, errorHandle = null) {
+function genericRequest(url, in_data, callback, depth = 0, errorHandle = null, timeout = 0) {
     in_data['session_id'] = session_id;
     function fail(e) {
         if (e instanceof ProgressEvent) {
@@ -172,7 +172,7 @@ function genericRequest(url, in_data, callback, depth = 0, errorHandle = null) {
             if (data.error_id == 'invalid_session_id') {
                 console.log('Session refused, will get new one and try again.');
                 getSession(() => {
-                    genericRequest(url, in_data, callback, depth + 1, errorHandle);
+                    genericRequest(url, in_data, callback, depth + 1, errorHandle, timeout);
                 });
                 return;
             }
@@ -180,7 +180,7 @@ function genericRequest(url, in_data, callback, depth = 0, errorHandle = null) {
                 console.log(`Failed to impersonate user ${impersonateTargetUserId}, will clear and try again.`);
                 impersonateTargetUserId = null;
                 getSession(() => {
-                    genericRequest(url, in_data, callback, depth + 1, errorHandle);
+                    genericRequest(url, in_data, callback, depth + 1, errorHandle, timeout);
                 });
                 return;
             }
@@ -192,7 +192,7 @@ function genericRequest(url, in_data, callback, depth = 0, errorHandle = null) {
             return;
         }
         callback(data);
-    }, errorHandle || genericServerError);
+    }, errorHandle || genericServerError, timeout);
 }
 
 let lastServerVersion = null;

@@ -1,19 +1,26 @@
 using FreneticUtilities.FreneticExtensions;
+using FreneticUtilities.FreneticToolkit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Newtonsoft.Json.Linq;
+using SwarmUI.Accounts;
 using SwarmUI.Core;
 using SwarmUI.Utils;
+using SwarmUI.WebAPI;
 using System.IO;
 using System.Text.RegularExpressions;
 
 namespace SwarmUI.Builtin_MobileEnhancementsExtension;
 
 /// <summary>Fork-owned extension that adds mobile-friendly UX and Progressive Web App (PWA) support to SwarmUI.
-/// Everything ships as new files under this extension folder so upstream merges stay clean - see docs/MobilePWA-Optimization-Plan.md.</summary>
+/// Most behavior stays in this extension; documented core API couplings support the standalone client.</summary>
 public class MobileEnhancementsExtension : Extension
 {
     /// <summary>Browser theme / PWA status-bar color, matched to the modern_dark background (<c>--background: #161616</c>).</summary>
     public static string ThemeColor = "#161616";
+
+    /// <summary>Per-user guard against repeatedly materializing a full autocomplete response.</summary>
+    public static SimpleRateLimiter<string> SimpleAutocompleteRateLimiter = new(12, TimeSpan.FromMinutes(1));
 
     /// <inheritdoc/>
     public override void OnInit()
@@ -52,6 +59,59 @@ public class MobileEnhancementsExtension : Extension
         OtherAssets.Add("Assets/m/m_images.js");
         OtherAssets.Add("Assets/m/m_models.js");
         OtherAssets.Add("Assets/m/m_app.js");
+        API.RegisterAPICall(GetSimpleAutocompletions, false, Permissions.FundamentalGenerateTabAccess);
+    }
+
+    /// <summary>Returns the current user's autocomplete word list for the standalone client. This endpoint is
+    /// called lazily on first prompt focus so a large tag CSV does not block the initial mobile render. When the
+    /// configured source is <c>character_tags</c> and a sibling <c>all_tags</c> source exists, the general list is
+    /// used instead: TagDex already owns character lookup and the <c>&lt;character:</c> prefix, so this gives the
+    /// user both systems without manually swapping the setting.</summary>
+    public async Task<JObject> GetSimpleAutocompletions(HttpContext context, Session session)
+    {
+        if (!SimpleAutocompleteRateLimiter.TryUseOne(session.User.UserID))
+        {
+            return new JObject() { ["error"] = "Autocomplete request rate limit reached.", ["error_id"] = "ratelimit" };
+        }
+        Settings.User.AutoCompleteData settings = session.User.Settings.AutoComplete;
+        CancellationToken cancellationToken = context.RequestAborted;
+        (string Source, string[] Entries) result;
+        try
+        {
+            result = string.IsNullOrWhiteSpace(settings.Source)
+                ? (settings.Source, null)
+                : await AutoCompleteListHelper.GetDataWithSiblingFallbackAsync(settings.Source, "character_tags", "all_tags",
+                    settings.EscapeParens, settings.Suffix, settings.SpacingMode, cancellationToken);
+        }
+        catch (InvalidDataException)
+        {
+            return new JObject()
+            {
+                ["autocompletions"] = null,
+                ["configured_source"] = settings.Source,
+                ["source"] = null,
+                ["warning"] = "The configured autocomplete list is too large for the mobile client. Choose a smaller all-tags list."
+            };
+        }
+        JArray completions = null;
+        if (result.Entries is not null)
+        {
+            completions = [];
+            for (int i = 0; i < result.Entries.Length; i++)
+            {
+                if ((i & 1023) == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                completions.Add(result.Entries[i]);
+            }
+        }
+        return new JObject()
+        {
+            ["autocompletions"] = completions,
+            ["configured_source"] = settings.Source,
+            ["source"] = result.Source
+        };
     }
 
     /// <inheritdoc/>
