@@ -30,7 +30,7 @@ public static class BasicAPIFeatures
         // General APIs
         API.RegisterAPICall(Logout, true, Permissions.Fundamental);
         API.RegisterAPICall(InstallConfirmWS, true, Permissions.Install);
-        API.RegisterAPICall(GetMyUserData, false, Permissions.FundamentalGenerateTabAccess);
+        API.RegisterAPICall((Func<Session, bool, Task<JObject>>)GetMyUserData, false, Permissions.FundamentalGenerateTabAccess);
         API.RegisterAPICall(ExportUserPresets, false, Permissions.FundamentalGenerateTabAccess);
         API.RegisterAPICall(SetStarredModels, true, Permissions.FundamentalModelAccess);
         API.RegisterAPICall(SetPresetLinks, true, Permissions.FundamentalModelAccess);
@@ -345,6 +345,12 @@ public static class BasicAPIFeatures
         return null;
     }
 
+    /// <summary>Returns the user's base data with the legacy full autocomplete payload.</summary>
+    public static Task<JObject> GetMyUserData(Session session)
+    {
+        return GetMyUserData(session, true);
+    }
+
     [API.APIDescription("User route to get the user's own base data.",
         """
             "user_name": "username",
@@ -375,9 +381,13 @@ public static class BasicAPIFeatures
             },
             "autocompletions": ["Word\nword\ntag\n3"]
         """)]
-    public static async Task<JObject> GetMyUserData(Session session)
+    public static async Task<JObject> GetMyUserData(Session session,
+        [API.APIParameter("If false, omit the configured autocomplete word list from this response.")] bool includeAutocompletions = true)
     {
         Settings.User.AutoCompleteData settings = session.User.Settings.AutoComplete;
+        string[] autocompletions = !includeAutocompletions || string.IsNullOrWhiteSpace(settings.Source)
+            ? null
+            : AutoCompleteListHelper.GetData(settings.Source, settings.EscapeParens, settings.Suffix, settings.SpacingMode);
         return new JObject()
         {
             ["user_name"] = session.User.UserID,
@@ -386,7 +396,7 @@ public static class BasicAPIFeatures
             ["permissions"] = JArray.FromObject(session.User.GetPermissions()),
             ["starred_models"] = JObject.Parse(session.User.GetGenericData("starred_models", "full") ?? "{}"),
             ["model_preset_links"] = JObject.Parse(session.User.GetGenericData("modelpresetlinks", "full") ?? "{}"),
-            ["autocompletions"] = string.IsNullOrWhiteSpace(settings.Source) ? null : new JArray(AutoCompleteListHelper.GetData(settings.Source, settings.EscapeParens, settings.Suffix, settings.SpacingMode))
+            ["autocompletions"] = autocompletions is null ? null : new JArray(autocompletions)
         };
     }
 

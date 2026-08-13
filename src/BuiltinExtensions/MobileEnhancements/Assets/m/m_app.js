@@ -1,5 +1,6 @@
 /** MobileEnhancements standalone client - boot.
- * getSession → ListT2IParams + GetMyUserData → register tabs → router. Any boot failure unhides the static
+ * getSession → compact ListT2IParams + GetMyUserData → register tabs → router. Autocomplete data loads
+ * lazily on first prompt focus. Any boot failure unhides the static
  * failure banner with the classic-UI escape link instead of dying silently. */
 class MApp {
 
@@ -8,15 +9,12 @@ class MApp {
         try {
             mState.load();
             getSession(() => {
-                genericRequest('ListT2IParams', {}, data => {
+                genericRequest('ListT2IParams', { 'compact': true }, data => {
                     mState.loadParamMeta(data);
                     mState.changed();
                 });
-                genericRequest('GetMyUserData', {}, data => {
+                genericRequest('GetMyUserData', { 'includeAutocompletions': false }, data => {
                     mState.presets = data.presets || [];
-                    // The autocompletion list rides this same response - no extra request, and it is
-                    // null unless the user configured a source, in which case the feature stays inert.
-                    mAutoComplete.loadFrom(data);
                     mState.changed();
                 });
                 mAutoComplete.loadSettings();

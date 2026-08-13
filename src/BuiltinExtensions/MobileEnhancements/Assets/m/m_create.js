@@ -7,6 +7,8 @@ class MCreate {
     constructor() {
         /** Cached LoRA model list from ListModels (fetched lazily on first sheet open). */
         this.loraList = null;
+        /** LoRA name -> model object, built with loraList to keep active-row enrichment O(1). */
+        this.loraMap = null;
         /** Cached checkpoint list from ListModels (fetched lazily on first model sheet open). */
         this.modelList = null;
         /** Live preview tiles by `${request_id}_${batch_index}`. Only ever one batch's worth. */
@@ -17,7 +19,9 @@ class MCreate {
         this.lastCompleted = [];
         /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip).
          * width/height are covered because the resolution controls own them - see mState.buildGenInput. */
-        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix'];
+        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'steps', 'cfgscale', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix'];
+        /** Quick numeric steppers keyed by parameter id. */
+        this.numberSteppers = {};
         /** Whether the user has manually collapsed the preview. */
         this.previewCollapsed = localStorage.getItem('m_client_preview_collapsed') == 'yes';
         // The preview is built here, detached, rather than in build(). Generation frames can arrive before
@@ -560,7 +564,13 @@ class MCreate {
         if (!low) {
             return list;
         }
-        return list.filter(model => `${model.name || ''} ${model.title || ''} ${model.trigger_phrase || ''}`.toLowerCase().includes(low));
+        return list.filter(model => {
+            // A phone should lowercase each 18K-LoRA search corpus once, not once per model per keystroke.
+            if (model._mSearchText == null) {
+                model._mSearchText = `${model.name || ''} ${model.title || ''} ${model.trigger_phrase || ''}`.toLowerCase();
+            }
+            return model._mSearchText.includes(low);
+        });
     }
 
     /** Narrows a picker list to the selected architecture and builds the row that explains what happened.
@@ -849,6 +859,10 @@ class MCreate {
         }
         row.appendChild(this.imagesGroup);
         wrap.appendChild(row);
+        let tuneRow = mUI.el('div', 'm-quick-row m-tune-row');
+        tuneRow.appendChild(this.buildNumberStepper('steps', 'Steps', { 'default': 20, 'min': 0, 'max': 500, 'step': 1 }));
+        tuneRow.appendChild(this.buildNumberStepper('cfgscale', 'CFG', { 'default': 7, 'min': 0, 'max': 100, 'step': 0.5 }));
+        wrap.appendChild(tuneRow);
         let resRow = mUI.el('div', 'm-quick-row');
         this.aspectSelect = document.createElement('select');
         this.aspectSelect.className = 'm-aspect-select';
@@ -897,6 +911,45 @@ class MCreate {
         return wrap;
     }
 
+    /** Builds one compact minus/value/plus control. Server metadata remains authoritative; fallback values only
+     * cover the short interval before ListT2IParams lands. */
+    buildNumberStepper(paramId, label, fallback) {
+        let wrap = mUI.el('div', 'm-number-stepper');
+        wrap.appendChild(mUI.el('span', 'm-stepper-label', label));
+        let minus = mUI.el('button', 'm-stepper-button', '−');
+        minus.setAttribute('aria-label', `Decrease ${label}`);
+        minus.addEventListener('click', () => this.adjustQuickNumber(paramId, -1));
+        wrap.appendChild(minus);
+        let value = mUI.el('span', 'm-stepper-value');
+        wrap.appendChild(value);
+        let plus = mUI.el('button', 'm-stepper-button', '+');
+        plus.setAttribute('aria-label', `Increase ${label}`);
+        plus.addEventListener('click', () => this.adjustQuickNumber(paramId, 1));
+        wrap.appendChild(plus);
+        this.numberSteppers[paramId] = { 'wrap': wrap, 'value': value, 'fallback': fallback };
+        return wrap;
+    }
+
+    /** Moves a quick numeric parameter by its declared increment and clamps it to the server range. */
+    adjustQuickNumber(paramId, direction) {
+        let control = this.numberSteppers[paramId];
+        let meta = mState.paramMeta[paramId] || control.fallback;
+        let step = parseFloat(meta.step);
+        step = Number.isFinite(step) && step > 0 ? step : control.fallback.step;
+        let current = parseFloat(mState.buildGenInput()[paramId]);
+        if (!Number.isFinite(current)) {
+            current = parseFloat(meta.default);
+        }
+        if (!Number.isFinite(current)) {
+            current = control.fallback.default;
+        }
+        let min = Number.isFinite(parseFloat(meta.min)) ? parseFloat(meta.min) : control.fallback.min;
+        let max = Number.isFinite(parseFloat(meta.max)) ? parseFloat(meta.max) : control.fallback.max;
+        let next = Math.min(max, Math.max(min, current + step * direction));
+        mState.params[paramId] = `${parseFloat(next.toFixed(6))}`;
+        mState.changed();
+    }
+
     /** Syncs the quick-param controls from state. */
     renderQuickParams() {
         this.seedLock.textContent = mState.seedLocked ? '🔒' : '🎲';
@@ -914,6 +967,18 @@ class MCreate {
         }
         for (let btn of this.imagesGroup.querySelectorAll('.m-seg-button')) {
             btn.classList.toggle('m-selected', btn.dataset.count == `${mState.params['images'] || '1'}`);
+        }
+        let metadataReady = Object.keys(mState.paramMeta).length > 0;
+        let effective = mState.buildGenInput();
+        for (let paramId in this.numberSteppers) {
+            let control = this.numberSteppers[paramId];
+            let meta = mState.paramMeta[paramId];
+            control.wrap.style.display = !metadataReady || meta ? '' : 'none';
+            let shown = effective[paramId];
+            if (shown == null || shown == '') {
+                shown = meta && meta.default != null ? meta.default : control.fallback.default;
+            }
+            control.value.textContent = `${shown}`;
         }
         let aspectMeta = mState.paramMeta['aspectratio'];
         let serverValues = aspectMeta && aspectMeta.values ? aspectMeta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '9:16', 'Custom'];
@@ -1153,12 +1218,7 @@ class MCreate {
 
     /** The cached LoRA model object for a name, or a minimal stand-in before the list has loaded. */
     loraByName(name) {
-        for (let model of (this.loraList || [])) {
-            if (model.name == name) {
-                return model;
-            }
-        }
-        return { 'name': name };
+        return this.loraMap && this.loraMap.get(name) || { 'name': name };
     }
 
     /** LoRA bottom sheet: active LoRAs with weight sliders, add-picker from ListModels. */
@@ -1234,8 +1294,8 @@ class MCreate {
             if (arch.row) {
                 results.appendChild(arch.row);
             }
-            let active = mState.getLoras().map(l => l.name);
-            let matches = MCreate.filterModels(arch.list, search.value).filter(m => !active.includes(m.name));
+            let active = new Set(mState.getLoras().map(l => l.name));
+            let matches = MCreate.filterModels(arch.list, search.value).filter(m => !active.has(m.name));
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
@@ -1263,6 +1323,7 @@ class MCreate {
         if (!this.loraList) {
             genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
                 this.loraList = data.files || [];
+                this.loraMap = new Map(this.loraList.map(model => [model.name, model]));
                 // The active rows are re-rendered too: until this lands they show a bare name, with no
                 // thumbnail and no trigger phrase, because those live on the model object not in params.
                 renderRows();

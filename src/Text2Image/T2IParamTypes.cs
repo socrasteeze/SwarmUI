@@ -116,11 +116,18 @@ public record class T2IParamType(string Name, string Description, string Default
     T2IParamDataType Type = T2IParamDataType.UNSET, bool DoNotSave = false, bool ImageShouldResize = true, bool ImageAlwaysB64 = false, bool DoNotPreview = false, bool Nonreusable = false, string DependNonDefault = null, bool IntentionalUnused = false,
     string Subtype = null, string ID = null, Type SharpType = null)
 {
+    /// <summary>Serializes this parameter for API clients, including its value list.</summary>
     public JObject ToNet(Session session)
+    {
+        return ToNet(session, true);
+    }
+
+    /// <summary>Serializes this parameter for API clients, optionally omitting its value list.</summary>
+    public JObject ToNet(Session session, bool includeValues)
     {
         JToken values = null;
         JToken valueNames = null;
-        if (GetValues is not null)
+        if (includeValues && GetValues is not null)
         {
             List<string> rawVals = GetValues(session);
             values = JArray.FromObject(rawVals.Select(v => v.Before("///")).ToList());
