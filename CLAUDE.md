@@ -13,8 +13,8 @@ Always use this fork's checked-out root `CLAUDE.md` and `AGENTS.md` as the opera
 Every commit — author AND committer — is `socrasteeze <socradeez@gmail.com>`. Local git
 config is NOT part of a clone: a fresh checkout, container, or agent sandbox inherits
 whatever global identity happens to be set there and will silently commit as someone (or
-something) else. A sibling fork in this account (`ai-toolkit`) shipped a commit with the
-right author but committer `Claude <noreply@anthropic.com>` for exactly this reason — set
+something) else. A sibling fork shipped a commit with the right author but the wrong
+committer for exactly this reason — set
 the identity once, per clone, before the first commit, and never override it afterwards:
 
 ```
