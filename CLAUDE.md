@@ -120,6 +120,10 @@ After that, `git fetch upstream` and `git merge upstream/master` work exactly as
 5. **Never rewrite upstream commits.** Amend, rebase, reset-author, or re-sign only commits this fork authored; leave every commit reachable from `upstream/master` byte-identical. Rewriting one changes its SHA, which detaches fork history from `upstream/master` and makes each later `git merge upstream/master` re-apply that change as a conflicting duplicate. Upstream commits showing "Unverified" on GitHub (foreign committer email, no signature we can produce) is the correct, expected state for a fork — tooling that flags it, including the stop-hook git check, is reporting on commits that are not ours to fix. Note the hook's `%G?`-based check also false-negatives on our *own* signed commits whenever `gpg.ssh.allowedSignersFile` is unset in the container; confirm with `git cat-file -p <sha>` (look for a `gpgsig` header) before amending anything.
 6. **Run the `/clean` skill before any push to `master`.** It scrubs AI attribution (Co-Authored-By trailers, tool signatures, etc.) from commits and reconciles local vs. remote history before the push. This repo's default branch is `master`, not `main` — treat every `origin/main` reference in that skill as `origin/master`.
 
+## Upstream Sync Log
+
+- 2026-08-12 — merged 2 commits (`82dbd7f7`, `f9367de5`) for LTX 2.5 model, workflow, asset, and documentation support. Adopted 2 as-is; rejected 0; divergence work 0; conflict and clean-merge sweep findings 0. Release build, format, style-format, isolated core boot, and isolated extension boot passed before and after the merge. The baseline extension build retained 21 pre-existing `CS0618` warnings from the ignored `SwarmUI-WildcardImporter` extension and no errors. Native Linux launcher execution was unavailable on Windows, so the boot gates invoked the built DLL directly with isolated `--data_dir` roots.
+
 ## Fork Delta (living list — keep updated)
 
 Style note: entries below use short sentences, one fact per sentence, and tables for parallel lists. Keep new entries in that style — this is a reference for tired readers, not prose.
