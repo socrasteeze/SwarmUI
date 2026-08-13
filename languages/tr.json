@@ -1,7 +1,6 @@
 {
     "name_en": "Turkish",
     "name_local": "Türkçe",
-    "authorship": "Meforgers AI",
     "keys": {
         "\n                            TensorRT is an NVIDIA-specific optimization library. This will create a \".engine\" TensorRT model based on your model.\n                            This will take several minutes to create, and will only work with a limited subset of inputs.\n                            (For example, LoRA will not work, and resolution is constrained to the range you select).\n                            Therefore this should only be used for models you want to use frequently, especially for example models exposed as an external API.\n                        ": "TensorRT, NVIDIA'ya özel bir optimizasyon kütüphanesidir. Bu, modelinize dayalı bir \".engine\" TensorRT modeli oluşturacaktır.\nBu işlemin oluşturulması birkaç dakika sürecek ve yalnızca sınırlı bir girdi alt kümesiyle çalışacaktır.\n(Örneğin, LoRA çalışmayacak ve çözünürlük seçtiğiniz aralıkla sınırlı olacaktır).\nBu nedenle, bu yalnızca sık sık kullanmak istediğiniz modeller için, özellikle de harici bir API olarak sunulan örnek modeller için kullanılmalıdır.",
         "\n                            The \"Utilities\" tab provides a variety of general utilities and tools in the subtabs above, and the quicktools below.\n                        ": "“Yardımcı Programlar” sekmesi, yukarıdaki alt sekmelerde ve aşağıdaki hızlı araçlarda çeşitli genel yardımcı programlar ve araçlar sunar.",
