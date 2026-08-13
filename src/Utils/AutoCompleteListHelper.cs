@@ -288,10 +288,10 @@ public class AutoCompleteListHelper
                     }
                     if (cache.BoundedFormattedLists.TryGetValue(key, out string[] cached))
                     {
-                        string[] copy = CloneData(cached, cancellationToken);
+                        string[] cachedCopy = CloneData(cached, cancellationToken);
                         if (ReferenceEquals(cache, Volatile.Read(ref CurrentCache)))
                         {
-                            return (name, copy);
+                            return (name, cachedCopy);
                         }
                         continue;
                     }
