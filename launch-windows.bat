@@ -10,11 +10,13 @@ set PATH=C:\Program Files\dotnet;%PATH%
 set DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 rem Server settings option
-rem Fork edit: explicit "origin master" rather than a bare "git pull" - forces every launch to pull only from
+rem Fork edit: explicit "origin main" rather than a bare "git pull" - forces every launch to pull only from
 rem this fork (origin), never from upstream, regardless of local branch-tracking config (branch.master.remote/.merge).
+rem Branch name updated 2026-08-13: origin's default branch was renamed from "master" to "main" (see CLAUDE.md's
+rem Fork Delta); the old hardcoded "origin master" started failing every launch with "couldn't find remote ref master".
 if exist .\src\bin\always_pull (
     echo Pulling latest changes...
-    git pull origin master
+    git pull origin main
 )
 
 if not exist .git (
