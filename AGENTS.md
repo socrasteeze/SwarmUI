@@ -174,6 +174,8 @@ The only Python managed directly by SwarmUI. Mostly Comfy node formats, sometime
 
 ## Upstream Sync Log
 
+- 2026-08-14 — merged 1 commit (`a3526ef`, "tweak music3 details"): MiniMax Music3 doc wording for CFG Scale / Steps, and the hardcoded `cfg_scale` in `WorkflowGenerator.cs`'s music3 node lowered `1.7` → `1.5`. Adopted 1 as-is; rejected 0; divergence work 0. Zero conflicts and zero clean-merge sweep findings — the fork touches neither incoming file (it modifies `WorkflowGeneratorSteps.cs`, not `WorkflowGenerator.cs`). Build/format/boot gates could NOT run this sync: the container had no dotnet SDK installed. Verification was limited to the conflict-marker count, the fork-overlap check above, and the identity/attribution scan; re-run the full verify gate on a machine with dotnet before treating this merge as validated.
+- 2026-08-13 — merged 2 commits (`7e18550`, `d4cb48c`) for MiniMax Music support and an h3 turbo lora doc note. Adopted 2 as-is; rejected 0; divergence work 0; zero conflicts. (Logged retroactively on 2026-08-14 — the merge commit `fa89a70` landed without a log entry.)
 - 2026-08-12 — merged 2 commits (`82dbd7f7`, `f9367de5`) for LTX 2.5 model, workflow, asset, and documentation support. Adopted 2 as-is; rejected 0; divergence work 0; conflict and clean-merge sweep findings 0. Release build, format, style-format, isolated core boot, and isolated extension boot passed before and after the merge. The baseline extension build retained 21 pre-existing `CS0618` warnings from the ignored `SwarmUI-WildcardImporter` extension and no errors. Native Linux launcher execution was unavailable on Windows, so the boot gates invoked the built DLL directly with isolated `--data_dir` roots.
 
 ## Fork Delta (living list — keep updated)
