@@ -331,17 +331,30 @@ public class WorkflowGeneratorSteps
                             }
                         }
                     }
-                    string teaCacheNode = g.CreateNode(g.Features.Contains("teacache_oldvers") ? "TeaCacheForVidGen" : "TeaCache", new JObject()
+                    // Fork edit: a model can pass the compat-class check above and still resolve to no TeaCache type at
+                    // all. Wan 2.2 registers under the 'wan-21-14b' compat class, so IsWanVideo() accepts it, but its
+                    // arch ID ('wan-2_2-image2video-14b') matches none of the wan-2_1-* branches, leaving type empty.
+                    // Passing that empty value through crashes the generation inside the node itself, with
+                    // "KeyError: ''" on SUPPORTED_MODELS_COEFFICIENTS. TeaCache is abandoned upstream and ships no Wan
+                    // 2.2 coefficients, so there is nothing correct to substitute - skip cleanly and say why instead.
+                    if (string.IsNullOrEmpty(type))
                     {
-                        ["model"] = g.LoadingModel,
-                        ["model_type"] = type,
-                        ["rel_l1_thresh"] = teaCacheThreshold,
-                        ["max_skip_steps"] = 3,
-                        ["start_percent"] = teaCacheStart,
-                        ["end_percent"] = 1,
-                        ["cache_device"] = "cuda"
-                    });
-                    g.LoadingModel = [teaCacheNode, 0];
+                        Logs.Warning($"Ignore TeaCache Mode parameter because the current model '{g.CurrentModelClass()?.Name ?? "(none)"}' has no matching TeaCache model type - TeaCache does not provide coefficients for this architecture.");
+                    }
+                    else
+                    {
+                        string teaCacheNode = g.CreateNode(g.Features.Contains("teacache_oldvers") ? "TeaCacheForVidGen" : "TeaCache", new JObject()
+                        {
+                            ["model"] = g.LoadingModel,
+                            ["model_type"] = type,
+                            ["rel_l1_thresh"] = teaCacheThreshold,
+                            ["max_skip_steps"] = 3,
+                            ["start_percent"] = teaCacheStart,
+                            ["end_percent"] = 1,
+                            ["cache_device"] = "cuda"
+                        });
+                        g.LoadingModel = [teaCacheNode, 0];
+                    }
                 }
                 else
                 {
