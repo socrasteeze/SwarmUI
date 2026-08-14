@@ -234,7 +234,7 @@ Small edits:
 - `Assets/m/m_models.js` — retain an already-loaded rich LoRA row and notify the coach without forcing catalog loading.
 - `Assets/m/m_autocomplete.js` — optional known-entry callback so a TagDex artist/character insertion carries role metadata. Existing insertion remains the fallback.
 - `Assets/m/m.css` — sheet, issue rows, role chips, and diff preview.
-- `CLAUDE.md` and this plan — coupling log.
+- `AGENTS.md` and this plan — coupling log.
 
 Keep the coach isolated from generation transport. It may read and explicitly edit `mState`; `m_gen.js` must not know it exists.
 

@@ -2,7 +2,7 @@
 
 Implementation handoff for the booru character/artist picker on this fork (socrasteeze/SwarmUI). Written so a coding agent (or human) can extend it phase-by-phase without redoing the research.
 
-Read `CLAUDE.md` and `AGENTS.md` first. Everything here follows the merge-friendly policy: **zero edits to existing upstream files**. The only files touched outside the new extension are two fork-owned MobileEnhancements assets.
+Read `AGENTS.md` first. Everything here follows the merge-friendly policy: **zero edits to existing upstream files**. The only files touched outside the new extension are two fork-owned MobileEnhancements assets.
 
 ## Implementation status (living)
 

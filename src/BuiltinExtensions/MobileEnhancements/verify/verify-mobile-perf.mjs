@@ -1,6 +1,6 @@
 /**
  * Mobile perf + safe-area-top regression harness (fork). Companion to verify-mobile-layout.mjs; see the
- * coupling watchlist in docs/MobilePWA-Optimization-Plan.md and the layout.js entry in CLAUDE.md.
+ * coupling watchlist in docs/MobilePWA-Optimization-Plan.md and the layout.js entry in AGENTS.md.
  *
  * It guards two things:
  *

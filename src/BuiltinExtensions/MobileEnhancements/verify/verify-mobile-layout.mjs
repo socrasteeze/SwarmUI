@@ -1,7 +1,7 @@
 /**
  * Mobile-layout regression harness (fork). Re-run this after any upstream merge that touches
  * layout.js, genpage.css, or mobile.css - see the coupling watchlist in
- * docs/MobilePWA-Optimization-Plan.md and the layout.js entry in CLAUDE.md's Fork Delta.
+ * docs/MobilePWA-Optimization-Plan.md and the layout.js entry in AGENTS.md's Fork Delta.
  *
  * It guards the invariants established when the fork's mobile shell was retired (2026-08):
  * no shell CSS survives, the keyboard inset has no dead zone, the prompt bar lands flush above the
