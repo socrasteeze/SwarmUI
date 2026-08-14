@@ -32,8 +32,9 @@ param(
     # Your fork's git URL.
     [string]$RepoUrl = "https://github.com/socrasteeze/SwarmUI.git",
 
-    # Branch to clone.
-    [string]$Branch = "master",
+    # Branch to clone. "main" since 2026-08-13, when origin's default branch was renamed from "master".
+    # The old "master" branch still exists on the remote but is stale and divergent - do not clone it.
+    [string]$Branch = "main",
 
     # Port for the new instance (keep different from the original if running both at once).
     [int]$Port = 7802,
