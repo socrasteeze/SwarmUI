@@ -27,6 +27,7 @@ class MApp {
             mUI.initRouter();
             mUI.initKeyboardWatch();
             this.wireHeader();
+            this.watchForUpdate();
         }
         catch (e) {
             console.error('mobile client boot failed', e);
@@ -104,6 +105,13 @@ class MApp {
             });
         });
         list.appendChild(clear);
+        let hardRefresh = mUI.el('button', 'm-more-item', 'Force update (clear app cache)');
+        hardRefresh.addEventListener('click', () => {
+            mUI.confirm('Delete the cached app files and reload? Your prompt and settings are kept.', () => {
+                this.hardRefresh();
+            });
+        });
+        list.appendChild(hardRefresh);
         for (let i = 0; i < mUI.moreItems.length; i++) {
             let entry = mUI.moreItems[i];
             let item = mUI.el('button', 'm-more-item', entry.label);
@@ -111,6 +119,65 @@ class MApp {
             list.appendChild(item);
         }
         panel.appendChild(list);
+    }
+
+    /** Tells the user when a newer version of the app has been fetched and is waiting to take over.
+     *
+     * The service worker calls skipWaiting()/clients.claim(), so a new worker activates as soon as it installs -
+     * but the PAGE keeps running the old scripts until it is reloaded, and in an installed PWA there is no
+     * address bar to reload from and no reason for the user to suspect anything changed. 'controllerchange' is
+     * the moment that swap happens; surfacing it turns a silent stale-until-you-force-quit state into a
+     * one-tap update.
+     *
+     * Guarded on hasController: on the very FIRST visit the worker also takes control (going from no controller
+     * to one), and telling a first-time user "an update is ready" for the version they just loaded would be
+     * nonsense. Only a swap from one controller to another is a real update. */
+    watchForUpdate() {
+        if (!('serviceWorker' in navigator)) {
+            return;
+        }
+        let hadController = !!navigator.serviceWorker.controller;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!hadController) {
+                hadController = true;
+                return;
+            }
+            mUI.note('Update ready - reopen the app, or use More > Force update.');
+        });
+    }
+
+    /** Deletes every Cache Storage entry, unregisters the service worker, then reloads.
+     *
+     * This exists because a plain reload is NOT an escape hatch on iOS. The installed (Home Screen) app runs in
+     * its own storage container, separate from Safari - so "clear Safari data" does nothing for it, and there is
+     * no address bar, no devtools and no reload button to hold. If a bad or stale asset ever gets into Cache
+     * Storage there, a user has no way out except deleting and reinstalling the app. This is that way out.
+     *
+     * Order matters: caches are deleted BEFORE the worker is unregistered. Unregister first and a still-running
+     * worker can service one more fetch and repopulate what was just deleted. Reload goes through
+     * location.reload() only after both settle, so the fresh page load has no controller and no cache to hit.
+     * Everything is best-effort - a browser with no SW support or a rejected delete still ends in a reload,
+     * which is strictly no worse than the button not existing. */
+    async hardRefresh() {
+        try {
+            if (window.caches) {
+                let names = await caches.keys();
+                await Promise.all(names.map(name => caches.delete(name)));
+            }
+        }
+        catch (e) {
+            console.error('cache clear failed during hard refresh', e);
+        }
+        try {
+            if ('serviceWorker' in navigator) {
+                let regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map(reg => reg.unregister()));
+            }
+        }
+        catch (e) {
+            console.error('service worker unregister failed during hard refresh', e);
+        }
+        location.reload();
     }
 }
 

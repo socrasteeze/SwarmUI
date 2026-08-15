@@ -10,12 +10,53 @@ const CACHE_ASSET = `swarm-asset-${SWARM_VARY}`;
 const OFFLINE_URL = '/ExtensionFile/MobileEnhancementsExtension/Assets/offline.html';
 
 // Paths the worker must never touch - live API, generated media, websockets. Let the network own these.
-const PASS_THROUGH = ['/api/', '/view/', '/viewspecial/', '/output/', '/audio/'];
+// /tagdexindex/ is here for a storage reason rather than a correctness one: it is a few-hundred-KB blob served
+// from a fingerprinted, effectively immutable URL, so the browser's ordinary HTTP cache already serves repeat
+// visits with zero network. Copying it into Cache Storage as well bought nothing and spent a large slice of
+// iOS's small (~50MB) origin budget - and because the URL carries a version, every version ever loaded stayed
+// resident forever. Thumbnails (/tagdexthumb/) are deliberately NOT here: they are small, individually useful
+// offline, and now bounded by MAX_ASSET_ENTRIES.
+const PASS_THROUGH = ['/api/', '/view/', '/viewspecial/', '/output/', '/audio/', '/tagdexindex/'];
+
+// Hard ceilings on the runtime caches. iOS Safari's Cache Storage budget is small (~50MB is the commonly
+// reported figure) and it evicts the WHOLE origin's storage when exceeded rather than trimming - so an
+// unbounded cache does not degrade, it wipes everything including the offline fallback. These are entry counts
+// rather than bytes because the Cache API exposes no size, and entry count is the thing we can actually check.
+const MAX_ASSET_ENTRIES = 120;
+const MAX_STATIC_ENTRIES = 80;
+
+/** Trims a cache to a maximum entry count, oldest-first (Cache Storage keys are insertion-ordered). */
+async function trimCache(cacheName, maxEntries) {
+    try {
+        const cache = await caches.open(cacheName);
+        const keys = await cache.keys();
+        if (keys.length <= maxEntries) {
+            return;
+        }
+        // Delete sequentially from the oldest end; keys() order is insertion order, so this is a crude LRU
+        // (really FIFO, since a cache hit does not reorder). Good enough: the goal is a ceiling, not optimality.
+        const excess = keys.length - maxEntries;
+        for (let i = 0; i < excess; i++) {
+            await cache.delete(keys[i]);
+        }
+    }
+    catch (err) {
+        // Trimming is maintenance, never the point of the request that triggered it.
+    }
+}
 
 self.addEventListener('install', event => {
     event.waitUntil((async () => {
-        const cache = await caches.open(CACHE_STATIC);
-        await cache.add(new Request(OFFLINE_URL, { cache: 'reload' }));
+        // The offline page is best-effort, NOT a precondition of installing. It used to be awaited bare, so if
+        // that one GET ever 404'd (asset rename) or redirected to a login page, the install event rejected and
+        // NO service worker installed at all - trading a missing offline page for having no worker whatsoever.
+        try {
+            const cache = await caches.open(CACHE_STATIC);
+            await cache.add(new Request(OFFLINE_URL, { cache: 'reload' }));
+        }
+        catch (err) {
+            console.log(`SwarmUI SW: offline fallback not cached (${err}) - continuing install anyway.`);
+        }
         await self.skipWaiting();
     })());
 });
@@ -66,7 +107,12 @@ async function networkFirst(request, cacheName) {
     try {
         const fresh = await fetch(request);
         if (fresh && fresh.ok && request.method == 'GET') {
-            cache.put(request, fresh.clone());
+            // Not awaited (the response must not wait on disk), but .catch'd: an unhandled QuotaExceededError
+            // here was previously an unhandled rejection inside the worker, which tells nobody anything and
+            // leaves the cache full. Trimming afterwards is what keeps it from getting there again.
+            cache.put(request, fresh.clone())
+                .then(() => trimCache(cacheName, MAX_STATIC_ENTRIES))
+                .catch(err => console.log(`SwarmUI SW: cache put failed (${err})`));
         }
         return fresh;
     }
@@ -88,7 +134,9 @@ async function cacheFirst(request, cacheName) {
     }
     const fresh = await fetch(request);
     if (fresh && fresh.ok) {
-        cache.put(request, fresh.clone());
+        cache.put(request, fresh.clone())
+            .then(() => trimCache(cacheName, MAX_ASSET_ENTRIES))
+            .catch(err => console.log(`SwarmUI SW: asset cache put failed (${err})`));
     }
     return fresh;
 }
