@@ -707,7 +707,12 @@ public class T2IParamTypes
             "", IgnoreIf: "", IsAdvanced: true, Clean: (_, s) => CleanModelNameList(s), GetValues: (session) => CleanModelList(Program.T2IModelSets["LoRA"].ListModelNamesFor(session)), Group: GroupAdvancedModelAddons, VisibleNormally: false, ChangeWeight: 8, Subtype: "LoRA"
             ));
         LoraWeights = Register<List<string>>(new("LoRA Weights", "Weight values for the LoRA model list.\nComma separated list of weight numbers.\nMust match the length of the LoRAs input.",
-            "", IgnoreIf: "", Min: -10, Max: 10, Step: 0.1, IsAdvanced: true, Group: GroupAdvancedModelAddons, VisibleNormally: false
+            // Fork edit: genpage slider capped to +/-2 (was +/-10) to match the /simple LoRA sheet's own
+            // hardcoded slider bounds (m_create.js). List-typed params aren't range-validated server-side
+            // (T2IParamTypes.ValidateParam only enforces Min/Max on INTEGER/DECIMAL) so this only narrows the
+            // UI slider - an existing preset or saved image with a weight outside +/-2 still loads and reruns
+            // unclamped, it just can't be *dragged* past +/-2 anymore.
+            "", IgnoreIf: "", Min: -2, Max: 2, Step: 0.1, IsAdvanced: true, Group: GroupAdvancedModelAddons, VisibleNormally: false
             ));
         LoraTencWeights = Register<List<string>>(new("LoRA Tenc Weights", "Distinct weight values for the text encoders of LoRA model list.\nComma separated list of weight numbers.\nMust match the length of the LoRAs input.",
             "", IgnoreIf: "", Min: -10, Max: 10, Step: 0.1, IsAdvanced: true, Group: GroupAdvancedModelAddons, VisibleNormally: false
