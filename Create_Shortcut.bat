@@ -15,11 +15,12 @@ rem
 rem Usage:  Create_Shortcut.bat [/desktop] [/startmenu] [/both] [/remove] [/force] [/launcher]
 rem With no arguments it prompts.
 rem   /force     overwrite a same-named shortcut that points somewhere else
-rem   /launcher  target the plain launcher (console only) instead of start-and-open-the-UI
+rem   /launcher  target the plain launcher (skips Start_SwarmUI.bat's idempotency check; keeps its console visible)
 
-rem Default target is Start_SwarmUI.bat, which starts the server AND opens the UI. The plain launcher only gives you
-rem a console, because this install has LaunchMode=none - the server does not open a browser itself. Pass /launcher
-rem to target the raw launcher instead.
+rem Default target is Start_SwarmUI.bat, which starts the server if it isn't already running (idempotent, safe to
+rem click twice). It does NOT open a browser or the installed PWA - the fork owner does not want a browser window
+rem force-opened on every launch, and this install has LaunchMode=none so the server does not open one itself
+rem either. The plain launcher (/launcher) gives you the same thing minus the idempotency check, plus a console.
 set "SC_LAUNCHER=Start_SwarmUI.bat"
 if not exist "%~dp0Start_SwarmUI.bat" set "SC_LAUNCHER=launch-fork.bat"
 if not exist "%~dp0launch-fork.bat" if not exist "%~dp0Start_SwarmUI.bat" set "SC_LAUNCHER=launch-windows.bat"

@@ -1,14 +1,16 @@
-# Starts the SwarmUI server if it is not already running, waits for it to answer, then opens the UI.
+# Starts the SwarmUI server if it is not already running, then waits for it to answer. Idempotent: if the
+# server is already up this is a no-op.
 #
-# Why this exists: this install has LaunchMode=none, so the server never opens a browser itself. That left two
-# desktop icons that each did half the job - the launcher gave you a console with no UI, and the installed PWA
-# shortcut gave you a blank window because nothing was listening. This does both, in the right order, and is
-# idempotent: if the server is already up it just opens the UI.
+# Fork edit (2026-08): this used to also open a browser tab / the installed PWA once the server answered.
+# That default is gone - the fork owner does not want a browser window forced open on every launch, restart,
+# or (previously) in-app restart that happened to route back through this script. Opening the UI is now
+# strictly opt-in via -OpenBrowser; every normal invocation (Start_SwarmUI.bat, the Desktop/Start Menu/Startup
+# shortcuts, this script run bare) starts the server and nothing else.
 #
-# Invoked by Start_SwarmUI.bat. Run directly with -NoBrowser to start the server only.
+# Invoked by Start_SwarmUI.bat. Run directly with -OpenBrowser to also open the UI once it's up.
 
 param(
-    [switch]$NoBrowser,
+    [switch]$OpenBrowser,
     [int]$TimeoutSeconds = 300
 )
 
@@ -95,7 +97,7 @@ Write-Host "SwarmUI launcher - port $port"
 
 if (Test-SwarmUp -Port $port) {
     Write-Host "  Server is already running."
-    if (-not $NoBrowser) { Open-SwarmUI -Port $port }
+    if ($OpenBrowser) { Open-SwarmUI -Port $port }
     exit 0
 }
 
@@ -149,7 +151,7 @@ try {
         if (Test-SwarmUp -Port $port) {
             Write-Host ""
             Write-Host "  Server is up."
-            if (-not $NoBrowser) { Open-SwarmUI -Port $port }
+            if ($OpenBrowser) { Open-SwarmUI -Port $port }
             exit 0
         }
         Start-Sleep -Milliseconds 1000
