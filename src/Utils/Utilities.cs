@@ -169,9 +169,10 @@ public static class Utilities
 
     static Utilities()
     {
-        if (File.Exists("./.git/refs/heads/master"))
+        string commit = ReadGitCommit();
+        if (!string.IsNullOrWhiteSpace(commit))
         {
-            GitCommit = File.ReadAllText("./.git/refs/heads/master").Trim()[0..8];
+            GitCommit = commit;
             VaryID += ".GIT-" + GitCommit;
         }
         for (int i = 0; i <= 9; i++)
@@ -179,6 +180,77 @@ public static class Utilities
             ReservedFilenames.Add($"com{i}");
             ReservedFilenames.Add($"lpt{i}");
         }
+    }
+
+    /// <summary>Reads the current git commit's short hash, or an empty string if it cannot be determined.
+    /// <para>Fork edit: this used to read <c>./.git/refs/heads/master</c> directly. That silently returned nothing the
+    /// moment this fork's default branch was renamed from <c>master</c> to <c>main</c> (2026-08-13), which froze
+    /// <see cref="VaryID"/> at the bare version number. Everything that depends on VaryID moving per commit quietly
+    /// stopped working: the <c>?vary=</c> query on every script/stylesheet URL, and the service worker's cache names
+    /// (which are built from it and are what its stale-cache sweep deletes on activate). Symptom was a browser or
+    /// installed PWA serving old assets forever with no way to bust them.</para>
+    /// <para>So: resolve whatever branch HEAD actually points at, rather than assuming a branch name. Handles a
+    /// detached HEAD (the hash sits in HEAD itself), a loose ref, and a packed ref - a repo that has been GC'd keeps
+    /// its refs only in <c>packed-refs</c>, so the loose-file lookup alone is not sufficient even on <c>master</c>.</para></summary>
+    public static string ReadGitCommit()
+    {
+        try
+        {
+            if (!File.Exists("./.git/HEAD"))
+            {
+                return "";
+            }
+            string head = File.ReadAllText("./.git/HEAD").Trim();
+            // Detached HEAD: the file holds the commit hash itself rather than a "ref:" pointer.
+            if (!head.StartsWith("ref:"))
+            {
+                return ShortGitHash(head);
+            }
+            string refPath = head.After("ref:").Trim();
+            if (refPath.Length == 0)
+            {
+                return "";
+            }
+            if (File.Exists($"./.git/{refPath}"))
+            {
+                return ShortGitHash(File.ReadAllText($"./.git/{refPath}").Trim());
+            }
+            // Packed refs: one "<hash> <refpath>" pair per line, with optional '#' comments and '^' peel lines.
+            if (File.Exists("./.git/packed-refs"))
+            {
+                foreach (string line in File.ReadAllLines("./.git/packed-refs"))
+                {
+                    string trimmed = line.Trim();
+                    if (trimmed.Length == 0 || trimmed.StartsWith('#') || trimmed.StartsWith('^'))
+                    {
+                        continue;
+                    }
+                    string[] parts = trimmed.SplitFast(' ', 1);
+                    if (parts.Length == 2 && parts[1].Trim() == refPath)
+                    {
+                        return ShortGitHash(parts[0]);
+                    }
+                }
+            }
+            return "";
+        }
+        catch (Exception ex)
+        {
+            // Never let a version-string lookup stop the server from starting.
+            Logs.Debug($"Could not determine git commit for VaryID: {ex.Message}");
+            return "";
+        }
+    }
+
+    /// <summary>Trims a raw git hash to the 8-character short form used in <see cref="VaryID"/>, or returns an empty string if it is not a plausible hash.</summary>
+    public static string ShortGitHash(string hash)
+    {
+        string clean = hash.Trim();
+        if (clean.Length < 8)
+        {
+            return "";
+        }
+        return clean[0..8];
     }
 
     /// <summary>Cleans a filename with strict filtering, including removal of forbidden characters, removal of the '.' symbol, but permitting '/'.</summary>
