@@ -40,6 +40,52 @@ class MobileEnhancements {
         this.applySafeAreaTop();
         this.watchSafeAreaTop();
         this.registerServiceWorker();
+        this.addMobileReturnLink();
+    }
+
+    /**
+     * In the installed app only, puts a "Mobile UI" link on any non-/simple page so the user can get back.
+     *
+     * Standalone has no address bar and no browser back button, and /simple's own "Classic UI" link navigates
+     * here with nothing pointing back - so a tap that was meant as a peek at the full UI stranded the user
+     * until they force-quit the app. The share target has the same shape and is worse: it cold-starts at
+     * /ShareTarget which redirects here, so there is no history entry to swipe back to at all.
+     *
+     * Deliberately standalone-only. In a normal browser tab the address bar and back gesture already solve
+     * this, and injecting a floating link into every Razor page on desktop would be an unwanted change to the
+     * main UI - this exists to repair a navigation dead end, not to add an affordance.
+     */
+    addMobileReturnLink() {
+        if (!this.isStandalone) {
+            return;
+        }
+        if (location.pathname.toLowerCase().startsWith('/simple')) {
+            return;
+        }
+        let add = () => {
+            if (!document.body || document.querySelector('.swarm-mobile-return')) {
+                return;
+            }
+            let link = document.createElement('a');
+            link.className = 'swarm-mobile-return';
+            link.href = '/simple';
+            link.textContent = 'Mobile UI';
+            // Inline-styled rather than in mobile.css: this element only ever exists in the installed app, and
+            // keeping its styling next to the one place that creates it avoids a rule in a shared stylesheet
+            // that appears to apply to every page but never matches on any of them.
+            link.style.cssText = 'position:fixed;z-index:1002;right:0.6rem;font-size:13px;padding:0.5rem 0.8rem;'
+                + 'min-height:44px;display:inline-flex;align-items:center;border-radius:0.5rem;'
+                + 'background:var(--background-panel,#222);color:var(--text,#eee);border:1px solid var(--border-color,#444);'
+                + 'text-decoration:none;opacity:0.92;'
+                + 'top:calc(var(--safe-top, env(safe-area-inset-top)) + 0.4rem);';
+            document.body.appendChild(link);
+        };
+        if (document.body) {
+            add();
+        }
+        else {
+            document.addEventListener('DOMContentLoaded', add);
+        }
     }
 
     /** True on iOS/iPadOS. Used only to gate the top safe-area fallback, which works around a quirk of

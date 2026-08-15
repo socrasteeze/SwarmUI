@@ -12,6 +12,17 @@
 
 .m-body {
     --m-safe-bottom: min(env(safe-area-inset-bottom), 34px);
+    /* Landscape notch/Dynamic Island insets. The manifest declares orientation "any", so this client really
+       does get rotated, and in landscape on a notched iPhone the cutout eats ~44-59px off ONE side (whichever
+       way the device was turned) - which is where the header text, the first or last bottom-nav item, and the
+       edges of every sheet were landing. Capped at 60px on the same reasoning as --m-safe-bottom above: iOS on
+       this fork's target device has been observed reporting insets in physical rather than CSS pixels, and a
+       runaway value here would carve a permanent dead band out of the width.
+       Applied to each bar's own padding rather than to .m-app, so backgrounds and borders still run edge to
+       edge - padding the app container instead leaves a strip of page background beside the nav and cuts the
+       header's bottom border short of the screen edge. */
+    --m-safe-left: min(env(safe-area-inset-left), 60px);
+    --m-safe-right: min(env(safe-area-inset-right), 60px);
     margin: 0;
     background-color: var(--background);
     color: var(--text);
@@ -33,15 +44,39 @@
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
 }
-.m-body button {
+/* touch-action kills the ~300ms double-tap-to-zoom wait on interactive elements. Scoped to every clickable
+   thing rather than just <button>: this client uses <a> for nav, and <span>/<div> for the chip removers, the
+   sheet grip and the history tiles, all of which took the delay while real buttons did not.
+   -webkit-tap-highlight-color is the iOS grey flash drawn on tap. It is suppressed because the app already
+   draws its own press feedback (the @media (hover: none) :active rule at the end of this file); leaving both
+   on gives a doubled, off-brand press state. Suppressed, not restyled - :active is the brand-consistent half. */
+.m-body button,
+.m-body a,
+.m-body select,
+.m-body [role="button"],
+.m-body .m-nav-item,
+.m-body .m-image-tile,
+.m-body .m-image-tile-cell,
+.m-body .m-sheet-grip,
+.m-body .m-image-tile-remove,
+.m-body .m-adv-chip-x,
+.m-body .m-lora-remove {
     touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 
+/* --safe-top is measured and published by mobile_core.js (measureSafeAreaTop), with the raw env() as fallback
+   for the browser-tab case where nothing overlays the top. Do NOT reduce this back to a bare env(): iOS reports
+   env(safe-area-inset-top) as 0 for home-screen web apps, including - especially - under the
+   apple-mobile-web-app-status-bar-style: black-translucent that MobileEnhancementsExtension injects, which is
+   the very mode that lays content out UNDERNEATH the status bar. A zero there is not evidence there is nothing
+   to avoid; the bottom inset does report on the same device (that is what --m-safe-bottom caps). Bare env() is
+   why the header used to render behind the clock and Dynamic Island in the installed app. */
 .m-app {
     display: flex;
     flex-direction: column;
     height: 100dvh;
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--safe-top, env(safe-area-inset-top));
     box-sizing: border-box;
 }
 
@@ -51,6 +86,8 @@
     align-items: center;
     gap: 0.6rem;
     padding: 0.4rem 0.8rem;
+    padding-left: calc(0.8rem + var(--m-safe-left));
+    padding-right: calc(0.8rem + var(--m-safe-right));
     border-bottom: 1px solid var(--border-color);
     flex: 0 0 auto;
 }
@@ -65,11 +102,17 @@
     padding: 0.05rem 0.55rem;
     font-weight: bold;
 }
+/* 12px text alone gave roughly a 14px-tall tap target in the header. The text stays small (it is deliberately
+   de-emphasised chrome) but the tappable box is padded out to the 44px minimum. */
 .m-header-link {
     margin-left: auto;
     color: var(--text-soft);
     text-decoration: none;
     font-size: 12px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.4rem;
 }
 
 /* --- Panels --- */
@@ -85,6 +128,8 @@
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     padding: 0.5rem 0.7rem;
+    padding-left: calc(0.7rem + var(--m-safe-left));
+    padding-right: calc(0.7rem + var(--m-safe-right));
     box-sizing: border-box;
 }
 .m-panel.m-tab-active {
@@ -97,6 +142,10 @@
     flex: 0 0 auto;
     border-top: 1px solid var(--border-color);
     padding-bottom: max(calc(var(--m-safe-bottom) - 10px), 0px);
+    /* Keeps the first and last nav items clear of the landscape notch; the bar's own background still spans
+       the full width, so this reads as inset content rather than a shortened bar. */
+    padding-left: var(--m-safe-left);
+    padding-right: var(--m-safe-right);
     background: var(--background-panel);
 }
 .m-nav-item {
@@ -220,15 +269,20 @@
     opacity: 0.6;
     border-color: var(--emphasis);
 }
+/* 2rem (32px), NOT the 44px HIG minimum, and that is a deliberate trade rather than an oversight. The parent
+   tile is 4.2rem (67px) and its whole surface is the drag-to-reorder handle; a 44px remove target would cover
+   the top-right ~2/3 of it, so every attempt to start a drag near that corner would instead delete the image.
+   32px is the largest size that still leaves the tile draggable, and it is a ~2x area increase over the
+   previous 1.4rem. If this ever needs to be a true 44px, the tile has to grow first. */
 .m-image-tile-remove {
     position: absolute;
     top: 0;
     right: 0;
     background: rgba(0, 0, 0, 0.55);
     color: #fff;
-    width: 1.4rem;
-    height: 1.4rem;
-    line-height: 1.4rem;
+    width: 2rem;
+    height: 2rem;
+    line-height: 2rem;
     text-align: center;
     border-bottom-left-radius: 0.5rem;
 }
@@ -408,8 +462,9 @@
     background: none;
     border: none;
     color: var(--text-soft);
-    padding: 0.2rem 0.3rem;
-    min-height: 30px;
+    padding: 0.2rem 0.6rem;
+    /* 44px HIG minimum. It sits alone on the preview header row, so there is room and no reason to be under it. */
+    min-height: 44px;
 }
 /* --m-preview-cell-h is set by renderPreviewState from the tile count so that a 1-up and a 2x2 batch
    both land at roughly the same total height instead of the batch pushing the prompt off screen. */
@@ -764,11 +819,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* Inline inside an advanced chip, so it cannot be a 44px box without breaking the chip's own layout. Padding
+   is widened to roughly double the previous hit area, which is what fits here. Documented as a knowing
+   shortfall rather than silently left at 19px. */
 .m-adv-chip-x {
     margin-left: 0.4rem;
     color: var(--text);
     font-weight: bold;
-    padding: 0.2rem;
+    padding: 0.5rem 0.6rem;
+    margin-right: -0.2rem;
 }
 
 /* Sits above the prompt box, in normal flow. It used to be sticky to the bottom of the panel, which put it
@@ -779,6 +838,11 @@
     padding: 0.4rem 0;
     background: var(--background);
 }
+/* Same opt-out as .m-image-tile above, and for the same reason: this button has a deliberate 600ms long-press
+   (it opens the grid sheet), which is exactly the gesture iOS uses to start a text selection and raise the
+   callout. contextmenu is already preventDefault'd in m_create.js, but that does NOT suppress the iOS callout
+   or the selection magnifier - only these two properties do. Without them the long-press that opens the grid
+   sheet also highlights the button label and can pop a system menu over it. */
 .m-generate-button {
     flex: 1;
     background: var(--emphasis);
@@ -788,6 +852,9 @@
     border: none;
     border-radius: 0.7rem;
     min-height: 50px;
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
 .m-interrupt-button {
     background: var(--danger-button-background, #550000);
@@ -810,15 +877,26 @@
 .m-sheet-backdrop.m-open {
     opacity: 1;
 }
+/* bottom rides --m-kb-inset (published by mUI.initKeyboardWatch) so the sheet sits ON TOP of the on-screen
+   keyboard rather than behind it. position:fixed anchors to the LAYOUT viewport, which iOS does not shrink for
+   the keyboard, so a plain `bottom: 0` put this sheet - and the model-search, LoRA-search and grid-axis fields
+   inside it - underneath the keyboard the moment one of those fields took focus. viewport-fit and
+   interactive-widget do not help: the latter is Chromium-only and iOS ignores it.
+   max-height is clamped against the same inset so a tall sheet cannot extend up past the visible band.
+   Deliberately NOT transitioned: --m-kb-inset updates on every visualViewport scroll frame, and a transition
+   would restart its tween each frame, leaving the sheet visibly trailing the keyboard. The transform
+   transition below is only for the open/close slide and does not affect `bottom`. */
 .m-sheet {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    bottom: var(--m-kb-inset, 0px);
     background: var(--background-panel);
     border-radius: 1rem 1rem 0 0;
     padding: 0 0.8rem calc(0.8rem + var(--m-safe-bottom)) 0.8rem;
-    max-height: 75dvh;
+    padding-left: calc(0.8rem + var(--m-safe-left));
+    padding-right: calc(0.8rem + var(--m-safe-right));
+    max-height: min(75dvh, calc(100dvh - var(--m-kb-inset, 0px) - 3rem));
     overflow-y: auto;
     overscroll-behavior: contain;
     transform: translateY(100%);
@@ -869,10 +947,17 @@
     min-width: 2.5rem;
     text-align: right;
 }
+/* 44px square. It sits at the end of a LoRA row with space to spare, and it is destructive - an undersized
+   destructive control is the worst combination of the two. */
 .m-lora-remove {
     color: var(--text-soft);
     font-size: 19px;
     padding: 0.2rem 0.4rem;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 .m-lora-slider {
     width: 100%;
@@ -1078,7 +1163,8 @@
        header rather than above the nav so it never covers the Generate button. --- */
 .m-toast {
     position: fixed;
-    top: calc(env(safe-area-inset-top) + 3rem);
+    /* Same --safe-top reasoning as .m-app: a bare env() here put the toast under the status bar in standalone. */
+    top: calc(var(--safe-top, env(safe-area-inset-top)) + 3rem);
     left: 50%;
     transform: translate(-50%, -0.5rem);
     max-width: 88vw;
