@@ -32,6 +32,8 @@ class MAutoComplete {
         /** Incremental narrowing cache, as in the genpage. */
         this.lastWord = null;
         this.lastResults = null;
+        /** subtype -> {source, names}: memoized model-name lists for the `<prefix:` completers. See modelNames. */
+        this.nameCache = {};
         /** box -> its permanent suggestion-strip element (one per enableFor call, never removed - see
          * enableFor for why it has to be permanent rather than inserted/removed per keystroke). */
         this.slots = new Map();
@@ -191,11 +193,11 @@ class MAutoComplete {
             return ['\nFor example "<param[cfgscale]:1>" sets CFG Scale to 1.'];
         });
         this.registerPrefix('embed', 'Use a pretrained CLIP TI Embedding', (prefix) => {
-            return this.getOrderedMatches(this.modelNames('Embedding'), prefix.toLowerCase());
+            return this.matchModelNames('Embedding', prefix.toLowerCase());
         });
         this.registerAltPrefix('embedding', 'embed');
         this.registerPrefix('lora', 'Forcibly apply a pretrained LoRA model', (prefix) => {
-            return this.getOrderedMatches(this.modelNames('LoRA'), prefix.toLowerCase());
+            return this.matchModelNames('LoRA', prefix.toLowerCase());
         });
         this.registerPrefix('region', 'Apply a different prompt to a sub-region within the image', (prefix) => {
             return ['\nx,y,width,height eg "0.25,0.25,0.5,0.5"', '\nor x,y,width,height,strength. "region:background" for background only.'];
@@ -241,9 +243,50 @@ class MAutoComplete {
         });
     }
 
-    /** Model names for a subtype, from the ListT2IParams models map ([[name, classId], ...]). */
+    /** Model names for a subtype, from the ListT2IParams models map ([[name, classId], ...]).
+     * Memoized: this is called on every keystroke inside a `<lora:` tag, and rebuilding an 18.5k-entry array
+     * per keypress was pure garbage. Keyed on the source array's identity rather than a manual invalidation
+     * call, so a models reload (which replaces the array) is picked up automatically and a stale cache is not
+     * representable - there is no "forgot to invalidate" failure mode to get wrong later. */
     modelNames(subtype) {
-        return (mState.models[subtype] || []).map(entry => entry[0]);
+        let source = mState.models[subtype] || [];
+        let cached = this.nameCache[subtype];
+        if (cached && cached.source === source) {
+            return cached.names;
+        }
+        let names = source.map(entry => entry[0]);
+        let low = names.map(n => n.toLowerCase());
+        this.nameCache[subtype] = { 'source': source, 'names': names, 'low': low };
+        return names;
+    }
+
+    /** Ordered model-name matches for a `<prefix:` completer: prefix matches first, then contains-matches,
+     * same ordering getOrderedMatches produces.
+     *
+     * Exists because getOrderedMatches is a three-pass filter that lowercases every candidate on every pass,
+     * and these two completers are the only callers handed a list the size of a model library. On the fork
+     * owner's 18.9k LoRAs that was ~57k throwaway lowercase strings PER KEYSTROKE on the phone's main thread.
+     * Here the lowercase forms are computed once per library load (see modelNames) and this is a single pass
+     * with no intermediate arrays.
+     *
+     * Deliberately still scans the whole list rather than stopping at the cap: a prefix match found near the
+     * end outranks a contains-match found near the start, so early exit would silently change WHICH results
+     * appear, not just how fast they arrive. The cap belongs at the display layer, and is applied there. */
+    matchModelNames(subtype, prefixLow) {
+        let names = this.modelNames(subtype);
+        let low = this.nameCache[subtype].low;
+        let prefixed = [];
+        let contained = [];
+        for (let i = 0; i < names.length; i++) {
+            let index = low[i].indexOf(prefixLow);
+            if (index == 0) {
+                prefixed.push(names[i]);
+            }
+            else if (index > 0) {
+                contained.push(names[i]);
+            }
+        }
+        return prefixed.concat(contained);
     }
 
     /** Finds previously-declared setvar/setmacro names in the prompt. Returns null when there are none. */
@@ -370,7 +413,18 @@ class MAutoComplete {
         if (!(prefix in this.prefixes)) {
             return [];
         }
-        return this.prefixes[prefix].completer(suffix, prompt).map(p => {
+        // Bound the list BEFORE the map. Chip building already caps at MaxChips, but that only stopped the DOM
+        // blowing up - every entry past the cap was still being formatted into a throwaway template string on
+        // every keystroke. On the fork owner's library a bare `<lora:` matches all ~18.5k LoRAs, so this map
+        // was allocating ~18.5k strings per keypress on the phone's main thread purely to discard all but 60.
+        // MaxChips is the honest bound: nothing beyond it can ever be displayed. The completer's own ordering
+        // (prefix matches first, then contains-matches) runs before this, so slicing keeps the BEST matches
+        // rather than an arbitrary set - which is why this caps here and not inside the completers.
+        let completions = this.prefixes[prefix].completer(suffix, prompt);
+        if (completions.length > MAutoComplete.MaxChips) {
+            completions = completions.slice(0, MAutoComplete.MaxChips);
+        }
+        return completions.map(p => {
             if (typeof p == 'object' || p.startsWith('\n')) {
                 return p;
             }

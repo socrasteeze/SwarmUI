@@ -96,7 +96,18 @@ class MImages {
             let prefix = this.folder == '' ? '' : `${this.folder}/`;
             this.entries = (data.files || []).map(f => {
                 let fullsrc = `${prefix}${f.src}`;
-                return { 'src': f.src, 'fullsrc': fullsrc, 'url': `${getImageOutPrefix()}/${fullsrc}`, 'metadata': f.metadata || '' };
+                let url = `${getImageOutPrefix()}/${fullsrc}`;
+                // 'thumb' is what the grid renders; 'url' stays full-resolution for the viewer.
+                // The grid draws into ~33vw cells, so pointing it at the original meant downloading and
+                // DECODING a full 1024-2048px generation per ~120px tile. iOS holds decoded bitmaps at
+                // 4 bytes/px, so a few dozen visible tiles is hundreds of MB of decode memory - which is how
+                // a mobile Safari tab dies silently with no error. The server already renders a downscaled
+                // preview for exactly this (WebServer.cs, ?preview=true) and the desktop history browser has
+                // always used it (outputhistory.js); only this client was asking for originals.
+                // Safe to always append: the server honours it only when the user's ImageHistoryUsePreviews
+                // setting is on, and falls through to the original bytes for any file it cannot preview
+                // (audio, unsupported formats), so this degrades to the previous behaviour rather than breaking.
+                return { 'src': f.src, 'fullsrc': fullsrc, 'url': url, 'thumb': `${url}?preview=true`, 'metadata': f.metadata || '' };
             });
             this.grid.innerHTML = '';
             this.rendered = 0;
@@ -136,7 +147,10 @@ class MImages {
             let tile = mUI.el('div', 'm-image-tile-cell');
             let img = document.createElement('img');
             img.loading = 'lazy';
-            img.src = entry.url;
+            // Off the main thread: a grid chunk is 40 images, and synchronous decode of that many at once is a
+            // visible scroll stall on a phone.
+            img.decoding = 'async';
+            img.src = entry.thumb;
             tile.appendChild(img);
             tile.addEventListener('click', () => this.openViewer(entry, i));
             this.grid.appendChild(tile);
@@ -204,18 +218,37 @@ class MImages {
         addAction('Close', close);
         overlay.appendChild(actions);
         let startX = -1;
+        let startY = -1;
         imgWrap.addEventListener('touchstart', (e) => {
             if (e.touches.length == 1) {
                 startX = e.touches.item(0).clientX;
+                startY = e.touches.item(0).clientY;
+            }
+            else {
+                // Second finger down: this is a pinch, not a swipe. The single-touch check on touchstart alone
+                // was not enough - a gesture that BEGAN with one finger had already recorded startX, so
+                // spreading to a two-finger zoom and releasing still navigated away from the image being
+                // zoomed. Disarming here is what makes the guard hold for the whole gesture.
+                startX = -1;
+                startY = -1;
             }
         }, { passive: true });
+        imgWrap.addEventListener('touchcancel', () => {
+            startX = -1;
+            startY = -1;
+        });
         imgWrap.addEventListener('touchend', (e) => {
             if (startX == -1 || index == null) {
                 return;
             }
             let delta = e.changedTouches.item(0).clientX - startX;
+            let deltaY = e.changedTouches.item(0).clientY - startY;
             startX = -1;
-            if (Math.abs(delta) > 60) {
+            startY = -1;
+            // Axis lock: a diagonal drag (or a vertical one that drifted sideways past the threshold) should
+            // not count as a horizontal swipe. Requiring horizontal travel to exceed vertical is what makes
+            // this a swipe rather than "any gesture that happened to move 60px sideways".
+            if (Math.abs(delta) > Math.abs(deltaY) && Math.abs(delta) > 60) {
                 let next = delta < 0 ? index + 1 : index - 1;
                 if (next >= 0 && next < this.entries.length) {
                     show(this.entries[next], next);
