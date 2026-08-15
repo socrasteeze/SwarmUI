@@ -459,6 +459,41 @@
     display: none;
 }
 
+/* --- Resolved-prompt readout (below the preview, NOT inside its sticky header - see m_create.js) --- */
+.m-resolved-prompt {
+    border: 1px solid var(--border-color);
+    border-radius: 0.4rem;
+    background: var(--background-panel);
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.5rem;
+}
+.m-resolved-prompt.m-resolved-empty {
+    display: none;
+}
+.m-resolved-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-soft);
+    margin-bottom: 0.2rem;
+}
+.m-resolved-text {
+    /* Selectable so the fully-resolved text can be copied out for comparison - the whole point of this
+       box is letting the user eyeball (and grab) exactly what wildcard/tag expansion produced. */
+    user-select: text;
+    -webkit-user-select: text;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.m-resolved-wildcards {
+    font-size: 11px;
+    color: var(--text-soft);
+    margin-top: 0.3rem;
+}
+.m-resolved-wildcards:empty {
+    display: none;
+}
+
 /* --- Images tab toolbar --- */
 .m-images-bar {
     display: flex;
