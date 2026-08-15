@@ -156,6 +156,12 @@ class MUI {
         };
         backdrop.addEventListener('click', close);
         let startY = -1;
+        // Set when a touch gesture has been fully handled by touchend below, so the synthetic click that iOS
+        // fires afterwards does not ALSO run the click handler. Without this the drag threshold was decorative:
+        // touchend correctly declined to close on a 20px drag, and then the synthetic click closed the sheet
+        // anyway. Cleared on a timer because the synthetic click arrives a moment after touchend, and the
+        // handler must stay live for real mouse clicks (desktop taps the grip to close).
+        let touchHandled = false;
         grip.addEventListener('touchstart', (e) => {
             startY = e.touches.item(0).clientY;
         }, { passive: true });
@@ -177,11 +183,26 @@ class MUI {
             let delta = e.changedTouches.item(0).clientY - startY;
             sheet.style.transform = '';
             startY = -1;
+            touchHandled = true;
+            setTimeout(() => {
+                touchHandled = false;
+            }, 500);
             if (delta > 60) {
                 close();
             }
         });
-        grip.addEventListener('click', close);
+        // A touch the system takes away mid-drag never fires touchend, so reset the visual offset here or the
+        // sheet stays parked partway down for the rest of its life.
+        grip.addEventListener('touchcancel', () => {
+            sheet.style.transform = '';
+            startY = -1;
+        });
+        grip.addEventListener('click', () => {
+            if (touchHandled) {
+                return;
+            }
+            close();
+        });
         return close;
     }
 
@@ -230,9 +251,33 @@ class MUI {
         if (!window.visualViewport) {
             return;
         }
-        let apply = () => document.body.classList.toggle('m-kb-open', this.keyboardOpen());
+        let apply = () => {
+            document.body.classList.toggle('m-kb-open', this.keyboardOpen());
+            document.documentElement.style.setProperty('--m-kb-inset', `${this.keyboardInset()}px`);
+        };
+        // 'scroll' as well as 'resize': iOS scrolls the LAYOUT viewport under an open keyboard, which changes
+        // offsetTop without changing height, so a resize-only listener would leave the inset stale mid-scroll.
         window.visualViewport.addEventListener('resize', apply);
+        window.visualViewport.addEventListener('scroll', apply);
         apply();
+    }
+
+    /** How many CSS px at the bottom of the LAYOUT viewport are covered by the on-screen keyboard.
+     *
+     * This is a different question from keyboardOpen() below, and conflating the two is the documented genpage
+     * bug - hence two measures. `position: fixed; bottom: 0` anchors to the layout viewport, which iOS does not
+     * shrink for the keyboard, so a bottom sheet sits behind it. The visible band in those same coordinates is
+     * [offsetTop, offsetTop + height], so whatever lies below its bottom edge is the covered strip.
+     *
+     * offsetTop IS included here (unlike keyboardOpen) precisely because this answer must shrink as iOS scrolls
+     * the layout viewport up - the covered strip genuinely gets smaller. Clamped at 0 so desktop, and the
+     * elastic overscroll that briefly makes this negative on iOS, both read as "nothing covered". */
+    keyboardInset() {
+        if (!window.visualViewport) {
+            return 0;
+        }
+        let covered = window.innerHeight - (window.visualViewport.height + window.visualViewport.offsetTop);
+        return Math.max(0, Math.round(covered));
     }
 
     /** Whether an on-screen keyboard is up.
