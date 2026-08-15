@@ -778,13 +778,22 @@ class MCreate {
     wireReorder(tile) {
         let armTimer = null;
         let dragging = false;
+        let startX = 0;
+        let startY = 0;
         tile.addEventListener('touchstart', (e) => {
+            let touch = e.touches.item(0);
+            startX = touch ? touch.clientX : 0;
+            startY = touch ? touch.clientY : 0;
             armTimer = setTimeout(() => {
                 dragging = true;
                 tile.classList.add('m-dragging');
             }, 150);
         }, { passive: true });
         tile.addEventListener('touchmove', (e) => {
+            let touch = e.touches.item(0);
+            if (!touch) {
+                return;
+            }
             if (!dragging) {
                 if (armTimer) {
                     clearTimeout(armTimer);
@@ -792,8 +801,22 @@ class MCreate {
                 }
                 return;
             }
+            // Axis lock. The 150ms arm alone is not intent: a deliberate vertical scroll routinely rests on a
+            // tile longer than that before the finger starts moving, and this handler is the ONLY thing that can
+            // release it - the branch below preventDefaults every move, and the reorder reads clientX only, so a
+            // vertical drag was previously swallowed while doing nothing at all. Scrolling the Create panel from
+            // a prompt-image tile was therefore dead. Same TapSlopPx the Generate long-press uses: once the
+            // gesture is decisively more vertical than horizontal, disarm and hand the touch back to the scroller.
+            let dx = Math.abs(touch.clientX - startX);
+            let dy = Math.abs(touch.clientY - startY);
+            if (dy > MCreate.TapSlopPx && dy > dx) {
+                dragging = false;
+                tile.classList.remove('m-dragging');
+                this.renderImageStrip();
+                return;
+            }
             e.preventDefault();
-            let x = e.touches.item(0).clientX;
+            let x = touch.clientX;
             for (let sibling of this.imageStrip.querySelectorAll('.m-image-tile:not(.m-image-add)')) {
                 if (sibling == tile) {
                     continue;
