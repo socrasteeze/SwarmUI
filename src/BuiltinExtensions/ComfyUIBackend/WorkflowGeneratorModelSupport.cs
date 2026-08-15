@@ -100,6 +100,9 @@ public partial class WorkflowGenerator
     /// <summary>Returns true if the current model is PiD.</summary>
     public bool IsPiD() => IsModelCompatClass(T2IModelClassSorter.CompatPiD);
 
+    /// <summary>Returns true if the current model is SeedVR2.</summary>
+    public bool IsSeedVR2() => IsModelCompatClass(T2IModelClassSorter.CompatSeedVR2);
+
     /// <summary>Returns true if the current model is HiDream-i1.</summary>
     public bool IsHiDream() => IsModelCompatClass(T2IModelClassSorter.CompatHiDreamI1);
 
@@ -794,18 +797,18 @@ public partial class WorkflowGenerator
         public string GetLTX2EmbedClip()
         {
             // TODO: This is cursed and wrong.
-            return RequireClipModel("ltx2/ltx2-embeddings-connector-distill.safetensors", "https://huggingface.co/Kijai/LTXV2_comfy/resolve/main/text_encoders/ltx-2-19b-embeddings_connector_distill_bf16.safetensors", "8990ec3fe88396ca33ac1795c89b1771d88190e51e24084b21f54b25399acbed", null);
-        }
-
-        public string GetLTX25Gemma4Model()
-        {
-            return RequireClipModel("LTX-2/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", "https://huggingface.co/mcmonkey/swarm-models/resolve/main/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", "09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de", T2IParamTypes.GemmaModel);
+            return RequireClipModel("ltx2-embeddings-connector-distill.safetensors", "https://huggingface.co/Kijai/LTXV2_comfy/resolve/main/text_encoders/ltx-2-19b-embeddings_connector_distill_bf16.safetensors", "8990ec3fe88396ca33ac1795c89b1771d88190e51e24084b21f54b25399acbed", null);
         }
 
         public string GetLTX23TextProjectionClip()
         {
             // TODO: Still cursed!
-            return RequireClipModel("LTX-2/ltx-2.3_text_projection_bf16.safetensors", "https://huggingface.co/Kijai/LTX2.3_comfy/resolve/main/text_encoders/ltx-2.3_text_projection_bf16.safetensors", "911d59bb4cb7708179c9a0045ea0fe41212ecfb77aed3a02702b7c0a8274911f", null);
+            return RequireClipModel("ltx-2.3_text_projection_bf16.safetensors", "https://huggingface.co/Kijai/LTX2.3_comfy/resolve/main/text_encoders/ltx-2.3_text_projection_bf16.safetensors", "911d59bb4cb7708179c9a0045ea0fe41212ecfb77aed3a02702b7c0a8274911f", null);
+        }
+
+        public string GetLTX25Gemma4Model()
+        {
+            return RequireClipModel("gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", "https://huggingface.co/mcmonkey/swarm-models/resolve/main/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors", "09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de", T2IParamTypes.GemmaModel);
         }
 
         public void LoadClip(string type, string model)
@@ -1047,7 +1050,7 @@ public partial class WorkflowGenerator
                     {
                         dtype = "default";
                     }
-                    else if (IsZImage() || IsZetaChroma() || IsAnima() || IsLens() || IsPixelDiT() || IsPiD()) // Model is small and dense, so trust user preferred download format
+                    else if (IsZImage() || IsZetaChroma() || IsAnima() || IsLens() || IsPixelDiT() || IsPiD() || IsSeedVR2()) // Model is small and dense, so trust user preferred download format
                     {
                         dtype = "default";
                     }
@@ -1314,6 +1317,10 @@ public partial class WorkflowGenerator
             helpers.LoadClip("pixeldit", helpers.GetGemma2_2bElmModel());
             LoadingVAE = CreateVAELoader("pixel_space");
         }
+        else if (IsSeedVR2())
+        {
+            helpers.DoVaeLoader(null, T2IModelClassSorter.CompatSeedVR2, "seedvr2-vae");
+        }
         else if (IsHiDream())
         {
             string loaderType = "QuadrupleCLIPLoader";
@@ -1515,7 +1522,7 @@ public partial class WorkflowGenerator
         }
         else if (IsMiniMaxMusic3())
         {
-            helpers.LoadClip("minimax", helpers.RequireClipModel("MiniMaxMusic3/minimax_music3_text_encoder_pruned_int8_convrot.safetensors", "https://huggingface.co/Comfy-Org/MiniMax-Music-3/resolve/main/text_encoders/minimax_music3_text_encoder_pruned_int8_convrot.safetensors", "010b7416d2336a08c711bc22ee65849c9623069ddb7d89bec011a75699e52014", null));
+            helpers.LoadClip("minimax", helpers.RequireClipModel("minimax_music3_text_encoder_pruned_int8_convrot.safetensors", "https://huggingface.co/Comfy-Org/MiniMax-Music-3/resolve/main/text_encoders/minimax_music3_text_encoder_pruned_int8_convrot.safetensors", "010b7416d2336a08c711bc22ee65849c9623069ddb7d89bec011a75699e52014", null));
             helpers.DoVaeLoader(null, T2IModelClassSorter.CompatMiniMaxMusic3, "minimax-music-3-vae");
             CurrentAudioVae = new WGNodeData([LoadingVAE, 0], this, WGNodeData.DT_AUDIOVAE, CurrentCompat());
         }
@@ -1524,8 +1531,8 @@ public partial class WorkflowGenerator
             // TODO: WTF? these twin qwen tencs are wacky.
             if (LoadingClip is null)
             {
-                string qwen06 = helpers.RequireClipModel("AceStep/qwen_0.6b_ace15.safetensors", "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/split_files/text_encoders/qwen_0.6b_ace15.safetensors", "fd4590c82153b8ddb67e15a2e7aaa8afa8b83a858c8a9b82a4831063156aa7a7", null);
-                string qwen17 = helpers.RequireClipModel("AceStep/qwen_1.7b_ace15.safetensors", "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/split_files/text_encoders/qwen_1.7b_ace15.safetensors", "ed63e9247d1f55f3ace04fa11e95b085fc82d459c82c5626f0b2e37b91ebd710", T2IParamTypes.QwenModel);
+                string qwen06 = helpers.RequireClipModel("qwen_0.6b_ace15.safetensors", "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/split_files/text_encoders/qwen_0.6b_ace15.safetensors", "fd4590c82153b8ddb67e15a2e7aaa8afa8b83a858c8a9b82a4831063156aa7a7", null);
+                string qwen17 = helpers.RequireClipModel("qwen_1.7b_ace15.safetensors", "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/split_files/text_encoders/qwen_1.7b_ace15.safetensors", "ed63e9247d1f55f3ace04fa11e95b085fc82d459c82c5626f0b2e37b91ebd710", T2IParamTypes.QwenModel);
                 helpers.LoadClip2("ace", qwen06, qwen17);
             }
             if (LoadingVAE is null)
@@ -1594,7 +1601,7 @@ public partial class WorkflowGenerator
         {
             step.Action(this);
         }
-        if (LoadingClip is null)
+        if (LoadingClip is null && type != "SeedVR2")
         {
             if (string.IsNullOrWhiteSpace(model.Metadata?.ModelClassType))
             {

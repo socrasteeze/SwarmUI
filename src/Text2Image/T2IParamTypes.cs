@@ -344,8 +344,8 @@ public class T2IParamTypes
     public static T2IRegisteredParam<int> Images, Steps, Width, Height, SideLength, BatchSize, VAETileSize, VAETileOverlap, VAETemporalTileSize, VAETemporalTileOverlap, ClipStopAtLayer, VideoFrames, VideoMotionBucket, VideoFPS, VideoSteps, RefinerSteps, CascadeLatentCompression, MaskShrinkGrow, MaskBlur, MaskGrow, SegmentMaskBlur, SegmentMaskGrow, SegmentMaskOversize, SegmentSteps, Text2VideoFrames, TrimVideoStartFrames, TrimVideoEndFrames, VideoExtendFrameOverlap;
     public static T2IRegisteredParam<long> Seed, VariationSeed, WildcardSeed, Text2AudioBPM;
     public static T2IRegisteredParam<double> CFGScale, VariationSeedStrength, InitImageCreativity, InitImageResetToNorm, InitImageNoise, RefinerControl, RefinerUpscale, RefinerCFGScale, ReVisionStrength, AltResolutionHeightMult,
-        FreeUBlock1, FreeUBlock2, FreeUSkip1, FreeUSkip2, GlobalRegionFactor, EndStepsEarly, SamplerSigmaMin, SamplerSigmaMax, SamplerRho, VideoAugmentationLevel, VideoCFG, VideoMinCFG, Video2VideoCreativity, VideoSwapPercent, VideoExtendSwapPercent, IP2PCFG2, RegionalObjectCleanupFactor, SigmaShift, SegmentThresholdMax, SegmentCFGScale, FluxGuidanceScale, Text2AudioDuration, ConditioningMultiplier, NegativeConditioningMultiplier;
-    public static T2IRegisteredParam<Image> InitImage, MaskImage, VideoEndFrame;
+        FreeUBlock1, FreeUBlock2, FreeUSkip1, FreeUSkip2, GlobalRegionFactor, EndStepsEarly, SamplerSigmaMin, SamplerSigmaMax, SamplerRho, VideoAugmentationLevel, VideoCFG, VideoMinCFG, Video2VideoCreativity, VideoSwapPercent, VideoExtendSwapPercent, IP2PCFG2, RegionalObjectCleanupFactor, SigmaShift, SegmentThresholdMax, SegmentCFGScale, FluxGuidanceScale, Text2AudioDuration, AudioSilentPrefixDuration, AudioSilentSuffixDuration, ConditioningMultiplier, NegativeConditioningMultiplier;
+    public static T2IRegisteredParam<Image> InitImage, MaskImage, VideoEndImage;
     public static T2IRegisteredParam<AudioFile> VideoAudioInput;
     public static T2IRegisteredParam<T2IModel> Model, RefinerModel, VAE, RegionalObjectInpaintingModel, SegmentModel, VideoModel, VideoSwapModel, RefinerVAE, ClipLModel, ClipGModel, ClipVisionModel, T5XXLModel, LLaVAModel, LLaMAModel, QwenModel, MistralModel, GemmaModel, GptOssModel, VideoExtendModel, VideoExtendSwapModel, NegativeModel;
     public static T2IRegisteredParam<List<string>> Loras, LoraWeights, LoraTencWeights, LoraSectionConfinement;
@@ -359,7 +359,6 @@ public class T2IParamTypes
         GroupAdvancedModelAddons, GroupSwarmInternal, GroupFreeU, GroupRegionalPrompting, GroupSegmentRefining, GroupSegmentOverrides, GroupAdvancedSampling, GroupAlternateGuidance, GroupVideo, GroupText2Video, GroupAdvancedVideo, GroupAdvancedVideoObscure, GroupVideoExtend, GroupText2Audio,
         GroupStarred, GroupUser1, GroupUser2, GroupUser3;
 
-    [Obsolete("This group was discarded from core.")]
     public static T2IParamGroup GroupOtherFixes;
 
     public class ControlNetParamHolder
@@ -640,7 +639,7 @@ public class T2IParamTypes
         Video2VideoCreativity = Register<double>(new("Video2Video Creativity", "Optional advanced method to start the video diffusion late.\nThis is equivalent to Init Image Creativity.\nSet below 1 to skip some fraction of steps.\nThis only makes sense if the base input is a video.\n'Video Frame's param must have same frame length as the input video.\nIf set to 1, video2video logic is not applied, and the input is treated as a single image.",
             "1", IgnoreIf: "1", Min: 0, Max: 1, Step: 0.05, OrderPriority: 19.5, ViewType: ParamViewType.SLIDER, Group: GroupVideo, Permission: Permissions.ParamVideo, FeatureFlag: "video", IsAdvanced: true, DoNotPreview: true
             ));
-        VideoEndFrame = Register<Image>(new("Video End Image", "An image to use as the 'end frame' of a video.\nOnly some models support end frames (Wan FLF2V, LTX-V), most don't.",
+        VideoEndImage = Register<Image>(new("Video End Image", "An image to use as the 'end frame' of a video.\nOnly some models support end frames (Wan FLF2V, LTX-V), most don't.",
             null, OrderPriority: 30, Group: GroupVideo, Permission: Permissions.ParamVideo, FeatureFlag: "video", DoNotPreview: true, ChangeWeight: 2, IsAdvanced: true
             ));
         // ================================================ Advanced Video ================================================
@@ -971,6 +970,14 @@ public class T2IParamTypes
         FreeUSkip2 = Register<double>(new("[FreeU] Skip Two", "Skip2 multiplier value for FreeU.\nPaper recommends 0.2.",
             "0.2", Min: 0, Max: 10, Step: 0.05, IsAdvanced: true, Group: GroupFreeU, FeatureFlag: "freeu", OrderPriority: -1
             ));
+        // ================================================ Other Fixes ================================================
+        GroupOtherFixes = new("Other Fixes", Open: false, OrderPriority: 60, IsAdvanced: true);
+        AudioSilentPrefixDuration = Register<double>(new("Audio Silent Prefix Duration", "Seconds of silent audio to mask off at the start of the generation.\nUseful for video models (such as MiniMax H3) which generate audio that tends to start with stray noise.\nBy injecting a small amount of masked silence, the model understands to not add other noise at the start.\nCan also be used with a large duration value to force full silence throughout a video.",
+            "0.1", Min: 0, Max: 9999, ViewMax: 10, Step: 0.1, Toggleable: true, IsAdvanced: true, Group: GroupOtherFixes, ViewType: ParamViewType.SLIDER, OrderPriority: 5
+            ));
+        AudioSilentSuffixDuration = Register<double>(new("Audio Silent Suffix Duration", "Seconds of silent audio to mask off at the end of the generation.\nUseful for video models (such as MiniMax H3) which generate audio that tends to end with stray noise.\nBy injecting a small amount of masked silence, the model understands to not add other noise at the end.",
+            "0", Min: 0, Max: 9999, ViewMax: 10, Step: 0.1, Toggleable: true, IsAdvanced: true, Group: GroupOtherFixes, ViewType: ParamViewType.SLIDER, OrderPriority: 5
+            ));
         // ================================================ User Defined Groups ================================================
         GroupStarred = new("Starred", Open: true, OrderPriority: -60, Description: "User-selectable starred parameters, brought to the top of the parameter list for convenient access.");
         PlaceholderParamGroupStarred = Register<bool>(new("Placeholder Param - Group Starred", "Placeholder hidden parameter to make the 'Starred' Group exist.",
@@ -988,9 +995,6 @@ public class T2IParamTypes
         PlaceholderParamGroupUser3 = Register<bool>(new("Placeholder Param - Group User Three", "Placeholder hidden parameter to make the 'User Group 3' Group exist.",
             Default: "false", IgnoreIf: "false", VisibleNormally: false, IsAdvanced: true, Group: GroupUser3
            ));
-#pragma warning disable CS0618 // Type or member is obsolete
-        GroupOtherFixes = GroupSwarmInternal;
-#pragma warning restore CS0618 // Type or member is obsolete
     }
 
     /// <summary>Gets the value in the list that best matches the input text of a model name (for user input handling), or null if no match.</summary>
