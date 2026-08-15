@@ -28,6 +28,7 @@ class MCreate {
         // the Create panel has ever been built (deep-link to #models, then generate), and a tile handler
         // that assumed its container existed is exactly the crash this ordering avoids.
         this.buildPreview();
+        this.buildResolvedPrompt();
         mGen.onFrame((kind, data) => this.onFrame(kind, data));
     }
 
@@ -54,6 +55,46 @@ class MCreate {
         this.previewWrap.appendChild(this.previewPending);
         this.pending = false;
         this.renderPreviewState();
+    }
+
+    /** Builds the (initially detached, empty) resolved-prompt readout shown below the preview. Not part of
+     * previewWrap on purpose: previewWrap is a sticky header (position: sticky; top: 0), so anything added
+     * inside it eats permanent screen space at the top of the panel at every scroll position. This sits
+     * after it in normal flow instead, so it appears once, below the images, and scrolls away like anything
+     * else - matching "below the preview", not "pinned under the preview". */
+    buildResolvedPrompt() {
+        this.resolvedWrap = mUI.el('div', 'm-resolved-prompt m-resolved-empty');
+        this.resolvedWrap.appendChild(mUI.el('div', 'm-resolved-label', 'Resolved prompt'));
+        this.resolvedText = mUI.el('div', 'm-resolved-text');
+        this.resolvedWrap.appendChild(this.resolvedText);
+        this.resolvedWildcards = mUI.el('div', 'm-resolved-wildcards');
+        this.resolvedWrap.appendChild(this.resolvedWildcards);
+    }
+
+    /** Shows the server's fully-resolved prompt (post-wildcard, post-<trigger>, etc.) for one completed
+     * image - not the raw text still sitting in the prompt box - so wildcard/tag expansion is visible right
+     * under the preview without a trip into the full viewer. Updates per completed image in a batch, so on
+     * a multi-image batch it ends up showing the last one to finish; wildcards can differ per image (each
+     * gets its own wildcard seed), and this box is deliberately singular rather than per-tile to keep it
+     * readable on a phone. Silently no-ops on unreadable metadata rather than showing something misleading -
+     * see applyMetadata in m_state.js for the same JSON-shape assumptions. */
+    updateResolvedPrompt(metadataStr) {
+        if (!metadataStr) {
+            return;
+        }
+        try {
+            let full = JSON.parse(metadataStr);
+            let meta = full.sui_image_params || {};
+            let extra = full.sui_extra_data || {};
+            let resolved = `${meta.prompt || ''}`;
+            this.resolvedText.textContent = resolved;
+            this.resolvedWrap.classList.toggle('m-resolved-empty', !resolved);
+            let used = extra.used_wildcards || [];
+            this.resolvedWildcards.textContent = used.length ? `Wildcards used: ${used.join(', ')}` : '';
+        }
+        catch (e) {
+            console.error('could not parse image metadata for resolved-prompt readout', e);
+        }
     }
 
     /** Marks a batch as requested; cleared by the first frame or by a failure. */
@@ -91,6 +132,7 @@ class MCreate {
             tile.dataset.url = url;
             tile.classList.add('m-tile-done');
             tile.querySelector('.m-tile-progress').style.width = '';
+            this.updateResolvedPrompt(data.metadata);
             this.snapshotCompleted();
         }
         else if (kind == 'discard') {
@@ -167,6 +209,11 @@ class MCreate {
             this.liveTiles[`restored_${i}`] = tile;
             this.previewGrid.appendChild(tile);
         }
+        // Keep the resolved-prompt readout in sync with whatever's back on screen, so an interrupted batch
+        // doesn't leave it showing text for an image that's no longer visible.
+        if (this.lastCompleted.length > 0) {
+            this.updateResolvedPrompt(this.lastCompleted[this.lastCompleted.length - 1].metadata);
+        }
     }
 
     /** One preview cell: image, progress bar, tap-to-open in the shared viewer. */
@@ -207,6 +254,7 @@ class MCreate {
         // Flex column so children keep their natural height rather than being shrunk to fit (see m.css).
         panel.classList.add('m-create-panel');
         panel.appendChild(this.previewWrap);
+        panel.appendChild(this.resolvedWrap);
         this.archRow = mUI.el('div', 'm-arch-row');
         this.archSelect = mUI.el('select', 'm-arch-select');
         this.archSelect.addEventListener('change', () => {
