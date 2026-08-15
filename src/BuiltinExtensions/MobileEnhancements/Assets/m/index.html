@@ -3,13 +3,23 @@
 <head>
     <meta charset="utf-8" />
     <!-- viewport-fit=cover is required for env(safe-area-inset-*) to report real values in the installed PWA.
-         maximum-scale=1 is what actually stops iOS zooming the page when a text field takes focus. The 16px
-         font floor in m.css is still there and is still correct (nothing focusable is under it - verified),
-         but on-device it proved not to be sufficient on its own. This does NOT cost accessibility zoom:
-         since iOS 10, Safari deliberately ignores scale limits for user-initiated pinch-zoom and honours
-         them only for the automatic focus zoom, which is exactly the one we want gone. user-scalable=no is
-         deliberately NOT used - it is the blunt version and would matter on browsers that do respect it. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+         interactive-widget=resizes-content is Chromium-only (iOS Safari ignores it) - harmless to ship, but it
+         buys nothing on the primary target platform, so never treat it as the iOS keyboard solution.
+
+         NOTE: this meta is REWRITTEN at runtime by mobile_core.js's fixViewport() (loaded below), which drops
+         maximum-scale. It is left here without maximum-scale so the static file and the runtime result agree -
+         a reader should not have to run the app to learn what the viewport actually ends up being.
+
+         History, because it will otherwise get "fixed" back: this file used to pin maximum-scale=1, arguing that
+         since iOS 10 Safari ignores scale limits for user-initiated pinch and honours them only for automatic
+         focus zoom. The first half is right; the second half was an inference from an on-device observation, not
+         a documented contract. And it is not free: Android Chrome/Firefox DO honour maximum-scale, so it
+         suppressed real pinch zoom there, and maximum-scale < 2 is the documented WCAG 1.4.4 failure that
+         axe-core flags. The correct fix for focus zoom is the 16px floor on every focusable field (m.css), which
+         is verified complete across every input/select/textarea in this client. If focus zoom is ever observed
+         again on device, find the actual cause - a field under 16px, or a layout wider than the viewport
+         triggering Safari's shrink-to-fit - rather than reinstating this. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>SwarmUI Mobile</title>
     <link rel="icon" href="/favicon.ico" />
     [HEADEXTRA]
@@ -29,6 +39,22 @@
     <script defer src="/js/translator.js?vary=[VARY]"></script>
     <script defer src="/js/permissions.js?vary=[VARY]"></script>
     <script defer src="/js/site.js?vary=[VARY]"></script>
+    <!-- MobileEnhancements core. A ScriptFiles entry, so it auto-injects on every Razor page but NOT here - /simple
+         builds its own script list. Loaded explicitly because /simple is the manifest's start_url and therefore the
+         primary installed-PWA surface, yet was the one surface missing all three things this file provides:
+           1. Service worker registration. Without it /simple had NO worker at all (verified: 0 registrations), so
+              the offline fallback and installability criteria never applied to the app users actually install.
+           2. --safe-top. iOS reports env(safe-area-inset-top) as 0 for home-screen web apps even under
+              black-translucent (which MobileEnhancementsExtension injects), so the header rendered behind the
+              clock / Dynamic Island. m.css now consumes var(--safe-top, env(...)) - see the .m-app rule.
+           3. body.pwa-standalone / body.coarse-pointer classes.
+         DELIBERATE SIDE EFFECT: its fixViewport() rewrites the viewport meta above and drops `maximum-scale=1`,
+         restoring pinch zoom. That is intended - maximum-scale=1 is the documented WCAG 1.4.4 failure pattern and
+         the 16px focusable-field floor (m.css) is the correct fix for focus zoom, which is already fully in place.
+         This also makes /simple match the genpage, which has run without maximum-scale since mobile_core shipped.
+         Must load BEFORE the m_* scripts so the body classes and --safe-top exist before first paint/layout.
+         `defer` is required: the constructor touches document.body. -->
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/mobile_core.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_state.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_gen.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_ui.js?vary=[VARY]"></script>
