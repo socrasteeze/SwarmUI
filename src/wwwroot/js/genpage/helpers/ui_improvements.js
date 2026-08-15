@@ -565,10 +565,17 @@ class UIImprovementHandler {
             elem.value = val;
         }
         let buttons = [...elem.options].filter(o => o.style.display != 'none').map(o => { return { key_html: o.dataset.cleanname, title: o.title, key: o.innerText, searchable: `${o.dataset.cleanname} ${o.innerText} ${o.value}`, action: () => { o.selected = true; triggerChangeFor(elem); } }; });
-        // document.body (not elem.parentElement): a position:fixed popover nested inside a
-        // -webkit-overflow-scrolling:touch panel (eg the sidebar, on iOS Safari) becomes trapped inside
-        // that ancestor's new containing block and renders clipped/covered instead of floating over the page.
-        this.lastPopover = new AdvancedPopover(popId, buttons, true, rect.x, rect.y, document.body, elem.selectedIndex < 0 ? null : elem.selectedOptions[0].innerText, 0);
+        // Never elem.parentElement: a position:fixed popover nested inside a -webkit-overflow-scrolling:touch
+        // panel (the sidebar, batch view, or a browser container on iOS Safari - see mobile.css) becomes
+        // trapped inside that ancestor's new containing block and renders clipped/covered rather than
+        // floating over the page. That is why this fork pinned the root to document.body.
+        // Upstream's `.closest('.modal')` (2026-08, "popover vs modal fight") is kept because it does not
+        // reintroduce that: none of the touch-scrolling containers above is a .modal, so a sidebar-anchored
+        // popover still resolves to document.body exactly as before, while a modal-anchored one stops
+        // fighting its modal. Do not "simplify" this back to a bare document.body or a bare parentElement -
+        // each of those re-breaks one of the two cases.
+        let root = elem.closest('.modal') || document.body;
+        this.lastPopover = new AdvancedPopover(popId, buttons, true, rect.x, rect.y, root, elem.selectedIndex < 0 ? null : elem.selectedOptions[0].innerText, 0);
         e.preventDefault();
         e.stopPropagation();
         return false;
