@@ -90,7 +90,7 @@ const geometry = () => page.evaluate(() => {
 });
 const SHORT = 'Generation failed: Generation session interrupted.';
 const LONG = 'Generation failed: Generation session interrupted. Traceback follows with a long unbroken path'
-    + ' /home/user/some/very/long/path/to/a/model/file.safetensors and a good deal more text after it.';
+    + ' models/loras/a/deeply/nested/folder/some_model_file.safetensors and a good deal more text after it.';
 
 const before = await geometry();
 
