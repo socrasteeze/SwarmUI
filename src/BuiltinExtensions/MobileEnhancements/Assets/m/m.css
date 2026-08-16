@@ -534,8 +534,16 @@
 }
 
 /* --- Live preview (sticky top of the Create panel, so it stays visible while the params scroll under it.
-       The generate bar is NOT sticky - it rides just above the prompt box instead) --- */
+       The generate bar is NOT sticky - it rides just above the prompt box instead)
+
+   The canvas height is RESERVED, not grown into: --m-preview-h is the height of the block in every state it
+   has - empty, queued, generating, done - so a generation cannot push the model row, the Generate button and
+   the prompt box down the screen as it progresses. That was the old behaviour: the block was display: none
+   until the first tile, then ~40dvh of it appeared at the top of the panel, under the user's thumb.
+   The cost is real and deliberate - a phone gives this space up permanently - so the collapse toggle
+   (persisted in localStorage) is the way to take it back, and a collapsed preview reserves nothing. --- */
 .m-create-preview {
+    --m-preview-h: 38dvh;
     position: sticky;
     top: 0;
     z-index: 2;
@@ -543,8 +551,11 @@
     padding-bottom: 0.4rem;
     margin-bottom: 0.2rem;
 }
-.m-create-preview.m-preview-empty {
-    display: none;
+/* Idle (nothing generating) is the one state that isn't pinned: an empty placeholder riding down the panel
+   while you edit params is not worth the top of the screen. Sticky and static occupy identical flow space, so
+   this changes nothing about the layout - only whether the empty box follows the scroll. */
+.m-create-preview.m-preview-idle {
+    position: static;
 }
 .m-preview-head {
     display: flex;
@@ -559,27 +570,31 @@
     /* 44px HIG minimum. It sits alone on the preview header row, so there is room and no reason to be under it. */
     min-height: 44px;
 }
-/* --m-preview-cell-h is set by renderPreviewState from the tile count so that a 1-up and a 2x2 batch
-   both land at roughly the same total height instead of the batch pushing the prompt off screen. */
+/* --m-preview-cell-h is set by renderPreviewState from the tile count, so a 1-up, a 2-up and a 2x2 all fill
+   the reserved canvas instead of each batch size being its own height. */
 .m-preview-grid {
     display: grid;
     gap: 0.3rem;
-    /* 1-up and 2x2 fit exactly; anything larger (a big preset batch, or grid-gen cells streaming in)
-       scrolls inside this box rather than growing the sticky header down over the prompt. */
-    max-height: 40dvh;
+    /* Fixed, not max-height: this box IS the reserved canvas. 1-up, 2-up and 2x2 fit exactly; anything larger
+       (a big preset batch, or grid-gen cells streaming in) scrolls inside it rather than growing the sticky
+       header down over the prompt. */
+    height: var(--m-preview-h);
     overflow-y: auto;
     overscroll-behavior: contain;
 }
-.m-create-preview.m-preview-collapsed .m-preview-grid {
+.m-create-preview.m-preview-collapsed .m-preview-grid,
+/* No tiles: the canvas placeholder is holding the same space, so an empty grid would double it. */
+.m-create-preview.m-preview-empty .m-preview-grid {
     display: none;
 }
-/* While the on-screen keyboard is up the visual viewport is already tiny; 40dvh of preview on top of
-   that would crowd the prompt box right when it matters most. */
+/* While the on-screen keyboard is up the visual viewport is already tiny; a canvas-worth of preview on top
+   of that would crowd the prompt box right when it matters most. */
 .m-body.m-kb-open .m-preview-grid {
     display: none;
 }
-.m-preview-pending {
-    height: 4.5rem;
+/* The stand-in for the grid while there are no tiles. Same height as the grid, by construction. */
+.m-preview-canvas {
+    height: var(--m-preview-h);
     border: 1px dashed var(--border-color);
     border-radius: 0.4rem;
     display: flex;
@@ -588,8 +603,12 @@
     justify-content: center;
     gap: 0.5rem;
     color: var(--text-soft);
+    box-sizing: border-box;
 }
-.m-preview-pending-bar {
+.m-create-preview:not(.m-preview-empty) .m-preview-canvas {
+    display: none;
+}
+.m-preview-canvas-bar {
     width: 60%;
     height: 0.25rem;
     border-radius: 0.25rem;
@@ -597,13 +616,22 @@
     background-size: 50% 100%;
     background-repeat: no-repeat;
     animation: m-pending-slide 1.2s linear infinite;
+    /* visibility, not display: the bar keeps its box when idle, so the label doesn't move half a line the
+       moment a batch is queued. */
+    visibility: hidden;
+}
+.m-preview-canvas-pending .m-preview-canvas-bar {
+    visibility: visible;
 }
 @keyframes m-pending-slide {
     from { background-position: -60% 0; }
     to { background-position: 160% 0; }
 }
-.m-create-preview.m-preview-collapsed .m-preview-pending,
-.m-body.m-kb-open .m-preview-pending {
+/* Collapsed and keyboard-open are the two states that deliberately give the space back, so the canvas goes
+   with the grid in both - the reservation exists to stop generation moving things, not to defend an empty
+   box against the user's own collapse or against the keyboard. */
+.m-create-preview.m-preview-collapsed .m-preview-canvas,
+.m-body.m-kb-open .m-preview-canvas {
     display: none;
 }
 
@@ -668,7 +696,7 @@
 
 .m-preview-cell {
     position: relative;
-    height: var(--m-preview-cell-h, 38dvh);
+    height: var(--m-preview-cell-h, var(--m-preview-h));
     background: var(--background-panel);
     border-radius: 0.4rem;
     overflow: hidden;
@@ -840,6 +868,23 @@
 }
 .m-model-result.m-selected .m-model-name {
     color: var(--emphasis);
+}
+/* Marks a starred ("favourite") model. The pickers sort starred entries to the top (mState.starredFirst), and
+   a list that reorders itself with nothing on screen to explain why just looks unsorted. Decoration only - the
+   star is set in the full UI's model browser; this client has no star button of its own. */
+.m-model-star {
+    flex: 0 0 auto;
+    color: var(--emphasis);
+    font-size: 14px;
+    padding-left: 0.2rem;
+}
+/* On a Models-tab card the star rides the top corner of the thumbnail instead of sitting in the row
+   (.m-model-card carries the position: relative this anchors to). */
+.m-model-star-badge {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.35rem;
+    text-shadow: 0 0 0.3rem var(--background);
 }
 .m-model-text {
     flex: 1 1 auto;
@@ -1218,6 +1263,8 @@
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     overflow: hidden;
+    /* Anchor for .m-model-star-badge. */
+    position: relative;
 }
 .m-model-card img {
     width: 100%;

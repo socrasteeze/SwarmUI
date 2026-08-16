@@ -15,6 +15,9 @@ class MApp {
                 });
                 genericRequest('GetMyUserData', { 'includeAutocompletions': false }, data => {
                     mState.presets = data.presets || [];
+                    // Same response already carries the user's starred models, so the pickers get favourites
+                    // ordering for free - no second request, and no new server route.
+                    mState.starredModels = data.starred_models || {};
                     mState.changed();
                 });
                 mAutoComplete.loadSettings();

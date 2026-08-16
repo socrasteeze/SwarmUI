@@ -46,6 +46,13 @@ class MUI {
         return name.includes('/') ? name.substring(0, name.lastIndexOf('/')) : '';
     }
 
+    /** The star marking a favourite model, or null when it isn't one. Rows are sorted starred-first
+     * (mState.starredFirst), and a list whose order changes with nothing on screen explaining why reads as a
+     * list in a random order - this is what says "these are your stars". */
+    starBadge(subtype, name) {
+        return mState.isStarred(subtype, name) ? this.el('span', 'm-model-star', '★') : null;
+    }
+
     /** Thumbnail for a model, or null when it has no preview image. */
     modelThumb(model, className) {
         if (!model.preview_image) {
