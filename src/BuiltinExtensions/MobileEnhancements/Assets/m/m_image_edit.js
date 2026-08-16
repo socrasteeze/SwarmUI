@@ -7,10 +7,14 @@
  * history live only on this object, rebuilt fresh each open() and discarded on close, so nothing writes
  * back to mState.promptImages unless the user explicitly saves.
  *
- * Rotate is fixed 90-degree steps only (no free-angle) and crop is a single axis-aligned rectangle with
- * four corner handles - both deliberate scope choices for a small touch sheet, not omissions: free rotation
- * needs its own gesture and a way to show/trim the resulting canvas edges, real added complexity for a
- * screen this size. */
+ * Rotation comes in two forms: the Rotate button's lossless 90-degree quarter turns, and the angle row's
+ * free rotation in fixed steps, which grows the canvas to the rotated bounding box and fills the exposed
+ * corners white. Flip is horizontal only (a vertical flip is a horizontal one plus two Rotates) and crop is
+ * a single axis-aligned rectangle with four corner handles - both deliberate scope choices for a small touch
+ * sheet rather than omissions.
+ *
+ * The crop rectangle has no button of its own. Drag it and tap Save; any transform that would invalidate it
+ * commits it first. See applyCrop. */
 class MImageEdit {
 
     /** A crop rectangle is never allowed to shrink below this fraction of the shorter working-canvas side -
@@ -21,6 +25,27 @@ class MImageEdit {
      * real memory ceiling on a phone editing a large photo, not just a UX choice - the oldest entry is
      * dropped silently past this depth. */
     static MaxHistory = 6;
+
+    /** One tap of a pad button adds this fraction of the dimension it extends (10% of the current width for
+     * left/right, of the current height for top/bottom). Taken from the live dimension rather than the
+     * original, so repeated taps compound slightly - which is the right feel here: the first taps step in
+     * meaningful amounts and later ones stay proportional to what's already on screen. */
+    static PadFraction = 0.1;
+
+    /** Hard ceiling on either working-canvas dimension. Padding is the only op that grows the canvas, and it
+     * is unbounded by nature (nothing stops a finger tapping ← forty times), so it needs a stop: a canvas past
+     * this size is slow to re-encode on a phone and would go out to the API as a needlessly huge data URI. */
+    static MaxCanvasDimension = 8192;
+
+    /** Degrees per tap of the free-rotate nudge buttons. A coarse step, reachable in a tap or two - this is
+     * for tilting an image off-axis, not for straightening a horizon by a degree or two (which this step
+     * cannot express at all). The 90-degree Rotate button is unaffected and still handles quarter turns. */
+    static FreeRotateStepDegrees = 25;
+
+    /** Free rotation is clamped to this many degrees either way. Kept an exact multiple of the step, so the
+     * last tap in each direction lands on the limit instead of stopping at a half-step short of it. Past this
+     * the shorter path to any orientation is a 90-degree Rotate plus a smaller free angle. */
+    static MaxFreeRotateDegrees = 75;
 
     constructor() {
         /** Index into mState.promptImages this session is editing, or null when nothing is open. */
@@ -37,10 +62,20 @@ class MImageEdit {
         /** Stack of prior working-canvas snapshots, most recent last. */
         this.history = [];
         /** Pending crop rectangle, in the working canvas's own pixel space: {x, y, w, h}. Dragging a handle
-         * only updates this and the overlay - it never touches canvas pixels until Apply Crop is tapped. */
+         * only updates this and the overlay - it never touches canvas pixels until something calls applyCrop
+         * (Save, or any transform that would invalidate the rectangle). */
         this.cropRect = null;
-        /** True once the source image has actually loaded onto the canvas, so a tap on Rotate/Crop/Undo/Save
-         * that lands before then (or after a load error) is a no-op instead of throwing. */
+        /** Pristine canvas the current free-rotate session rotates *from*, or null when no session is open.
+         * This is what keeps incremental nudging from compounding: every nudge redraws this snapshot once at
+         * the new accumulated angle, so twenty taps to 20 degrees is a single resample of the original, not
+         * twenty stacked ones each blurring the last. Any op that rewrites the canvas ends the session
+         * (endRotateSession), so the next nudge re-snapshots from that new result. */
+        this.rotateSource = null;
+        /** Accumulated free-rotate angle in degrees for the open session, signed clockwise-positive. Only
+         * meaningful while rotateSource is non-null. */
+        this.rotateAngle = 0;
+        /** True once the source image has actually loaded onto the canvas, so a tap on any of the tool, pad,
+         * or Save buttons that lands before then (or after a load error) is a no-op instead of throwing. */
         this.ready = false;
     }
 
@@ -62,6 +97,8 @@ class MImageEdit {
         this.cropRect = null;
         this.cropRectEl = null;
         this.cropHandles = null;
+        this.rotateSource = null;
+        this.rotateAngle = 0;
         this.ready = false;
 
         let content = mUI.el('div', 'm-edit-sheet');
@@ -74,15 +111,56 @@ class MImageEdit {
 
         let controls = mUI.el('div', 'm-edit-controls');
         let rotateButton = mUI.el('button', 'm-edit-tool-button', '⟳ Rotate');
-        let cropButton = mUI.el('button', 'm-edit-tool-button', '✓ Crop');
+        let flipButton = mUI.el('button', 'm-edit-tool-button', '⇄ Flip');
         let undoButton = mUI.el('button', 'm-edit-tool-button', '↺ Undo');
-        for (let button of [rotateButton, cropButton, undoButton]) {
+        for (let button of [rotateButton, flipButton, undoButton]) {
             button.disabled = true;
         }
         controls.appendChild(rotateButton);
-        controls.appendChild(cropButton);
+        controls.appendChild(flipButton);
         controls.appendChild(undoButton);
         content.appendChild(controls);
+
+        // Free rotation, incremental. The readout is the reset: it shows the accumulated angle and taps back
+        // to 0, which beats a fourth button in the row and gives the number something to do.
+        let angleRow = mUI.el('div', 'm-edit-angle-row');
+        angleRow.appendChild(mUI.el('span', 'm-edit-angle-label', 'Angle'));
+        let step = MImageEdit.FreeRotateStepDegrees;
+        let angleDownButton = mUI.el('button', 'm-edit-angle-button', '↺');
+        angleDownButton.setAttribute('aria-label', `Rotate counter-clockwise by ${step} degrees`);
+        let angleReadout = mUI.el('button', 'm-edit-angle-readout', '0°');
+        angleReadout.setAttribute('aria-label', 'Reset angle to zero');
+        let angleUpButton = mUI.el('button', 'm-edit-angle-button', '↻');
+        angleUpButton.setAttribute('aria-label', `Rotate clockwise by ${step} degrees`);
+        angleDownButton.addEventListener('click', () => this.nudgeRotate(-MImageEdit.FreeRotateStepDegrees));
+        angleUpButton.addEventListener('click', () => this.nudgeRotate(MImageEdit.FreeRotateStepDegrees));
+        angleReadout.addEventListener('click', () => this.resetRotate());
+        let angleButtons = [angleDownButton, angleReadout, angleUpButton];
+        for (let button of angleButtons) {
+            button.disabled = true;
+            angleRow.appendChild(button);
+        }
+        content.appendChild(angleRow);
+        this.angleReadout = angleReadout;
+
+        // Padding gets its own row rather than four more buttons in the tool row above: at four sides plus the
+        // three existing tools, one row of seven would put every target under the ~44px this client holds as
+        // its touch-target floor everywhere else.
+        let padRow = mUI.el('div', 'm-edit-pad-row');
+        padRow.appendChild(mUI.el('span', 'm-edit-pad-label', 'Add white'));
+        let padButtons = [];
+        for (let [side, glyph] of [['left', '←'], ['top', '↑'], ['bottom', '↓'], ['right', '→']]) {
+            let button = mUI.el('button', 'm-edit-pad-button', glyph);
+            // The glyph alone is meaningless to a screen reader, and the direction it names is the edge the
+            // white goes on - not a direction of travel.
+            button.title = `Add white to the ${side}`;
+            button.setAttribute('aria-label', `Add white to the ${side}`);
+            button.disabled = true;
+            button.addEventListener('click', () => this.padSide(side));
+            padRow.appendChild(button);
+            padButtons.push(button);
+        }
+        content.appendChild(padRow);
 
         let actions = mUI.el('div', 'm-edit-actions');
         let cancelButton = mUI.el('button', 'm-edit-cancel-button', 'Cancel');
@@ -109,6 +187,10 @@ class MImageEdit {
             if (!this.ready) {
                 return;
             }
+            // Save commits whatever rectangle is on screen: dragging the handles and tapping Save is the whole
+            // crop flow, and there is no separate Crop button to forget. Free when nothing was dragged, since
+            // applyCrop no-ops on a full-extent rectangle rather than copying pixels to the same size.
+            this.applyCrop();
             // JPEG, always - buildWorkingCanvas already flattened any source transparency onto opaque white,
             // so there's no alpha to lose, and a photo-sized PNG re-encode would bloat the payload this goes
             // out to the WS API as for no benefit here.
@@ -117,7 +199,7 @@ class MImageEdit {
             close();
         });
         rotateButton.addEventListener('click', () => this.rotate90());
-        cropButton.addEventListener('click', () => this.applyCrop());
+        flipButton.addEventListener('click', () => this.flipHorizontal());
         undoButton.addEventListener('click', () => this.undo());
         this.undoButton = undoButton;
 
@@ -134,10 +216,11 @@ class MImageEdit {
             this.buildCropOverlay();
             this.render();
             this.ready = true;
-            for (let button of [rotateButton, cropButton, saveButton]) {
+            for (let button of [rotateButton, flipButton, saveButton, ...angleButtons, ...padButtons]) {
                 button.disabled = false;
             }
             this.syncUndoState();
+            this.syncRotateState();
         };
         img.onerror = () => {
             mUI.warn('Could not open that image for editing.');
@@ -199,18 +282,17 @@ class MImageEdit {
         }
         this.canvas = this.history.pop();
         this.cropRect = this.fullCropRect();
+        this.endRotateSession();
         this.render();
         this.syncUndoState();
     }
 
-    /** Rotates the working canvas 90 degrees clockwise (fixed-angle only - see class doc). The crop
-     * rectangle resets to the new full extent rather than carrying a rotated rectangle forward: that would
-     * need its own coordinate transform for very little benefit, since Apply Crop only ever commits whatever
-     * rectangle is currently on screen. */
+    /** Rotates the working canvas 90 degrees clockwise (fixed-angle only - see class doc). */
     rotate90() {
         if (!this.ready) {
             return;
         }
+        this.applyCrop();
         this.pushHistory();
         let rotated = document.createElement('canvas');
         rotated.width = this.canvas.height;
@@ -221,14 +303,21 @@ class MImageEdit {
         ctx.drawImage(this.canvas, -this.canvas.width / 2, -this.canvas.height / 2);
         this.canvas = rotated;
         this.cropRect = this.fullCropRect();
+        this.endRotateSession();
         this.render();
         this.syncUndoState();
     }
 
     /** Commits the pending crop rectangle: crops pixels out of the working canvas and resets the rectangle
      * to the new full extent. A no-op when the rectangle already covers the whole canvas (dragging the
-     * handles back out to the edges, or never having touched them) - Apply Crop shouldn't burn an undo slot
-     * cropping to everything. */
+     * handles back out to the edges, or never having touched them), which is what lets every caller below
+     * invoke it unconditionally without burning an undo slot cropping to everything.
+     *
+     * There is no Crop button. Save calls this, and so does every op that rewrites the canvas underneath the
+     * rectangle (rotate90, flipHorizontal, padSide) - all of them work in canvas-pixel space, so a pending
+     * rectangle that survived one of them would be pointing at the wrong pixels. Committing first means a
+     * dragged rectangle is never silently thrown away; the cost is that crop-then-rotate is two Undo steps
+     * rather than one, which is the honest accounting anyway. */
     applyCrop() {
         if (!this.ready) {
             return;
@@ -244,6 +333,158 @@ class MImageEdit {
         cropped.getContext('2d').drawImage(this.canvas, r.x, r.y, r.w, r.h, 0, 0, cropped.width, cropped.height);
         this.canvas = cropped;
         this.cropRect = this.fullCropRect();
+        this.endRotateSession();
+        this.render();
+        this.syncUndoState();
+    }
+
+    /** Adds one step to the free-rotate angle, opening a session (snapshot + one undo entry) on the first
+     * nudge of a run. All later nudges in that run redraw the same snapshot at the new total, so the run
+     * costs exactly one undo slot and one resample no matter how many taps it takes - see rotateSource. */
+    nudgeRotate(delta) {
+        if (!this.ready) {
+            return;
+        }
+        if (!this.rotateSource) {
+            // Committing the pending crop first for the same reason the other transforms do: the rectangle is
+            // in canvas-pixel space and free rotation rewrites that space.
+            this.applyCrop();
+            this.pushHistory();
+            this.rotateSource = document.createElement('canvas');
+            this.rotateSource.width = this.canvas.width;
+            this.rotateSource.height = this.canvas.height;
+            this.rotateSource.getContext('2d').drawImage(this.canvas, 0, 0);
+            this.rotateAngle = 0;
+        }
+        let max = MImageEdit.MaxFreeRotateDegrees;
+        let next = Math.min(Math.max(this.rotateAngle + delta, -max), max);
+        if (next == this.rotateAngle) {
+            return;
+        }
+        this.rotateAngle = next;
+        this.drawFreeRotation();
+    }
+
+    /** Returns the open session to 0 degrees, restoring the snapshot exactly - a tap on the readout after
+     * overshooting, rather than an equal number of taps back the other way. A no-op with no session open, so
+     * the readout is inert rather than misleading when it already says 0. */
+    resetRotate() {
+        if (!this.ready || !this.rotateSource || this.rotateAngle == 0) {
+            return;
+        }
+        this.rotateAngle = 0;
+        this.drawFreeRotation();
+    }
+
+    /** Redraws the working canvas as rotateSource rotated by the accumulated angle, onto a canvas grown to the
+     * rotated bounding box so no content is pushed off-frame, with the exposed corners filled opaque white.
+     *
+     * White rather than auto-cropping inward to the largest inscribed rectangle: this editor already puts
+     * deliberate white on an image (the pad row), so a white wedge is an artifact of the same kind the user
+     * has already opted into, and it keeps every pixel of the source instead of silently eating content to
+     * hide the corners. */
+    drawFreeRotation() {
+        let source = this.rotateSource;
+        let radians = this.rotateAngle * Math.PI / 180;
+        let cos = Math.abs(Math.cos(radians));
+        let sin = Math.abs(Math.sin(radians));
+        let width = Math.round(source.width * cos + source.height * sin);
+        let height = Math.round(source.width * sin + source.height * cos);
+        if (Math.max(width, height) > MImageEdit.MaxCanvasDimension) {
+            mUI.warn(`Can't rotate past ${MImageEdit.MaxCanvasDimension}px on a side.`);
+            // Back out the step that would have overflowed, so the readout keeps matching what's on screen.
+            this.rotateAngle -= Math.sign(this.rotateAngle) * MImageEdit.FreeRotateStepDegrees;
+            return;
+        }
+        let rotated = document.createElement('canvas');
+        rotated.width = width;
+        rotated.height = height;
+        let ctx = rotated.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.translate(width / 2, height / 2);
+        ctx.rotate(radians);
+        ctx.drawImage(source, -source.width / 2, -source.height / 2);
+        this.canvas = rotated;
+        this.cropRect = this.fullCropRect();
+        this.render();
+        this.syncUndoState();
+        this.syncRotateState();
+    }
+
+    /** Ends any open free-rotate session, so the next nudge snapshots afresh from whatever the canvas has
+     * become. Called by every op that replaces the canvas out from under the session. */
+    endRotateSession() {
+        this.rotateSource = null;
+        this.rotateAngle = 0;
+        this.syncRotateState();
+    }
+
+    /** Points the readout at the current angle. */
+    syncRotateState() {
+        if (this.angleReadout) {
+            this.angleReadout.textContent = `${this.rotateAngle}°`;
+        }
+    }
+
+    /** Mirrors the working canvas left-to-right. Horizontal only, and that is not a missing half: a vertical
+     * flip is this plus two Rotates, and on a three-button row a second flip control would cost more than the
+     * one extra tap it saves. Canvas dimensions are unchanged, so unlike rotate/pad this could in principle
+     * carry the pending crop rectangle across (mirrored) - it commits it like the others instead, so that all
+     * three transforms behave the same way rather than one of them being subtly special. */
+    flipHorizontal() {
+        if (!this.ready) {
+            return;
+        }
+        this.applyCrop();
+        this.pushHistory();
+        let flipped = document.createElement('canvas');
+        flipped.width = this.canvas.width;
+        flipped.height = this.canvas.height;
+        let ctx = flipped.getContext('2d');
+        ctx.translate(flipped.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(this.canvas, 0, 0);
+        this.canvas = flipped;
+        this.cropRect = this.fullCropRect();
+        this.endRotateSession();
+        this.render();
+        this.syncUndoState();
+    }
+
+    /** Grows the working canvas by one PadFraction step on one side, filling the new strip opaque white and
+     * redrawing the existing pixels offset into it. White specifically, not transparent: Save encodes JPEG
+     * (see the save handler), which has no alpha, so a transparent pad would arrive as black. */
+    padSide(side) {
+        if (!this.ready) {
+            return;
+        }
+        this.applyCrop();
+        let horizontal = side == 'left' || side == 'right';
+        let step = Math.round((horizontal ? this.canvas.width : this.canvas.height) * MImageEdit.PadFraction);
+        // A sub-pixel step on a tiny canvas would silently do nothing and still burn an undo slot.
+        if (step < 1) {
+            return;
+        }
+        let width = this.canvas.width + (horizontal ? step : 0);
+        let height = this.canvas.height + (horizontal ? 0 : step);
+        if (Math.max(width, height) > MImageEdit.MaxCanvasDimension) {
+            mUI.warn(`Can't pad past ${MImageEdit.MaxCanvasDimension}px on a side.`);
+            return;
+        }
+        this.pushHistory();
+        let padded = document.createElement('canvas');
+        padded.width = width;
+        padded.height = height;
+        let ctx = padded.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, width, height);
+        // Only left and top displace the existing pixels; right and bottom leave them at the origin and let
+        // the already-white remainder of the larger canvas be the pad.
+        ctx.drawImage(this.canvas, side == 'left' ? step : 0, side == 'top' ? step : 0);
+        this.canvas = padded;
+        this.cropRect = this.fullCropRect();
+        this.endRotateSession();
         this.render();
         this.syncUndoState();
     }
