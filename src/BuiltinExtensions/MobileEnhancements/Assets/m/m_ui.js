@@ -8,6 +8,9 @@ class MUI {
         this.built = {};
         /** Extra More-tab rows contributed by other extensions: [{label, onClick}]. */
         this.moreItems = [];
+        /** Header error-strip elements, resolved and wired on first use by errorBar(). undefined = not looked
+         * up yet, null = the markup isn't there (errors fall back to the toast). */
+        this.errorEls = undefined;
     }
 
     /** Creates an element with a class and optional text. */
@@ -216,7 +219,7 @@ class MUI {
     /** Shows a transient message in the client's own toast.
      * Deliberately NOT site.js's showError: that renders into the shared toast box whose header is the
      * literal word "Error" (built server-side by WebUtil.Toast), so routing confirmations through it made
-     * "Model set: Anima" read as a failure. showError is now reserved for things that actually failed. */
+     * "Model set: Anima" read as a failure. Failures go to error() below, which owns the header strip. */
     toast(message, kind) {
         if (!this.toastBox) {
             this.toastBox = this.el('div', 'm-toast');
@@ -243,6 +246,81 @@ class MUI {
     /** Something the user needs to fix or know went wrong, short of a transport failure. */
     warn(message) {
         this.toast(message, 'warn');
+    }
+
+    /** Shows a failure in the header's error strip. Every showError call on this client ends up here - see the
+     * override at the bottom of this file.
+     *
+     * Why not site.js's center_toast: it is a fixed box at `top: 3rem`, which on a phone lands over the header,
+     * the prompt box and the top of the model strip, flashes red, and never dismisses itself - so a failed
+     * generation hid the controls you needed to retry it, behind the notice that it failed. The strip takes the
+     * header title's place instead: the header keeps its height (nothing below it moves) and it covers no
+     * content, because the header is chrome. The m.css block documents the two rules that keep it that way.
+     *
+     * Unlike the toast this is sticky, deliberately - a failure is not a confirmation, and the reason a
+     * generation died should still be readable after you look away from the phone. It clears on its own X, and
+     * on the next generate (mCreate.doGenerate), which is the point the old message stops describing anything.
+     *
+     * The [TOAST] markup in index.html stays regardless: this replaces site.js's showError, it does not delete
+     * it, and the elements have to exist if anything ever reaches the original. */
+    error(message) {
+        let text = `${message}`;
+        let els = this.errorBar();
+        if (!els) {
+            // The header markup is static so this shouldn't happen, but a toast beats swallowing a failure.
+            this.warn(text);
+            return;
+        }
+        els.line.textContent = text;
+        els.detail.textContent = text;
+        // A new failure collapses the old one's detail panel - it is the previous error's text.
+        els.detail.style.display = 'none';
+        els.line.setAttribute('aria-expanded', 'false');
+        els.bar.style.display = '';
+        els.header.classList.add('m-header-erred');
+    }
+
+    /** Hides the header error strip, restoring the title. Safe to call when nothing is showing. */
+    clearError() {
+        let els = this.errorBar();
+        if (!els) {
+            return;
+        }
+        els.bar.style.display = 'none';
+        els.detail.style.display = 'none';
+        els.line.setAttribute('aria-expanded', 'false');
+        els.header.classList.remove('m-header-erred');
+    }
+
+    /** Opens/closes the full-text panel under the header. The one-line strip is clipped, and upstream error
+     * strings are routinely a backend traceback rather than a sentence, so the untruncated text has to be
+     * reachable - as an overlay, so reading it doesn't move the panels either. */
+    toggleErrorDetail() {
+        let els = this.errorBar();
+        if (!els) {
+            return;
+        }
+        let open = els.detail.style.display == 'none';
+        els.detail.style.display = open ? '' : 'none';
+        els.line.setAttribute('aria-expanded', `${open}`);
+    }
+
+    /** Resolves and wires the header error strip on first use; null when the markup isn't present. */
+    errorBar() {
+        if (this.errorEls !== undefined) {
+            return this.errorEls;
+        }
+        let header = document.querySelector('.m-header');
+        let bar = document.querySelector('.m-header-error');
+        let line = document.querySelector('.m-header-error-text');
+        let detail = document.querySelector('.m-header-error-detail');
+        let close = document.querySelector('.m-header-error-x');
+        this.errorEls = header && bar && line && detail && close ? { header, bar, line, detail, close } : null;
+        if (this.errorEls) {
+            line.addEventListener('click', () => this.toggleErrorDetail());
+            close.addEventListener('click', () => this.clearError());
+        }
+        return this.errorEls;
     }
 
     /** Hides the bottom nav while the on-screen keyboard is open. The layout is normal-flow so iOS handles
@@ -291,3 +369,28 @@ class MUI {
 }
 
 mUI = new MUI();
+
+/* Routes every error on this client into the header strip instead of the shared center_toast. site.js declares
+ * showError as a plain global function, so reassigning it here is what the unqualified `showError(...)` calls
+ * in site.js itself (genericRequest's default handler, makeWSRequest's fail path, the server-has-updated
+ * notice) and in m_gen.js's failed() actually reach from this point on.
+ *
+ * Installed at file scope rather than from MApp.init(): init() is allowed to throw - it has its own
+ * boot-failure banner for that - and a boot that went wrong is exactly when errors need somewhere to land.
+ * m_ui.js is deferred and ordered after site.js, so the original is guaranteed to exist by now; the typeof
+ * guard is only so a future load-order change degrades to "no override" instead of a boot-killing throw.
+ *
+ * The ui.HideErrorMessages filter is re-implemented rather than delegated, because delegating would mean
+ * calling the original showError - which is the toast this exists to replace. Keep the two in step. */
+if (typeof showError == 'function') {
+    window.showError = (message) => {
+        let excluded = (typeof getUserSetting == 'function' ? getUserSetting('ui.HideErrorMessages', '') : '').split('|').map(x => x.trim());
+        for (let entry of excluded) {
+            if (entry && `${message}`.includes(entry)) {
+                console.log(`Error message ${message} contains excluded message ${entry}, not showing.`);
+                return;
+            }
+        }
+        mUI.error(message);
+    };
+}

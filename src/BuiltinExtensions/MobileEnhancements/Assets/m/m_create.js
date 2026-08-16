@@ -440,6 +440,10 @@ class MCreate {
             mUI.warn('Type a prompt or pick a preset first.');
             return;
         }
+        // The header error strip is sticky, so clear it here: from this point the last failure describes an
+        // attempt the user has already moved on from. Cleared on the way out rather than on the way in so a
+        // rejected input (the guard above) still leaves the reason it was rejected on screen.
+        mUI.clearError();
         mAutoComplete.hide();
         if (this.previewCollapsed) {
             this.previewCollapsed = false;

@@ -85,6 +85,18 @@
         <header class="m-header">
             <span class="m-header-title">SwarmUI</span>
             <span class="m-queue-chip" style="display:none">0</span>
+            <!-- Error strip. This is where showError lands on /simple (mUI.error, and the showError override at
+                 the bottom of m_ui.js) instead of the shared center_toast above, which parks a fixed box over
+                 the middle of the screen. It lives INSIDE the header and takes the space the title occupies, so
+                 showing it moves nothing and covers no content - see the m.css block for the full reasoning.
+                 The message line is a button: it toggles .m-header-error-detail, which hangs off the bottom of
+                 the header as an overlay so the untruncated text is reachable without reflowing the panels. -->
+            <div class="m-header-error" role="alert" aria-live="assertive" style="display:none">
+                <span class="m-header-error-icon" aria-hidden="true">&#9888;</span>
+                <button type="button" class="m-header-error-text" aria-expanded="false"></button>
+                <button type="button" class="m-header-error-x" aria-label="Dismiss error">&#10005;</button>
+            </div>
+            <div class="m-header-error-detail" style="display:none"></div>
             <a class="m-header-link" href="/Text2Image">Classic UI</a>
         </header>
         <main class="m-panels">
