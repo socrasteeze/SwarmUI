@@ -362,20 +362,23 @@
     opacity: 0.6;
     border-color: var(--emphasis);
 }
-/* 2rem (32px), NOT the 44px HIG minimum, and that is a deliberate trade rather than an oversight. The parent
-   tile is 4.2rem (67px) and its whole surface is the drag-to-reorder handle; a 44px remove target would cover
-   the top-right ~2/3 of it, so every attempt to start a drag near that corner would instead delete the image.
-   32px is the largest size that still leaves the tile draggable, and it is a ~2x area increase over the
-   previous 1.4rem. If this ever needs to be a true 44px, the tile has to grow first. */
+/* 1.3rem (~21px), smaller than both the old 32px and the 44px HIG minimum - a deliberate trade, not an
+   oversight, but a different one than it used to be. The parent tile is 4.2rem (67px); a 44px remove target
+   would cover its top-right ~2/3, and even the old 32px ate a real bite of the corner a tap-to-edit or a
+   drag-to-reorder attempt might land on. It can shrink now because it stopped being the only way off an
+   image: tapping the tile opens the editor (m_image_edit.js), which has its own unhurried "Remove image"
+   button - so a miss here just opens the editor instead of doing nothing, and removal is never more than one
+   extra tap away either way. If this ever needs to grow back toward 44px, the tile has to grow first. */
 .m-image-tile-remove {
     position: absolute;
     top: 0;
     right: 0;
     background: rgba(0, 0, 0, 0.55);
     color: #fff;
-    width: 2rem;
-    height: 2rem;
-    line-height: 2rem;
+    width: 1.3rem;
+    height: 1.3rem;
+    line-height: 1.3rem;
+    font-size: 12px;
     text-align: center;
     border-bottom-left-radius: 0.5rem;
 }
@@ -1129,6 +1132,126 @@
     padding: 0.6rem 0.2rem;
     min-height: 44px;
     width: 100%;
+}
+
+/* --- Prompt-image editor sheet (m_image_edit.js) ---
+   Opened by tapping a thumbnail in the Create tab's image strip. Rotate/crop/undo only ever touch the canvas
+   and this overlay - reordering and the strip's own remove button (m_create.js) are untouched by any of it. */
+.m-edit-canvas-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: var(--background-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 0.4rem;
+    padding: 0.5rem;
+    margin-bottom: 0.6rem;
+    /* Keeps the sheet from collapsing to a sliver while "Loading..." is the only content, and clips the crop
+       rectangle's outside-dimming box-shadow (below) to this box rather than letting it bleed into the
+       padding or past the wrap's own rounded corners. */
+    min-height: 8rem;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.m-edit-canvas {
+    display: block;
+    /* Sized in JS (fitDisplaySize), not CSS - see the comment there for why a canvas's percentage
+       max-width/max-height can't resolve against a flex-centered wrap without a definite-width ancestor. */
+}
+.m-edit-crop-rect {
+    position: absolute;
+    border: 2px solid var(--emphasis);
+    /* A 9999px spread dimmed rectangle around the crop box, clipped by the wrap's own overflow:hidden - the
+       simplest way to darken "outside the crop" without a second element tracking the same four edges. */
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+    box-sizing: border-box;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+/* 44px touch target (these are precision drag handles - if anything they deserve MORE room than a typical
+   row button, not less), centered on its corner point via the transform rather than sized/positioned to sit
+   flush against it, so the hit target extends evenly in every direction from the exact corner. The visible
+   dot is a smaller ::after so the corner itself still reads as a thin crosshair rather than a 44px blob. */
+.m-edit-crop-handle {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.m-edit-crop-handle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0.8rem;
+    height: 0.8rem;
+    transform: translate(-50%, -50%);
+    background: var(--emphasis);
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0.05rem 0.2rem rgba(0, 0, 0, 0.5);
+}
+.m-edit-controls {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+.m-edit-tool-button {
+    flex: 1 1 0;
+    min-width: 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.4rem;
+}
+.m-edit-tool-button:disabled {
+    opacity: 0.4;
+}
+.m-edit-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+}
+.m-edit-cancel-button {
+    flex: 1 1 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 46px;
+}
+.m-edit-save-button {
+    flex: 1 1 0;
+    background: var(--emphasis);
+    color: var(--emphasis-text, #fff);
+    font-weight: bold;
+    border: none;
+    border-radius: 0.5rem;
+    min-height: 46px;
+}
+.m-edit-save-button:disabled {
+    opacity: 0.4;
+}
+/* Deliberately small and plain, not a full-width danger button - see m_image_edit.js's comment on the
+   button. Destructive, but no longer the only way to remove this image (the strip keeps its own shrunk ×),
+   so it doesn't need to fight Save/Cancel for visual weight. */
+.m-edit-remove-button {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    color: color-mix(in srgb, var(--red) 65%, var(--text-soft));
+    font-size: 13px;
+    min-height: 40px;
 }
 
 /* --- Grid sheet --- */

@@ -66,6 +66,12 @@
          MAutoComplete) and before m_create.js. -->
     <script defer src="/ExtensionFile/TagDexExtension/Assets/tagdex_core.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/TagDexExtension/Assets/m_tagdex.js?vary=[VARY]"></script>
+    <!-- Prompt-image crop/rotate editor, opened by tapping a thumbnail in m_create.js's image strip. Only
+         needs mUI/mState (both already loaded above); m_create.js only references the global `mImageEdit`
+         lazily, inside a click handler, so strict load-order before it isn't required for correctness - it's
+         placed here anyway to match how every other cross-referenced global in this list is ordered before
+         its first consumer. -->
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_image_edit.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_create.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_images.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_models.js?vary=[VARY]"></script>
