@@ -90,6 +90,8 @@
     padding-right: calc(0.8rem + var(--m-safe-right));
     border-bottom: 1px solid var(--border-color);
     flex: 0 0 auto;
+    /* Containing block for .m-header-error-detail, which hangs below the header as an overlay. */
+    position: relative;
 }
 .m-header-title {
     font-weight: bold;
@@ -109,10 +111,101 @@
     color: var(--text-soft);
     text-decoration: none;
     font-size: 12px;
+    /* The error strip claims the rest of the row when it shows, and this link is the only flexible thing left
+       beside it - without this it wraps to "Classic / UI" as soon as an error arrives. The strip's own text is
+       what gives way instead (it ellipsises). */
+    white-space: nowrap;
+    flex: 0 0 auto;
     min-height: 44px;
     display: inline-flex;
     align-items: center;
     padding: 0 0.4rem;
+}
+
+/* --- Header error strip ---
+   Replaces site.js's center_toast as the error surface on this client (mUI.error + the showError override in
+   m_ui.js). What was wrong with the toast on a phone: it is `position: fixed; top: 3rem`, so it landed square
+   over the header, the prompt box and the top of the model strip; it flashed red on arrival; and it has no
+   auto-dismiss, so a failed generation left the controls you needed for the retry buried under the report of
+   the failure.
+
+   Two rules make this version stay out of the way, and both are load-bearing:
+   1. It is a flex child of the header that takes the title's place (.m-header-erred hides .m-header-title), so
+      the header's height is unchanged - nothing in .m-panels or the nav moves when an error arrives or clears.
+      Every control in the strip is capped at the 44px the header link already sets, for the same reason: a
+      taller row would grow the header and shift the panels. Do not give this element a min-height above 44px.
+   2. It clips to one line. The full text lives in .m-header-error-detail, which is absolutely positioned, so
+      even expanding it reflows nothing.
+   The "Classic UI" link deliberately stays visible beside it: it is the escape hatch, and an error is exactly
+   when someone reaches for it. --- */
+.m-header-error {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.m-header.m-header-erred .m-header-title {
+    display: none;
+}
+.m-header.m-header-erred {
+    border-bottom-color: color-mix(in srgb, var(--red) 55%, var(--border-color));
+}
+.m-header-error-icon {
+    color: color-mix(in srgb, var(--red) 60%, var(--text));
+    font-size: 14px;
+    flex: 0 0 auto;
+}
+.m-header-error-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text);
+    font-size: 12px;
+    text-align: left;
+    min-height: 44px;
+    /* One line, clipped. Wrapping instead would grow the header, which is the shift this whole block exists
+       to avoid; the detail panel below is where long text goes. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.m-header-error-x {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-soft);
+    font-size: 13px;
+    min-width: 36px;
+    min-height: 44px;
+    padding: 0;
+}
+.m-header-error-detail {
+    position: absolute;
+    top: 100%;
+    /* `top: 100%` resolves against the header's PADDING box, so the panel would otherwise be drawn over the
+       header's own 1px bottom border - which in this state is the red erred-state line. */
+    margin-top: 1px;
+    left: 0;
+    right: 0;
+    z-index: 70;
+    max-height: 40vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.6rem 0.8rem;
+    padding-left: calc(0.8rem + var(--m-safe-left));
+    padding-right: calc(0.8rem + var(--m-safe-right));
+    box-sizing: border-box;
+    background: var(--background-panel);
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.45);
+    font-size: 13px;
+    /* Backend errors arrive as pre-formatted tracebacks; keep their line breaks, and break the long unbroken
+       paths inside them rather than overflowing sideways (the body sets overflow-x: hidden). */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 /* --- Panels --- */
