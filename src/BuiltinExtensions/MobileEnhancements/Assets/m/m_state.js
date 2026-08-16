@@ -21,6 +21,9 @@ class MState {
         this.presets = [];
         /** Model name lists from ListT2IParams (subtype -> [[name, classId], ...]). */
         this.models = {};
+        /** Starred ("favourite") model names from GetMyUserData, as subtype -> [name, ...]. Same store the
+         * genpage's star buttons write through SetStarredModels, so a star set over there shows up here. */
+        this.starredModels = {};
         /** Model class data from ListT2IParams (classId -> {standard_width, standard_height, ...}). */
         this.modelClasses = {};
         /** subtype -> Map(strippedName -> compat class), built lazily by compatMapFor. */
@@ -451,6 +454,31 @@ class MState {
             let compat = this.compatClassOf(subtype, model.name);
             return !compat || classes.has(compat);
         });
+    }
+
+    /** Whether a model is starred, by the exact name ListModels reports - which is what SetStarredModels
+     * stores, so no normalization is wanted here. */
+    isStarred(subtype, name) {
+        let starred = this.starredModels[subtype];
+        return !!starred && starred.includes(name);
+    }
+
+    /** Lifts starred models to the front of a picker list, leaving everything else in the order it arrived.
+     *
+     * This is ordering, not filtering: the pickers cap how many rows they render (MCreate.ListCap), so on a
+     * library of any size a starred model living late in the alphabet was simply never on screen unless you
+     * searched for it by name - which defeats the point of starring it. Sorted before the cap, deliberately.
+     *
+     * Array.sort is stable (spec-guaranteed since ES2019), so ties keep the server's own sortBy: Name order
+     * and this stays a lift rather than a reshuffle. Returns a copy: the caller's list is the cached
+     * ListModels result, and reordering that in place would make the cache order depend on view history. */
+    starredFirst(list, subtype) {
+        let starred = this.starredModels[subtype];
+        if (!starred || starred.length == 0) {
+            return list;
+        }
+        let set = new Set(starred);
+        return list.slice().sort((a, b) => (set.has(b.name) ? 1 : 0) - (set.has(a.name) ? 1 : 0));
     }
 
     /** Active LoRAs as [{name, weight}] from the index-aligned params arrays. */

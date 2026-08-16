@@ -46,13 +46,18 @@ class MCreate {
         this.previewWrap.appendChild(head);
         this.previewGrid = mUI.el('div', 'm-preview-grid');
         this.previewWrap.appendChild(this.previewGrid);
-        // Shown from the instant Generate is tapped until the first frame lands. Queueing behind a loading
-        // model can take a while, and without this the whole screen sits unchanged - indistinguishable from
-        // a button that did nothing.
-        this.previewPending = mUI.el('div', 'm-preview-pending');
-        this.previewPending.appendChild(mUI.el('div', 'm-preview-pending-label', 'Queued...'));
-        this.previewPending.appendChild(mUI.el('div', 'm-preview-pending-bar'));
-        this.previewWrap.appendChild(this.previewPending);
+        // The empty canvas: what stands in for the images before any exist. It is exactly as tall as the grid
+        // that replaces it (--m-preview-h, in m.css), which is the point - the space is reserved from first
+        // paint, so tapping Generate and then receiving tiles doesn't push the model row, the Generate button
+        // and the prompt box down the screen mid-generation.
+        // It also carries the queued state: from the instant Generate is tapped until the first frame lands,
+        // its label and progress bar are the only sign anything is happening. Queueing behind a loading model
+        // can take a while, and without that the screen sits unchanged, indistinguishable from a dead button.
+        this.previewCanvas = mUI.el('div', 'm-preview-canvas');
+        this.previewCanvasLabel = mUI.el('div', 'm-preview-canvas-label');
+        this.previewCanvas.appendChild(this.previewCanvasLabel);
+        this.previewCanvas.appendChild(mUI.el('div', 'm-preview-canvas-bar'));
+        this.previewWrap.appendChild(this.previewCanvas);
         this.pending = false;
         this.renderPreviewState();
     }
@@ -103,15 +108,27 @@ class MCreate {
         this.renderPreviewState();
     }
 
-    /** Syncs the preview's collapsed/empty/pending classes and the toggle glyph. */
+    /** Syncs the preview's collapsed/idle/pending classes, the canvas label, and the toggle glyph.
+     *
+     * The block occupies the same height in every one of these states - idle, queued, generating, done - so
+     * none of the transitions between them moves anything below it. `m-preview-idle` (no tiles, nothing
+     * queued) is the one state that is not pinned: an empty placeholder following you down the panel while
+     * you edit params is not worth the top 40% of the screen, and dropping the sticky costs no layout because
+     * a sticky element occupies its flow space either way. */
     renderPreviewState() {
         let count = Object.keys(this.liveTiles).length;
-        this.previewWrap.classList.toggle('m-preview-empty', count == 0 && !this.pending);
-        this.previewPending.style.display = this.pending && count == 0 ? '' : 'none';
+        this.previewWrap.classList.toggle('m-preview-idle', count == 0 && !this.pending);
+        this.previewWrap.classList.toggle('m-preview-empty', count == 0);
+        this.previewCanvas.classList.toggle('m-preview-canvas-pending', this.pending);
+        this.previewCanvasLabel.textContent = this.pending ? 'Queued...' : 'No preview yet';
         this.previewWrap.classList.toggle('m-preview-collapsed', this.previewCollapsed);
         this.previewToggle.textContent = this.previewCollapsed ? '▾ Preview' : '▴ Preview';
-        this.previewGrid.style.gridTemplateColumns = `repeat(${count > 1 ? 2 : 1}, 1fr)`;
-        this.previewGrid.style.setProperty('--m-preview-cell-h', count > 1 ? '19dvh' : '38dvh');
+        let columns = count > 1 ? 2 : 1;
+        // Cells are sized to fill the reserved canvas rather than to a fixed dvh, so a 1-up, a 2-up and a 2x2
+        // all come out the same total height instead of each batch size being its own layout.
+        let rows = Math.min(2, Math.max(1, Math.ceil(count / columns)));
+        this.previewGrid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+        this.previewGrid.style.setProperty('--m-preview-cell-h', rows > 1 ? 'calc((var(--m-preview-h) - 0.3rem) / 2)' : 'var(--m-preview-h)');
     }
 
     /** WS frame handling for the live preview tiles. */
@@ -679,7 +696,7 @@ class MCreate {
             if (arch.row) {
                 results.appendChild(arch.row);
             }
-            let matches = MCreate.filterModels(arch.list, search.value);
+            let matches = mState.starredFirst(MCreate.filterModels(arch.list, search.value), 'Stable-Diffusion');
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
@@ -688,6 +705,10 @@ class MCreate {
                     item.appendChild(thumb);
                 }
                 item.appendChild(mUI.modelText(model, null));
+                let star = mUI.starBadge('Stable-Diffusion', model.name);
+                if (star) {
+                    item.appendChild(star);
+                }
                 if (mState.params['model'] == model.name) {
                     item.classList.add('m-selected');
                 }
@@ -1370,7 +1391,7 @@ class MCreate {
                 results.appendChild(arch.row);
             }
             let active = new Set(mState.getLoras().map(l => l.name));
-            let matches = MCreate.filterModels(arch.list, search.value).filter(m => !active.has(m.name));
+            let matches = mState.starredFirst(MCreate.filterModels(arch.list, search.value).filter(m => !active.has(m.name)), 'LoRA');
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
@@ -1379,6 +1400,10 @@ class MCreate {
                     item.appendChild(thumb);
                 }
                 item.appendChild(mUI.modelText(model, null));
+                let star = mUI.starBadge('LoRA', model.name);
+                if (star) {
+                    item.appendChild(star);
+                }
                 item.addEventListener('click', () => {
                     let cur = mState.getLoras();
                     cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
