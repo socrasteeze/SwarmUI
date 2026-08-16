@@ -15,6 +15,9 @@ class MApp {
                 });
                 genericRequest('GetMyUserData', { 'includeAutocompletions': false }, data => {
                     mState.presets = data.presets || [];
+                    // Same response already carries the user's starred models, so the pickers get favourites
+                    // ordering for free - no second request, and no new server route.
+                    mState.starredModels = data.starred_models || {};
                     mState.changed();
                 });
                 mAutoComplete.loadSettings();
@@ -112,6 +115,28 @@ class MApp {
             });
         });
         list.appendChild(hardRefresh);
+        // Restart the SERVER - deliberately distinct from "Force update" above, which only ever touches this
+        // browser (caches + service worker). The two are not interchangeable: a Release-build server reads
+        // every /simple, MobileEnhancements and TagDex asset from disk ONCE and serves that copy for its whole
+        // life (WebServer.ViewExtensionScript's GetLazy branch), so an edited or newly added asset is invisible
+        // until the process restarts, no matter how thoroughly the client clears its own caches. Before this
+        // row, the only way to do that from a phone was the desktop-oriented Server tab on the genpage.
+        // Permission is checked at click rather than at build, matching the TagDex sheet: hasPermission()
+        // fails OPEN before the session lands, and this panel can be built by a #more deep link before then.
+        let restart = mUI.el('button', 'm-more-item', 'Restart server');
+        restart.addEventListener('click', () => {
+            if (typeof permissions != 'undefined' && !permissions.hasPermission('restart')) {
+                mUI.warn('You do not have permission to restart the server.');
+                return;
+            }
+            // Says "interrupts" rather than "may interrupt" when there is actually queued work, because the
+            // cost of this is entirely about what is in flight right now.
+            let queued = mGen.queueTotal > 0 ? `This interrupts ${mGen.queueTotal} queued/running generation(s). ` : '';
+            mUI.confirm(`Restart the SwarmUI server? ${queued}It rebuilds first, so it can take a while to come back. The app will reload itself once it does.`, () => {
+                this.restartServer(restart);
+            });
+        });
+        list.appendChild(restart);
         for (let i = 0; i < mUI.moreItems.length; i++) {
             let entry = mUI.moreItems[i];
             let item = mUI.el('button', 'm-more-item', entry.label);
@@ -158,6 +183,98 @@ class MApp {
      * location.reload() only after both settle, so the fresh page load has no controller and no cache to hit.
      * Everything is best-effort - a browser with no SW support or a rejected delete still ends in a reload,
      * which is strictly no worse than the button not existing. */
+    /** Fires the server restart and hands off to the watcher.
+     *
+     * `UpdateAndRestart` with force and nothing else set is the same call the genpage's own extension
+     * "restart server" button makes: `doUpdateServer` defaults false and no extension/backend update lists are
+     * sent, so it git-updates nothing - it writes `src/bin/must_rebuild` and requests the restart. Exit code
+     * 42 is what tells the launch script to relaunch, so **this only comes back if the server was started
+     * through a launch script**; a bare `dotnet run` just exits, which is why the watcher below eventually
+     * gives up with an honest message instead of spinning forever.
+     *
+     * The error path is split on the type rather than reported blindly, because "the connection died" is the
+     * expected outcome here, not a failure: site.js hands a transport failure to errorHandle as the raw
+     * ProgressEvent, while an actual server-side rejection (no permission, bad request) arrives as a string.
+     * A string means the restart never started and the row goes back; anything else means the server is
+     * already going down, which is exactly what was asked for. */
+    restartServer(row) {
+        row.disabled = true;
+        row.textContent = 'Restarting server...';
+        genericRequest('UpdateAndRestart', { 'force': true }, data => this.awaitServerReturn(row), 0, err => {
+            if (typeof err == 'string') {
+                row.disabled = false;
+                row.textContent = 'Restart server';
+                mUI.warn(`Could not restart: ${err}`);
+                return;
+            }
+            this.awaitServerReturn(row);
+        });
+    }
+
+    /** Waits for the server to go away and come back, then reloads into the fresh one.
+     *
+     * Two phases, and the first one is the whole reason this isn't a plain "poll until it answers" loop: the
+     * server is still perfectly responsive for a moment after it accepts the request (the shutdown is a
+     * detached task on a delay), so a single-phase watcher would get an immediate success, reload straight
+     * back into the OLD process, and look like the button did nothing. So: wait for a probe to FAIL, and only
+     * then wait for one to succeed.
+     *
+     * The probe is a POST because the service worker explicitly passes non-GET requests straight through
+     * (`sw.js`: `if (request.method != 'GET') return`), so it can never be answered from cache - a cached 200
+     * for a GET while the process is down would break both phases at once. Any HTTP response at all counts as
+     * "up", including a rejection: the question is whether the web server is answering, not whether this
+     * particular call succeeded.
+     *
+     * Finishes through hardRefresh() rather than location.reload() on purpose. The point of restarting from
+     * here is almost always to pick up changed assets, and a plain reload can still be served the old ones out
+     * of the browser/service-worker cache - `?vary=` only busts on a committed change, so an uncommitted asset
+     * edit keeps the exact same URL across the restart. Clearing the client caches too makes this button do
+     * the whole job rather than most of it. */
+    async awaitServerReturn(row) {
+        let probe = async () => {
+            try {
+                await fetch('API/GetNewSession', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}',
+                    cache: 'no-store',
+                });
+                return true;
+            }
+            catch (e) {
+                return false;
+            }
+        };
+        let sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        // Generous, because "rebuild then relaunch" is genuinely slow on a cold build and the alternative is
+        // telling someone their working restart failed. Both caps are counts of 2s polls.
+        let downDeadline = 30;
+        let upDeadline = 300;
+        for (let i = 0; i < downDeadline; i++) {
+            await sleep(2000);
+            if (!await probe()) {
+                row.textContent = 'Server restarting - waiting...';
+                for (let j = 0; j < upDeadline; j++) {
+                    await sleep(2000);
+                    if (await probe()) {
+                        row.textContent = 'Back up - reloading...';
+                        this.hardRefresh();
+                        return;
+                    }
+                }
+                row.disabled = false;
+                row.textContent = 'Restart server';
+                mUI.warn('The server has not come back yet. If it was not started from a launch script, it will not restart on its own.');
+                return;
+            }
+        }
+        // Never went down: the call was accepted but the process is still serving. Most likely the restart was
+        // refused somewhere past the API layer, so say that rather than pretending it worked.
+        row.disabled = false;
+        row.textContent = 'Restart server';
+        mUI.warn('The server did not restart. Check the server logs.');
+    }
+
     async hardRefresh() {
         try {
             if (window.caches) {

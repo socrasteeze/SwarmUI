@@ -55,6 +55,7 @@ public class MobileEnhancementsExtension : Extension
         OtherAssets.Add("Assets/m/m_gen.js");
         OtherAssets.Add("Assets/m/m_ui.js");
         OtherAssets.Add("Assets/m/m_autocomplete.js");
+        OtherAssets.Add("Assets/m/m_image_edit.js");
         OtherAssets.Add("Assets/m/m_create.js");
         OtherAssets.Add("Assets/m/m_images.js");
         OtherAssets.Add("Assets/m/m_models.js");

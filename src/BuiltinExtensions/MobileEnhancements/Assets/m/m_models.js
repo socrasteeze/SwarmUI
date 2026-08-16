@@ -47,7 +47,11 @@ class MModels {
         genericRequest('ListModels', { 'path': this.folder, 'depth': 1, 'subtype': this.subtype, 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
             this.renderFolders(data.folders || []);
             this.grid.innerHTML = '';
-            for (let model of (data.files || [])) {
+            // Starred first, same as the Create-tab pickers and the genpage's own browsers. This list is one
+            // folder deep rather than capped, so it is ordering for its own sake here, not rescuing rows from
+            // a truncated list - but a favourite that sorts to the top in one place and the middle in another
+            // is just two different apps.
+            for (let model of mState.starredFirst(data.files || [], this.subtype)) {
                 this.grid.appendChild(this.buildCard(model));
             }
             if ((data.files || []).length == 0) {
@@ -87,6 +91,13 @@ class MModels {
         let thumb = mUI.modelThumb(model, null);
         if (thumb) {
             card.appendChild(thumb);
+        }
+        let star = mUI.starBadge(this.subtype, model.name);
+        if (star) {
+            // On the card the star is a corner badge over the thumbnail rather than a row item - a card with
+            // no preview image has nothing to overlay, so it sits in the corner of the card itself.
+            star.classList.add('m-model-star-badge');
+            card.appendChild(star);
         }
         card.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag()));
         if (this.subtype == 'Stable-Diffusion' && mState.params['model'] == model.name) {
