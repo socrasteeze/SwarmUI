@@ -1216,6 +1216,71 @@
 .m-edit-tool-button:disabled {
     opacity: 0.4;
 }
+/* Nudge, readout, nudge. The readout is a button (it resets the angle) but reads as a value, so it is styled
+   flat and monospaced-by-numbers rather than like the controls either side of it. */
+.m-edit-angle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+.m-edit-angle-label {
+    flex: 0 0 auto;
+    color: var(--text-soft);
+    font-size: 13px;
+}
+.m-edit-angle-button {
+    flex: 1 1 0;
+    min-width: 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    font-size: 18px;
+    line-height: 1;
+}
+.m-edit-angle-readout {
+    flex: 0 0 3.5rem;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    min-height: 44px;
+    text-align: center;
+}
+.m-edit-angle-button:disabled,
+.m-edit-angle-readout:disabled {
+    opacity: 0.4;
+}
+/* Four sides on one row, sharing it with a label. The label takes its natural width and the four buttons
+   split what's left evenly, so they stay a uniform block of targets rather than sizing to their glyphs. */
+.m-edit-pad-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+.m-edit-pad-label {
+    flex: 0 0 auto;
+    color: var(--text-soft);
+    font-size: 13px;
+}
+.m-edit-pad-button {
+    flex: 1 1 0;
+    min-width: 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    font-size: 18px;
+    line-height: 1;
+}
+.m-edit-pad-button:disabled {
+    opacity: 0.4;
+}
 .m-edit-actions {
     display: flex;
     gap: 0.4rem;
