@@ -745,8 +745,15 @@ class MCreate {
             let img = document.createElement('img');
             img.src = entry.kind == 'data' ? entry.value : `${getImageOutPrefix()}/${entry.value}`;
             tile.appendChild(img);
+            // A tap was a no-op here before this existed, so opening the editor doesn't compete with
+            // anything - long-press+drag (wireReorder, below) is unaffected, and a real drag never lets a
+            // synthetic click fire afterward, so this never fires mid-reorder either.
+            tile.addEventListener('click', () => mImageEdit.open(i));
             let remove = mUI.el('span', 'm-image-tile-remove', '×');
-            remove.addEventListener('click', () => {
+            remove.addEventListener('click', (e) => {
+                // Without this the click also bubbles to the tile's own listener above and opens the editor
+                // on top of the tile that was just removed from under it.
+                e.stopPropagation();
                 mState.promptImages.splice(i, 1);
                 mState.changed();
             });
