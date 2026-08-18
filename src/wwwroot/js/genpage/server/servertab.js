@@ -696,54 +696,168 @@ function adminInterruptUser(userId) {
     genericRequest('AdminInterruptUser', { 'name': userId }, data => {});
 }
 
-function serverResourceLoop() {
-    if (isVisible(getRequiredElementById('server_tab'))) {
-        fixTabHeights();
+/** Manages the Server Status pane on the Server Info tab. Builds the DOM once, then updates values in place. */
+class ServerStatusManager {
+    constructor() {
+        this.resourceArea = getRequiredElementById('resource_usage_area');
+        this.usersArea = getRequiredElementById('connected_users_list');
+        this.gpuIds = null;
+        this.userIds = null;
+        this.cpuMeter = null;
+        this.ramMeter = null;
+        this.gpuRows = {};
+        this.userRows = {};
+        this.loopInterval = null;
+        sessionReadyCallbacks.push(() => {
+            this.loopInterval = setInterval(this.refreshLoop, 1000);
+        });
     }
-    if (isVisible(getRequiredElementById('Server-Info'))) {
-        if (!hasEverCheckedForUpdates) {
-            if (window.checkForUpdatesAutomatically) {
-                check_for_updates();
-            }
-            else {
-                hasEverCheckedForUpdates = true;
-                getRequiredElementById('updates_available_notice_area').innerText = 'Automatic update checks disabled in Server Configuration';
-            }
+
+    /** Fetches current server status reports from the server and applies them. */
+    refresh() {
+        genericRequest('GetServerResourceInfo', {}, data => this.updateResources(data));
+        genericRequest('ListConnectedUsers', {}, data => this.updateUsers(data));
+    }
+
+    /** Applies a GetServerResourceInfo payload. Rebuilds fully if the GPU set changes. */
+    updateResources(data) {
+        let gpus = data.gpus ? Object.values(data.gpus) : [];
+        let gpuIds = gpus.map(gpu => gpu.id).join(',');
+        if (this.gpuIds != gpuIds) {
+            this.buildResources(gpus);
+            this.gpuIds = gpuIds;
         }
-        genericRequest('GetServerResourceInfo', {}, data => {
-            let target = getRequiredElementById('resource_usage_area');
-            let priorWidth = 0;
-            if (target.style.minWidth) {
-                priorWidth = parseFloat(target.style.minWidth.replaceAll('px', ''));
-            }
-            target.style.minWidth = `${Math.max(priorWidth, target.offsetWidth)}px`;
-            if (data.gpus) {
-                let html = '<table class="simple-table"><tr><th>Resource</th><th>ID</th><th>Temp</th><th>Usage</th><th>Mem Usage</th><th>Used Mem</th><th>Free Mem</th><th>Total Mem</th></tr>';
-                html += `<tr><td>CPU</td><td>...</td><td>...</td><td>${Math.round(data.cpu.usage * 100)}% (${data.cpu.cores} cores)</td><td>${Math.round(data.system_ram.used / data.system_ram.total * 100)}%</td><td>${fileSizeStringify(data.system_ram.used)}</td><td>${fileSizeStringify(data.system_ram.free)}</td><td>${fileSizeStringify(data.system_ram.total)}</td></tr>`;
-                for (let gpu of Object.values(data.gpus)) {
-                    html += `<tr><td>${gpu.name}</td><td>${gpu.id}</td><td>${gpu.temperature}&deg;C</td><td>${gpu.utilization_gpu}% Core, ${gpu.utilization_memory}% Mem</td><td>${Math.round(gpu.used_memory / gpu.total_memory * 100)}%</td><td>${fileSizeStringify(gpu.used_memory)}</td><td>${fileSizeStringify(gpu.free_memory)}</td><td>${fileSizeStringify(gpu.total_memory)}</td></tr>`;
-                }
-                html += '</table>';
-                target.innerHTML = html;
-            }
-        });
-        genericRequest('ListConnectedUsers', {}, data => {
-            let target = getRequiredElementById('connected_users_list');
-            let priorWidth = 0;
-            if (target.style.minWidth) {
-                priorWidth = parseFloat(target.style.minWidth.replaceAll('px', ''));
-            }
-            target.style.minWidth = `${Math.max(priorWidth, target.offsetWidth)}px`;
-            let html = '<table class="simple-table"><tr><th>Name</th><th>Last Active</th><th>Active Sessions</th><th>Current Gens</th></tr>';
-            for (let user of data.users) {
-                let button = (user.waiting_gens == 0 && user.loading_models == 0 && user.waiting_backends == 0 && user.live_gens == 0) ? '' : `<button class="basic-button" onclick="adminInterruptUser('${escapeHtml(user.id)}')">Interrupt</button>`;
-                html += `<tr><td>${user.id}</td><td>${user.last_active}</td><td>${user.active_sessions.map(sess => `${sess.count}x from ${sess.address}`).join(', ')}</td><td>${currentGenString(user.waiting_gens, user.loading_models, user.live_gens, user.waiting_backends)}${button}</td></tr>`;
-            }
-            html += '</table>';
-            target.innerHTML = html;
-        });
+        let cpuPct = Math.round(data.cpu.usage * 100);
+        this.setMeter(this.cpuMeter, cpuPct, `${cpuPct}% &middot; ${data.cpu.cores} cores`, true);
+        let ramPct = Math.round(data.system_ram.used / data.system_ram.total * 100);
+        this.setMeter(this.ramMeter, ramPct, `${ramPct}% &middot; ${fileSizeStringify(data.system_ram.used)} / ${fileSizeStringify(data.system_ram.total)}`, data.system_ram.total > 0);
+        for (let gpu of gpus) {
+            let row = this.gpuRows[gpu.id];
+            row.name.innerHTML = `GPU ${gpu.id} &middot; ${escapeHtml(gpu.name)}`;
+            row.temp.innerHTML = `${gpu.temperature}&deg;C`;
+            this.setMeter(row.core, gpu.utilization_gpu, `${gpu.utilization_gpu}%`, true);
+            let vramPct = Math.round(gpu.used_memory / gpu.total_memory * 100);
+            this.setMeter(row.vram, vramPct, `${vramPct}% &middot; ${fileSizeStringify(gpu.used_memory)} / ${fileSizeStringify(gpu.total_memory)}`, gpu.total_memory > 0);
+        }
     }
-    if (isVisible(backendsListView)) {
-        backendLoopUpdate();
+
+    /** Applies a ListConnectedUsers payload. Rebuilds fully if the user set changes. */
+    updateUsers(data) {
+        let users = data.users;
+        let userIds = users.map(user => user.id).join(',');
+        if (this.userIds != userIds) {
+            this.buildUsers(users);
+            this.userIds = userIds;
+        }
+        for (let user of users) {
+            let row = this.userRows[user.id];
+            row.lastActive.innerText = user.last_active;
+            row.sessions.innerText = user.active_sessions.map(sess => `${sess.count}x from ${sess.address}`).join(', ');
+            row.gens.innerHTML = currentGenString(user.waiting_gens, user.loading_models, user.live_gens, user.waiting_backends);
+            let busy = user.waiting_gens != 0 || user.loading_models != 0 || user.waiting_backends != 0 || user.live_gens != 0;
+            row.button.style.display = busy ? '' : 'none';
+        }
+    }
+
+    /** Rebuilds the resource usage meters fully. */
+    buildResources(gpus) {
+        this.gpuRows = {};
+        let list = createDiv(null, 'server-resource-list');
+        this.cpuMeter = this.makeMeter('CPU');
+        this.ramMeter = this.makeMeter('RAM');
+        list.appendChild(this.cpuMeter.root);
+        list.appendChild(this.ramMeter.root);
+        for (let gpu of gpus) {
+            let block = createDiv(null, 'server-resource-gpu');
+            let head = createDiv(null, 'server-resource-gpu-head');
+            let name = document.createElement('span');
+            name.className = 'server-resource-gpu-name';
+            let temp = document.createElement('span');
+            temp.className = 'server-resource-gpu-temp';
+            head.appendChild(name);
+            head.appendChild(temp);
+            let core = this.makeMeter('Core');
+            let vram = this.makeMeter('VRAM');
+            block.appendChild(head);
+            block.appendChild(core.root);
+            block.appendChild(vram.root);
+            list.appendChild(block);
+            this.gpuRows[gpu.id] = { name, temp, core, vram };
+        }
+        this.resourceArea.innerHTML = '';
+        this.resourceArea.appendChild(list);
+    }
+
+    /** Rebuilds the connected-users table fully. */
+    buildUsers(users) {
+        this.userRows = {};
+        let table = document.createElement('table');
+        table.className = 'simple-table';
+        let header = document.createElement('tr');
+        for (let title of ['Name', 'Last Active', 'Active Sessions', 'Current Gens']) {
+            let th = document.createElement('th');
+            th.innerText = title;
+            header.appendChild(th);
+        }
+        table.appendChild(header);
+        for (let user of users) {
+            let tr = document.createElement('tr');
+            let name = document.createElement('td');
+            name.innerText = user.id;
+            let lastActive = document.createElement('td');
+            let sessions = document.createElement('td');
+            let gensCell = document.createElement('td');
+            let gens = document.createElement('span');
+            let button = document.createElement('button');
+            button.className = 'basic-button';
+            button.innerText = 'Interrupt';
+            button.addEventListener('click', () => adminInterruptUser(user.id));
+            gensCell.appendChild(gens);
+            gensCell.appendChild(button);
+            tr.appendChild(name);
+            tr.appendChild(lastActive);
+            tr.appendChild(sessions);
+            tr.appendChild(gensCell);
+            table.appendChild(tr);
+            this.userRows[user.id] = { lastActive, sessions, gens, button };
+        }
+        this.usersArea.innerHTML = '';
+        this.usersArea.appendChild(table);
+    }
+
+    /** Creates a labeled meter row with a fill bar. */
+    makeMeter(labelText) {
+        let root = createDiv(null, 'server-resource-meter', `<div class="server-resource-meter-head"><span class="server-resource-meter-label">${escapeHtml(labelText)}</span><span class="server-resource-meter-value"></span></div><div class="server-resource-meter-bar"><div class="server-resource-meter-fill"></div></div>`);
+        return { root, value: root.querySelector('.server-resource-meter-value'), fill: root.querySelector('.server-resource-meter-fill') };
+    }
+
+    /** Updates a meter's fill width and value text. */
+    setMeter(meter, percent, text, show) {
+        meter.fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+        meter.value.innerHTML = text;
+        meter.root.style.display = show ? '' : 'none';
+    }
+
+    refreshLoop() {
+        if (isVisible(getRequiredElementById('server_tab'))) {
+            fixTabHeights();
+        }
+        if (isVisible(getRequiredElementById('Server-Info'))) {
+            if (!hasEverCheckedForUpdates) {
+                if (window.checkForUpdatesAutomatically) {
+                    check_for_updates();
+                }
+                else {
+                    hasEverCheckedForUpdates = true;
+                    getRequiredElementById('updates_available_notice_area').innerText = 'Automatic update checks disabled in Server Configuration';
+                }
+            }
+            serverStatusManager.refresh();
+        }
+        if (isVisible(backendsListView)) {
+            backendLoopUpdate();
+        }
     }
 }
+
+serverStatusManager = new ServerStatusManager();
