@@ -470,6 +470,19 @@
 .m-seg-group {
     display: flex;
 }
+/* Seed row: 1/2/4/paste/CLR share the leftover width equally so the cluster's right edge
+   matches Prefix / Steps / CFG, instead of CLR growing from its three-letter label. */
+.m-batch-group {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.m-batch-group .m-seg-button {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    padding-left: 0;
+    padding-right: 0;
+}
 .m-seg-button {
     background: var(--background-panel);
     color: var(--text);

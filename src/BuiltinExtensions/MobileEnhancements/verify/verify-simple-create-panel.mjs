@@ -272,15 +272,26 @@ const layout = await page.evaluate(() => {
     let tune = document.querySelector('.m-tune-row');
     let labels = [...document.querySelector('.m-quick-item.m-seg-group').querySelectorAll('.m-seg-button')].map(b => b.textContent);
     let createIcon = document.querySelector('.m-nav-item[data-mdest="create"] .m-nav-icon').textContent;
+    let prefixBox = prefix ? prefix.getBoundingClientRect() : null;
+    let batchBtns = [...document.querySelectorAll('.m-batch-group .m-seg-button')].map(b => b.getBoundingClientRect());
+    let widths = batchBtns.map(b => Math.round(b.width * 10) / 10);
+    let widthSpan = widths.length ? Math.max(...widths) - Math.min(...widths) : 99;
+    let last = batchBtns.length ? batchBtns[batchBtns.length - 1] : null;
     return {
         prefixBeforeTune: !!(prefix && tune && (prefix.compareDocumentPosition(tune) & Node.DOCUMENT_POSITION_FOLLOWING)),
         batch: labels.join(','),
-        createIcon: createIcon
+        createIcon: createIcon,
+        batchEqual: widthSpan <= 1,
+        batchWidths: widths,
+        batchRightAlign: !!(prefixBox && last && Math.abs(last.right - prefixBox.right) <= 1)
     };
 });
 check('Prefix field sits above the Steps/CFG row', layout.prefixBeforeTune);
 check('batch row is 1, 2, 4, clipboard, CLR',
     layout.batch == '1,2,4,📋,CLR', layout.batch);
+check('batch 1/2/4/paste/CLR buttons are equal width',
+    layout.batchEqual, JSON.stringify(layout.batchWidths));
+check('batch group right edge matches Prefix', layout.batchRightAlign);
 check('Create nav icon is the geometric triangle, not a pencil emoji',
     layout.createIcon == '\u25B3', JSON.stringify(layout.createIcon));
 

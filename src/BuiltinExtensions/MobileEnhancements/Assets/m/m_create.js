@@ -1062,7 +1062,7 @@ class MCreate {
         });
         seedWrap.appendChild(this.seedInput);
         row.appendChild(seedWrap);
-        this.imagesGroup = mUI.el('div', 'm-quick-item m-seg-group');
+        this.imagesGroup = mUI.el('div', 'm-quick-item m-seg-group m-batch-group');
         for (let n of ['1', '2', '4']) {
             let btn = mUI.el('button', 'm-seg-button', n);
             btn.dataset.count = n;
