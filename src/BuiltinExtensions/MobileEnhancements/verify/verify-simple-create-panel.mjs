@@ -75,7 +75,8 @@ await page.addInitScript(() => {
     window.genericRequest = () => {};
     window.makeWSRequest = () => null;
     window.getSession = () => {};
-    window.getImageOutPrefix = () => '/View';
+    window.getImageOutPrefix = () => 'View/local';
+    window.isValidMediaPath = (path) => typeof path == 'string' && (path.startsWith('inputs/') || path.startsWith('raw/') || path.startsWith('Starred/'));
     window.getTextSelRange = () => [0, 0];
     window.session_id = 'test';
     window.permissions = { hasPermission: () => true };
@@ -174,8 +175,7 @@ await page.click('.m-preview-toggle');
 await page.evaluate(pixel => {
     let models = ['aaa_first.safetensors', 'bbb_middle.safetensors', 'zzz_starred.safetensors', 'zzz_unstarred.safetensors']
         .map(name => ({ name, title: '', trigger_phrase: '', preview_image: pixel }));
-    mCreate.loraList = models;
-    mCreate.loraMap = new Map(models.map(m => [m.name, m]));
+    mCreate.indexLoras(models);
     mCreate.modelList = models;
     mState.starredModels = { 'LoRA': ['zzz_starred.safetensors'], 'Stable-Diffusion': ['zzz_starred.safetensors'] };
     mCreate.openLoraSheet();
@@ -212,6 +212,138 @@ await page.evaluate(() => { mState.starredModels = {}; });
 const unsorted = await page.evaluate(() => mState.starredFirst(mCreate.loraList, 'LoRA').map(m => m.name).join(','));
 check('no stars set: the list is returned untouched',
     unsorted == 'aaa_first.safetensors,bbb_middle.safetensors,zzz_starred.safetensors,zzz_unstarred.safetensors', unsorted);
+
+// Star stored without the weight-file extension must still lift the .safetensors row. Genpage's
+// starred_models and ListModels disagree on that suffix; exact-match dropped every favourite.
+await page.evaluate(() => {
+    mState.starredModels = { 'LoRA': ['zzz_starred'] };
+});
+const extless = await page.evaluate(() => mState.starredFirst(mCreate.loraList, 'LoRA').map(m => m.name));
+check('star without .safetensors still lifts the ListModels row',
+    extless[0] == 'zzz_starred.safetensors', JSON.stringify(extless));
+
+// LoRA heading is the metadata title whenever it is non-empty, including when it equals the file stem.
+await page.evaluate(pixel => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.starredModels = {};
+    mCreate.indexLoras([
+        { name: 'ill/epoch_1.safetensors', title: 'Azenda', trigger_phrase: '', preview_image: pixel },
+        { name: 'ill/plain.safetensors', title: '', trigger_phrase: '', preview_image: pixel },
+        { name: 'ill/Azenda.safetensors', title: 'Azenda', trigger_phrase: '', preview_image: pixel }
+    ]);
+    mCreate.openLoraSheet();
+}, PIXEL);
+const titled = await page.evaluate(() => [...document.querySelectorAll('.m-lora-results .m-model-result')].map(row => ({
+    heading: row.querySelector('.m-model-name').textContent,
+    sub: (row.querySelector('.m-model-sub') || {}).textContent || ''
+})));
+check('LoRA picker: a distinct title is the heading', titled[0].heading == 'Azenda' && titled[0].sub == 'epoch_1', JSON.stringify(titled[0]));
+check('LoRA picker: missing title falls back to the file stem', titled[1].heading == 'plain', JSON.stringify(titled[1]));
+check('LoRA picker: title equal to the file stem is still the heading', titled[2].heading == 'Azenda', JSON.stringify(titled[2]));
+
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+});
+
+// Folder-prefix architecture filter: a qwen LoRA must not survive an ill pick just because both report SDXL.
+const arch = await page.evaluate(() => {
+    mState.presets = [
+        { title: 'ill/pose', param_map: { model: 'ill/ckpt' } },
+        { title: 'qwen/edit', param_map: { model: 'qwen/ckpt' } }
+    ];
+    mState.archFilter = 'ill';
+    let list = [
+        { name: 'ill/keep.safetensors' },
+        { name: 'qwen/hide.safetensors' },
+        { name: 'misc/unknown.safetensors' }
+    ];
+    return mState.filterByArch(list, 'LoRA').map(m => m.name).join(',');
+});
+check('arch filter: other known group folders are hidden',
+    arch == 'ill/keep.safetensors,misc/unknown.safetensors', arch);
+
+// Prefix sits above Steps/CFG; clipboard and CLR follow the 1/2/4 batch buttons.
+const layout = await page.evaluate(() => {
+    let prefix = document.querySelector('.m-prefix-input');
+    let tune = document.querySelector('.m-tune-row');
+    let labels = [...document.querySelector('.m-quick-item.m-seg-group').querySelectorAll('.m-seg-button')].map(b => b.textContent);
+    let createIcon = document.querySelector('.m-nav-item[data-mdest="create"] .m-nav-icon').textContent;
+    return {
+        prefixBeforeTune: !!(prefix && tune && (prefix.compareDocumentPosition(tune) & Node.DOCUMENT_POSITION_FOLLOWING)),
+        batch: labels.join(','),
+        createIcon: createIcon
+    };
+});
+check('Prefix field sits above the Steps/CFG row', layout.prefixBeforeTune);
+check('batch row is 1, 2, 4, clipboard, CLR',
+    layout.batch == '1,2,4,📋,CLR', layout.batch);
+check('Create nav icon is the geometric triangle, not a pencil emoji',
+    layout.createIcon == '\u25B3', JSON.stringify(layout.createIcon));
+
+// Generated-image attach must send a path, never a data URI or a View/ URL.
+const paths = await page.evaluate(() => {
+    let fromView = mImages.promptPathEntry('View/local/raw/2026-08-17/foo.png');
+    let fromRaw = mImages.promptPathEntry('raw/2026-08-17/foo.png');
+    let fromData = mImages.promptPathEntry('data:image/png;base64,aaaa');
+    return {
+        view: fromView && fromView.kind == 'path' && fromView.value == 'raw/2026-08-17/foo.png',
+        raw: fromRaw && fromRaw.kind == 'path' && fromRaw.value == 'raw/2026-08-17/foo.png',
+        data: fromData == null
+    };
+});
+check('Prompt Img strips a View URL down to the output-relative path', paths.view);
+check('Prompt Img accepts an already-relative raw/ path', paths.raw);
+check('Prompt Img refuses a data URI rather than stuffing it as a path', paths.data);
+
+// Models tab uses the same preferTitle heading rule; checkpoints stay filename-first.
+const headings = await page.evaluate(() => {
+    let lora = mUI.modelLines({ name: 'ill/epoch_1.safetensors', title: 'Azenda' }, true);
+    let untitled = mUI.modelLines({ name: 'ill/epoch_1.safetensors', title: '' }, true);
+    let ckpt = mUI.modelLines({ name: 'ill/epoch_1.safetensors', title: 'Azenda' }, false);
+    return { lora: lora.primary, untitled: untitled.primary, ckpt: ckpt.primary };
+});
+check('Models-tab LoRA heading is the title, not epoch_1', headings.lora == 'Azenda', JSON.stringify(headings));
+check('untitled LoRA falls back to the file stem', headings.untitled == 'epoch_1', JSON.stringify(headings));
+check('checkpoint heading stays the file stem even when titled', headings.ckpt == 'epoch_1', JSON.stringify(headings));
+
+await page.evaluate(() => {
+    let panel = document.querySelector('.m-panel[data-mtab="models"]');
+    panel.classList.add('m-tab-active');
+    mModels.build(panel);
+});
+const toggle = await page.evaluate(() => {
+    let group = document.querySelector('.m-models-toggle');
+    let panel = document.querySelector('.m-panel[data-mtab="models"]');
+    let btns = [...group.querySelectorAll('.m-seg-button')];
+    let gw = group.getBoundingClientRect().width;
+    let content = panel.clientWidth - parseFloat(getComputedStyle(panel).paddingLeft) - parseFloat(getComputedStyle(panel).paddingRight);
+    return {
+        labels: btns.map(b => b.textContent).join('|'),
+        full: Math.abs(gw - content) < 3,
+        even: btns.length == 2 && Math.abs(btns[0].getBoundingClientRect().width - btns[1].getBoundingClientRect().width) < 3
+    };
+});
+check('Models toggle is Checkpoints | LoRAs', toggle.labels == 'Checkpoints|LoRAs', toggle.labels);
+check('Models toggle spans the panel content width', toggle.full, JSON.stringify(toggle));
+check('Models toggle buttons are equal halves', toggle.even, JSON.stringify(toggle));
+
+const bars = await page.evaluate(() => {
+    let panel = getComputedStyle(document.querySelector('.m-panel'));
+    let sheetRule = [...document.styleSheets].some(s => {
+        try {
+            return [...s.cssRules].some(r => r.selectorText && r.selectorText.includes('.m-panel') && `${r.style.scrollbarWidth}` == 'none');
+        }
+        catch (e) {
+            return false;
+        }
+    });
+    return { width: panel.scrollbarWidth, sheetRule: sheetRule };
+});
+check('Create/Models panel scrollbar is hidden', bars.width == 'none' || bars.sheetRule, JSON.stringify(bars));
 
 await browser.close();
 

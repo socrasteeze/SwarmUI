@@ -25,25 +25,41 @@ class MUI {
         return elem;
     }
 
-    /** Primary display name for a model: file name, no folders, no extension. Deliberately NOT the metadata
-     * title - titles routinely repeat across every file in a series (a folder of "Anima" checkpoints all
-     * report the title "Anima"), so a title-first list is a list of identical rows. The file name is the
-     * thing that actually differs, and it is what the model is called everywhere else. */
+    /** File-name stem of a model: folders and extension stripped. Used as the checkpoint heading, and as
+     * the LoRA subtitle when a metadata title is taking the heading. */
     modelName(name) {
         let short = `${name || ''}`.split('/').pop();
         return short.replace(/\.(safetensors|ckpt|sft|gguf|engine|pt|bin)$/i, '');
     }
 
-    /** Secondary line for a model: the metadata title when it says something the file name doesn't, else
-     * the containing folder. Empty when neither adds anything. */
-    modelSubtitle(model) {
-        let primary = this.modelName(model.name);
+    /** Heading + dim second line for a model card.
+     *
+     * Checkpoints stay file-name first: titles repeat across a series (a folder of "Anima" checkpoints all
+     * report the title "Anima"), so a title-first checkpoint list is a column of identical rows. LoRAs are
+     * the opposite - preferTitle - because their file names are often hashes or Civitai version stems, and
+     * the metadata title is the name the user actually knows. A non-empty title is always the LoRA heading,
+     * even when it equals the file stem: hiding it in that case is how "epoch_1" showed up as untitled.
+     * The file stem is only the heading when title is absent. A distinct stem stays as the dim subtitle so
+     * two LoRAs that share a title still tell apart. */
+    modelLines(model, preferTitle) {
+        let file = this.modelName(model.name);
         let title = `${model.title || ''}`.trim();
-        if (title && title.toLowerCase() != primary.toLowerCase()) {
-            return title;
-        }
         let name = `${model.name || ''}`;
-        return name.includes('/') ? name.substring(0, name.lastIndexOf('/')) : '';
+        let folder = name.includes('/') ? name.substring(0, name.lastIndexOf('/')) : '';
+        if (preferTitle && title) {
+            let subtitle = file && file.toLowerCase() != title.toLowerCase() ? file : folder;
+            return { 'primary': title, 'subtitle': subtitle };
+        }
+        if (title && title.toLowerCase() != file.toLowerCase()) {
+            return { 'primary': file, 'subtitle': title };
+        }
+        return { 'primary': file, 'subtitle': folder };
+    }
+
+    /** Secondary line for a model. Kept as a thin wrapper so older call sites that only wanted the dim
+     * line do not have to unpack modelLines. */
+    modelSubtitle(model) {
+        return this.modelLines(model, false).subtitle;
     }
 
     /** The star marking a favourite model, or null when it isn't one. Rows are sorted starred-first
@@ -68,13 +84,14 @@ class MUI {
     /** The text block of a model row: name, subtitle, and the trigger phrase when the model declares one.
      * Trigger phrases are the reason a LoRA row needs more than a name - onTrigger, when given, makes the
      * phrase a tappable chip. The chip shows the literal phrase (so you know what you are getting) but the
-     * callback is what decides what gets inserted; mCreate inserts the `<trigger>` tag rather than the text. */
-    modelText(model, onTrigger) {
+     * callback is what decides what gets inserted; mCreate inserts the `<trigger>` tag rather than the text.
+     * preferTitle is the LoRA heading rule from modelLines - checkpoints omit it. */
+    modelText(model, onTrigger, preferTitle) {
         let text = this.el('div', 'm-model-text');
-        text.appendChild(this.el('div', 'm-model-name', this.modelName(model.name)));
-        let subtitle = this.modelSubtitle(model);
-        if (subtitle) {
-            text.appendChild(this.el('div', 'm-model-sub', subtitle));
+        let lines = this.modelLines(model, preferTitle);
+        text.appendChild(this.el('div', 'm-model-name', lines.primary));
+        if (lines.subtitle) {
+            text.appendChild(this.el('div', 'm-model-sub', lines.subtitle));
         }
         let trigger = `${model.trigger_phrase || ''}`.trim();
         if (trigger) {

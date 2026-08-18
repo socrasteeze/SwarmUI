@@ -273,7 +273,28 @@ class MState {
             delete input['sidelength'];
         }
         if (this.promptImages.length > 0) {
-            input['promptimages'] = this.promptImages.map(img => img.value);
+            // Path entries must be output-root-relative (raw/..., Starred/..., inputs/...). A leftover
+            // View/ URL or data URI here is what ValidateParam interpolates into the "string too long"
+            // error, so strip known prefixes on the way out rather than trusting every stored value.
+            let sent = [];
+            for (let i = 0; i < this.promptImages.length; i++) {
+                let img = this.promptImages[i];
+                if (img.kind == 'path') {
+                    let path = (typeof mImages != 'undefined' && mImages.urlToPath) ? (mImages.urlToPath(img.value) || img.value) : img.value;
+                    if (path && !`${path}`.startsWith('data:')) {
+                        sent.push(path);
+                    }
+                }
+                else {
+                    sent.push(img.value);
+                }
+            }
+            if (sent.length > 0) {
+                input['promptimages'] = sent;
+            }
+            else {
+                delete input['promptimages'];
+            }
         }
         else {
             delete input['promptimages'];
@@ -395,6 +416,19 @@ class MState {
         return `${name || ''}`.replace(/\.(safetensors|ckpt|sft|gguf|engine|pt|bin)$/i, '');
     }
 
+    /** True when two model-name strings name the same file, ignoring a trailing weight-file extension.
+     * Presets, starred_models, and ListModels do not agree on whether the extension is present. */
+    static sameModel(a, b) {
+        return MState.stripModelExt(a) == MState.stripModelExt(b);
+    }
+
+    /** Leading folder segment of a model path ('ill/foo.safetensors' -> 'ill'). Empty for a root file. */
+    static modelFolder(name) {
+        let n = MState.stripModelExt(name);
+        let slash = n.indexOf('/');
+        return slash == -1 ? '' : n.substring(0, slash);
+    }
+
     /** Extension-stripped model name -> compat class, for one subtype. Built once and cached.
      * This has to be a map, not a scan: filterByArch calls compatClassOf once per model, so a linear scan
      * made it O(models^2) - 18,561 LoRAs measured at 3,972 ms per call on desktop, and it runs on every
@@ -442,25 +476,66 @@ class MState {
         return classes;
     }
 
-    /** Filters a ListModels result down to the selected architecture. Models whose compat class we cannot
-     * determine are kept: unknown is not the same as incompatible, and silently hiding a model the user can
-     * see in the full UI is worse than showing one extra. */
+    /** Filters a ListModels result down to the selected architecture.
+     *
+     * Folder prefix is the first gate, because that is how the architecture picker itself is defined (the
+     * leading segment of preset titles: 'ill/PLATT Pose' -> 'ill') and how this library is laid out on disk.
+     * Compat class alone cannot tell Illustrious from Pony from Anima - they all report SDXL - so a qwen or
+     * flux LoRA sitting in its own folder used to survive an 'ill' filter whenever it had no class, or the
+     * wrong shared one. A model whose first folder is a *different* known group is out. A model in the
+     * selected group is in, even if its class is missing.
+     *
+     * Models outside any known group still use compat class. Unknown class is kept: unknown is not the same
+     * as incompatible, and silently hiding a model the user can see in the full UI is worse than showing one
+     * extra. An empty class set still means "don't class-filter" - a group whose presets set no checkpoint
+     * would otherwise hide everything that isn't in that folder. */
     filterByArch(models, subtype) {
-        let classes = this.groupCompatClasses(this.archFilter);
-        if (classes.size == 0) {
+        if (!this.archFilter) {
             return models;
         }
+        let groups = new Set(this.presetGroups());
+        let classes = this.groupCompatClasses(this.archFilter);
         return models.filter(model => {
+            let folder = MState.modelFolder(model.name);
+            if (folder == this.archFilter) {
+                return true;
+            }
+            if (folder && groups.has(folder)) {
+                return false;
+            }
+            if (classes.size == 0) {
+                return true;
+            }
             let compat = this.compatClassOf(subtype, model.name);
             return !compat || classes.has(compat);
         });
     }
 
-    /** Whether a model is starred, by the exact name ListModels reports - which is what SetStarredModels
-     * stores, so no normalization is wanted here. */
-    isStarred(subtype, name) {
+    /** Starred names for one subtype, with and without a trailing weight-file extension. SetStarredModels
+     * stores whatever name the genpage's star button had - ListModels' full name, usually with
+     * .safetensors - but presets and some older rows omit it. Matching only the exact string dropped every
+     * favourite whose stored form disagreed, which on a 120-row cap looks like "my stars are missing". */
+    starredNameSet(subtype) {
+        let set = new Set();
         let starred = this.starredModels[subtype];
-        return !!starred && starred.includes(name);
+        if (!starred) {
+            return set;
+        }
+        for (let i = 0; i < starred.length; i++) {
+            let name = starred[i];
+            set.add(name);
+            set.add(MState.stripModelExt(name));
+        }
+        return set;
+    }
+
+    /** Whether a model is starred, extension-insensitive. */
+    isStarred(subtype, name) {
+        if (!name) {
+            return false;
+        }
+        let set = this.starredNameSet(subtype);
+        return set.has(name) || set.has(MState.stripModelExt(name));
     }
 
     /** Lifts starred models to the front of a picker list, leaving everything else in the order it arrived.
@@ -473,12 +548,12 @@ class MState {
      * and this stays a lift rather than a reshuffle. Returns a copy: the caller's list is the cached
      * ListModels result, and reordering that in place would make the cache order depend on view history. */
     starredFirst(list, subtype) {
-        let starred = this.starredModels[subtype];
-        if (!starred || starred.length == 0) {
+        let set = this.starredNameSet(subtype);
+        if (set.size == 0) {
             return list;
         }
-        let set = new Set(starred);
-        return list.slice().sort((a, b) => (set.has(b.name) ? 1 : 0) - (set.has(a.name) ? 1 : 0));
+        let hit = (name) => set.has(name) || set.has(MState.stripModelExt(name));
+        return list.slice().sort((a, b) => (hit(b.name) ? 1 : 0) - (hit(a.name) ? 1 : 0));
     }
 
     /** Active LoRAs as [{name, weight}] from the index-aligned params arrays. */

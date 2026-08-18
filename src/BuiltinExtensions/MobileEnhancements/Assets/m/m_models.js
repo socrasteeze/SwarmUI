@@ -84,8 +84,8 @@ class MModels {
         }
     }
 
-    /** One model card: preview, file name, metadata title, trigger phrase; tap = select (checkpoint) or
-     * add (LoRA). Named by file rather than metadata title - see mUI.modelName for why. */
+    /** One model card: preview, heading, subtitle, trigger phrase; tap = select (checkpoint) or add (LoRA).
+     * Checkpoints stay file-name first; LoRAs prefer the metadata title - see mUI.modelLines. */
     buildCard(model) {
         let card = mUI.el('div', 'm-model-card');
         let thumb = mUI.modelThumb(model, null);
@@ -99,7 +99,7 @@ class MModels {
             star.classList.add('m-model-star-badge');
             card.appendChild(star);
         }
-        card.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag()));
+        card.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag(), this.subtype == 'LoRA'));
         if (this.subtype == 'Stable-Diffusion' && mState.params['model'] == model.name) {
             card.classList.add('m-selected');
         }
@@ -115,7 +115,7 @@ class MModels {
             }
             else {
                 let cur = mState.getLoras();
-                if (!cur.some(l => l.name == model.name)) {
+                if (!cur.some(l => MState.sameModel(l.name, model.name))) {
                     cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
                     mState.setLoras(cur);
                 }

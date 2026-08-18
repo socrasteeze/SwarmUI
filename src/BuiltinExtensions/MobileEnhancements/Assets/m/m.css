@@ -229,6 +229,31 @@
     display: block;
 }
 
+/* Scrollbars stay functional (touch pan, wheel) but never paint - including the empty-gutter some
+   engines reserve on overflow:auto even when nothing overflows. Same pattern as .m-ac-strip. */
+.m-panel,
+.m-header-error-detail,
+.m-preview-grid,
+.m-model-results,
+.m-sheet,
+.m-preset-strip,
+.m-image-strip,
+.m-folder-chips,
+.m-ac-strip {
+    scrollbar-width: none;
+}
+.m-panel::-webkit-scrollbar,
+.m-header-error-detail::-webkit-scrollbar,
+.m-preview-grid::-webkit-scrollbar,
+.m-model-results::-webkit-scrollbar,
+.m-sheet::-webkit-scrollbar,
+.m-preset-strip::-webkit-scrollbar,
+.m-image-strip::-webkit-scrollbar,
+.m-folder-chips::-webkit-scrollbar,
+.m-ac-strip::-webkit-scrollbar {
+    display: none;
+}
+
 /* --- Bottom nav --- */
 .m-bottom-nav {
     display: flex;
@@ -260,6 +285,9 @@
 .m-nav-icon {
     font-size: 19px;
     line-height: 1;
+    /* Geometric-shapes / miscellaneous-symbols code points, not color emoji. Without this, a dingbat
+       such as U+270E (the old Create pencil) can render as an emoji and break the set. */
+    font-variant-emoji: text;
 }
 .m-body.m-kb-open .m-bottom-nav {
     display: none;
@@ -726,7 +754,6 @@
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     padding: 0.25rem 0;
-    scrollbar-width: none;
     /* Matches a populated row's height (36px chip + this rule's own vertical padding). */
     min-height: 44px;
     box-sizing: border-box;
@@ -734,9 +761,6 @@
 /* The strip is deliberately NOT pinned to the top of the keyboard. iOS draws its own form-accessory bar
    (up/down arrows and Done) in that band, over web content, so a pinned strip renders behind it. Enter/Tab
    accept the highlighted suggestion, so the strip needs to be readable, not thumb-reachable. */
-.m-ac-strip::-webkit-scrollbar {
-    display: none;
-}
 .m-ac-chip {
     display: flex;
     align-items: center;
@@ -1439,7 +1463,14 @@
 
 /* --- Models tab --- */
 .m-models-toggle {
+    display: flex;
+    width: 100%;
+    box-sizing: border-box;
     margin-bottom: 0.5rem;
+}
+.m-models-toggle .m-seg-button {
+    flex: 1 1 50%;
+    min-width: 0;
 }
 .m-model-grid {
     display: grid;
