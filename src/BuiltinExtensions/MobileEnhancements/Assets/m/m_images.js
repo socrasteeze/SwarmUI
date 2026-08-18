@@ -78,13 +78,36 @@ class MImages {
         }
     }
 
-    /** Best-effort conversion of a served image URL back to an output-root-relative path (for star/delete). */
+    /** Best-effort conversion of a served image URL back to an output-root-relative path (for star/delete
+     * and for attaching the file as a prompt image). Data URIs have no path - those are unsaved bytes, not
+     * files. Absolute View URLs are stripped down to the same relative form ListImages reports. */
     urlToPath(url) {
+        if (!url || `${url}`.startsWith('data:')) {
+            return null;
+        }
+        let text = `${url}`;
         let prefix = `${getImageOutPrefix()}/`;
-        if (url.startsWith(prefix)) {
-            return url.substring(prefix.length);
+        let idx = text.indexOf(prefix);
+        if (idx >= 0) {
+            return text.substring(idx + prefix.length);
+        }
+        if (typeof isValidMediaPath == 'function' && isValidMediaPath(text)) {
+            return text;
         }
         return null;
+    }
+
+    /** Prompt-image entry for a generated or history file. Always kind:'path' with the output-relative
+     * path (raw/..., Starred/..., inputs/...). The server only expands those three prefixes into file
+     * bytes; anything else is treated as base64, and ValidateParam interpolates the entire value into the
+     * exception - a View URL or a data URI stuffed here is the "string too long" failure. Returns null
+     * when the image was never saved (data URI preview, SaveFiles off). */
+    promptPathEntry(urlOrPath) {
+        let path = this.urlToPath(urlOrPath);
+        if (!path || path.startsWith('data:')) {
+            return null;
+        }
+        return { 'kind': 'path', 'value': path };
     }
 
     /** Fetches the current folder's history. */
@@ -187,11 +210,15 @@ class MImages {
             }
         });
         addAction('Prompt Img', () => {
-            if (entry.fullsrc) {
-                mState.promptImages.push({ 'kind': 'path', 'value': entry.fullsrc });
+            let attached = this.promptPathEntry(entry.fullsrc || entry.url);
+            if (attached) {
+                mState.promptImages.push(attached);
                 mState.changed();
                 close();
                 location.hash = 'create';
+            }
+            else {
+                mUI.warn('This image is not a saved file, so it cannot be attached as a path. Paste it into the prompt box instead.');
             }
         });
         addAction(entry.fullsrc && entry.fullsrc.startsWith('Starred/') ? 'Unstar' : 'Star', () => {

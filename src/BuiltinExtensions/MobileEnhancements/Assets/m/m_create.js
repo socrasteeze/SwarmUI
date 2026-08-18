@@ -7,7 +7,8 @@ class MCreate {
     constructor() {
         /** Cached LoRA model list from ListModels (fetched lazily on first sheet open). */
         this.loraList = null;
-        /** LoRA name -> model object, built with loraList to keep active-row enrichment O(1). */
+        /** LoRA name -> model object, indexed by both the ListModels name and the extension-stripped form
+         * (presets and starred_models omit .safetensors). Built with loraList so active-row enrichment is O(1). */
         this.loraMap = null;
         /** Cached checkpoint list from ListModels (fetched lazily on first model sheet open). */
         this.modelList = null;
@@ -147,6 +148,13 @@ class MCreate {
             tile.querySelector('img').src = url;
             tile.dataset.metadata = data.metadata || '';
             tile.dataset.url = url;
+            // Keep the output-relative path on the tile so Prompt Img never has to reverse a data URI or a
+            // View URL. urlToPath returns null for unsaved (data-URI) images, and that is the correct answer
+            // - attaching those as kind:'path' is what sent a multi-megabyte string as a "path".
+            let path = mImages.urlToPath(url);
+            if (path) {
+                tile.dataset.fullsrc = path;
+            }
             tile.classList.add('m-tile-done');
             tile.querySelector('.m-tile-progress').style.width = '';
             this.updateResolvedPrompt(data.metadata);
@@ -186,7 +194,7 @@ class MCreate {
         for (let key in this.liveTiles) {
             let tile = this.liveTiles[key];
             if (tile.classList.contains('m-tile-done') && tile.dataset.url) {
-                snapshot.push({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata || '' });
+                snapshot.push({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata || '', 'fullsrc': tile.dataset.fullsrc || '' });
             }
         }
         if (snapshot.length > 0) {
@@ -222,6 +230,9 @@ class MCreate {
             tile.querySelector('img').src = entry.url;
             tile.dataset.url = entry.url;
             tile.dataset.metadata = entry.metadata;
+            if (entry.fullsrc) {
+                tile.dataset.fullsrc = entry.fullsrc;
+            }
             tile.classList.add('m-tile-done');
             this.liveTiles[`restored_${i}`] = tile;
             this.previewGrid.appendChild(tile);
@@ -240,7 +251,7 @@ class MCreate {
         tile.appendChild(mUI.el('div', 'm-tile-progress'));
         tile.addEventListener('click', () => {
             if (tile.dataset.url) {
-                mImages.openViewer({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata, 'fullsrc': mImages.urlToPath(tile.dataset.url) });
+                mImages.openViewer({ 'url': tile.dataset.url, 'metadata': tile.dataset.metadata, 'fullsrc': tile.dataset.fullsrc || mImages.urlToPath(tile.dataset.url) });
             }
         });
         return tile;
@@ -926,6 +937,107 @@ class MCreate {
         reader.readAsDataURL(file);
     }
 
+    /** Clipboard button: attach whatever is on the clipboard as prompt image(s). Image blobs go through
+     * addImageFile (the same path as paste-on-the-prompt-box). A Swarm output path or a data URI uses the
+     * existing attach helpers. Empty or non-image clipboard is a warning, not an error. */
+    pasteFromClipboard() {
+        let attached = (count) => {
+            if (count > 0) {
+                mUI.note(count == 1 ? 'Pasted image.' : `Pasted ${count} images.`);
+            }
+            else {
+                mUI.warn('Clipboard has no image.');
+            }
+        };
+        let fromText = (text) => {
+            let val = `${text || ''}`.trim();
+            if (!val) {
+                return false;
+            }
+            if (val.startsWith('data:image/')) {
+                mState.promptImages.push({ 'kind': 'data', 'value': val });
+                mState.changed();
+                return true;
+            }
+            let entry = typeof mImages != 'undefined' ? mImages.promptPathEntry(val) : null;
+            if (entry) {
+                mState.promptImages.push(entry);
+                mState.changed();
+                return true;
+            }
+            return false;
+        };
+        let warnBlocked = () => {
+            mUI.warn('Could not read the clipboard. Paste into the prompt box instead.');
+        };
+        if (navigator.clipboard && navigator.clipboard.read) {
+            navigator.clipboard.read().then(items => {
+                let files = [];
+                let texts = [];
+                let pending = items.length;
+                if (pending == 0) {
+                    attached(0);
+                    return;
+                }
+                let finish = () => {
+                    if (--pending > 0) {
+                        return;
+                    }
+                    for (let i = 0; i < files.length; i++) {
+                        this.addImageFile(files[i]);
+                    }
+                    let extra = 0;
+                    if (files.length == 0) {
+                        for (let i = 0; i < texts.length; i++) {
+                            if (fromText(texts[i])) {
+                                extra++;
+                            }
+                        }
+                    }
+                    attached(files.length + extra);
+                };
+                for (let i = 0; i < items.length; i++) {
+                    let item = items[i];
+                    let imageType = null;
+                    for (let t = 0; t < item.types.length; t++) {
+                        if (item.types[t].startsWith('image/')) {
+                            imageType = item.types[t];
+                            break;
+                        }
+                    }
+                    if (imageType) {
+                        item.getType(imageType).then(blob => {
+                            files.push(new File([blob], 'clipboard.png', { 'type': blob.type || imageType }));
+                            finish();
+                        }, finish);
+                    }
+                    else if (item.types.indexOf('text/plain') >= 0) {
+                        item.getType('text/plain').then(blob => blob.text()).then(text => {
+                            texts.push(text);
+                            finish();
+                        }, finish);
+                    }
+                    else {
+                        finish();
+                    }
+                }
+            }, () => {
+                if (navigator.clipboard.readText) {
+                    navigator.clipboard.readText().then(text => attached(fromText(text) ? 1 : 0), warnBlocked);
+                }
+                else {
+                    warnBlocked();
+                }
+            });
+            return;
+        }
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(text => attached(fromText(text) ? 1 : 0), warnBlocked);
+            return;
+        }
+        warnBlocked();
+    }
+
     /** Quick params row: seed lock + value, images count, aspect ratio, side length, resolution readout. */
     buildQuickParams() {
         let wrap = mUI.el('div', 'm-quick-wrap');
@@ -960,8 +1072,47 @@ class MCreate {
             });
             this.imagesGroup.appendChild(btn);
         }
+        let clipBtn = mUI.el('button', 'm-seg-button', '📋');
+        clipBtn.title = 'Paste clipboard as prompt image';
+        clipBtn.setAttribute('aria-label', 'Paste clipboard as prompt image');
+        clipBtn.addEventListener('click', () => this.pasteFromClipboard());
+        this.imagesGroup.appendChild(clipBtn);
+        let clearBtn = mUI.el('button', 'm-seg-button', 'CLR');
+        clearBtn.title = 'Clear prompt images and prefix';
+        clearBtn.setAttribute('aria-label', 'Clear prompt images and prefix');
+        clearBtn.addEventListener('click', () => {
+            mUI.confirm('Clear prompt images and the Prefix field? The text prompt is kept.', () => {
+                mState.promptImages = [];
+                delete mState.params['filenameprefix'];
+                mState.changed();
+            });
+        });
+        this.imagesGroup.appendChild(clearBtn);
         row.appendChild(this.imagesGroup);
         wrap.appendChild(row);
+        // Filename prefix sits directly above Steps/CFG: a label for the session's saved files, used as
+        // often as the steppers, so it should not live below aspect/size. Same control as before - only
+        // the DOM order changed. resetParams still preserves it; the CLR button above is what clears it.
+        this.prefixRow = mUI.el('div', 'm-quick-row');
+        this.prefixRow.appendChild(mUI.el('span', 'm-quick-label', 'Prefix'));
+        this.prefixInput = document.createElement('input');
+        this.prefixInput.type = 'text';
+        this.prefixInput.className = 'm-prefix-input';
+        this.prefixInput.placeholder = 'none';
+        this.prefixInput.addEventListener('input', () => {
+            let val = this.prefixInput.value.trim();
+            // Deleting rather than storing '' keeps m_client_state clean and avoids sending a no-op key.
+            if (val == '') {
+                delete mState.params['filenameprefix'];
+            }
+            else {
+                mState.params['filenameprefix'] = val;
+            }
+            // save(), not changed(): a full re-render per keystroke would fight the user's typing.
+            mState.save();
+        });
+        this.prefixRow.appendChild(this.prefixInput);
+        wrap.appendChild(this.prefixRow);
         let tuneRow = mUI.el('div', 'm-quick-row m-tune-row');
         tuneRow.appendChild(this.buildNumberStepper('steps', 'Steps', { 'default': 20, 'min': 0, 'max': 500, 'step': 1 }));
         tuneRow.appendChild(this.buildNumberStepper('cfgscale', 'CFG', { 'default': 7, 'min': 0, 'max': 100, 'step': 0.5 }));
@@ -989,28 +1140,6 @@ class MCreate {
         wrap.appendChild(resRow);
         this.resReadout = mUI.el('div', 'm-res-readout');
         wrap.appendChild(this.resReadout);
-        // Filename prefix: a label for the saved file's name, not a generation parameter. Server-side it is
-        // inserted at the start of the filename whatever outpath format is active, so it survives presets.
-        this.prefixRow = mUI.el('div', 'm-quick-row');
-        this.prefixRow.appendChild(mUI.el('span', 'm-quick-label', 'Prefix'));
-        this.prefixInput = document.createElement('input');
-        this.prefixInput.type = 'text';
-        this.prefixInput.className = 'm-prefix-input';
-        this.prefixInput.placeholder = 'none';
-        this.prefixInput.addEventListener('input', () => {
-            let val = this.prefixInput.value.trim();
-            // Deleting rather than storing '' keeps m_client_state clean and avoids sending a no-op key.
-            if (val == '') {
-                delete mState.params['filenameprefix'];
-            }
-            else {
-                mState.params['filenameprefix'] = val;
-            }
-            // save(), not changed(): a full re-render per keystroke would fight the user's typing.
-            mState.save();
-        });
-        this.prefixRow.appendChild(this.prefixInput);
-        wrap.appendChild(this.prefixRow);
         return wrap;
     }
 
@@ -1319,9 +1448,25 @@ class MCreate {
         mUI.note('Added <trigger> to the prompt.');
     }
 
+    /** Indexes a ListModels LoRA list by both the full name and the extension-stripped form. Presets and
+     * starred_models store `ill/foo`; ListModels reports `ill/foo.safetensors`. Looking up only the full
+     * name left every active row as a bare stem with no title or thumbnail. */
+    indexLoras(list) {
+        this.loraList = list || [];
+        this.loraMap = new Map();
+        for (let i = 0; i < this.loraList.length; i++) {
+            let model = this.loraList[i];
+            this.loraMap.set(model.name, model);
+            this.loraMap.set(MState.stripModelExt(model.name), model);
+        }
+    }
+
     /** The cached LoRA model object for a name, or a minimal stand-in before the list has loaded. */
     loraByName(name) {
-        return this.loraMap && this.loraMap.get(name) || { 'name': name };
+        if (!this.loraMap) {
+            return { 'name': name };
+        }
+        return this.loraMap.get(name) || this.loraMap.get(MState.stripModelExt(name)) || { 'name': name };
     }
 
     /** LoRA bottom sheet: active LoRAs with weight sliders, add-picker from ListModels. */
@@ -1346,7 +1491,7 @@ class MCreate {
                 if (thumb) {
                     top.appendChild(thumb);
                 }
-                top.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag()));
+                top.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag(), true));
                 let readout = mUI.el('span', 'm-lora-weight-readout', `${loras[i].weight}`);
                 top.appendChild(readout);
                 let remove = mUI.el('span', 'm-lora-remove', '×');
@@ -1397,8 +1542,12 @@ class MCreate {
             if (arch.row) {
                 results.appendChild(arch.row);
             }
-            let active = new Set(mState.getLoras().map(l => l.name));
-            let matches = mState.starredFirst(MCreate.filterModels(arch.list, search.value).filter(m => !active.has(m.name)), 'LoRA');
+            let active = new Set();
+            let curLoras = mState.getLoras();
+            for (let i = 0; i < curLoras.length; i++) {
+                active.add(MState.stripModelExt(curLoras[i].name));
+            }
+            let matches = mState.starredFirst(MCreate.filterModels(arch.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name))), 'LoRA');
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
@@ -1406,15 +1555,17 @@ class MCreate {
                 if (thumb) {
                     item.appendChild(thumb);
                 }
-                item.appendChild(mUI.modelText(model, null));
+                item.appendChild(mUI.modelText(model, null, true));
                 let star = mUI.starBadge('LoRA', model.name);
                 if (star) {
                     item.appendChild(star);
                 }
                 item.addEventListener('click', () => {
                     let cur = mState.getLoras();
-                    cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
-                    mState.setLoras(cur);
+                    if (!cur.some(l => MState.sameModel(l.name, model.name))) {
+                        cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
+                        mState.setLoras(cur);
+                    }
                     renderRows();
                     renderResults();
                 });
@@ -1429,8 +1580,7 @@ class MCreate {
         content.appendChild(addWrap);
         if (!this.loraList) {
             genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
-                this.loraList = data.files || [];
-                this.loraMap = new Map(this.loraList.map(model => [model.name, model]));
+                this.indexLoras(data.files || []);
                 // The active rows are re-rendered too: until this lands they show a bare name, with no
                 // thumbnail and no trigger phrase, because those live on the model object not in params.
                 renderRows();
