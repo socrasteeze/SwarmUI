@@ -2112,6 +2112,64 @@ body.small-window > .tab-content.tab-hundred {
     vertical-align: top;
     text-align: left;
 }
+.server-resource-list {
+    min-width: 18rem;
+    text-align: left;
+}
+.server-resource-meter {
+    margin-bottom: 0.55rem;
+}
+.server-resource-meter-head, .server-resource-gpu-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.2rem;
+}
+.server-resource-meter-value, .server-resource-gpu-temp {
+    color: var(--text-soft);
+    white-space: nowrap;
+}
+.server-resource-meter-bar {
+    height: 0.4rem;
+    background-color: var(--light-border);
+    overflow: hidden;
+}
+.server-resource-meter-fill {
+    height: 100%;
+    width: 0%;
+    background-color: var(--emphasis);
+}
+.server-resource-gpu {
+    margin-top: 0.75rem;
+}
+.server-resource-gpu-head {
+    margin-bottom: 0.4rem;
+}
+.server-resource-gpu-name {
+    font-weight: bold;
+}
+.server-status-section-title {
+    font-weight: bold;
+    margin-bottom: 0.4rem;
+}
+.server-status-section + .server-status-section {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--light-border);
+}
+.server-status-section .simple-table {
+    width: 100%;
+}
+.server-manage-section.border-secondary, .server-manage-section.border-success {
+    border-style: solid;
+    border-width: 1px;
+    padding: 0.4rem;
+}
+.server-manage-shutdown {
+    border: 1px solid var(--red);
+    padding: 0.5rem 0.6rem;
+}
 @media screen and (max-width:768px) {
     .input-sidebar {
         width: calc(16rem - 5px);
@@ -2244,46 +2302,95 @@ body.small-window > .tab-content.tab-hundred {
     height: 40rem;
     width: 50%;
 }
-.model_downloader_metadatazone {
-    width: 40rem;
-    max-width: calc(100vw - 42rem);
-    max-height: 20rem;
-    padding: 1rem;
+.model-downloader-field {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    margin: 0.45rem 0;
+}
+.model-downloader-field > b {
+    min-width: 6.5rem;
+    flex-shrink: 0;
+}
+.model-downloader-field .auto-text-wide, .model-downloader-field .auto-dropdown, .model-downloader-field .model-downloader-status {
+    flex: 1 1 12rem;
+    min-width: 0;
+    width: auto;
+}
+.model-downloader-status {
+    color: var(--text-soft);
+}
+.model-downloader-preview {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    margin: 0.6rem 0;
+    padding: 0.75rem;
     border: 1px solid var(--light-border);
     border-radius: 0.5rem;
+    background-color: var(--background-soft);
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.model_downloader_metadatazone {
+    flex: 1;
+    min-width: 0;
+    max-height: 22rem;
     overflow: auto;
-    display: inline-block;
-    vertical-align: top;
+}
+.model_downloader_metadatazone img {
+    max-width: 100%;
+    height: auto;
 }
 .model_downloader_imageside {
-    display: inline-block;
-    width: 20rem;
-    vertical-align: top;
+    width: 16rem;
+    flex-shrink: 0;
 }
 .model_downloader_imageside img {
     max-width: 100%;
-    max-height: 20rem;
+    max-height: 18rem;
     object-fit: contain;
 }
 .model_downloader_imageselector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+.model_downloader_imageindex {
+    min-width: 3.5rem;
     text-align: center;
+    font-size: 85%;
+    color: var(--text-soft);
+}
+.model_downloader_input_wrap {
+    display: contents;
 }
 .model-downloader-section-wrapper {
-    display: block;
-    width: fit-content;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 1rem;
+    width: 100%;
+    max-width: calc(100% - 20px);
     margin: auto;
 }
 .model-downloader-main-section {
-    display: inline-block;
-    width: 70rem;
+    width: 56rem;
     padding-right: 1rem;
     padding-left: 1rem;
-    max-width: calc(100vw - 44rem);
+    max-width: 100%;
+    box-sizing: border-box;
 }
 .model-downloader-right-sidebar {
-    display: inline-block;
-    vertical-align: top;
     max-width: 42rem;
+}
+.model-downloader-paid {
+    color: var(--red);
+    font-size: 120%;
 }
 .active-model-download-card {
     display: inline-block;
@@ -2291,12 +2398,21 @@ body.small-window > .tab-content.tab-hundred {
 }
 .active-model-download-card img {
     width: 10rem;
-    margin-left: 5rem;
     max-height: 10rem;
     object-fit: contain;
+    display: block;
+    margin: 0.5rem auto;
 }
 .active-model-download-card .status-text {
     font-size: 80%;
+}
+@media (max-width: 768px) {
+    .model-downloader-preview {
+        flex-direction: column;
+    }
+    .model_downloader_imageside {
+        width: 100%;
+    }
 }
 .ext-danger-license {
     background-color: rgba(255, 0, 0, 0.2);
