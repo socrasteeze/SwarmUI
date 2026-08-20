@@ -303,6 +303,7 @@ https://github.com/user-attachments/assets/b3605901-78ed-4f13-a065-adfbc0d63232
 - LTX-2.5 is an official upgraded to LTX-2.3, with some improvements.
 - It has (partial) compatibility with LTX-2.3, eg some loras will cross-apply.
 - Main downloads require accepting license here <https://huggingface.co/Lightricks/LTX-2.5> then downloading from here <https://huggingface.co/Lightricks/LTX-2.5/tree/main/diffusion_models>
+    - Save in `diffusion_models` folder
 - Parameters:
     - Mostly the same as regular LTX-2.3
 
@@ -581,7 +582,9 @@ Note that the Ref model crunches its inputs a bit (they pass through the text en
 
 ### MiniMax H3 Image Generation
 
-You can generate images with MiniMax H3 in Swarm by just setting Frames to 1. This similar to other video models, with a key exception: H3 will actually generate 5 frames, and then discard 4. While direct single-frame generation is possible in H3, quality suffers severely as it is not a trained case.
+You can generate images with MiniMax H3 in Swarm by just setting Frames to `2`. This similar to other video models, with a key exception: H3 will actually generate 5 frames, and then discard 4. While direct single-frame generation is possible in H3, quality suffers severely as it is not a trained case.
+
+Alternately, you can download this community VAE for direct image support: [Mamad8/MiniMax-H3-Image-VAE](<https://huggingface.co/Mamad8/MiniMax-H3-Image-VAE/tree/main>), and then generate with Frames set to `1` and this VAE selected. This will truly natively generate 1 latent for 1 image frame.
 
 You can use the Ref model this way to do image editing. Note that quality will be poor compared to proper dedicated image models.
 

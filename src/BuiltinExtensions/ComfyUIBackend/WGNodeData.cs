@@ -170,7 +170,7 @@ public class WGNodeData(JArray _path, WorkflowGenerator _gen, string _dataType, 
                     ["samples"] = Path
                 }, id);
             }
-            if (Gen.IsMiniMaxH3() && Frames == 1)
+            if (Gen.IsMiniMaxH3() && Frames == 2)
             {
                 decoded = Gen.CreateNode("ImageFromBatch", new JObject()
                 {
@@ -237,7 +237,8 @@ public class WGNodeData(JArray _path, WorkflowGenerator _gen, string _dataType, 
                     ["samples"] = Path
                 }, id);
             }
-            else if (UserInput.TryGet(T2IParamTypes.VAETileSize, out _))
+            // NOTE: decode audio tiled does not work for some models (eg H3) so for now whitelist which models are valid
+            else if (UserInput.TryGet(T2IParamTypes.VAETileSize, out _) && Gen.IsMiniMaxMusic3())
             {
                 decoded = Gen.CreateNode("VAEDecodeAudioTiled", new JObject()
                 {
@@ -466,7 +467,7 @@ public class WGNodeData(JArray _path, WorkflowGenerator _gen, string _dataType, 
         }
         if (result.DataType == DT_IMAGE || result.DataType == DT_VIDEO)
         {
-            return EncodeToLatent(vae);
+            return EncodeToLatent(vae).AsSamplingLatent(vae, audioVae);
         }
         if (result.DataType == DT_AUDIO)
         {
