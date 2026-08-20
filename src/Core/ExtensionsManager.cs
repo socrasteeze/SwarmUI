@@ -33,9 +33,14 @@ public class ExtensionsManager
             string dependency = Path.Combine(extensionDir, name.Name + ".dll");
             try
             {
-                Default.LoadFromAssemblyName(name);
+                Assembly hostAsm = Default.LoadFromAssemblyName(name);
                 // We only get here if host successfully loads the assembly.
-                if (File.Exists(dependency) && !manager.CoreDependencyNames.Contains(name.Name))
+                // Fork edit: only report a genuine host-vs-extension collision. LoadFromAssemblyName can resolve back to
+                // the exact file this extension ships (an Assembly.LoadFile context over the extension's own output dir),
+                // in which case there is no host copy at all and the warning is a false positive - it told users the host
+                // copy was winning for a dependency the host does not even carry, and deleting the "redundant" dll then
+                // broke the extension. Comparing the resolved path against the extension's own dep catches exactly that.
+                if (File.Exists(dependency) && !manager.CoreDependencyNames.Contains(name.Name) && !IsSamePath(hostAsm?.Location, dependency))
                 {
                     Logs.Warning($"Extension {Name} ships {name.Name}.dll but host already has it loaded; using host copy.");
                 }
@@ -48,6 +53,16 @@ public class ExtensionsManager
             }
             Logs.Debug($"Extension {Name} loading private dep {name.Name} from {dependency}");
             return LoadFromAssemblyPath(dependency);
+        }
+
+        /// <summary>Returns true if both paths are non-empty and point at the same file on disk.</summary>
+        private static bool IsSamePath(string a, string b)
+        {
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+            {
+                return false;
+            }
+            return Path.GetFullPath(a).Equals(Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
         }
     }
 
