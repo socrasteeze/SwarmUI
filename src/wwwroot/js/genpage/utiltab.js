@@ -357,7 +357,7 @@ class ModelDownloaderUtil {
             if (rawData.tags) {
                 metadata['modelspec.tags'] = rawData.tags.join(", ");
             }
-            if (['Illustrious', 'Pony'].includes(rawVersion.baseModel)) {
+            if (['Illustrious', 'Pony', 'NoobAI', 'Anima'].includes(rawVersion.baseModel)) {
                 metadata['modelspec.usage_hint'] = rawVersion.baseModel;
             }
             let metadataWithImage = (img) => {

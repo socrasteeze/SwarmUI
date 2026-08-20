@@ -1066,6 +1066,17 @@ public class T2IModelClassSorter
                 Logs.Debug($"{modelType} Model {model.Name} has unknown architecture ID {arch}");
             }
         }
+        if (modelType == "LoRA")
+        {
+            string baseModel = fix(header?.Value<string>("BaseModel"))
+                ?? fix(header?["__metadata__"]?.Value<string>("BaseModel"));
+            T2IModelClass fromBase = T2ICivitaiBaseModelMap.TryGetLoraClass(baseModel);
+            if (fromBase is not null && T2ICivitaiBaseModelMap.ShouldPreferMappedLoraClass(matchedClass, fromBase))
+            {
+                Logs.Debug($"{modelType} Model {model.Name} mapped to {fromBase.Name} by sidecar BaseModel '{baseModel}'");
+                matchedClass = fromBase;
+            }
+        }
         if (!model.RawFilePath.EndsWith(".safetensors") && !model.RawFilePath.EndsWith(".sft") && header is null)
         {
             Logs.Debug($"{modelType} Model {model.Name} cannot have known type, not safetensors and no header");

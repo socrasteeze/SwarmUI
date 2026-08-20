@@ -501,9 +501,9 @@ public static class ModelsAPI
         {
             actualModel.Title = string.IsNullOrWhiteSpace(title) ? null : title;
             actualModel.Description = description;
-            if (!string.IsNullOrWhiteSpace(type))
+            if (!string.IsNullOrWhiteSpace(type) && T2IModelClassSorter.ModelClasses.TryGetValue(type.ToLowerFast(), out T2IModelClass mappedClass))
             {
-                actualModel.ModelClass = T2IModelClassSorter.ModelClasses.GetValueOrDefault(type.ToLowerFast());
+                actualModel.ModelClass = mappedClass;
             }
             if (standard_width > 0)
             {
@@ -753,7 +753,7 @@ public static class ModelsAPI
         {
             return new JObject() { ["error"] = "Model not found." };
         }
-        return new JObject() { ["hash"] = match.GetOrGenerateTensorHashSha256() };
+        return new JObject() { ["hash"] = match.GetOrGenerateTensorHashSha256(updateCache: true, resave: false) };
     }
 
     public static AsciiMatcher MetadataUrlAllowedChars = new(AsciiMatcher.BothCaseLetters + AsciiMatcher.Digits + "/\\-_.?=&%");
