@@ -682,6 +682,14 @@ public class T2IModelHandler
                 return nonNull;
             }
             const int basicLimit = 4096;
+            string specTitle = pickBest(metaHeader?.Value<string>("modelspec.title"), metaHeader?.Value<string>("title"));
+            string fileStem = fileName.BeforeLast('.');
+            string resolvedTitle = specTitle;
+            if (T2ICivitaiBaseModelMap.TitleIsFilename(resolvedTitle, fileName) && !string.IsNullOrWhiteSpace(altName))
+            {
+                resolvedTitle = altName;
+            }
+            resolvedTitle = pickBest(resolvedTitle, altName, fileStem);
             metadata = new()
             {
                 ModelFileVersion = modified,
@@ -689,13 +697,13 @@ public class T2IModelHandler
                 TimeCreated = new DateTimeOffset(File.GetCreationTimeUtc(model.RawFilePath)).ToUnixTimeMilliseconds(),
                 ModelName = modelCacheId,
                 ModelClassType = clazz?.ID,
-                Title = limitLength(pickBest(metaHeader?.Value<string>("modelspec.title"), metaHeader?.Value<string>("title"), altName, fileName.BeforeLast('.')), basicLimit),
+                Title = limitLength(resolvedTitle, basicLimit),
                 Author = limitLength(pickBest(metaHeader?.Value<string>("modelspec.author"), metaHeader?.Value<string>("author")), basicLimit),
                 Description = limitLength(pickBest(metaHeader?.Value<string>("modelspec.description"), metaHeader?.Value<string>("description"), altDescription), 1024 * 1024 * 4),
                 PreviewImage = img,
                 StandardWidth = width,
                 StandardHeight = height,
-                UsageHint = limitLength(pickBest(metaHeader?.Value<string>("modelspec.usage_hint"), metaHeader?.Value<string>("usage_hint")), 8192 * 5),
+                UsageHint = limitLength(pickBest(metaHeader?.Value<string>("modelspec.usage_hint"), metaHeader?.Value<string>("usage_hint"), T2ICivitaiBaseModelMap.UsageHintFromBaseModel(metaHeader?.Value<string>("BaseModel"))), 8192 * 5),
                 MergedFrom = limitLength(pickBest(metaHeader?.Value<string>("modelspec.merged_from"), metaHeader?.Value<string>("merged_from")), 8192 * 10),
                 TriggerPhrase = limitLength(pickBest(metaHeader?.Value<string>("modelspec.trigger_phrase"), metaHeader?.Value<string>("trigger_phrase")) ?? altTriggerPhrase, 8192 * 5),
                 License = limitLength(pickBest(metaHeader?.Value<string>("modelspec.license"), metaHeader?.Value<string>("license")), basicLimit),
