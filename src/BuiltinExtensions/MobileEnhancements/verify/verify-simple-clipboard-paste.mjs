@@ -155,6 +155,12 @@ check('the paste box is contenteditable, which is what lets a phone paste an IMA
         let box = document.querySelector('.m-paste-box');
         return box.isContentEditable && box.getAttribute('role') == 'textbox';
     }));
+// The caret has to be in the box by the time the opening tap ends. A focus() from a timer after the open
+// transition is outside the user-activation window, which a phone ignores - and an unfocused box means a tap
+// on it before a long-press will offer Paste at all, so one clipboard button becomes two button presses.
+// Asserted with no wait on purpose: a passing check here means focus happened during the click, not after it.
+check('the paste box is already focused when the opening tap ends',
+    await page.evaluate(() => document.activeElement == document.querySelector('.m-paste-box')));
 check('the sheet offers the photo-library fallback too',
     await page.evaluate(() => !!document.querySelector('.m-paste-box') && [...document.querySelectorAll('.m-sheet .m-wide-button')].some(b => b.textContent == 'Choose an image instead')));
 

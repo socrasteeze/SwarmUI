@@ -1141,10 +1141,15 @@ class MCreate {
                 }, () => done(0));
             }, 0);
         });
-        // Focused after the open transition (0.25s in m.css), not during it: focusing mid-slide raises the
-        // keyboard against a sheet that is still animating into place, which iOS resolves by scrolling the
-        // box out from under the caret.
-        setTimeout(() => box.focus(), 300);
+        // Focused SYNCHRONOUSLY, inside the click that opened the sheet, and that timing is the whole point:
+        // a browser places a caret and raises the on-screen keyboard for a focus() only while the user's own
+        // tap is still the live gesture. This first shipped as a focus() from a 300ms timer, to let the open
+        // transition finish - which lands outside that window, so a phone ignored it and the box sat there
+        // unfocused. That cost a second tap on the box before a long-press would even offer Paste, and made
+        // one clipboard button feel like two button presses.
+        // preventScroll because the sheet is still parked at translateY(100%) for the frame this runs in:
+        // without it the browser scrolls the page toward where the box is not yet.
+        box.focus({ 'preventScroll': true });
     }
 
     /** Quick params row: seed lock + value, images count, aspect ratio, side length, resolution readout. */
