@@ -1,10 +1,10 @@
 # HANDOFF
 
-**Updated:** 2026-08-21 · **Branch:** main · **Base:** f7bc44f · **Tree:** clean
+**Updated:** 2026-08-21 · **Branch:** main · **Base:** bcb3b73d (pushed) · **Tree:** clean
 
 ## State
-`/simple`'s 📋 clipboard button works over plain LAN HTTP again. Code, harness and AGENTS.md entry are on `main`.
-Nothing has been tried on a real phone yet — that is the only thing left on this work.
+`/simple`'s 📋 clipboard button works over plain LAN HTTP again — pushed. On top of that, an upstream sync
+(2 commits, merge `9b5fadb6`) is committed locally and **not pushed**: its build gates could not run here.
 
 ## Done this session
 - Clipboard button falls back to a paste sheet instead of dead-ending — `src/BuiltinExtensions/MobileEnhancements/Assets/m/m_create.js` (`pasteFromClipboard`, `openPasteSheet`, `attachFromText`, `attachFromTransfer`)
@@ -14,6 +14,7 @@ Nothing has been tried on a real phone yet — that is the only thing left on th
 - Fork Delta entry, including the genpage gap left unfixed — `AGENTS.md`
 
 ## Open
+0. **Run the build gates on the workstation for the unpushed upstream merge, then push.** No .NET SDK exists in the container it was made in, so `dotnet build --configuration Release`, `dotnet format --verify-no-changes` and the ci-test boot have not run against it. The merge itself is clean (0 conflicts, touchpoints verified line-for-line against upstream) — see the 2026-08-21 entry in the AGENTS.md Upstream Sync Log.
 1. Device-verify on iOS: tap 📋, long-press the box, Paste. Confirm it takes **two** gestures, not three. Restart the server first (see Traps).
 2. Decide the genpage image-editor clipboard fix, which is waiting on the fork owner: `pasteSelectionFromClipboard` has no rejection handler and its fallback box is a one-line text input — `src/wwwroot/js/genpage/helpers/image_editor.js:622`, `src/Pages/_Generate/GenTabModals.cshtml:294`. Both are upstream core files, so it is a merge-cost call, not a technical one.
 3. Pre-existing failure in `verify-simple-create-panel.mjs`, unrelated to this work: "batch group right edge matches Prefix" (42/43). Confirmed present on the pre-change tree too. Nobody has looked at whether it is a real misalignment or a harness tolerance.
