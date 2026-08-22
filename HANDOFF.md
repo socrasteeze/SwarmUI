@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-08-22 · **Branch:** main · **Base:** local `main`, unpushed · **Tree:** see Open 0
+**Updated:** 2026-08-22 · **Branch:** main · **Base:** `origin/main` at `80e16c3d` (pushed) · **Tree:** clean
 
 ## State
 An ultrasweep ran and **halted at recon: zero actionable work.** 23 candidates were collected from the
@@ -9,8 +9,16 @@ task at all. The full classification is in Parked below.
 
 What did change: the stalled `origin/main` merge was completed (`5974a983`), its `AGENTS.md` conflict
 resolved (duplicate 2026-08-21 sync entries — kept the detailed pushed version, grafted on the workstation
-gate results), the tailnet HTTPS handoff adopted from the cloud branch (`8f51ff2f`), and two stale lines in
-the mobile/PWA plan corrected.
+gate results), the tailnet HTTPS handoff adopted from the cloud branch (`8f51ff2f`), and stale lines in the
+mobile/PWA plan corrected. All of that is pushed.
+
+Then three of the five open items were closed on the owner's go-ahead: the tailnet TLS decision was
+confirmed (proxy route, no Swarm-side cert), and the **genpage image-editor clipboard rejection** was
+fixed — a core-file edit, so it carries a Fork Delta entry and a coupling-watchlist row. A three-lens
+adversarial review of that fix found five issues including one blocking; all five were applied. Notably it
+killed a `shown.bs.modal` re-focus this session first wrote: `WebUtil.ModalHeader` emits a non-`fade`
+modal, so Bootstrap's callback is synchronous and the existing `box.focus()` already wins. The constructor
+is back to byte-identical upstream.
 
 **The verification gate now actually ran, and passes.** This closes the open item that has been carried
 since 2026-08-14. Prior handoffs claimed "no .NET SDK in this container" — that was true of the cloud
@@ -18,22 +26,25 @@ containers, and **false on this workstation**: SDK 8.0.417 and 10.0.103 are inst
 `src/SwarmUI.csproj` targets `net8.0`.
 
 ## Open
-0. **Nothing is pushed.** Four local commits sit ahead of `origin/main`. Also delete the merged cloud
-   branch `origin/claude/swarmui-tailnet-https-wryhg2` once its content is confirmed landed.
+0. ~~Push, and delete the merged cloud branch.~~ **Done — `origin/main` is at the pushed merge, and
+   `claude/swarmui-tailnet-https-wryhg2` is deleted.** The genpage clipboard work after it is committed
+   locally; push state is noted in the header.
 1. ~~Run the .NET gates.~~ **Done — all three pass. See Verify.**
-2. Decide whether Swarm should terminate TLS itself. It cannot today: `HostURL` is hardcoded to `http://`
-   (`src/Core/WebServer.cs:42`) and `NetworkData` has no cert fields (`src/Core/Settings.cs`). Cost is a
-   cert path pair plus a Kestrel `ListenAnyIP(port, o => o.UseHttps(...))` in `Prep()` — and owning cert
-   renewal. Only worth it if the proxy route is rejected, which nobody has done. Two core-file edits, so
-   fork law makes it a last resort.
-3. If the proxy route is taken: blank `Network.AuthBypassIPs` whenever `RequiredAuthorization` is set, and
+2. ~~Decide whether Swarm should terminate TLS itself.~~ **Decided 2026-08-22: no — take the Tailscale `serve` proxy route (see Decisions).**
+   Kept only as a cost record, should the proxy route ever be abandoned: Swarm cannot do this today —
+   `HostURL` is hardcoded to `http://` (`src/Core/WebServer.cs:42`) and `NetworkData` has no cert fields
+   (`src/Core/Settings.cs`). The cost would be a cert path pair plus a Kestrel
+   `ListenAnyIP(port, o => o.UseHttps(...))` in `Prep()`, two core-file edits, and owning cert renewal.
+3. **Owner action, not code.** The proxy route is now the decided path, so before exposing it: blank `Network.AuthBypassIPs` whenever `RequiredAuthorization` is set, and
    point `Network.ExternalURL` at the https URL. Both live in the running server's `Data/Settings.fds`,
    not in the tracked tree — no commit results.
-4. Genpage image-editor clipboard fix, still waiting on the fork owner. Confirmed still true of the code:
-   the `navigator.clipboard.read()` promise chain at `src/wwwroot/js/genpage/helpers/image_editor.js:622`
-   has no `.catch()`, and its modal fallback is a one-line input
-   (`src/Pages/_Generate/GenTabModals.cshtml:294`). Both are upstream core files, so it is a merge-cost
-   call. The `/simple` side of the same gap already shipped (`openPasteSheet`, `ffef175e`/`d762b0f0`).
+4. ~~Genpage image-editor clipboard fix.~~ **Rejection half done (2026-08-22).** `navigator.clipboard.read()`
+   rejection now routes to the paste modal, and a successful paste into that modal closes it and confirms
+   (it previously dropped the layer behind the backdrop silently). Core-file edit, recorded in the Fork
+   Delta and the coupling watchlist. **Still open:** the modal's box is `<input type="text" maxlength="0">`
+   (`GenTabModals.cshtml:294`), which a phone will not offer an image paste over — so the modal is still
+   desktop-only in practice. Making it `contenteditable` is a second core-file edit; that merge cost is
+   undecided. Not browser-verified: no harness covers genpage.
 5. Pre-existing `verify-simple-create-panel.mjs` failure: "batch group right edge matches Prefix" (42/43).
    The assertion is `Math.abs(last.right - prefixBox.right) <= 1` at that harness's line 294, so resolving
    it means choosing between a layout fix in `m.css`/`m_create.js` and loosening the tolerance — that
@@ -73,6 +84,9 @@ containers, and **false on this workstation**: SDK 8.0.417 and 10.0.103 are inst
   tailnet interface, so the same port number stays free there and the port does not have to change.
 - Proxy-side cert over a Swarm-side one — `serve` renews itself; a Swarm-side cert is manual renewal
   every ~90 days for a feature one machine uses.
+- **Confirmed 2026-08-22.** Swarm-side TLS is rejected, not merely deferred: it would mean core edits to
+  `WebServer.cs` and `Settings.cs` for a single machine's convenience. Open items 2 and 3 close on this.
+  The remaining work is server settings the owner applies to the running instance — nothing in the tree.
 
 ## Verify
 All three ran on this workstation on 2026-08-22 against the current tree. **All pass.**

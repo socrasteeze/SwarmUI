@@ -607,6 +607,8 @@ class ImageEditor {
                     let reader = new FileReader();
                     reader.onload = (ev) => {
                         this.addImageLayerFromClipboard(ev.target.result);
+                        $('#image_editor_paste_modal').modal('hide');
+                        doNoticePopover('Pasted image as new layer', 'notice-pop-green');
                     };
                     reader.readAsDataURL(file);
                     return;
@@ -617,14 +619,12 @@ class ImageEditor {
 
     /**
      * Pastes the selection from the clipboard to the image editor as a new image layer.
-     * No-op if the clipboard does not contain image data. Shows modal fallback when Clipboard API is unavailable.
+     * No-op if the clipboard does not contain image data. Shows modal fallback when the Clipboard API is
+     * unavailable or its read is refused.
      */
     pasteSelectionFromClipboard() {
         if (!navigator.clipboard || !navigator.clipboard.read) {
-            let box = document.getElementById('image_editor_paste_pastebox');
-            box.value = '';
-            $('#image_editor_paste_modal').modal('show');
-            box.focus();
+            this.openPasteModal();
             return;
         }
         navigator.clipboard.read().then((items) => {
@@ -647,7 +647,27 @@ class ImageEditor {
             if (!found) {
                 doNoticePopover('No image in clipboard', 'notice-pop-red');
             }
-        });
+        }, () => this.openPasteModal());
+    }
+
+    /**
+     * Fork edit - see the `image_editor.js` entry in AGENTS.md's Fork Delta. Upstream shows this modal only when
+     * the clipboard API is *missing*; its `read()` rejection was unhandled, so a denied or dismissed permission
+     * did nothing at all - no message, no modal. Do not collapse the rejection handler in
+     * `pasteSelectionFromClipboard` back into a single-argument `.then(...)`; that re-breaks that case.
+     *
+     * The clipboard fallback: a focused paste box in a modal, for every browser and context that will not hand
+     * the page the clipboard on its own. `navigator.clipboard` is undefined outside a secure context, and Swarm
+     * is normally reached at a LAN address over plain HTTP - insecure by that rule no matter how local it is.
+     * `read()` also rejects when the clipboard-read permission is denied or dismissed, when the document is not
+     * focused, and on browsers that expose the API to extensions only. A paste event carries its own data with
+     * no permission and no secure context involved, so this path always works.
+     */
+    openPasteModal() {
+        let box = document.getElementById('image_editor_paste_pastebox');
+        box.value = '';
+        $('#image_editor_paste_modal').modal('show');
+        box.focus();
     }
 
     activeElementIsAnInput() {
