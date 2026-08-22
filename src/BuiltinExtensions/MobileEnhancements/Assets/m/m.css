@@ -1105,6 +1105,40 @@
     margin-bottom: 0.5rem;
 }
 
+/* --- Clipboard paste sheet (m_create.js openPasteSheet) ---
+   Opened by the 📋 button whenever the browser will not read the clipboard itself, which over plain LAN HTTP
+   is always. The box is contenteditable, so it needs the border, the min-height and the placeholder a
+   textarea would have given for free. Dashed border rather than solid: it is a drop target for a gesture,
+   not a field with a value. */
+.m-paste-hint {
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1.35;
+    margin-bottom: 0.6rem;
+}
+.m-paste-box {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 5.5rem;
+    max-height: 40dvh;
+    overflow-y: auto;
+    padding: 0.7rem;
+    border: 1px dashed var(--border-color);
+    border-radius: 0.7rem;
+    background: var(--background);
+    color: var(--text);
+    -webkit-user-select: text;
+    user-select: text;
+}
+.m-paste-box:empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-soft);
+}
+.m-paste-box img {
+    max-width: 100%;
+    height: auto;
+}
+
 /* --- LoRA sheet --- */
 .m-lora-row {
     padding: 0.5rem 0;
