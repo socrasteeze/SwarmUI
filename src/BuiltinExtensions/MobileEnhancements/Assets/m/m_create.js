@@ -909,19 +909,71 @@ class MCreate {
         });
     }
 
-    /** Clipboard paste: image items become prompt images (the user's screenshot-paste flow). */
+    /** Clipboard paste on the prompt box: image items become prompt images (the user's screenshot-paste
+     * flow). Text is deliberately left alone here - this box is where prompts are typed, so a pasted path
+     * belongs in the text, not attached as an image. That is what the clipboard button is for. */
     onPaste(e) {
-        let items = (e.clipboardData || {}).items || [];
-        let found = false;
-        for (let item of items) {
-            if (item.type && item.type.startsWith('image/')) {
-                found = true;
-                this.addImageFile(item.getAsFile());
-            }
-        }
-        if (found) {
+        if (this.attachFromTransfer(e.clipboardData, false) > 0) {
             e.preventDefault();
         }
+    }
+
+    /** Attaches a text payload as a prompt image when it is one: a data URI, or a Swarm output path / View
+     * URL. Returns whether it attached anything. */
+    attachFromText(text) {
+        let val = `${text || ''}`.trim();
+        if (!val) {
+            return false;
+        }
+        if (val.startsWith('data:image/')) {
+            mState.promptImages.push({ 'kind': 'data', 'value': val });
+            mState.changed();
+            return true;
+        }
+        let entry = typeof mImages != 'undefined' ? mImages.promptPathEntry(val) : null;
+        if (entry) {
+            mState.promptImages.push(entry);
+            mState.changed();
+            return true;
+        }
+        return false;
+    }
+
+    /** Attaches every image a paste event's DataTransfer carries, falling back to its text payload when it
+     * carries no file and allowText says text counts. Returns how many prompt images it added.
+     * This is the clipboard path that always works: a paste event hands the page its own data with no
+     * permission prompt and no secure-context rule involved, unlike navigator.clipboard.read. */
+    attachFromTransfer(data, allowText) {
+        if (!data) {
+            return 0;
+        }
+        let count = 0;
+        let items = data.items || [];
+        for (let i = 0; i < items.length; i++) {
+            let item = items[i];
+            if (item.kind == 'file' && item.type && item.type.startsWith('image/')) {
+                let file = item.getAsFile();
+                if (file) {
+                    this.addImageFile(file);
+                    count++;
+                }
+            }
+        }
+        // .files rather than .items is what some browsers populate for a dropped or pasted file, so it is a
+        // fallback and not a second pass - counting both would attach the same screenshot twice.
+        if (count == 0 && data.files) {
+            for (let i = 0; i < data.files.length; i++) {
+                let file = data.files[i];
+                if (file.type && file.type.startsWith('image/')) {
+                    this.addImageFile(file);
+                    count++;
+                }
+            }
+        }
+        if (count == 0 && allowText && data.getData && this.attachFromText(data.getData('text/plain'))) {
+            count++;
+        }
+        return count;
     }
 
     /** Reads a File to a data URI and appends it to the prompt images. */
@@ -939,7 +991,17 @@ class MCreate {
 
     /** Clipboard button: attach whatever is on the clipboard as prompt image(s). Image blobs go through
      * addImageFile (the same path as paste-on-the-prompt-box). A Swarm output path or a data URI uses the
-     * existing attach helpers. Empty or non-image clipboard is a warning, not an error. */
+     * existing attach helpers. Empty or non-image clipboard is a warning, not an error.
+     *
+     * **The read API is the optimistic path, not the only one.** `navigator.clipboard` is undefined outside a
+     * secure context, and this client is normally reached at a LAN address over plain HTTP - which is
+     * insecure by that rule no matter how local it is, so the button used to dead-end on every phone that
+     * wasn't pointed at localhost. `read()` also rejects when the clipboard-read permission is denied or
+     * dismissed, when the document isn't focused, and on browsers that expose it to extensions only. Every
+     * one of those ends in openPasteSheet(), where the user's own paste gesture hands the page the data no
+     * API here is allowed to take. The old readText() retry is gone with them: it fails for the same reasons
+     * read() just did, costs a second permission prompt to find that out, and the sheet accepts pasted text
+     * anyway. */
     pasteFromClipboard() {
         let attached = (count) => {
             if (count > 0) {
@@ -948,27 +1010,6 @@ class MCreate {
             else {
                 mUI.warn('Clipboard has no image.');
             }
-        };
-        let fromText = (text) => {
-            let val = `${text || ''}`.trim();
-            if (!val) {
-                return false;
-            }
-            if (val.startsWith('data:image/')) {
-                mState.promptImages.push({ 'kind': 'data', 'value': val });
-                mState.changed();
-                return true;
-            }
-            let entry = typeof mImages != 'undefined' ? mImages.promptPathEntry(val) : null;
-            if (entry) {
-                mState.promptImages.push(entry);
-                mState.changed();
-                return true;
-            }
-            return false;
-        };
-        let warnBlocked = () => {
-            mUI.warn('Could not read the clipboard. Paste into the prompt box instead.');
         };
         if (navigator.clipboard && navigator.clipboard.read) {
             navigator.clipboard.read().then(items => {
@@ -989,7 +1030,7 @@ class MCreate {
                     let extra = 0;
                     if (files.length == 0) {
                         for (let i = 0; i < texts.length; i++) {
-                            if (fromText(texts[i])) {
+                            if (this.attachFromText(texts[i])) {
                                 extra++;
                             }
                         }
@@ -1021,21 +1062,94 @@ class MCreate {
                         finish();
                     }
                 }
-            }, () => {
-                if (navigator.clipboard.readText) {
-                    navigator.clipboard.readText().then(text => attached(fromText(text) ? 1 : 0), warnBlocked);
-                }
-                else {
-                    warnBlocked();
-                }
-            });
+            }, () => this.openPasteSheet());
             return;
         }
-        if (navigator.clipboard && navigator.clipboard.readText) {
-            navigator.clipboard.readText().then(text => attached(fromText(text) ? 1 : 0), warnBlocked);
-            return;
-        }
-        warnBlocked();
+        this.openPasteSheet();
+    }
+
+    /** The clipboard fallback: a focused paste box in a sheet, for every browser and context that will not
+     * hand the page the clipboard on its own (see pasteFromClipboard above - over plain LAN HTTP that is all
+     * of them). A paste event carries its own data with no permission and no secure context involved, so this
+     * path always works.
+     *
+     * **contenteditable, not a textarea**, which is the whole reason this is a box of its own rather than a
+     * pointer at the prompt field: iOS only offers Paste for a copied image over a region that can hold one,
+     * and a plain textarea is not one. The old message sent people to the prompt box, where a phone's paste
+     * menu would silently decline to offer the image they had just copied.
+     *
+     * "Choose an image instead" reuses the strip's own hidden file input - on a phone that opens the photo
+     * library, which is where a screenshot actually lives, and it is the guaranteed path when a paste gesture
+     * is unavailable entirely. */
+    openPasteSheet() {
+        let content = mUI.el('div', 'm-paste-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Paste an image'));
+        content.appendChild(mUI.el('div', 'm-paste-hint', 'This browser will not hand the page your clipboard on its own (that needs HTTPS or localhost). Tap the box below and paste: long-press then Paste on a phone, Ctrl+V on a desktop.'));
+        let box = mUI.el('div', 'm-paste-box');
+        box.contentEditable = 'true';
+        box.setAttribute('role', 'textbox');
+        box.setAttribute('aria-label', 'Paste an image here');
+        box.dataset.placeholder = 'Paste here';
+        content.appendChild(box);
+        let pickButton = mUI.el('button', 'm-wide-button', 'Choose an image instead');
+        content.appendChild(pickButton);
+        let close = mUI.openSheet(content);
+        pickButton.addEventListener('click', () => {
+            close();
+            if (this.fileInput) {
+                this.fileInput.click();
+            }
+        });
+        let done = (count) => {
+            box.innerHTML = '';
+            if (count > 0) {
+                close();
+                mUI.note(count == 1 ? 'Pasted image.' : `Pasted ${count} images.`);
+            }
+            else {
+                // The sheet stays open on a miss - the user is already in the paste gesture, and closing it
+                // would mean tapping the clipboard button again to try the other thing on their clipboard.
+                mUI.warn('Nothing usable pasted - copy an image, a data URI, or a Swarm image path.');
+            }
+        };
+        box.addEventListener('paste', (e) => {
+            let count = this.attachFromTransfer(e.clipboardData, true);
+            if (count > 0) {
+                e.preventDefault();
+                done(count);
+                return;
+            }
+            // An image copied out of a web page - or, on a phone, out of the photo library - can arrive as
+            // markup with no file and no usable text behind it. Let that default paste land in the box, then
+            // read the <img> back out of it on the next task. A data: src is the bytes themselves and a View
+            // URL from this same server resolves to an output path, so attachFromText takes both; a blob:
+            // src is neither, but it is real bytes this page is allowed to read, so fetch it into a file.
+            // The box is cleared on every one of those paths, so nothing is left sitting in it.
+            setTimeout(() => {
+                let src = box.querySelector('img') ? box.querySelector('img').src : '';
+                if (!src || this.attachFromText(src)) {
+                    done(src ? 1 : 0);
+                    return;
+                }
+                fetch(src).then(response => response.blob()).then(blob => {
+                    if (!blob.type || !blob.type.startsWith('image/')) {
+                        done(0);
+                        return;
+                    }
+                    this.addImageFile(new File([blob], 'pasted.png', { 'type': blob.type }));
+                    done(1);
+                }, () => done(0));
+            }, 0);
+        });
+        // Focused SYNCHRONOUSLY, inside the click that opened the sheet, and that timing is the whole point:
+        // a browser places a caret and raises the on-screen keyboard for a focus() only while the user's own
+        // tap is still the live gesture. This first shipped as a focus() from a 300ms timer, to let the open
+        // transition finish - which lands outside that window, so a phone ignored it and the box sat there
+        // unfocused. That cost a second tap on the box before a long-press would even offer Paste, and made
+        // one clipboard button feel like two button presses.
+        // preventScroll because the sheet is still parked at translateY(100%) for the frame this runs in:
+        // without it the browser scrolls the page toward where the box is not yet.
+        box.focus({ 'preventScroll': true });
     }
 
     /** Quick params row: seed lock + value, images count, aspect ratio, side length, resolution readout. */
