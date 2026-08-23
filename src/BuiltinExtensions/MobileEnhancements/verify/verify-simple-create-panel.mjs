@@ -266,6 +266,17 @@ const arch = await page.evaluate(() => {
 check('arch filter: other known group folders are hidden',
     arch == 'ill/keep.safetensors,misc/unknown.safetensors', arch);
 
+// The Prefix row is hidden unless the session advertises the `filenameprefix` param - renderQuickParams
+// recomputes `prefixRow.style.display` from `mState.paramMeta` on every render (m_create.js). This harness
+// never boots, so ListT2IParams never lands and the row stayed `display: none`, giving the Prefix input a
+// zero rect. The right-edge check below then compared a real edge against 0 and had always failed, which
+// read as a misalignment for weeks. Populate the param and re-render first, so the check measures the
+// arrangement it was written for.
+await page.evaluate(() => {
+    mState.paramMeta['filenameprefix'] = { id: 'filenameprefix', name: 'Filename Prefix', type: 'text', default: '' };
+    mCreate.renderQuickParams();
+});
+
 // Prefix sits above Steps/CFG; clipboard and CLR follow the 1/2/4 batch buttons.
 const layout = await page.evaluate(() => {
     let prefix = document.querySelector('.m-prefix-input');
@@ -283,7 +294,9 @@ const layout = await page.evaluate(() => {
         createIcon: createIcon,
         batchEqual: widthSpan <= 1,
         batchWidths: widths,
-        batchRightAlign: !!(prefixBox && last && Math.abs(last.right - prefixBox.right) <= 1)
+        prefixVisible: !!(prefixBox && prefixBox.width > 0),
+        batchRightAlign: !!(prefixBox && last && Math.abs(last.right - prefixBox.right) <= 1),
+        batchRightGap: (prefixBox && last) ? Math.round((last.right - prefixBox.right) * 100) / 100 : null
     };
 });
 check('Prefix field sits above the Steps/CFG row', layout.prefixBeforeTune);
@@ -291,7 +304,8 @@ check('batch row is 1, 2, 4, clipboard, CLR',
     layout.batch == '1,2,4,📋,CLR', layout.batch);
 check('batch 1/2/4/paste/CLR buttons are equal width',
     layout.batchEqual, JSON.stringify(layout.batchWidths));
-check('batch group right edge matches Prefix', layout.batchRightAlign);
+check('Prefix row is visible once filenameprefix is advertised', layout.prefixVisible);
+check('batch group right edge matches Prefix', layout.batchRightAlign, `gap ${layout.batchRightGap}px`);
 check('Create nav icon is the geometric triangle, not a pencil emoji',
     layout.createIcon == '\u25B3', JSON.stringify(layout.createIcon));
 
