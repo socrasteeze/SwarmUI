@@ -40,10 +40,9 @@ items from the previous handoff stay closed. Nothing unpushed.
   proxied request arrives as loopback.
 - **Plain HTTP to the tailnet address on that port now returns 400** — `serve` owns that side and expects
   TLS. LAN and localhost HTTP are unaffected.
-- **A running server blocks two things**: a `--ci-test` boot collides with it over `Data/Users.ldb` (pass an
-  isolated `--data_dir`), and a rebuild fails because it holds `SwarmUI.exe`. Also shut it down before
-  editing `Data/Settings.fds`, which it rewrites on exit. Stop it via the `ShutdownServer` API, never a
-  hard kill — LiteDB.
+- **A running server blocks three things**: a `--ci-test` boot (collides over `Data/Users.ldb` — pass an
+  isolated `--data_dir`), a rebuild (it holds `SwarmUI.exe`), and editing `Data/Settings.fds` (rewritten on
+  exit). Stop it via the `ShutdownServer` API, never a hard kill — LiteDB.
 - **Release builds cache extension assets in memory** — asset edits need a restart. `?vary=` is the git
   commit read at **startup**, so a server restarted before a commit serves new bytes under the old URL and
   clients keep a stale copy.
