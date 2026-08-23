@@ -35,9 +35,18 @@ containers, and **false on this workstation**: SDK 8.0.417 and 10.0.103 are inst
    `HostURL` is hardcoded to `http://` (`src/Core/WebServer.cs:42`) and `NetworkData` has no cert fields
    (`src/Core/Settings.cs`). The cost would be a cert path pair plus a Kestrel
    `ListenAnyIP(port, o => o.UseHttps(...))` in `Prep()`, two core-file edits, and owning cert renewal.
-3. **Owner action, not code.** The proxy route is now the decided path, so before exposing it: blank `Network.AuthBypassIPs` whenever `RequiredAuthorization` is set, and
-   point `Network.ExternalURL` at the https URL. Both live in the running server's `Data/Settings.fds`,
-   not in the tracked tree — no commit results.
+3. **Owner action, not code — and the current config blocks the plan.** Read from the live
+   `Data/Settings.fds` on 2026-08-22: `Host: 0.0.0.0`, `Port: 8085`, `ExternalURL` empty,
+   `AuthBypassIPs: 127.0.0.1,::1,::ffff:127.0.0.1`, `RequiredAuthorization` empty.
+   - **`Host: 0.0.0.0` kills the same-port `serve` trick** — it claims 8085 on every interface, so
+     Tailscale `serve` cannot bind the tailnet side of that port. Host must move to loopback first. This is
+     the one blocking change, and it is the trap already listed below, now confirmed live rather than
+     hypothetical.
+   - `RequiredAuthorization` is empty, so there is **no auth at all** today and the `AuthBypassIPs` proxy
+     bypass is not yet biting. It starts biting the moment auth is set — so set `AuthBypassIPs` empty in the
+     same edit, never after.
+   - Point `ExternalURL` at the https URL once `serve` is up.
+   All three live in the running server's settings, not the tracked tree — no commit results.
 4. ~~Genpage image-editor clipboard fix.~~ **Rejection half done (2026-08-22).** `navigator.clipboard.read()`
    rejection now routes to the paste modal, and a successful paste into that modal closes it and confirms
    (it previously dropped the layer behind the backdrop silently). Core-file edit, recorded in the Fork
@@ -45,8 +54,11 @@ containers, and **false on this workstation**: SDK 8.0.417 and 10.0.103 are inst
    `contenteditable` div instead of `<input type="text" maxlength="0">`, so a phone will offer Paste over
    it, and a pasted `<img>` with no file behind it is read back out. That makes
    `src/Pages/_Generate/GenTabModals.cshtml` a second diverged core file, with its own Fork Delta entry.
-   **Still not browser-verified** — no harness covers genpage, and checking it on the running server needs
-   a restart because `.cshtml` is compiled. That restart is the outstanding step here.
+   **Browser-verified 2026-08-22** against the real running server (restarted so the compiled `.cshtml` took
+   effect): 10 behaviours, covering rejection routing, the absent-API path, the empty-clipboard negative,
+   modal open/clear/focus, box rendering, and all four paste shapes. Detail in `AGENTS.md`. Two links remain
+   unverifiable this way: synthetic clipboard events do not run the browser's own default paste (so the
+   `<img>` read-back was tested with the img pre-placed), and nobody has used an actual thumb on iOS.
 5. ~~Pre-existing `verify-simple-create-panel.mjs` failure (42/43).~~ **Resolved 2026-08-22 — harness gap,
    not a misalignment. No production code changed.** The Prefix row is hidden unless the session advertises
    `filenameprefix`, and the harness never boots, so the check compared a real edge against a zero rect and
