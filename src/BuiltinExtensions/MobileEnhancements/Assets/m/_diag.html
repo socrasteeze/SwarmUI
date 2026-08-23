@@ -15,9 +15,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <!-- PROBE 2: does theme-color paint the band iOS reserves below the web view? Red is used because
-         nothing else in this app is red, so there is no ambiguity in the screenshot. -->
-    <meta name="theme-color" content="#ff0000" />
+    <meta name="theme-color" content="#161616" />
     <title>SwarmUI device diagnostic</title>
     <style>
         :root {
@@ -27,10 +25,7 @@
             --probe-left: env(safe-area-inset-left);
             --probe-right: env(safe-area-inset-right);
         }
-        /* PROBE: canvas ownership. html gets a colour nothing else in the app uses. If the band below the
-           bottom bar renders RED, the page's canvas covers the full web view and CSS can paint it. If it
-           stays dark, that band is iOS chrome outside the view and only the manifest colour can change it. */
-        html { height: 100%; background: #ff0000; }
+        html { height: 100%; }
         body {
             margin: 0;
             height: 100%;
@@ -64,7 +59,8 @@
     <div id="out"></div>
     <div id="bar"><div>BOTTOM BAR — should touch the screen edge</div></div>
     <div style="flex:0 0 auto;background:#202020;color:#aaa;font-size:11px;padding:0 0.8rem 0.5rem;text-align:center;">
-        PROBE 2: band RED = theme-color owns it (fixable). Band DARK = neither CSS nor theme-color reach it.
+        A band below this bar means the web view is not full-bleed. Established 2026-08-23: it is reachable by
+        neither page CSS nor theme-color. See the mobile plan doc before chasing it again.
     </div>
     <script>
         const cs = getComputedStyle(document.documentElement);
