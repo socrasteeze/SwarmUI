@@ -179,6 +179,44 @@ One commit (or PR) per phase: 1 → 2 → 3 → 4 (→ 5). Phases 2–4 are inde
 6. Desktop no-regression pass (large-window UI visually unchanged) every phase.
 7. After any future upstream merge: re-run this gate + re-check the coupling watchlist.
 
+## Known, accepted: the bottom-nav gap in the installed iOS app (2026-08-23)
+
+On the target iPhone (iOS 18.7 / WebKit, 956pt screen) the installed app renders a band of reserved space
+below `.m-bottom-nav`, so the bar does not touch the physical screen edge. **Investigated and accepted as
+a device/WebKit behaviour, not a fork defect. Do not re-chase it without new information.**
+
+Measured on device with `Assets/m/_diag.html`:
+
+| | |
+|---|---|
+| `innerHeight` / `screen.height` | 894 / 956 — the web view is **62px short** |
+| `100dvh` and `height: 100%` | **both** resolve to 894px |
+| all four `env(safe-area-inset-*)` | **0px**, top included |
+| `display-mode: standalone` / `navigator.standalone` | `false` / `true` |
+
+What that rules out, each verified rather than assumed:
+
+- **Not a CSS height-unit problem.** `100dvh` and `height: 100%` measured identical, so no swap between
+  them can help. A `body.pwa-standalone { height: 100% }` rule was shipped on this premise and reverted
+  the same day once the device data came back.
+- **Not paintable by the page.** An `html` background colour did not reach the band — it is outside the
+  page canvas entirely.
+- **Not `theme-color`.** Setting it to a distinct colour did not reach the band either.
+- **Not a stale or legacy install.** A fresh install from the HTTPS origin, with the manifest and
+  `display: standalone`, still shows it.
+- **Not `detectStandalone()` failing.** It falls through to `navigator.standalone`, which the device
+  reports true, so `body.pwa-standalone` *is* applied and standalone-scoped rules are live.
+
+The root condition is that `viewport-fit=cover` is not taking effect — every inset reports 0 and the view
+is letterboxed — despite the meta being present in `index.html`, re-applied by `mobile_core.js`'s
+`fixViewport()`, and `apple-mobile-web-app-status-bar-style: black-translucent` being injected. The bar is
+correctly positioned at the bottom of the viewport it is given; the viewport is simply not the screen.
+
+Consequence worth knowing: with the bottom inset reporting 0, `--m-safe-bottom` computes to 0, so
+`.m-bottom-nav`'s `padding-bottom` collapses. That padding is doing nothing on this device — the clearance
+comes from the reserved band instead. If a future iOS starts reporting the inset properly, the padding
+resumes and no change is needed.
+
 ## Coupling watchlist (re-check after every upstream merge)
 
 These fork files depend on unedited core internals. Upstream refactors won't cause git conflicts — they cause silent breakage, so check these by hand:
