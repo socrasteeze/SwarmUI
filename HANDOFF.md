@@ -45,11 +45,12 @@ containers, and **false on this workstation**: SDK 8.0.417 and 10.0.103 are inst
    (`GenTabModals.cshtml:294`), which a phone will not offer an image paste over — so the modal is still
    desktop-only in practice. Making it `contenteditable` is a second core-file edit; that merge cost is
    undecided. Not browser-verified: no harness covers genpage.
-5. Pre-existing `verify-simple-create-panel.mjs` failure: "batch group right edge matches Prefix" (42/43).
-   The assertion is `Math.abs(last.right - prefixBox.right) <= 1` at that harness's line 294, so resolving
-   it means choosing between a layout fix in `m.css`/`m_create.js` and loosening the tolerance — that
-   choice *is* the open question. Not runnable here: Playwright does not resolve (deliberately not a repo
-   dependency).
+5. ~~Pre-existing `verify-simple-create-panel.mjs` failure (42/43).~~ **Resolved 2026-08-22 — harness gap,
+   not a misalignment. No production code changed.** The Prefix row is hidden unless the session advertises
+   `filenameprefix`, and the harness never boots, so the check compared a real edge against a zero rect and
+   could never have passed. The batch group was correctly aligned all along (`gap 0px`). Detail in
+   `AGENTS.md`. Playwright is now installed locally, so the whole suite runs: **218/218 across all 7
+   harnesses.**
 
 ## Parked (from the sweep — each needs a decision you have not made)
 - **Mobile/PWA:** in-viewer `navigator.share({files})` button (deferred with the §2c overlay chrome that
@@ -101,4 +102,12 @@ running", clean shutdown, zero real errors — the only log hits are two `0 Erro
 four `NU1900` notices from nuget.org being unreachable for vulnerability data. Neither pre-existing
 extension error (VideoStages rename, SeedVR2 duplicate key) reappeared; both were fixed 2026-08-20.
 
-Not run: the Playwright harnesses (`verify-simple-*.mjs`) — not installed here.
+Playwright 1.62.1 + chromium-1234 are now installed locally (gitignored — still deliberately *not* a repo
+dependency, so `npm install playwright && npx playwright install chromium` is needed on a fresh machine).
+All 7 harnesses pass, the first full-suite run: `verify-mobile-layout` 11/11, `verify-mobile-perf` 45/45,
+`verify-simple-clipboard-paste` 26/26, `verify-simple-create-panel` 44/44, `verify-simple-error-banner`
+22/22, `verify-simple-image-editor` 50/50, `verify-simple-restart` 20/20 — **218/218**.
+```bash
+for f in src/BuiltinExtensions/MobileEnhancements/verify/*.mjs; do node "$f"; done
+```
+Still not device-verified: no harness covers genpage, and nobody has used an actual thumb on iOS.

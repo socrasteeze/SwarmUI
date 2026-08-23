@@ -37,3 +37,9 @@ docker-compose.yml
 __pycache__/
 venv/
 *.pth
+
+# Node / Playwright verify tooling (opt-in, deliberately NOT a repo dependency - see AGENTS.md).
+# Installed locally to run the verify/*.mjs harnesses; never commit the install artifacts.
+node_modules/
+package.json
+package-lock.json
