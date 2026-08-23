@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<!-- Device diagnostic for the /simple client. Fork-owned, deliberately dependency-free.
+
+     This fork's target device is an iPhone, and none of the verify/*.mjs harnesses can reproduce a real
+     iOS safe-area inset, a standalone launch context, or a secure-context difference - a desktop Chromium
+     reports 0 for every inset no matter how the viewport is emulated. That left bottom-inset bugs
+     diagnosable only by guesswork against a screenshot. This page prints the numbers instead: open it on
+     the device, screenshot it, and the values below distinguish causes that otherwise look identical.
+
+     It mirrors the meta tags and CSS variables that /simple's index.html and m.css actually use, so what it
+     reports is what they see. Keep it in sync if those change. -->
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>SwarmUI device diagnostic</title>
+    <style>
+        :root {
+            /* Read back exactly the way m.css consumes them. */
+            --probe-top: env(safe-area-inset-top);
+            --probe-bottom: env(safe-area-inset-bottom);
+            --probe-left: env(safe-area-inset-left);
+            --probe-right: env(safe-area-inset-right);
+        }
+        html { height: 100%; }
+        body {
+            margin: 0;
+            height: 100%;
+            background: #161616;
+            color: #e4e4e4;
+            font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+        h1 { font-size: 15px; margin: 0; padding: 0.6rem 0.8rem; border-bottom: 1px solid #4c4c4c; }
+        #out { flex: 1 1 auto; overflow-y: auto; padding: 0.6rem 0.8rem; }
+        .row { display: flex; justify-content: space-between; gap: 0.8rem; padding: 2px 0; }
+        .k { color: #aaa; }
+        .v { font-weight: bold; text-align: right; word-break: break-all; }
+        .bad { color: #ff6b6b; }
+        .good { color: #6bff9a; }
+        /* The point of the exercise: this bar is the same shape as /simple's, so the screenshot shows
+           whether it reaches the physical bottom of the screen on this device. */
+        #bar {
+            flex: 0 0 auto;
+            background: #202020;
+            border-top: 1px solid #4c4c4c;
+            padding-bottom: max(calc(min(env(safe-area-inset-bottom), 34px) - 10px), 0px);
+            text-align: center;
+        }
+        #bar div { padding: 0.7rem 0; color: #9a7bff; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>SwarmUI device diagnostic</h1>
+    <div id="out"></div>
+    <div id="bar"><div>BOTTOM BAR — should touch the screen edge</div></div>
+    <script>
+        const cs = getComputedStyle(document.documentElement);
+        const mm = (q) => window.matchMedia(q).matches;
+        const px = (v) => (v || '').trim() || '0px';
+        const rows = [
+            ['URL origin', location.origin],
+            ['secure context', window.isSecureContext],
+            ['display-mode standalone', mm('(display-mode: standalone)')],
+            ['display-mode fullscreen', mm('(display-mode: fullscreen)')],
+            ['display-mode browser', mm('(display-mode: browser)')],
+            ['navigator.standalone', ('standalone' in navigator) ? navigator.standalone : 'n/a'],
+            ['innerHeight', window.innerHeight],
+            ['outerHeight', window.outerHeight],
+            ['screen.height', screen.height],
+            ['visualViewport.height', window.visualViewport ? Math.round(window.visualViewport.height) : 'n/a'],
+            ['100dvh resolves to', null],
+            ['html height 100% resolves to', null],
+            ['screen.height - innerHeight', screen.height - window.innerHeight],
+            ['devicePixelRatio', window.devicePixelRatio],
+            ['env safe-area-inset-top', px(cs.getPropertyValue('--probe-top'))],
+            ['env safe-area-inset-bottom', px(cs.getPropertyValue('--probe-bottom'))],
+            ['env safe-area-inset-left', px(cs.getPropertyValue('--probe-left'))],
+            ['env safe-area-inset-right', px(cs.getPropertyValue('--probe-right'))],
+            ['navigator.clipboard', typeof navigator.clipboard],
+            ['clipboard.read', navigator.clipboard ? typeof navigator.clipboard.read : 'n/a'],
+            ['userAgent', navigator.userAgent]
+        ];
+        // Measure the two candidate heights the same way m.css would, using real elements.
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;height:100dvh;';
+        document.body.appendChild(probe);
+        const dvh = Math.round(probe.getBoundingClientRect().height);
+        probe.style.height = '100%';
+        const pct = Math.round(probe.getBoundingClientRect().height);
+        probe.remove();
+        rows[10][1] = dvh + 'px';
+        rows[11][1] = pct + 'px';
+
+        const out = document.getElementById('out');
+        for (const [k, v] of rows) {
+            const d = document.createElement('div');
+            d.className = 'row';
+            const kk = document.createElement('span'); kk.className = 'k'; kk.textContent = k;
+            const vv = document.createElement('span'); vv.className = 'v'; vv.textContent = String(v);
+            if (k === 'secure context') { vv.classList.add(v ? 'good' : 'bad'); }
+            if (k === 'env safe-area-inset-bottom') { vv.classList.add(v === '0px' ? 'bad' : 'good'); }
+            d.append(kk, vv); out.appendChild(d);
+        }
+        // The decisive line: does the visible viewport actually span the physical screen?
+        const verdict = document.createElement('div');
+        verdict.className = 'row';
+        const gap = Math.round(screen.height - window.innerHeight);
+        verdict.innerHTML = '<span class="k">VERDICT</span><span class="v ' + (Math.abs(gap) < 20 ? 'good' : 'bad') + '">'
+            + (Math.abs(gap) < 20 ? 'viewport spans the screen' : 'viewport is ' + gap + 'px SHORT of the screen')
+            + '</span>';
+        out.appendChild(verdict);
+    </script>
+</body>
+</html>

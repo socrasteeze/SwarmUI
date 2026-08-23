@@ -51,6 +51,9 @@ public class MobileEnhancementsExtension : Extension
         // Standalone mobile client ("/simple") assets. index.html is deliberately NOT registered - it is only
         // ever served by ServeMobileClient, which performs the auth check and template substitutions.
         OtherAssets.Add("Assets/m/m.css");
+        // Device diagnostic page. No harness can reproduce a real iOS safe-area inset or standalone launch
+        // context, so this is the only way to get real numbers off the target device - see the file header.
+        OtherAssets.Add("Assets/m/_diag.html");
         OtherAssets.Add("Assets/m/m_state.js");
         OtherAssets.Add("Assets/m/m_gen.js");
         OtherAssets.Add("Assets/m/m_ui.js");
