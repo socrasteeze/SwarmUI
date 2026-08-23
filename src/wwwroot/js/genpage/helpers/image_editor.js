@@ -592,29 +592,66 @@ class ImageEditor {
     }
 
     /**
-     * Handles paste in the fallback modal textbox: reads image from e.clipboardData and adds as layer.
+     * Handles paste in the fallback modal box: reads an image off e.clipboardData and adds it as a layer.
+     *
+     * Fork edit - see the `image_editor.js` entry in AGENTS.md's Fork Delta. Upstream handled only the
+     * `kind == 'file'` shape and returned silently otherwise. An image copied out of a web page - or, on a
+     * phone, out of the photo library - can instead arrive as *markup* with no file behind it, so that shape
+     * now falls through to the `<img>` read-back below rather than dead-ending. A miss says so out loud.
      */
     handlePasteModalPaste(e) {
-        let items = (e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData)) ? (e.clipboardData || e.originalEvent.clipboardData).items : null;
-        if (!items) {
-            return;
-        }
-        for (let i = 0; i < items.length; i++) {
-            if (items[i].kind == 'file') {
-                let file = items[i].getAsFile();
-                if (file && file.type.startsWith('image/')) {
-                    e.preventDefault();
-                    let reader = new FileReader();
-                    reader.onload = (ev) => {
-                        this.addImageLayerFromClipboard(ev.target.result);
-                        $('#image_editor_paste_modal').modal('hide');
-                        doNoticePopover('Pasted image as new layer', 'notice-pop-green');
-                    };
-                    reader.readAsDataURL(file);
-                    return;
+        let data = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
+        let items = data ? data.items : null;
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].kind == 'file') {
+                    let file = items[i].getAsFile();
+                    if (file && file.type.startsWith('image/')) {
+                        e.preventDefault();
+                        let reader = new FileReader();
+                        reader.onload = (ev) => this.finishPasteModal(ev.target.result);
+                        reader.readAsDataURL(file);
+                        return;
+                    }
                 }
             }
         }
+        // No file on the event. Let the default paste land in the box, then read the <img> back out of it on
+        // the next task. A `data:` src is the bytes themselves; a `blob:` or same-origin src is not, but it is
+        // real bytes this page may read, so fetch it. The box is cleared on every path, so nothing is left in it.
+        let box = document.getElementById('image_editor_paste_pastebox');
+        if (!box) {
+            return;
+        }
+        setTimeout(() => {
+            let img = box.querySelector('img');
+            let src = img ? img.src : '';
+            box.innerHTML = '';
+            if (!src) {
+                doNoticePopover('Nothing usable pasted - copy an image', 'notice-pop-red');
+                return;
+            }
+            if (src.startsWith('data:')) {
+                this.finishPasteModal(src);
+                return;
+            }
+            fetch(src).then((response) => response.blob()).then((blob) => {
+                if (!blob.type || !blob.type.startsWith('image/')) {
+                    doNoticePopover('Nothing usable pasted - copy an image', 'notice-pop-red');
+                    return;
+                }
+                let reader = new FileReader();
+                reader.onload = (ev) => this.finishPasteModal(ev.target.result);
+                reader.readAsDataURL(blob);
+            }, () => doNoticePopover('Could not read the pasted image', 'notice-pop-red'));
+        }, 0);
+    }
+
+    /** Shared tail of every successful modal paste: add the layer, close the modal, say so. */
+    finishPasteModal(dataURL) {
+        this.addImageLayerFromClipboard(dataURL);
+        $('#image_editor_paste_modal').modal('hide');
+        doNoticePopover('Pasted image as new layer', 'notice-pop-green');
     }
 
     /**
@@ -665,8 +702,10 @@ class ImageEditor {
      */
     openPasteModal() {
         let box = document.getElementById('image_editor_paste_pastebox');
-        box.value = '';
+        box.innerHTML = '';
         $('#image_editor_paste_modal').modal('show');
+        // Focused synchronously, inside the gesture that opened the modal: a browser places a caret and raises
+        // the on-screen keyboard for a programmatic focus() only while the user's own tap is still live.
         box.focus();
     }
 

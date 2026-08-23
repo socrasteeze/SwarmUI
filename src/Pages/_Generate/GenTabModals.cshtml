@@ -288,11 +288,30 @@
 @WebUtil.ModalFooter()
 @WebUtil.ModalHeader("image_editor_paste_modal", "Paste Image as Layer")
     <div class="modal-body">
-        <span class="translate">Your browser has not allowed Swarm to directly access your clipboard. Instead, paste an image from your clipboard into the box below with CTRL+V to add it as a new layer.</span>
+        <span class="translate">Your browser has not allowed Swarm to directly access your clipboard. Instead, paste an image into the box below to add it as a new layer: Ctrl+V on a desktop, long-press then Paste on a phone.</span>
         <br><br>
-        <label class="auto-file-input-label">
-            <input type="text" id="image_editor_paste_pastebox" class="auto-text auto-text-block" size="14" maxlength="0" placeholder="Ctrl+V: Paste Image" autocomplete="off" />
-        </label>
+        @* Fork edit - contenteditable, not <input type="text">. iOS only offers Paste for a copied image over a
+           region that can hold one, and a text input is not one, so the old box made this modal desktop-only.
+           See the image_editor.js entry in AGENTS.md's Fork Delta. *@
+        <style>
+            #image_editor_paste_pastebox {
+                box-sizing: border-box;
+                width: 100%;
+                min-height: 5.5rem;
+                max-height: 40vh;
+                overflow-y: auto;
+                padding: 0.7rem;
+                border: 1px dashed var(--border-color);
+                border-radius: 0.7rem;
+                background: var(--background);
+                color: var(--text);
+                -webkit-user-select: text;
+                user-select: text;
+            }
+            #image_editor_paste_pastebox:empty::before { content: attr(data-placeholder); color: var(--text-soft); }
+            #image_editor_paste_pastebox img { max-width: 100%; height: auto; }
+        </style>
+        <div id="image_editor_paste_pastebox" contenteditable="true" role="textbox" aria-label="Paste an image here" data-placeholder="Paste here"></div>
     </div>
     <div class="modal-footer">
         <button type="button" class="btn btn-secondary basic-button translate" onclick="$('#image_editor_paste_modal').modal('hide')">Cancel</button>

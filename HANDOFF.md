@@ -41,10 +41,12 @@ containers, and **false on this workstation**: SDK 8.0.417 and 10.0.103 are inst
 4. ~~Genpage image-editor clipboard fix.~~ **Rejection half done (2026-08-22).** `navigator.clipboard.read()`
    rejection now routes to the paste modal, and a successful paste into that modal closes it and confirms
    (it previously dropped the layer behind the backdrop silently). Core-file edit, recorded in the Fork
-   Delta and the coupling watchlist. **Still open:** the modal's box is `<input type="text" maxlength="0">`
-   (`GenTabModals.cshtml:294`), which a phone will not offer an image paste over — so the modal is still
-   desktop-only in practice. Making it `contenteditable` is a second core-file edit; that merge cost is
-   undecided. Not browser-verified: no harness covers genpage.
+   Delta and the coupling watchlist. **The mobile half then followed:** the modal box is now a
+   `contenteditable` div instead of `<input type="text" maxlength="0">`, so a phone will offer Paste over
+   it, and a pasted `<img>` with no file behind it is read back out. That makes
+   `src/Pages/_Generate/GenTabModals.cshtml` a second diverged core file, with its own Fork Delta entry.
+   **Still not browser-verified** — no harness covers genpage, and checking it on the running server needs
+   a restart because `.cshtml` is compiled. That restart is the outstanding step here.
 5. ~~Pre-existing `verify-simple-create-panel.mjs` failure (42/43).~~ **Resolved 2026-08-22 — harness gap,
    not a misalignment. No production code changed.** The Prefix row is hidden unless the session advertises
    `filenameprefix`, and the harness never boots, so the check compared a real edge against a zero rect and
