@@ -79,26 +79,6 @@
     padding-top: var(--safe-top, env(safe-area-inset-top));
     box-sizing: border-box;
 }
-/* Installed-PWA height, and why it is not just 100dvh.
-   In the installed iOS app the dynamic viewport was resolving to the screen MINUS the home-indicator inset,
-   so .m-app stopped ~34px short of the physical bottom. Everything inside laid out correctly against that
-   short viewport, which left .m-bottom-nav floating above a band of page background - the bar read as
-   unpinned. That defeats the bar's own padding-bottom (see .m-bottom-nav), which puts the inset INSIDE the
-   bar precisely so its background spans to the screen edge.
-   A percentage height tracks the layout viewport instead, which viewport-fit=cover makes full-bleed.
-   SCOPED TO STANDALONE ON PURPOSE: a standalone app has no retractable browser toolbars, so the layout
-   viewport is the screen and this is exact. In a normal Safari tab the layout viewport is the LARGE
-   viewport - taller than what is visible while the toolbars are shown - so the same rule there would
-   reintroduce the classic 100vh overflow. Tabs keep 100dvh. */
-html {
-    height: 100%;
-}
-body.m-body.pwa-standalone {
-    height: 100%;
-}
-body.pwa-standalone .m-app {
-    height: 100%;
-}
 
 /* --- Header --- */
 .m-header {
