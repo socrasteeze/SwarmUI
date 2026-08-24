@@ -45,6 +45,8 @@ class MobileEnhancements {
 
     /**
      * In the installed app only, puts a "Mobile UI" link on any non-/simple page so the user can get back.
+     * It docks into the top tab strip where there is one, and falls back to a floating pill where there is
+     * not (login, install, the error page).
      *
      * Standalone has no address bar and no browser back button, and /simple's own "Classic UI" link navigates
      * here with nothing pointing back - so a tap that was meant as a peek at the full UI stranded the user
@@ -66,6 +68,26 @@ class MobileEnhancements {
             if (!document.body || document.querySelector('.swarm-mobile-return')) {
                 return;
             }
+            let tabs = document.getElementById('toptablist');
+            if (tabs) {
+                // Docked into the tab strip rather than floated over it. As a fixed top-right pill it sat on
+                // top of whichever tab happened to be underneath, and once Genpage became installable in its
+                // own right (the Classic manifest variant) that overlap was on screen for a whole session
+                // instead of only for a peek from /simple. The strip already scrolls horizontally under
+                // body.small-window and its items are `flex: 0 0 auto`, so one more item at the end costs no
+                // layout and cannot collide with anything.
+                let item = document.createElement('li');
+                item.className = 'nav-item swarm-mobile-return';
+                item.setAttribute('role', 'presentation');
+                let tab = document.createElement('a');
+                tab.className = 'nav-link';
+                tab.href = '/simple';
+                tab.textContent = 'Mobile UI';
+                item.appendChild(tab);
+                tabs.appendChild(item);
+                return;
+            }
+            // No tab strip on this page, so fall back to the floating pill.
             let link = document.createElement('a');
             link.className = 'swarm-mobile-return';
             link.href = '/simple';
