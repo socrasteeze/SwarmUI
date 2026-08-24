@@ -19,6 +19,14 @@ public class MobileEnhancementsExtension : Extension
     /// <summary>Browser theme / PWA status-bar color, matched to the modern_dark background (<c>--background: #161616</c>).</summary>
     public static string ThemeColor = "#161616";
 
+    /// <summary>Query key and value that select the Classic variant of the web manifest. See <see cref="ServeManifest"/>.</summary>
+    public static string ManifestUiKey = "ui", ClassicUiValue = "classic";
+
+    /// <summary>Where a home-screen app installed from the Classic UI opens. The genpage's own route rather than
+    /// <c>/</c>: an install captures <c>start_url</c> verbatim and never re-resolves it, so pointing at <c>/</c> would
+    /// spend a redirect on every cold start.</summary>
+    public static string ClassicStartUrl = "/Text2Image";
+
     /// <summary>Per-user guard against repeatedly materializing a full autocomplete response.</summary>
     public static SimpleRateLimiter<string> SimpleAutocompleteRateLimiter = new(12, TimeSpan.FromMinutes(1));
 
@@ -144,7 +152,7 @@ public class MobileEnhancementsExtension : Extension
         // the rename was only ever about not having to TYPE a single-letter path, and a redirect nobody
         // types does not bring that back.
         WebServer.WebApp.MapGet("/m", ServeLegacyClientRedirect);
-        WebServer.PageHeaderExtra = new(WebServer.PageHeaderExtra.Value + BuildHeadTags());
+        WebServer.PageHeaderExtra = new(WebServer.PageHeaderExtra.Value + BuildHeadTags(true));
     }
 
     /// <summary>Redirects the pre-rename <c>/m</c> route to the current <c>/simple</c> client. Temporary
@@ -187,7 +195,7 @@ public class MobileEnhancementsExtension : Extension
         string html = File.ReadAllText($"{FilePath}Assets/m/index.html");
         string remaps = Newtonsoft.Json.JsonConvert.SerializeObject(SwarmUI.Text2Image.T2IParamTypes.ParameterRemaps);
         string toast = $"<div class=\"center-toast toast-error-box\" id=\"center_toast\">{WebUtil.Toast("error_toast_box", "Error", "", "error_toast_content", "", false)}</div>";
-        html = html.Replace("[VARY]", Utilities.VaryID).Replace("[REMAPS]", remaps).Replace("[HEADEXTRA]", BuildHeadTags()).Replace("[TOAST]", toast);
+        html = html.Replace("[VARY]", Utilities.VaryID).Replace("[REMAPS]", remaps).Replace("[HEADEXTRA]", BuildHeadTags(false)).Replace("[TOAST]", toast);
         context.Response.ContentType = "text/html";
         context.Response.StatusCode = 200;
         await context.Response.WriteAsync(html);
@@ -258,12 +266,43 @@ public class MobileEnhancementsExtension : Extension
             || host == "civitai.green" || host.EndsWith(".civitai.green");
     }
 
-    /// <summary>Serves the PWA web manifest at <c>/manifest.json</c>.</summary>
+    /// <summary>Serves the PWA web manifest at <c>/manifest.json</c>, in one of two variants.
+    /// <para>The manifest link tag goes in the head of every page, Classic and <c>/simple</c> alike, and a browser
+    /// installing a home-screen app takes <c>start_url</c> from the manifest rather than from the page the user was
+    /// standing on (iOS has honored the manifest since 16.4). One fixed manifest therefore sent every install to
+    /// <c>/simple</c>, including installs started from Classic. Classic pages instead link
+    /// <c>/manifest.json?ui=classic</c>, and that variant is rewritten here to open the genpage.</para>
+    /// <para><c>id</c> moves with <c>start_url</c> because <c>id</c> is what Chromium uses to tell installed apps
+    /// apart - leaving both variants on one <c>id</c> would make installing the second silently update the first
+    /// instead of adding a second icon. iOS has no such notion and treats every Add to Home Screen as its own app
+    /// either way. Note that neither re-reads the manifest for an app that is ALREADY installed, so an existing
+    /// icon keeps whatever <c>start_url</c> it captured until it is deleted and re-added.</para></summary>
     public async Task ServeManifest(HttpContext context)
     {
+        string body = File.ReadAllText($"{FilePath}Assets/manifest.json");
+        if (context.Request.Query[ManifestUiKey] == ClassicUiValue)
+        {
+            JObject manifest = JObject.Parse(body);
+            manifest["id"] = ClassicStartUrl;
+            manifest["start_url"] = ClassicStartUrl;
+            // The lone shortcut is "Generate", which means the same thing on either UI - it just has to point at
+            // the matching one, or a long-press on the Classic icon jumps to the mobile client.
+            if (manifest["shortcuts"] is JArray shortcuts)
+            {
+                foreach (JToken shortcut in shortcuts)
+                {
+                    shortcut["url"] = ClassicStartUrl;
+                }
+            }
+            body = manifest.ToString();
+        }
         context.Response.ContentType = "application/manifest+json";
+        // The two variants share a path and differ only by query string, which browsers cache aggressively.
+        // Without this, a cached copy of the old single-variant manifest can keep installing Classic to /simple
+        // long after the fix shipped.
+        context.Response.Headers["Cache-Control"] = "no-cache";
         context.Response.StatusCode = 200;
-        await context.Response.WriteAsync(File.ReadAllText($"{FilePath}Assets/manifest.json"));
+        await context.Response.WriteAsync(body);
         await context.Response.CompleteAsync();
     }
 
@@ -279,11 +318,14 @@ public class MobileEnhancementsExtension : Extension
         await context.Response.CompleteAsync();
     }
 
-    /// <summary>Builds the extra <c>&lt;head&gt;</c> tags (manifest link, theme color, apple/mobile PWA meta, touch icon) injected on every page.</summary>
-    public string BuildHeadTags()
+    /// <summary>Builds the extra <c>&lt;head&gt;</c> tags (manifest link, theme color, apple/mobile PWA meta, touch icon)
+    /// injected on every page. <paramref name="classic"/> picks the Classic manifest variant - see
+    /// <see cref="ServeManifest"/> for why the two UIs cannot share one manifest URL.</summary>
+    public string BuildHeadTags(bool classic)
     {
         string icons = "/ExtensionFile/MobileEnhancementsExtension/Assets/icons";
-        return "\n<link rel=\"manifest\" href=\"/manifest.json\" />"
+        string manifest = classic ? $"/manifest.json?{ManifestUiKey}={ClassicUiValue}" : "/manifest.json";
+        return $"\n<link rel=\"manifest\" href=\"{manifest}\" />"
             + $"\n<meta name=\"theme-color\" content=\"{ThemeColor}\" />"
             + "\n<meta name=\"mobile-web-app-capable\" content=\"yes\" />"
             + "\n<meta name=\"apple-mobile-web-app-capable\" content=\"yes\" />"
