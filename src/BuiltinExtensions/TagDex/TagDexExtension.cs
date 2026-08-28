@@ -52,6 +52,7 @@ public partial class TagDexExtension : Extension
         API.RegisterAPICall(TagDexUnloadSource, false, PermManageTagDex);
         API.RegisterAPICall(TagDexImportThumbnails, false, PermManageTagDex);
         API.RegisterAPICall(TagDexGenerateThumbnail, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexSetThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexDeleteThumbnail, false, PermManageTagDex);
     }
 
