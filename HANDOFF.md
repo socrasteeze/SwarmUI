@@ -1,60 +1,74 @@
 # HANDOFF
 
-**Updated:** 2026-08-23 · **Branch:** main · **Base:** a4c63d8a (= origin/main) · **Tree:** clean
+**Updated:** 2026-08-27 · **Branch:** main · **Base:** 70b5e459 (= origin/main) · **Tree:** dirty (`AGENTS.md` only)
 
 ## State
-A home-screen install now follows the UI it was started from: Genpage installs to `/Text2Image`, `/simple`
-still installs to `/simple`. Confirmed on-device. The return link that overlapped the tabs is now docked.
+TagDex Characters tab is fixed and committed; server-side verified against the live instance. Anima
+black-image faults root-caused and fixed by a server setting (`Data/Settings.fds`, untracked).
 
 ## Done this session
-- **Per-UI web manifest** — `MobileEnhancementsExtension.cs`. Razor pages link `/manifest.json?ui=classic`;
-  `ServeManifest` rewrites that variant's `start_url`, `id` and shortcut to `/Text2Image`, and responses are
-  now `Cache-Control: no-cache`. Cause: a browser takes `start_url` from the manifest, not from the page
-  being installed, so every Add to Home Screen landed on `/simple`. Fork Delta updated.
-- **"Mobile UI" return link docked into `#toptablist`** — `mobile_core.js`. The fixed top-right pill covered
-  whichever tab sat under it, permanently once Genpage became an install of its own. Fixed pill kept as the
-  fallback for pages with no tab strip.
+- **TagDex: 3 bugs + 2 new buttons** — commit `e0813155`. Reference generation never worked at all; every
+  copyright folder read as empty; added set-from-current-image and delete.
+- **Anima black images: fp16 overflow in the DiT.** SwarmUI auto-injects `--fast fp16_accumulation`
+  (`ComfyUISelfStartBackend.cs:362`), which sets ComfyUI's `PRIORITIZE_FP16`, which forces the bf16 Anima
+  weights to fp16 (`model_management.py:1140`). Disabled via `Performance.AllowGpuSpecificOptimizations:
+  false`. Backend now logs `model weight dtype torch.bfloat16, manual cast: None`. One test gen came out
+  normal (mean luminance 178); the fault is intermittent, so that is not yet proof.
 
 ## Open
-1. **Verify the docked "Mobile UI" link on-device** — force-quit the Classic app so it re-fetches assets,
-   then confirm the link rides at the end of the tab strip and covers no tab. The install itself is confirmed.
-2. Genpage still has no verify harness; the clipboard work was hand-checked, and two of its paths (default
-   paste, real iOS long-press) are unreachable by synthetic events anyway.
-3. No authentication is set. If it is ever enabled, blank `Network.AuthBypassIPs` in the same edit.
-4. Metadata pull is per-model only (card → Edit Metadata → CivitAI URL → Load → Save); no bulk scan exists
-   here. Nothing pulled yet — do a few and confirm the sidecars land before working through the library.
-5. 23 sweep candidates parked pending product decisions — `docs/TagDex-Plan.md`, `docs/MobilePWA-Optimization-Plan.md`.
+1. **Hard-refresh the browser (Ctrl+Shift+R)** before testing the Characters tab. Asset URLs carry
+   `?vary=<commit read at startup>`; the server started before `e0813155`, so cached JS still wins.
+2. **Re-run the prompts that reliably went black** and confirm they no longer do. This is the only real
+   proof the fp16 fix holds.
+3. **Move Characters into the Generate bottom bar.** No extension hook exists — `WebServer.cs:345-359`
+   discovers `Tabs/Text2Image/*.html` into `T2ITabHeader`/`T2ITabBody` only (rendered at
+   `Text2Image.cshtml:58,79`); the bottom strip is hardcoded in `_Generate/GenerateTab.cshtml` (nav items
+   ~164-187, panes ~234-258). Cheapest path: mirror the existing hook — discover `Tabs/GenerateBottom/*.html`
+   into new `T2IBottomTabHeader`/`T2IBottomTabBody`, insert both as placeholders in `GenerateTab.cshtml`,
+   then move `TagDex/Tabs/Text2Image/Characters.html` across. Two small append-only core edits, upstreamable,
+   record in Fork Delta. Card layout in the narrower panel is the long pole (chip rows will wrap).
+4. **`AGENTS.md` is dirty with edits not from this session** — a GPU-acceleration-gate bullet and a change to
+   the post-upstream-merge step. Left uncommitted deliberately; review and commit separately.
+5. If black images recur with the DiT in bf16, the next suspect is **`comfy-aimdo`** (`DynamicVRAM support
+   detected and enabled`, async weight offloading) — not audited.
+6. **TagDex per-user settings are unread** — VAE override, tiled VAE, thumb prompt suffix live in
+   `Data/Users.ldb` (LiteDB binary), not inspectable from disk.
+7. Carried forward: no auth is set (blank `Network.AuthBypassIPs` if ever enabled); model metadata pull is
+   per-model only; 23 sweep candidates parked — `docs/TagDex-Plan.md`, `docs/MobilePWA-Optimization-Plan.md`.
 
 ## Decisions
-- **Two manifest variants, and `id` moves with `start_url`.** `id` is how Chromium tells installed apps
-  apart — both on `"/"` means the second install updates the first. Classic uses `/Text2Image`, not `/`.
-- `tailscale serve` over Swarm-side TLS — it self-renews; Swarm would need core edits plus manual renewal.
-- **Proxy on its own TLS port; Swarm stays on `0.0.0.0`.** `serve` intercepts inside tailscaled, below the
-  socket layer, and owns the tailnet side of its port expecting TLS — hence not Swarm's, where it 400'd
-  plain HTTP. Ports are PWA origins; reinstall after a move.
-- **Model metadata writes `.swarm.json` sidecars, not safetensors headers.** A header rewrite flattened LoRA
-  architecture and titles last time and is not reversible. Keep `Paths.ClearStrayModelData` and
-  `EditMetadataAcrossAllDups` false — the first deletes what the sidecar extension repairs from.
+- **`AllowGpuSpecificOptimizations: false`** over `DisableInternalArgs: true` — the surgical alternative means
+  hand-maintaining `--front-end-version`, which goes stale on every frontend bump.
+- **Kept `--use-sage-attention`.** It cannot reach Anima: the DiT calls `F.scaled_dot_product_attention`
+  directly (`comfy/ldm/anima/model.py:80`), and the masked Qwen3 encoder falls back to pytorch attention
+  because sageattention 2.2.0's `sageattn()` has no `attn_mask` parameter.
+- **Unwrapped `rawInput["rawInput"]`** rather than renaming the parameter — the binder ignores the name
+  entirely, so no name would have worked.
+- **Delete button is conditional on `record.thumb`** — a card on the placeholder has no file behind it.
+- Anima text encoder left alone: `llama_detect` reads the file's own dtype, so it is already bf16. The
+  `dtype: torch.float16` line in the backend log is the pre-override default and is misleading.
 
 ## Traps
-- **`dotnet build --configuration Release` does not update the running server.** It writes `src/bin/Release`;
-  the launcher runs `src/bin/live_release`, rebuilt only when `src/bin/must_rebuild` exists or the exe is gone.
-- **`RequiredAuthorization` is bypassed behind any local reverse proxy**, `serve` included — it compares the
-  socket peer against `Network.AuthBypassIPs` (loopback by default), and proxied requests arrive as loopback.
-- **HTTPS needs the MagicDNS name, not the tailnet IP** — the cert is issued for the hostname, so the raw
-  tailnet IP fails its cert check. Plain HTTP on Swarm's own port is unaffected on every interface.
-- **A running server blocks three things**: a `--ci-test` boot (collides over `Data/Users.ldb` — pass an
-  isolated `--data_dir`), a rebuild, and editing `Data/Settings.fds`. Stop it via `ShutdownServer`, not a kill.
-- **Release builds cache extension assets in memory** — asset edits need a restart. `?vary=` is the git
-  commit read at **startup**, so a restart before a commit serves new bytes under the old URL.
-- On Windows the gate is the built DLL, not `launch-linux.sh`. Playwright is not a repo dependency.
+- **`\s` in `Data/Settings.fds` paths is FDS escaping for a literal backslash, not corruption.** `E:\smodels`
+  decodes to the real models root. Do not "fix" it — an unescaped path is what is wrong. Same scheme as `\x`
+  for null, visible in `Backends.fds`.
+- **A running server blocks a rebuild** (locks `SwarmUI.exe`) **and owns `Data/Settings.fds`.** Stop it with
+  the `ShutdownServer` API, not a kill; relaunch with `Start_SwarmUI.ps1`, which is idempotent.
+- **Build with `-o src/bin/live_release`.** A plain `--configuration Release` writes `src/bin/Release`, which
+  the launcher does not run.
+- **A `JObject` API parameter receives the whole request payload, not the field matching its name**
+  (`APICallReflectBuilder.cs:46`). This is what broke reference generation; it will break the next route too.
+- **`AllowGpuSpecificOptimizations: false` also downgrades** `fp8_e4m3fn_fast` to `fp8_e4m3fn` for large
+  models (`WorkflowGeneratorModelSupport.cs:1064`) — slower on Flux/Qwen-Image, no quality loss.
+- **`?vary=` is the git commit read at startup**, so restarting before committing serves new bytes under the
+  old URL — and committing after a restart leaves stale bytes cached.
 
 ## Verify
 ```powershell
-dotnet build src/SwarmUI.csproj --configuration Release --no-incremental
-dotnet format SwarmUI.sln --verify-no-changes
-dotnet src/bin/Release/net8.0/SwarmUI.dll --ci-test true --launch_mode none --loglevel debug --data_dir <scratch>
-Get-ChildItem src/BuiltinExtensions/MobileEnhancements/verify/*.mjs | ForEach-Object { node $_.FullName }
-tailscale serve status
+dotnet build SwarmUI.sln --configuration Release
+dotnet format --verify-no-changes
+dotnet format style --verify-no-changes
+# Build the binaries the launcher actually runs (stop the server first):
+dotnet build src/SwarmUI.csproj --configuration Release -o src/bin/live_release
+# No automated tests. Validate by running the live app in a browser.
 ```
-2026-08-23: build 0/0, format clean, boot exit 0. Playwright harnesses **not re-run** — this change is C# only.
