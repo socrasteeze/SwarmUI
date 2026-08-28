@@ -11,6 +11,10 @@
  */
 class TagDexTabClass {
 
+    /** Card image for an entry with no generated reference yet. Shared by the card builder and the delete path, so
+     * clearing a thumbnail lands on exactly the image a never-generated card shows. */
+    static PlaceholderImage = 'imgs/model_placeholder.jpg';
+
     constructor() {
         /** The core browser instance, built on first tab open. */
         this.browser = null;
@@ -496,7 +500,13 @@ class TagDexTabClass {
     listEntries(path, isRefresh, callback, depth) {
         let copyright = this.facets.copyright;
         if (path) {
-            copyright = this.folderToCopyright[path] || path;
+            // The browser hands folder paths with a trailing slash, and nests by '/' segment - see
+            // buildTreeElements in browsers.js, which builds each child as `${path}${name}/`. Our folders are one
+            // flat level of copyright tokens, and a token never contains a real slash (ToFolderToken swaps it for
+            // U+2215), so the last non-empty segment is the token. Without this strip the raw 'pokemon/' reaches
+            // the server, matches no copyright, and every folder reads as empty.
+            let token = path.replace(/\/+$/, '').split('/').pop();
+            copyright = this.folderToCopyright[token] || token;
         }
         genericRequest('TagDexSearchEntries', {
             source: this.source,
@@ -602,20 +612,26 @@ class TagDexTabClass {
             }
             html += '</span>';
         }
+        let buttons = [
+            { label: 'Insert trigger', onclick: () => this.insertTag(record.trigger) },
+            { label: 'Insert trigger + all core tags', onclick: () => this.insertTag([record.trigger].concat(record.core_tags || []).join(', ')) },
+            { label: 'Insert as <character:> tag', onclick: () => this.insertTag(`<character:${record.name}>`) },
+            { label: record.thumb ? 'Regenerate reference image' : 'Generate reference image', onclick: (div) => this.generateThumb(record, div) },
+            { label: 'Use current image as reference', onclick: (div) => this.setThumbFromCurrentImage(record, div) }
+        ];
+        // Only offered when there is something to delete - a card still showing the placeholder has no file behind it.
+        if (record.thumb) {
+            buttons.push({ label: 'Delete reference image', onclick: (div) => this.deleteThumb(record, div) });
+        }
+        buttons.push({ label: 'Open on booru', href: record.url, is_download: false });
         return {
             name: record.trigger,
             display: record.display || record.name,
             description: html,
-            image: record.thumb || 'imgs/model_placeholder.jpg',
+            image: record.thumb || TagDexTabClass.PlaceholderImage,
             className: 'tagdex-card',
             searchable: `${record.name} ${record.copyright || ''} ${(record.core_tags || []).join(' ')}`,
-            buttons: [
-                { label: 'Insert trigger', onclick: () => this.insertTag(record.trigger) },
-                { label: 'Insert trigger + all core tags', onclick: () => this.insertTag([record.trigger].concat(record.core_tags || []).join(', ')) },
-                { label: 'Insert as <character:> tag', onclick: () => this.insertTag(`<character:${record.name}>`) },
-                { label: record.thumb ? 'Regenerate reference image' : 'Generate reference image', onclick: (div) => this.generateThumb(record, div) },
-                { label: 'Open on booru', href: record.url, is_download: false }
-            ]
+            buttons: buttons
         };
     }
 
@@ -646,20 +662,70 @@ class TagDexTabClass {
             else if (data.success) {
                 this.generatingThumb = false;
                 this.setStatus(`Reference image saved for ${record.display || record.name}.`);
-                // Repaint just this card's image rather than refetching the page.
-                let img = div ? div.closest('.model-block, .model-block-small, .model-block-big') : null;
-                let target = img ? img.querySelector('img') : null;
-                if (target) {
-                    target.src = `${data.thumb}?t=${Date.now()}`;
-                }
-                else {
-                    this.requery();
-                }
+                this.repaintCardThumb(div, data.thumb);
             }
         }, 0, error => {
             this.generatingThumb = false;
             this.setStatus(`Reference generation failed: ${error}`);
         });
+    }
+
+    /** Sets one entry's reference image from whatever image is currently selected on the Generate tab.
+     * Complements generateThumb: the image worth keeping is often one already made and then inpainted, upscaled, or
+     * cherry-picked out of a batch, none of which regenerating from the tag alone would reproduce. */
+    setThumbFromCurrentImage(record, div) {
+        if (!currentImgSrc) {
+            this.setStatus('No current image - generate or pick one on the Generate tab first.');
+            return;
+        }
+        this.setStatus(`Saving current image as reference for ${record.display || record.name}...`);
+        // resize256 matches what the model preview flow sends, keeping the upload small; the server still runs it
+        // through the same JPEG helper the generate route uses.
+        imageToData(currentImgSrc, dataURL => {
+            if (!dataURL) {
+                this.setStatus('Could not read the current image.');
+                return;
+            }
+            genericRequest('TagDexSetThumbnail', { source: this.source, name: record.name, image: dataURL }, data => {
+                this.setStatus(`Reference image saved for ${record.display || record.name}.`);
+                this.repaintCardThumb(div, data.thumb);
+            }, 0, error => {
+                this.setStatus(`Could not save reference: ${error}`);
+            });
+        }, true);
+    }
+
+    /** Deletes one entry's reference image, reverting the card to the placeholder.
+     * Confirms first, the same way the wildcard browser guards its delete: the file is cheap to regenerate, but the
+     * button sits in a dense card grid where a misclick costs a gen to undo. */
+    deleteThumb(record, div) {
+        if (!confirm(`Delete the reference image for ${record.display || record.name}?`)) {
+            return;
+        }
+        genericRequest('TagDexDeleteThumbnail', { source: this.source, name: record.name }, data => {
+            record.thumb = null;
+            this.setStatus(data.removed > 0
+                ? `Reference image deleted for ${record.display || record.name}.`
+                : `No reference image on disk for ${record.display || record.name}.`);
+            this.repaintCardThumb(div, TagDexTabClass.PlaceholderImage);
+        }, 0, error => {
+            this.setStatus(`Could not delete reference: ${error}`);
+        });
+    }
+
+    /** Repaints one card's image in place rather than refetching the whole page, falling back to a requery when the
+     * card element cannot be found (eg the view changed under us). */
+    repaintCardThumb(div, thumb) {
+        let block = div ? div.closest('.model-block, .model-block-small, .model-block-big') : null;
+        let target = block ? block.querySelector('img') : null;
+        if (target) {
+            // Generated thumbs reuse one URL per entry, so they need the cache buster; the static placeholder does
+            // not, and busting it would refetch the same asset on every delete.
+            target.src = thumb == TagDexTabClass.PlaceholderImage ? thumb : `${thumb}?t=${Date.now()}`;
+        }
+        else {
+            this.requery();
+        }
     }
 
     /** Appends a tag to the prompt, or removes it if already present as a comma-separated segment.

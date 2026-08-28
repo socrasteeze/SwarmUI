@@ -29,7 +29,7 @@ public partial class TagDexExtension
     public async Task<JObject> TagDexGenerateThumbnail(Session session, WebSocket ws,
         [API.APIParameter("Dataset ID.")] string source,
         [API.APIParameter("Exact tag name to generate a reference for.")] string name,
-        [API.APIParameter("The current generation parameters, as the Generate tab would send them.")] JObject rawInput,
+        [API.APIParameter("The full request payload; the generation parameters live under its 'rawInput' key.")] JObject rawInput,
         [API.APIParameter("Whether to include the entry's core tags in the prompt.")] bool includeCoreTags = true)
     {
         TagDexList list = TagDexData.EnsureLoaded(source);
@@ -58,7 +58,13 @@ public partial class TagDexExtension
         try
         {
             TagDexPrefs prefs = TagDexPrefs.For(session);
-            T2IParamInput input = T2IAPI.RequestToParams(session, rawInput ?? [], true);
+            // A JObject API parameter is bound to the WHOLE request payload, not to the field matching its name -
+            // see APICallReflectBuilder, which just dups the input and strips 'session_id'. So the generation
+            // parameters have to be dug out of the nested 'rawInput' key; passing the outer object straight to
+            // RequestToParams feeds it 'source'/'name'/'rawInput' as unknown params and no model, which fails the
+            // whole gen with "No model input given".
+            JObject genParams = rawInput?["rawInput"] as JObject ?? [];
+            T2IParamInput input = T2IAPI.RequestToParams(session, genParams, true);
             string prompt = entry.Trigger;
             if (includeCoreTags && !string.IsNullOrWhiteSpace(entry.CoreTags))
             {
@@ -119,13 +125,62 @@ public partial class TagDexExtension
         }
     }
 
+    /// <summary>API route: sets one entry's reference thumbnail from an image the user already has.
+    /// <para>Complements <see cref="TagDexGenerateThumbnail"/>: the image you want is often one you already made and
+    /// then edited, inpainted, or upscaled, which regenerating from the tag alone would never reproduce.</para></summary>
+    [API.APIDescription("Sets a TagDex reference thumbnail from an existing image.", "\"success\": true, \"thumb\": \"/TagDexThumb/...\"")]
+    public async Task<JObject> TagDexSetThumbnail(Session session,
+        [API.APIParameter("Dataset ID.")] string source,
+        [API.APIParameter("Exact tag name to set the reference for.")] string name,
+        [API.APIParameter("Image-data-string of the new reference image.")] string image)
+    {
+        TagDexList list = TagDexData.EnsureLoaded(source);
+        if (list is null)
+        {
+            return new JObject() { ["error"] = $"Dataset '{source}' is not loaded." };
+        }
+        if (!list.ByName.TryGetValue(name, out int index))
+        {
+            return new JObject() { ["error"] = $"No entry named '{name}'." };
+        }
+        if (string.IsNullOrWhiteSpace(image))
+        {
+            return new JObject() { ["error"] = "No image given." };
+        }
+        TagDexEntry entry = list.Entries[index];
+        string written;
+        try
+        {
+            written = WriteThumb(list, in entry, ImageFile.FromDataString(image));
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"[TagDex] Thumbnail write failed for '{entry.Name}': {ex.ReadableString()}");
+            return new JObject() { ["error"] = $"Could not write thumbnail: {ex.Message}" };
+        }
+        if (written is null)
+        {
+            return new JObject() { ["error"] = "Image could not be read." };
+        }
+        TagDexData.InvalidateThumbs(source);
+        return new JObject() { ["success"] = true, ["name"] = entry.Name, ["thumb"] = written };
+    }
+
     /// <summary>Writes a generated image out as this entry's thumbnail, returning its served URL.
     /// <para>Reuses <see cref="ImageFile.ToMetadataJpg"/> - the same 256px-short-side JPEG helper the model preview
     /// system uses - rather than introducing a second resize path. Falls back to the raw image if the conversion is
     /// not applicable, so an unusual output type still produces a usable card.</para></summary>
     public static string WriteThumb(TagDexList list, in TagDexEntry entry, T2IEngine.ImageOutput image)
     {
-        if (image?.File is not ImageFile file)
+        return image?.File is not ImageFile file ? null : WriteThumb(list, in entry, file);
+    }
+
+    /// <summary>Writes an image file out as this entry's thumbnail, returning its served URL.
+    /// <para>Shared by the generate route and the "use an image I already made" route, so both land in the same
+    /// place in the same format.</para></summary>
+    public static string WriteThumb(TagDexList list, in TagDexEntry entry, ImageFile file)
+    {
+        if (file is null)
         {
             return null;
         }
