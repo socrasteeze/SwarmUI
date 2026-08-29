@@ -185,6 +185,7 @@
         <li class="nav-item" role="presentation">
             <a class="nav-link translate" data-bs-toggle="tab" href="#Tools-Tab" aria-selected="false" tabindex="-1" role="tab">Tools</a>
         </li>
+        @WebServer.T2IBottomTabHeader
     </ul>
     <div class="tab-content" id="t2i_bottom_bar_content">
         <div class="tab-pane show active genpage-bottom-tab" id="Image-History-Tab" role="tabpanel">
@@ -256,6 +257,7 @@
             <div class="tool-container" id="tool_container">
             </div>
         </div>
+        @WebServer.T2IBottomTabBody
     </div>
     @await Html.PartialAsync("GenTabModals.cshtml", Model)
 </div>
