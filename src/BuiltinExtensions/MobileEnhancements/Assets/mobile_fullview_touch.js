@@ -1,15 +1,22 @@
 /**
- * MobileEnhancements — touch layer for the fullscreen image viewer (fork extension).
+ * MobileEnhancements — touch layer for the fullscreen image viewer and the image-compare modal (fork extension).
  *
- * Augments the existing ImageFullViewHelper modal with native-gallery touch gestures. It only ADDS
- * touch listeners and drives the core viewer's own primitives (detachImg / moveImg / getHeightPercent /
- * showImage, and the global shiftToNextImagePreview used by the arrow keys) - the desktop mouse path in
+ * Two independent classes, each augmenting one existing core modal with native-gallery touch gestures. Both
+ * only ADD touch listeners and drive the core viewer's own primitives - the desktop mouse/wheel path in
  * currentimagehandler.js is never touched. All handling is gated to coarse (touch) pointers, so mouse
  * users are wholly unaffected. See docs/MobilePWA-Optimization-Plan.md (Phase 2).
  *
- * Gestures: pinch-zoom (anchored) + two-finger pan, one-finger pan when zoomed, double-tap zoom toggle,
- * horizontal swipe to move between images (at fit zoom), swipe-down to dismiss, single tap toggles the
- * metadata chrome. Every gesture fails safe: on any trouble the image is reset to a visible state.
+ * MobileFullViewTouch augments ImageFullViewHelper (detachImg / moveImg / getHeightPercent / showImage,
+ * and the global shiftToNextImagePreview used by the arrow keys). Gestures: pinch-zoom (anchored) +
+ * two-finger pan, one-finger pan when zoomed, double-tap zoom toggle, horizontal swipe to move between
+ * images (at fit zoom), swipe-down to dismiss, single tap toggles the metadata chrome.
+ *
+ * MobileImageCompareTouch augments ImageCompareHelper (moveImg / getViewportFromTarget /
+ * getOverlayDividerFromTarget / updateOverlaySplitFromClientPosition / clampPan / applyView / stopPanning -
+ * the exact same state the mouse handlers drive). Gestures: one-finger pan, pinch-zoom (anchored, replicating
+ * onWheel's math), one-finger drag on the slide-mode overlay divider.
+ *
+ * Every gesture fails safe: on any trouble the image is reset to a visible state.
  */
 class MobileFullViewTouch {
 
@@ -445,3 +452,252 @@ class MobileFullViewTouch {
 }
 
 let mobileFullViewTouch = new MobileFullViewTouch();
+
+/**
+ * MobileEnhancements — touch layer for the image-compare modal (fork extension).
+ *
+ * Augments the existing ImageCompareHelper modal (`imageCompareHelper`, global) with the same three
+ * interactions its mouse path supports, driven through its own public methods and fields so the touch and
+ * mouse paths share one viewport state (`panX`/`panY`/`zoom`/`overlaySplitPercent`) and can never diverge:
+ *   - one-finger pan of the image(s) - mirrors onMouseDown + onGlobalMouseMove (moveImg + applyView)
+ *   - two-finger pinch zoom, anchored at the pinch midpoint - replicates onWheel's zoom math exactly
+ *     (zoomAt below), driven by the ratio of successive inter-touch distances instead of a wheel delta,
+ *     plus pan by however far that midpoint drifts between frames
+ *   - one-finger drag on the slide-mode overlay divider - mirrors the onMouseDown divider branch +
+ *     the onGlobalMouseMove isAdjustingOverlaySplit branch (updateOverlaySplitFromClientPosition)
+ * Touch events target-lock to their initial element, so (unlike the mouse path) no document-level
+ * listeners are needed - touchmove/touchend keep arriving on the stage even once fingers wander outside it.
+ */
+class MobileImageCompareTouch {
+
+    /** Wire touch listeners onto the compare stage. */
+    constructor() {
+        this.stage = imageCompareHelper.stage;
+        this.mode = null;              // null | 'pan' | 'divider' | 'pinch'
+        this.didMove = false;
+        this.lastX = 0;
+        this.lastY = 0;
+        this.holdingPanState = false;  // true while we own imageCompareHelper's isDragging/isAdjustingOverlaySplit
+        this.pinchViewport = null;
+        this.pinchPrevDist = 0;
+        this.pinchPrevMidX = 0;
+        this.pinchPrevMidY = 0;
+        this.stage.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
+        this.stage.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
+        this.stage.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
+        this.stage.addEventListener('touchcancel', this.onTouchCancel.bind(this), { passive: false });
+    }
+
+    /** True only when the compare modal is open with two images selected, on a touch device. */
+    isActive() {
+        return imageCompareHelper.hasSelection() && imageCompareHelper.isOpen() && window.matchMedia('(pointer: coarse)').matches;
+    }
+
+    /**
+     * Hand back any pan/divider state we took from imageCompareHelper. Must run on every exit from a 'pan' or
+     * 'divider' gesture - including the mid-gesture exits (a second finger arriving to start a pinch, or a
+     * touch that lands somewhere we don't handle) - or isDragging / isAdjustingOverlaySplit would stay stuck
+     * true and the viewport cursor stuck on 'grabbing', diverging from the mouse path's state.
+     * stopPanning() (ignoreDragClose defaulted false) folds didDrag into noClose exactly as onGlobalMouseUp does.
+     */
+    releasePanState() {
+        if (this.holdingPanState) {
+            this.holdingPanState = false;
+            imageCompareHelper.stopPanning();
+        }
+    }
+
+    /** Distance between two active touches. */
+    touchDist(a, b) {
+        let dx = a.clientX - b.clientX;
+        let dy = a.clientY - b.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    onTouchStart(e) {
+        if (!this.isActive()) {
+            this.releasePanState();
+            this.mode = null;
+            return;
+        }
+        if (e.touches.length == 2) {
+            let t0 = e.touches[0], t1 = e.touches[1];
+            this.pinchViewport = imageCompareHelper.getViewportFromTarget(t0.target) || imageCompareHelper.getViewportFromTarget(t1.target);
+            // A pinch normally begins as a one-finger pan/divider drag, so release that state before switching.
+            this.releasePanState();
+            if (!this.pinchViewport) {
+                this.mode = null;
+                return;
+            }
+            this.mode = 'pinch';
+            this.didMove = false;
+            this.pinchPrevDist = this.touchDist(t0, t1);
+            this.pinchPrevMidX = (t0.clientX + t1.clientX) / 2;
+            this.pinchPrevMidY = (t0.clientY + t1.clientY) / 2;
+            e.preventDefault();
+            return;
+        }
+        if (e.touches.length != 1) {
+            this.releasePanState();
+            this.mode = null;
+            return;
+        }
+        let t = e.touches[0];
+        let viewport = imageCompareHelper.getViewportFromTarget(t.target);
+        if (!viewport) {
+            // Not over the image/overlay (e.g. mode buttons, metadata, scrub row) - leave untouched so the
+            // browser's native tap/scroll behavior on those controls still works.
+            this.releasePanState();
+            this.mode = null;
+            return;
+        }
+        this.lastX = t.clientX;
+        this.lastY = t.clientY;
+        this.didMove = false;
+        imageCompareHelper.lastMouseX = t.clientX;
+        imageCompareHelper.lastMouseY = t.clientY;
+        let divider = imageCompareHelper.getOverlayDividerFromTarget(t.target);
+        if (divider) {
+            this.mode = 'divider';
+            imageCompareHelper.updateOverlaySplitFromClientPosition(viewport, t.clientX, t.clientY);
+            imageCompareHelper.isAdjustingOverlaySplit = true;
+            imageCompareHelper.setViewportCursor(imageCompareHelper.getSlideAxis() == 'y' ? 'ns-resize' : 'ew-resize');
+        }
+        else {
+            this.mode = 'pan';
+            imageCompareHelper.isDragging = true;
+            imageCompareHelper.setViewportCursor('grabbing');
+        }
+        this.holdingPanState = true;
+        e.preventDefault();
+    }
+
+    onTouchMove(e) {
+        if (!this.isActive() || !this.mode) {
+            return;
+        }
+        if (this.mode == 'pinch') {
+            if (e.touches.length < 2) {
+                return;
+            }
+            e.preventDefault();
+            let t0 = e.touches[0], t1 = e.touches[1];
+            let newDist = this.touchDist(t0, t1);
+            let midX = (t0.clientX + t1.clientX) / 2;
+            let midY = (t0.clientY + t1.clientY) / 2;
+            if (this.pinchPrevDist > 0) {
+                let factor = newDist / this.pinchPrevDist;
+                this.zoomAt(this.pinchViewport, midX, midY, factor);
+                // Pan by how far the pinch midpoint drifted, so the image tracks the fingers.
+                imageCompareHelper.moveImg(midX - this.pinchPrevMidX, midY - this.pinchPrevMidY);
+                imageCompareHelper.applyView();
+            }
+            this.pinchPrevDist = newDist;
+            this.pinchPrevMidX = midX;
+            this.pinchPrevMidY = midY;
+            this.didMove = true;
+            return;
+        }
+        if (e.touches.length != 1) {
+            return;
+        }
+        let t = e.touches[0];
+        if (this.mode == 'divider') {
+            e.preventDefault();
+            let overlay = imageCompareHelper.getOverlay();
+            if (overlay) {
+                imageCompareHelper.updateOverlaySplitFromClientPosition(overlay, t.clientX, t.clientY);
+            }
+            if (Math.abs(t.clientX - this.lastX) > 1 || Math.abs(t.clientY - this.lastY) > 1) {
+                imageCompareHelper.didDrag = true;
+            }
+        }
+        else if (this.mode == 'pan') {
+            e.preventDefault();
+            let xDiff = t.clientX - imageCompareHelper.lastMouseX;
+            let yDiff = t.clientY - imageCompareHelper.lastMouseY;
+            imageCompareHelper.lastMouseX = t.clientX;
+            imageCompareHelper.lastMouseY = t.clientY;
+            imageCompareHelper.moveImg(xDiff, yDiff);
+            if (Math.abs(xDiff) > 1 || Math.abs(yDiff) > 1) {
+                imageCompareHelper.didDrag = true;
+            }
+            imageCompareHelper.applyView();
+        }
+        else {
+            return;
+        }
+        this.lastX = t.clientX;
+        this.lastY = t.clientY;
+        this.didMove = true;
+    }
+
+    onTouchEnd(e) {
+        // Mirrors onGlobalMouseUp exactly: releases the cursor, clears isDragging/isAdjustingOverlaySplit,
+        // and folds didDrag into noClose so the tap-to-close handler ignores a click that ends a drag.
+        this.releasePanState();
+        if (this.didMove) {
+            imageCompareHelper.noClose = true;
+        }
+        if (e.touches.length == 0) {
+            this.mode = null;
+            this.didMove = false;
+            this.pinchPrevDist = 0;
+        }
+        else if (this.mode == 'pinch' && e.touches.length < 2) {
+            // A finger lifted mid-pinch - end the gesture cleanly rather than guessing a new anchor.
+            this.mode = null;
+            this.pinchPrevDist = 0;
+        }
+    }
+
+    onTouchCancel(e) {
+        this.releasePanState();
+        this.mode = null;
+        this.didMove = false;
+        this.pinchPrevDist = 0;
+    }
+
+    /**
+     * Zoom the compare viewport by `factor` about the (clientX, clientY) point, replicating
+     * ImageCompareHelper.onWheel's math exactly (height-percent zoom, max-height clamp, pixelated past
+     * threshold, anchor-preserving pan correction, clampPan) but driven by an explicit factor instead of a
+     * wheel delta.
+     */
+    zoomAt(viewport, clientX, clientY, factor) {
+        let layout = imageCompareHelper.getViewportLayout(viewport);
+        if (!layout) {
+            return;
+        }
+        let rect = layout.rect;
+        if (!rect.width || !rect.height) {
+            return;
+        }
+        let origHeight = imageCompareHelper.getHeightPercent();
+        let minHeight = 10;
+        let maxHeight = imageCompareHelper.getMaxHeight();
+        if (maxHeight <= 0) {
+            maxHeight = Math.max(minHeight, origHeight * 4);
+        }
+        let newHeight = Math.max(minHeight, Math.min(origHeight * factor, maxHeight));
+        if (Math.abs(newHeight - origHeight) < 0.0001) {
+            return;
+        }
+        imageCompareHelper.updateImageRendering(newHeight);
+        imageCompareHelper.setViewportCursor('grab');
+        let localX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+        let localY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+        let zoomRatio = newHeight / origHeight;
+        let imgLeft = imageCompareHelper.getImgLeft();
+        let imgTop = imageCompareHelper.getImgTop();
+        let newPanX = localX - layout.baseLeft - (localX - layout.baseLeft - imgLeft) * zoomRatio;
+        let newPanY = localY - layout.baseTop - (localY - layout.baseTop - imgTop) * zoomRatio;
+        imageCompareHelper.panX = newPanX;
+        imageCompareHelper.panY = newPanY;
+        imageCompareHelper.setHeightPercent(newHeight);
+        imageCompareHelper.clampPan(newPanX, newPanY);
+        imageCompareHelper.applyView();
+    }
+}
+
+let mobileImageCompareTouch = new MobileImageCompareTouch();

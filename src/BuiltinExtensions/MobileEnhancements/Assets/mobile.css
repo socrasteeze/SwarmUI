@@ -88,6 +88,13 @@ body.coarse-pointer .imageview_modal_inner_div {
     will-change: transform;
 }
 
+/* Same reasoning as the fullview image wrap above, applied to the image-compare modal's stage: own pan/
+   pinch/divider-drag touches so the browser doesn't try to scroll or double-tap-zoom the page underneath.
+   mobile_fullview_touch.js's MobileImageCompareTouch drives zoom/pan/divider-split here. */
+body.coarse-pointer #image_compare_stage {
+    touch-action: none;
+}
+
 /* --- Phase 3: layout & touch ergonomics (mobile only) --- */
 
 /* Spec-compliant (>=44px) touch targets for the primary controls. */
