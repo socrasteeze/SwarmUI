@@ -770,7 +770,19 @@ function shiftToNextImagePreview(next = true, expand = false, isArrows = false) 
         return elem.src;
     }
     let curImgSrc = getSrc(curImgElem);
-    let index = imgs.findIndex(img => getSrc(img) == curImgSrc);
+    // Strip thumbnails may carry a `?preview=true` suffix the main image's src doesn't (see getThumbnailSrc /
+    // appendImage), so the resolved-URL compare alone no longer finds the current image in the batch. Fall back to
+    // comparing the raw srcs stashed in dataset: the enclosing '.image-block' and the current image element both
+    // hold the exact unresolved string that was handed to appendImage/setCurrentImage, so those match directly
+    // (comparing dataset.src against the resolved `.src` would never match, as one is relative and one absolute).
+    let curImgRawSrc = curImgElem.dataset.src;
+    let index = imgs.findIndex(img => {
+        if (getSrc(img) == curImgSrc) {
+            return true;
+        }
+        let block = findParentOfClass(img, 'image-block');
+        return block != null && curImgRawSrc != null && block.dataset.src == curImgRawSrc;
+    });
     if (index == -1) {
         let cleanSrc = (src) => src.length > 200 ? src.substring(0, 200) + '...' : src;
         console.log(`Image preview shift failed as current image ${cleanSrc(curImgSrc)} is not in batch area set [${imgs.map(getSrc).map(cleanSrc).join(', ')}]`);
@@ -1352,6 +1364,17 @@ function getPreferredBatchContainer(batchId) {
     return mainContainer;
 }
 
+/** Returns a thumbnail-sized variant of a View-route image src for use in small strip/batch previews, or the input unchanged if it isn't eligible (data URLs, local `imgs/` paths, or a src that already carries a query string). */
+function getThumbnailSrc(imageSrc) {
+    if (imageSrc.includes('?')) {
+        return imageSrc;
+    }
+    if (imageSrc.startsWith('View/') || imageSrc.startsWith('/View/')) {
+        return `${imageSrc}?preview=true`;
+    }
+    return imageSrc;
+}
+
 function appendImage(container, imageSrc, batchId, textPreview, metadata = '', type = 'legacy', prepend = true) {
     if (typeof container == 'string') {
         container = getRequiredElementById(container);
@@ -1399,6 +1422,7 @@ function appendImage(container, imageSrc, batchId, textPreview, metadata = '', t
     else {
         img = document.createElement('img');
         srcTarget = img;
+        img.loading = 'lazy';
     }
     img.addEventListener(isVideo ? 'loadeddata' : 'load', () => {
         if (batchId != "folder") {
@@ -1406,7 +1430,7 @@ function appendImage(container, imageSrc, batchId, textPreview, metadata = '', t
             div.style.width = `calc(${roundToStr(ratio * 10, 2)}rem + 2px)`;
         }
     });
-    srcTarget.src = imageSrc;
+    srcTarget.src = (isVideo || isAudio) ? imageSrc : getThumbnailSrc(imageSrc);
     img.classList.add('image-block-img-inner');
     div.appendChild(img);
     if (type == 'legacy') {

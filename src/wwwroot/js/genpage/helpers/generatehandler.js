@@ -127,7 +127,7 @@ class GenerateHandler {
             imgHolder.div.appendChild(imgElem);
         }
         else {
-            imgElem.src = src;
+            imgElem.src = getThumbnailSrc(src);
         }
         imgHolder.image = src;
         imgHolder.div.dataset.src = src;

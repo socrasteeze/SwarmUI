@@ -708,8 +708,20 @@ class ServerStatusManager {
         this.gpuRows = {};
         this.userRows = {};
         this.loopInterval = null;
-        sessionReadyCallbacks.push(() => {
+        // Lazy-arm: the loop is pure overhead on mobile/any session that never opens the Server tab, so only start
+        // it once that tab is actually shown (native 'shown.bs.tab', per the pattern at TagDex/Assets/tagdex_tab.js).
+        // Idempotent and never disarmed, matching the always-on behavior this replaces once armed.
+        let arm = () => {
+            if (this.loopInterval) {
+                return;
+            }
             this.loopInterval = setInterval(this.refreshLoop, 1000);
+        };
+        getRequiredElementById('servertabbutton').addEventListener('shown.bs.tab', arm);
+        sessionReadyCallbacks.push(() => {
+            if (isVisible(getRequiredElementById('server_tab'))) {
+                arm();
+            }
         });
     }
 
