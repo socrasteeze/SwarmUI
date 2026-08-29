@@ -2,8 +2,10 @@
 // Served at root scope from C# (/sw.js), with `const SWARM_VARY = "<version>";` prepended so cache
 // names roll on every server version. Strategy is deliberately conservative: the app is entirely
 // server-dependent (WebSocket + REST), so this worker only makes the app installable and adds an
-// offline fallback + static asset caching. It NEVER serves stale HTML/JS/CSS (network-first), so a
-// server update can't get "stuck" behind the cache.
+// offline fallback + static asset caching. It never serves stale UNfingerprinted HTML/JS/CSS
+// (network-first) - a server update can't get "stuck" behind the cache. Fingerprinted (`?vary=`) URLs
+// are the exception: they're served cache-first, because the URL itself carries the version, so a
+// cache hit can never be stale.
 
 const CACHE_STATIC = `swarm-static-${SWARM_VARY}`;
 const CACHE_ASSET = `swarm-asset-${SWARM_VARY}`;
@@ -24,6 +26,12 @@ const PASS_THROUGH = ['/api/', '/view/', '/viewspecial/', '/output/', '/audio/',
 // rather than bytes because the Cache API exposes no size, and entry count is the thing we can actually check.
 const MAX_ASSET_ENTRIES = 120;
 const MAX_STATIC_ENTRIES = 80;
+
+// Thumbnail runtime cache (/View?...&preview=true). Deliberately NOT versioned with SWARM_VARY -
+// thumbnails are content-addressed by the image itself, not by server version, so they outlive server
+// upgrades and there is no reason to throw them away on every deploy.
+const CACHE_THUMB = 'swarm-thumb-v1';
+const MAX_THUMB_ENTRIES = 50;
 
 /** Trims a cache to a maximum entry count, oldest-first (Cache Storage keys are insertion-ordered). */
 async function trimCache(cacheName, maxEntries) {
@@ -68,7 +76,7 @@ self.addEventListener('activate', event => {
         if (self.registration.navigationPreload) {
             await self.registration.navigationPreload.enable();
         }
-        const keep = [CACHE_STATIC, CACHE_ASSET];
+        const keep = [CACHE_STATIC, CACHE_ASSET, CACHE_THUMB];
         const names = await caches.keys();
         await Promise.all(names.map(n => keep.includes(n) ? null : caches.delete(n)));
         await self.clients.claim();
@@ -125,8 +133,11 @@ async function networkFirst(request, cacheName) {
     }
 }
 
-/** Cache-first: serve cache immediately, fetch+store on miss. For assets that never change per version. */
-async function cacheFirst(request, cacheName) {
+/** Cache-first: serve cache immediately, fetch+store on miss. For assets that never change per version.
+ * `maxEntries` is explicit rather than a fixed constant because this is now called for two different caches:
+ * hardcoding one cache's ceiling here meant CACHE_STATIC was trimmed to 120 down this path and to 80 down
+ * networkFirst's, so the two strategies fought over one cache and eviction came in bursts of 40. */
+async function cacheFirst(request, cacheName, maxEntries) {
     const cache = await caches.open(cacheName);
     const cached = await cache.match(request);
     if (cached) {
@@ -135,9 +146,59 @@ async function cacheFirst(request, cacheName) {
     const fresh = await fetch(request);
     if (fresh && fresh.ok) {
         cache.put(request, fresh.clone())
-            .then(() => trimCache(cacheName, MAX_ASSET_ENTRIES))
+            .then(() => trimCache(cacheName, maxEntries))
             .catch(err => console.log(`SwarmUI SW: asset cache put failed (${err})`));
     }
+    return fresh;
+}
+
+/** True for a thumbnail request (/View?...&preview=true) - the only /View/ traffic this worker caches.
+ * This branch runs before isPassThrough (which is what normally rejects /view/ AND cross-origin), so the
+ * origin check has to be repeated here: without it a cross-origin /view/...?preview=true would be pulled
+ * into the worker and answered with an opaque response instead of being left alone. */
+function isThumbnailRequest(url) {
+    return url.origin == self.location.origin && url.pathname.toLowerCase().startsWith('/view/') && url.searchParams.get('preview') == 'true';
+}
+
+/** Stores a thumbnail response, if it is really an image. Consumes `response` - pass a clone if you also
+ * intend to return it. Only caches responses that are ok AND image/*: a logged-out /View request returns a
+ * JSON error and a video that has no server-side preview returns the video itself, and caching either would
+ * poison the grid (or, for a video, hand a cached 200 back to a Range request and break seeking).
+ * Never throws: on the cache-miss path this runs alongside the response the page is waiting on, and iOS's
+ * small origin budget makes QuotaExceededError a routine outcome, not an exotic one. */
+async function storeThumbnail(cache, request, response) {
+    try {
+        if (response && response.ok && (response.headers.get('Content-Type') || '').startsWith('image/')) {
+            await cache.put(request, response);
+            await trimCache(CACHE_THUMB, MAX_THUMB_ENTRIES);
+        }
+    }
+    catch (err) {
+        console.log(`SwarmUI SW: thumbnail cache put failed (${err})`);
+    }
+}
+
+/** Stale-while-revalidate for thumbnails: serve any cached match immediately and refresh in the background;
+ * a cache miss goes straight to the network and stores on the way past. Both the store and the background
+ * refresh go through event.waitUntil - they outlive the response, and without waitUntil the browser is free
+ * to kill the worker the moment respondWith settles, which on iOS it readily does. */
+async function thumbnailCacheStrategy(event, request) {
+    const cache = await caches.open(CACHE_THUMB);
+    const cached = await cache.match(request);
+    if (cached) {
+        event.waitUntil((async () => {
+            try {
+                await storeThumbnail(cache, request, await fetch(request));
+            }
+            catch (err) {
+                console.log(`SwarmUI SW: thumbnail revalidate failed (${err})`);
+            }
+        })());
+        return cached;
+    }
+    const fresh = await fetch(request);
+    // Clone before returning: the page reads `fresh`'s body, and a body can only be read once.
+    event.waitUntil(storeThumbnail(cache, request, fresh.clone()));
     return fresh;
 }
 
@@ -147,6 +208,10 @@ self.addEventListener('fetch', event => {
         return;
     }
     const url = new URL(request.url);
+    if (isThumbnailRequest(url)) {
+        event.respondWith(thumbnailCacheStrategy(event, request));
+        return;
+    }
     if (isPassThrough(url, request)) {
         return;
     }
@@ -175,10 +240,17 @@ self.addEventListener('fetch', event => {
         return;
     }
     if (isStaticAsset(url)) {
-        event.respondWith(cacheFirst(request, CACHE_ASSET));
+        event.respondWith(cacheFirst(request, CACHE_ASSET, MAX_ASSET_ENTRIES));
         return;
     }
-    // Scripts / styles / other same-origin GETs (including ?vary= busted files): network-first so a
-    // server update is picked up immediately; cache only rescues a fully-offline reload.
+    // Fingerprinted URLs (?vary=<version>): cache-first is safe here because the URL itself changes
+    // whenever the content does, so a cache hit can never be stale - and it saves a network round trip
+    // for every script/style load once the version is cached.
+    if (url.searchParams.has('vary')) {
+        event.respondWith(cacheFirst(request, CACHE_STATIC, MAX_STATIC_ENTRIES));
+        return;
+    }
+    // Everything else same-origin (unfingerprinted scripts/styles/etc): network-first so a server update
+    // is picked up immediately; cache only rescues a fully-offline reload.
     event.respondWith(networkFirst(request, CACHE_STATIC));
 });
