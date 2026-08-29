@@ -1,182 +1,184 @@
 # HANDOFF
 
-**Updated:** 2026-08-28 · **Branch:** main · **Base:** d7b14c60 (= origin/main)
+**Updated:** 2026-08-28 · **Branch:** main · **Base:** 8ed7c3da (= origin/main at sweep start) · **Committed locally, NOT pushed**
 
-> This handoff intentionally bypasses the usual line cap: it is the full specification-and-rationale record
-> for the Characters-panel move to the Generate tab (plus two sibling features that landed in the same
-> sweep), written so an agent can pick this up cold and understand both the logic and the exact
-> implementation without re-deriving it.
+> Line cap intentionally bypassed. This is the full record of the mobile-PWA performance sweep: what shipped,
+> why each change is shaped the way it is, the six defects that verification caught before they landed, and the
+> complete parked backlog. Written so an agent can pick this up cold.
 
 ## State
 
-Three features are implemented, verified, and committed on `main` (not pushed):
+A mobile-PWA performance pass is committed on `main` in five commits, none pushed. Pushing requires the
+`/clean` skill per fork law.
 
-1. **Generate bottom-bar extension-tab hook + Characters panel moved onto the Generate tab** (the main ask).
-2. **TagDex batch thumbnail sweep** ("Generate All Visible" / Cancel on the Characters panel).
-3. **Image-compare touch parity** in MobileEnhancements (unrelated sibling task from the same sweep).
+Gates green on the merged tree: `dotnet build SwarmUI.sln --configuration Release` = 0 warnings / 0 errors;
+`dotnet format --verify-no-changes` and `dotnet format style --verify-no-changes` clean; `node --check` clean
+on all six touched JS files. Group A additionally passed a live-boot HTTP header matrix (Release DLL, scratch
+`--data_dir`, port 7902). **Nothing in this sweep has been exercised in a real browser, and nothing has been
+tested on a phone.** That is the largest outstanding risk — see Open.
 
-Gates green on all three: `dotnet build SwarmUI.sln --configuration Release` = 0 warnings / 0 errors;
-`dotnet format --verify-no-changes` and `dotnet format style --verify-no-changes` = clean;
-`node --check` clean on both touched JS files. The Characters move was live-boot tested (Release DLL,
-scratch `--data_dir`, port 7899, fetched `/Text2Image` and inspected the served HTML). **Nothing has been
-clicked in a real browser yet** — see Open.
+## What was wrong (the audit)
 
-## Feature 1 — Characters panel on the Generate tab
+The genpage ships ~48 JS + ~10 CSS files, ~2.0 MB uncompressed, unbundled and unminified. Every URL is
+already fingerprinted with `?vary=<version>.GIT-<hash>`. The audit found that fingerprinting was buying
+almost nothing, and that the PWA path specifically was the worst-served one:
 
-### The problem being solved
+- Compression was **off** on the only path the PWA can use. `AddResponseCompression()` was called bare, and
+  .NET defaults `EnableForHttps` to false. `mobile_core.js` refuses to register the service worker outside a
+  secure context, so an installed PWA is always HTTPS — and was always pulling the full ~2 MB uncompressed.
+- Nothing set `Cache-Control`. Static files got only `ETag`/`Last-Modified`, so browsers issued ~55
+  conditional requests per warm load; `/ExtensionFile/` sent no caching headers **at all**, returning a full
+  200 body for all 16 extension assets on every single load.
+- The service worker treated JS/CSS as network-first, so the installed app re-fetched all ~58 files per load
+  anyway, and `/view/` thumbnails were in the pass-through list — never cached.
+- PWA icons totalled 449 KB (a 512×512 at 230 KB), upscaled from `favicon.ico`.
+- The current-session batch strip requested **full-resolution** images for ~10rem-wide thumbnails, while the
+  history browser next to it correctly used 256px previews.
+- A 1 Hz server-status poll was armed on every page load whether or not the Server tab was ever opened.
 
-TagDex's Characters panel previously lived as a **top-level page tab** (sibling of Generate/Comfy/etc.),
-auto-discovered from `Tabs/Text2Image/Characters.html`. The goal: put it **inside the Generate tab's
-bottom bar** (sibling of Image History / Models / Wildcards / Tools) so it can be used *while* operating
-the normal Generate UI — pick a character, tweak the prompt, generate, without leaving the page.
+## Landed this sweep
 
-### Why a new discovery hook rather than hardcoding the tab
+### Commit A — `src/Core/WebServer.cs`
+- **Compression over HTTPS.** `AddResponseCompression()` takes the options form: `EnableForHttps = true`,
+  plus `image/svg+xml` and `application/manifest+json` on the MIME list. (`text/javascript` was also added but
+  is already a default — harmless.) Middleware order untouched.
+- **Static-file caching.** `UseStaticFiles` gained `OnPrepareResponse`: `?vary=` present →
+  `public, max-age=31536000, immutable`; otherwise `public, max-age=3600`.
+- **Extension-asset caching.** `ViewExtensionScript` sets the same pair (`immutable` / `max-age=86400`) in
+  both success branches via a small private helper. 404 branch stays header-free.
+- Verified live: `/js/site.js?vary=x` returns `Content-Encoding: br` **and** the immutable header; the bare
+  URL returns `max-age=3600`; `/ExtensionFile/...` behaves the same way at 86400; a bogus extension path
+  still 404s with no cache header. `EnableForHttps` itself is code-verified only — a local HTTP boot cannot
+  exercise it, and Kestrel here configures no HTTPS endpoint (TLS terminates at `tailscale serve`).
 
-The fork's standing policy (AGENTS.md) is merge-friendly, append-only changes to core. The core already has
-exactly one extension-tab discovery mechanism: `WebServer.GatherExtensionPageAdditions()` scans each
-extension's `Tabs/Text2Image/*.html`, registers a `view_extension_tab_{id}` permission per file, and emits
-nav-item + tab-pane HTML into `T2ITabHeader`/`T2ITabBody` placeholders rendered by the page templates. The
-implementation **mirrors that block one-for-one for a new `Tabs/GenerateBottom/` directory**, rather than
-hardcoding a Characters entry into `GenerateTab.cshtml`. Consequences:
+### Commit B — MobileEnhancements service worker + icons
+- **Cache-first for fingerprinted URLs.** Any request carrying `?vary=` is served cache-first from the
+  versioned static cache. Safe because a new commit changes both the URL and the cache name.
+- **Thumbnail runtime cache** (plan doc Phase 4 item 4). `swarm-thumb-v1`, deliberately unversioned so
+  thumbnails survive a version bump, 50-entry cap, stale-while-revalidate, intercepting
+  `/view/*?preview=true` ahead of the pass-through list, added to the `activate` keep-list.
+- **Icons regenerated:** 449 KB → **102 KB** (icon-512 230 KB → 40 KB; apple-touch 45 KB → 13 KB). The
+  apple-touch `<link>` href now carries `?vary=` so it rides the immutable path from Commit A.
 
-- Any extension (ours or upstream's) can now drop an HTML file in `Tabs/GenerateBottom/` and get a
-  bottom-bar tab with permission gating for free — the hook is generic, not TagDex-specific.
-- The core diff stays small, append-only, and plausibly upstreamable.
-- Permission behavior is identical to the existing hook (`view_extension_tab_characters`, USER default,
-  extension-tabs group), so existing user/role configs keep working unchanged.
+### Commit C — mobile viewer + first-run toast (extension-only, zero core edits)
+- **Adjacent-image preload** (plan doc §2b, spec'd long ago, never built). Resolves ±1 neighbours the same
+  way `shiftToNextImagePreview` does, warms them via detached `Image()` objects held on the instance, skips
+  placeholders/`data:`/video/audio, guarded on `document.hidden` and coarse pointer.
+- **In-viewer Share** via `navigator.share`: `fetch` → `File` → `canShare`/`share({files})`, falling back to
+  `share({url})`. `AbortError` swallowed (that is the user cancelling); other failures go to `showError`.
+- **First-run toast** pointing at the User tab's Mobile/Desktop dropdown. Standalone + small-window +
+  genpage-only + one-shot localStorage flag, set the instant it decides to show. Never changes a setting.
+- All three are gated so the DOM elements are **never instantiated** on desktop, not merely hidden.
 
-### Exact implementation
+### Commit D — core genpage JS (user-approved new fork divergence)
+- **Batch strip uses 256px previews.** New `getThumbnailSrc()` helper; `appendImage`'s plain-image branch and
+  `setImageFor`'s in-place preview→final swap both use it, plus `loading = 'lazy'`. **`dataset.src` stays
+  full-resolution everywhere**, which is what every click / full-view / star / reuse / delete path reads.
+- **Server-status loop armed lazily** on first `shown.bs.tab` of the Server tab (plus immediately if that tab
+  is already visible), instead of unconditionally at session-ready. Never disarms, so steady state is
+  unchanged.
 
-- `src/Core/WebServer.cs:85-92` — two new static fields, `T2IBottomTabHeader` and `T2IBottomTabBody`
-  (`HtmlString`, default empty), directly below the existing `T2ITabHeader`/`T2ITabBody`.
-- `src/Core/WebServer.cs` `GatherExtensionPageAdditions()` — the local `StringBuilder` declaration gains
-  `bottomTabHeader, bottomTabFooter`; a new `if (Directory.Exists($"{e.FilePath}Tabs/GenerateBottom/"))`
-  block (`:367-383`) mirrors the `Tabs/Text2Image` block above it exactly: enumerate `*.html`, derive
-  `id = T2IParamTypes.CleanTypeName(filename)`, register `view_extension_tab_{id}` if absent, append a
-  `<li class="nav-item">` nav link (`id="maintab_{id}"`, `data-bs-toggle="tab"`, `href="#{id}"`,
-  `data-requiredpermission`) and a pane div. **The one deliberate difference:** the pane class is
-  `tab-pane genpage-bottom-tab` (matching the hardcoded bottom-bar panes like `#Image-History-Tab`)
-  instead of the top-level hook's `tab-pane tab-pane-vw` — the bottom bar's sizing/scroll behavior comes
-  from `genpage-bottom-tab`.
-- `src/Pages/_Generate/GenerateTab.cshtml:188` — `@WebServer.T2IBottomTabHeader` appended inside
-  `<ul id="bottombartabcollection">` after the Tools nav item; `:260` — `@WebServer.T2IBottomTabBody`
-  appended inside `<div class="tab-content" id="t2i_bottom_bar_content">` after the Tools pane.
-- `src/BuiltinExtensions/TagDex/Tabs/Text2Image/Characters.html` → **git rename** →
-  `src/BuiltinExtensions/TagDex/Tabs/GenerateBottom/Characters.html`. The extension no longer has a
-  `Tabs/Text2Image/` directory, so no top-level Characters tab is emitted anymore.
-- `src/BuiltinExtensions/TagDex/Assets/tagdex_tab.js:1-5` — header comment updated to describe the new
-  wiring. The JS needed **no functional change** for the move: its lazy-init hooks on the
-  `maintab_characters` nav link (`tagdex_tab.js:59`), and the discovery hook emits the same
-  `maintab_{id}` id in the bottom bar, so first-open init, browser layout, and per-card handlers all
-  carry over. Verified in the served page: single `href="#characters"` inside `#bottombartabcollection`
-  with `data-requiredpermission="view_extension_tab_characters"`; pane is
-  `<div class="tab-pane genpage-bottom-tab" id="characters">`.
+### Commit E — docs
+`AGENTS.md` Fork Delta gained entries for the WebServer.cs hunks, the two new core-JS touchpoints, and the
+MobileEnhancements perf pass. `docs/MobilePWA-Optimization-Plan.md` marks §2b, §2c-share, Phase 4 item 4 and
+Phase 5 item 3 as shipped, and annotates the stale `layout.js:465` citations.
 
-### How it behaves from the Generate UI
+## Defects verification caught
 
-The Characters panel is now a bottom-bar tab like Image History: always reachable while the prompt/params
-sidebar and image area stay live. Card clicks that inject tags into the prompt act on the same page's
-prompt box directly. The panel inherits the bottom bar's (shorter, wider) geometry — card grid reflow in
-that narrower panel is untested in a real browser (Open #2).
+Every one of these passed the author agent's own gates and would have shipped. Recorded because each is a
+trap the next person can repeat, not merely a bug that got fixed.
 
-## Feature 2 — TagDex batch thumbnail sweep
-
-"Generate All Visible" sweeps every currently-rendered card still showing the placeholder and generates a
-reference image for each, sequentially, with live progress and a Cancel.
-
-- **Controls** — `Tabs/GenerateBottom/Characters.html`: `#tagdex_batch_row` (gated
-  `data-requiredpermission="tagdex_manage"`) holding `#tagdex_batch_generate`, `#tagdex_batch_cancel`
-  (hidden until running), `#tagdex_batch_status`. Styling: `.tagdex-batch-status` in `tagdex.css:70`.
-- **Wiring** — `tagdex_tab.js:375-376`; state fields `batchRunning`/`batchCancelled` plus the existing
-  `generatingThumb` flag, shared so a single-card generate and a sweep can never overlap.
-- **`collectPlaceholderCards()` (`:686`)** — walks `.model-block` cards; reads
-  `img.getAttribute('src') || img.dataset.src` because unrevealed lazyloaded imgs have *only*
-  `dataset.src` (and `img.src` on a src-less `<img>` reports the page URL, never empty).
-- **`runBatchStep()` (`:736`)** — deliberately sequential recursion, never `Promise.all`: the next
-  `TagDexGenerateThumbnail` websocket request is issued only from the previous one's success/error
-  callback, so exactly one is in flight. Rationale: `TagDexThumbs.cs:21` guards generation with a
-  single-slot `SemaphoreSlim`, so fan-out would only stack requests server-side while burning a websocket
-  each — and sequencing is what makes Cancel meaningful (only the in-flight card finishes; nothing else
-  was sent). Progress line shows per-card queued/percent/index states; errors are reported and the sweep
-  continues to the next card.
-- **`cancelBatchGenerate()`/`finishBatch()` (`:766/:776`)** — cancel sets the flag checked before each
-  step (no server cancel route exists; none needed with one request in flight); finish resets buttons and
-  reports "Done — generated N of N" / "Cancelled after i of N".
-- **Verifier-found fix (`:848-849`)** — `repaintCardThumb` now also does
-  `classList.remove('lazyload'); delete target.dataset.src` when painting a generated thumb. Without
-  this, `makeVisible` (`src/wwwroot/js/genpage/helpers/browsers.js:33-52`) re-assigns
-  `src = dataset.src` for anything still carrying `.lazyload` when it scrolls into view — silently
-  reverting off-screen cards the sweep just painted, and leaving them looking un-generated to the next
-  sweep. New upstream-coupling row recorded in `docs/TagDex-Plan.md`'s fork-delta table.
-
-## Feature 3 — Image-compare touch parity (MobileEnhancements)
-
-`MobileImageCompareTouch` class appended at
-`src/BuiltinExtensions/MobileEnhancements/Assets/mobile_fullview_touch.js:471` (instantiated `:703`),
-wiring `touchstart/touchmove/touchend/touchcancel` onto `imageCompareHelper.stage`
-(`#image_compare_stage`). **Zero core edits** — `currentimagehandler.js` untouched; the class drives only
-the core helper's existing public API (`getViewportFromTarget`, `getOverlayDividerFromTarget`,
-`updateOverlaySplitFromClientPosition`, `stopPanning`, `getViewportLayout`, `clampPan`,
-`setHeightPercent`, `getMaxHeight`, `updateImageRendering`, `applyView`, `moveImg`), so touch and mouse
-share one viewport state and cannot diverge. Gestures: one-finger pan, anchored pinch zoom (`zoomAt`
-`:667` replicates `onWheel`'s math with an explicit factor in place of `Math.pow(zoomRate, -deltaY/100)`
-— same min/max-height clamp, same anchor-preserving pan correction, same `clampPan`+`applyView`), and
-one-finger slide-divider drag. All gated on `(pointer: coarse)`; `touch-action: none` on the stage at
-`mobile.css:94`; desktop mouse/wheel unchanged. Verifier-found fix: a pinch always begins as one finger,
-which had opened a pan on the core helper; the second finger switched mode without releasing it, leaving
-`isDragging` stuck true and the cursor stuck on `grabbing` after every pinch. Fixed with
-`holdingPanState` + `releasePanState()` (`:503`), invoked on every gesture exit path (pinch transition,
-both bail paths, inactive guard, touchend, touchcancel). Doc line flipped TODO → shipped at
-`docs/MobilePWA-Optimization-Plan.md:12`.
+1. **Batch-strip navigation was silently dead** (`currentimagehandler.js`). The matcher compares the main
+   image's `.src` against strip elements. The `.src` IDL getter always returns a **resolved absolute** URL;
+   `dataset.src` holds the **raw relative** string. The delivered fallback clause compared one against the
+   other, so it could never match — and the original clause had stopped matching the moment thumbs gained
+   `?preview=true`. Result: `index == -1` on every finished image, killing arrow-key navigation, full-view
+   next/prev, and delete-then-shift. It survives a casual smoke test because live `data:` previews get no
+   `?preview=true`, and the non-default `AppendUserNameToOutputPath=false` config produces `Output/…` srcs
+   the helper skips. **Fix:** compare raw to raw (`curImgElem.dataset.src` vs `block.dataset.src`), keeping
+   the resolved-URL clause first.
+2. **Unguarded `cache.put` on the thumbnail miss path** (`sw.js`). The hit path had a `.catch`; the miss path
+   did not. A `QuotaExceededError` therefore rejected `respondWith`, which the browser surfaces as a network
+   error — turning a *successfully fetched* thumbnail into a broken image. It also made every uncached
+   thumbnail wait on a disk write plus a burst of sequential deletes before displaying. Related: the
+   background revalidate was not tied to `event.waitUntil`, so iOS could kill the worker before the cache was
+   ever written.
+3. **One cache, two entry ceilings** (`sw.js`). The new cache-first branch pointed `cacheFirst` at
+   `CACHE_STATIC` while it still trimmed to `MAX_ASSET_ENTRIES` (120); `networkFirst` trims the same cache to
+   80. The page emits ~55 fingerprinted assets, so this thrash cycle was in live range, not theoretical.
+4. **Maskable icon glyph pushed outside the safe zone.** The regeneration was not a pure recompression — it
+   enlarged the glyph ~11%, putting 3.14% of glyph pixels past the **circular** 80% safe radius (vs 0.18%
+   before), where an Android launcher mask would shave the wing corners. Requantizing the original art
+   instead restored the proven framing *and* came out 14 KB smaller.
+5. **Share button's `touchend` called `preventDefault()`**, which kills the synthetic click — and that click
+   is the only thing that ever resets core's `noClose` flag. Every share would have silently swallowed the
+   user's next tap-outside-to-close. Replaced with a self-clearing flag set on `pointerdown`.
+6. **Preload silently no-opped for every batch image**, having copied the pre-change matcher line and hit the
+   same absolute-vs-relative mismatch as defect 1.
 
 ## Open
 
-1. **Hard-refresh (Ctrl+Shift+R) before testing.** Asset URLs carry `?vary=<commit read at server startup>`.
-2. **Hands-on browser pass, never done:** the Characters bottom-bar tab (first-open init, card grid reflow
-   in the shorter/wider panel geometry, prompt injection while the Generate UI is live), the sweep
-   controls end-to-end, per-card generate / use-current-image / delete, LLLite models, and the
-   touchscreen compare gestures on a real device.
-3. **Re-run the prompts that reliably went black.** If they recur with the DiT in bf16, the next suspect
-   is `comfy-aimdo` (DynamicVRAM, async weight offloading) — not audited.
-4. Parked backlog unchanged, in `docs/TagDex-Plan.md` and `docs/MobilePWA-Optimization-Plan.md`:
-   simple-tab browse sheet, prompt coach, service-worker thumbnail cache, connection banner upgrades,
-   haptics, wake-lock, manifest shortcuts. No auth is configured on this install.
+1. **Restart the server, don't just refresh.** `WebServer.ExtensionAssets` holds each extension asset in a
+   `LazyOrReusable` that reads the file once per process lifetime, so extension JS/CSS edits are invisible
+   until a restart. Then hard-refresh (Ctrl+Shift+R) — `?vary=` is the commit read at startup.
+2. **Nothing here has been used in a browser, let alone on a phone.** Highest-value manual pass, in order:
+   batch-strip thumbnails still navigate with arrow keys and swipe (defect 1's blast radius); the Share
+   button on a real iOS/Android device; the thumbnail cache surviving an offline reload; the first-run toast
+   firing exactly once and never on `/simple`; the icons in an actual installed-app launcher.
+3. **Carried forward, still never done:** the hands-on browser pass for the TagDex Characters bottom-bar tab
+   (first-open init, card reflow, prompt injection), per-card generate / use-current-image / delete, LLLite
+   models, and the touchscreen image-compare gestures.
+4. **Re-run the prompts that reliably went black.** If they recur with the DiT in bf16, the next suspect is
+   `comfy-aimdo` (DynamicVRAM, async weight offloading) — not audited.
+5. **Scope gap in the thumbnail change.** With `Paths.AppendUserNameToOutputPath = false`, srcs are `Output/…`
+   and `getThumbnailSrc` skips them, so the optimization silently does nothing in that config. The server
+   would honour previews there; extend the helper if that config ever matters here.
+6. **Parked backlog** (corrected — the previous handoff listed several already-shipped items): `/simple`
+   browse sheet, the prompt coach (`docs/SimplePromptCoach-Plan.md`, wholly unstarted), Phase 5 item 1
+   (Simple tab as mobile home), §3.3 sidebar swipe animation (**premise stale** — the `layout.js:465` TODO it
+   was written against no longer exists), §2c full overlay chrome, server-reachable-but-app-down detection.
+   Haptics, wake-lock, manifest shortcuts and the SW thumbnail cache are all **shipped** and should stop
+   being listed as parked.
+7. No auth is configured on this install.
 
-## Decisions
+## Findings recorded, no action taken
 
-- **Mirror the Text2Image extension-tab hook for a new `Tabs/GenerateBottom/` scan** instead of hardcoding
-  the Characters tab into `GenerateTab.cshtml` or editing the bottom bar's fixed markup. Same permission
-  scheme, same nav markup, append-only, generic for any extension, upstreamable. Recorded in the
-  fork-delta table in `docs/TagDex-Plan.md`.
-- **Pane class `genpage-bottom-tab`, not `tab-pane-vw`** — the bottom bar's own panes define the geometry;
-  reusing the top-level hook's class would have broken sizing inside the bar.
-- **Batch sweep is strictly sequential** — see Feature 2 rationale (single-slot server gate, meaningful
-  cancel, one websocket).
-- **Touch handling stays wholly inside the MobileEnhancements extension**, replicating core math rather
-  than patching core — desktop behavior provably unchanged.
+- **TagDex vs upstream's `ApplyDownloadAPIKey` is not a bug.** `AGENTS.md` carries a watch item that upstream
+  now returns early when `session?.User is null`, dropping the `civitai.com` → `civitai.red` rewrite, and
+  TagDex's download call passes no session. Investigated: every TagDex dataset URL is a public
+  `huggingface.co/datasets/…`, so that rewrite never applied and the skipped HF auth header is not needed.
+  The watch item still stands for other callers.
+- **The 50 ms spinner interval was left alone deliberately.** The audit proposed replacing it with a CSS
+  animation. Upstream moved *off* CSS animation for measured GPU cost — see the comment in
+  `ui_improvements.js` directly above it. Changing it would contradict upstream's data with none of our own.
+- **Mobile scripts loading on desktop was left alone.** Five MobileEnhancements scripts (29.5 KB of touch
+  handling among them) inject into every genpage load. Gating is not feasible without core rearchitecture:
+  extension script tags are baked into a static string at startup. Mitigated anyway — they are `defer`red and
+  now immutable-cached.
 
 ## Traps
 
-- **Revealing a lazyloaded thumbnail takes three writes, not one.** `makeVisible`
-  (`browsers.js:33-52`) re-assigns `src = dataset.src` for anything still carrying `.lazyload`, so setting
-  `img.src` alone silently reverts off-screen cards on scroll. Fixed at `tagdex_tab.js:848-849`; any new
-  card-painting code must do the same three writes (`src`, remove `.lazyload`, delete `dataset.src`).
-- **A pinch always begins as a single touch.** Any touch layer that takes state on finger 1 must release
-  it when finger 2 arrives — see `holdingPanState`/`releasePanState()` in `mobile_fullview_touch.js`.
-- **`shown.bs.tab` never fires for a Generate-tab bar tab.** Every nav link inside a
-  `.swarm-gen-tab-subnav` collection (which `#bottombartabcollection` is) gets wrapped in a
-  `MovableGenTab`, whose constructor does `navElem.removeAttribute('data-bs-toggle')` and installs its own
-  `clickOn` handler (`layout.js:2-26`) — Bootstrap's tab JS is deliberately disabled there. Only
-  `#toptablist` is a plain Bootstrap tab bar. This silently broke the whole Characters panel on the move
-  (panel rendered, zero listeners wired, empty source `<select>`); fixed by also listening for `click`,
-  deferred 5ms so `MovableGenTab.clickOn`'s queued `reapplyPositions()` has given the pane real dimensions
-  before the card browser lays out. Any extension pane moved into a Generate tab bar must do the same.
-- **The `maintab_{id}` nav-link id is a contract.** TagDex's lazy init (`tagdex_tab.js:66`) and the tab
-  discovery hook both depend on it; renaming the emitted id breaks first-open init silently.
-- Carried forward: `\s` in `Data/Settings.fds` paths is FDS escaping, not corruption. A running server
-  locks the exe and owns the settings file — stop it with the `ShutdownServer` API, not a kill. A
-  `JObject` API parameter receives the whole request payload, not the field matching its name
-  (`APICallReflectBuilder.cs:46`).
+- **`.src` returns an absolute URL; `dataset.src` holds a relative one.** Never compare across the two. This
+  is defect 1 and defect 6, both from the same mistake in the same sweep.
+- **`immutable` sharpens an existing caveat.** An extension asset edited without a new commit keeps its
+  `?vary=` token. Previously a plain F5 revalidated off `Last-Modified` and picked the edit up; now it will
+  not for a year. Hard-refresh still works, and the documented workflow was already restart-then-hard-refresh
+  — worse in degree, not in kind. `#if DEBUG` re-reads per request but the browser no longer re-asks.
+- **The service worker's `image/*` Content-Type guard is load-bearing.** `/View` serves `.mp4` with range
+  processing, and `?preview=true` is appended to every history file including video. That guard is the only
+  thing stopping a cached 200 being handed to a Range request and breaking video seeking. Do not loosen it.
+- **A maskable icon's safe zone is a circle, not a box.** Clearing the 80% box is not sufficient.
+- **`shown.bs.tab` never fires for a Generate-tab-bar tab** — those nav links are wrapped in `MovableGenTab`,
+  which strips `data-bs-toggle` and handles clicks itself. `#toptablist` and `#servertabbutton` *are* plain
+  Bootstrap tabs, which is why the Commit D change works there. Also depends on Bootstrap 5 dispatching that
+  event natively; Bootstrap 4's jQuery-triggered version would not reach `addEventListener`.
+- **Revealing a lazyloaded thumbnail takes three writes, not one** (`src`, remove `.lazyload`, delete
+  `dataset.src`) — `makeVisible` re-asserts `src` from `dataset.src` on scroll otherwise.
+- **A pinch always begins as a single touch.** Any touch layer taking state on finger 1 must release it when
+  finger 2 arrives.
+- Carried forward: `\s` in `Data/Settings.fds` paths is FDS escaping, not corruption. A running server locks
+  the exe and owns the settings file — stop it with the `ShutdownServer` API, not a kill. A `JObject` API
+  parameter receives the whole request payload, not the field matching its name.
 
 ## Verify
 
@@ -184,7 +186,15 @@ both bail paths, inactive guard, touchend, touchcancel). Doc line flipped TODO �
 dotnet build SwarmUI.sln --configuration Release
 dotnet format --verify-no-changes
 dotnet format style --verify-no-changes
-node --check src/BuiltinExtensions/TagDex/Assets/tagdex_tab.js
+node --check src/BuiltinExtensions/MobileEnhancements/Assets/sw.js
+node --check src/BuiltinExtensions/MobileEnhancements/Assets/mobile_core.js
 node --check src/BuiltinExtensions/MobileEnhancements/Assets/mobile_fullview_touch.js
-# No automated tests; validate live. The launcher needs -o src/bin/live_release, not the default output dir.
+node --check src/wwwroot/js/genpage/gentab/currentimagehandler.js
+node --check src/wwwroot/js/genpage/helpers/generatehandler.js
+node --check src/wwwroot/js/genpage/server/servertab.js
+# Header matrix (live boot; GET not HEAD - MapGet routes may not answer HEAD):
+#   dotnet build src/SwarmUI.csproj -c Release -o src/bin/live_release
+#   src/bin/live_release/SwarmUI.exe --data_dir <scratch> --port 7902 --launch_mode none
+#   curl -sD - -o /dev/null -H "Accept-Encoding: gzip, br" "http://localhost:7902/js/site.js?vary=x"
+# No automated tests. The launcher needs -o src/bin/live_release, not the default output dir.
 ```
