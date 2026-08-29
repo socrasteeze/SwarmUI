@@ -67,6 +67,11 @@
     min-height: 1.4rem;
 }
 
+.tagdex-batch-status {
+    font-size: 0.85rem;
+    color: var(--text-soft);
+}
+
 .tagdex-more {
     min-height: 1.6rem;
     padding: 0 0.5rem;

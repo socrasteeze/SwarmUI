@@ -85,6 +85,12 @@ public class WebServer
     /// <summary>Extra content for the Text2Image page's tab bodies. Automatically set based on extensions.</summary>
     public static HtmlString T2ITabBody = new("");
 
+    /// <summary>Extra content for the Generate tab's bottom-bar tab list. Automatically set based on extensions.</summary>
+    public static HtmlString T2IBottomTabHeader = new("");
+
+    /// <summary>Extra content for the Generate tab's bottom-bar tab bodies. Automatically set based on extensions.</summary>
+    public static HtmlString T2IBottomTabBody = new("");
+
     /// <summary>Set of registered Theme IDs.</summary>
     public Dictionary<string, ThemeData> RegisteredThemes = [];
 
@@ -319,7 +325,7 @@ public class WebServer
 
     public void GatherExtensionPageAdditions()
     {
-        StringBuilder scripts = new(), stylesheets = new(), tabHeader = new(), tabFooter = new();
+        StringBuilder scripts = new(), stylesheets = new(), tabHeader = new(), tabFooter = new(), bottomTabHeader = new(), bottomTabFooter = new();
         ExtensionSharedFiles.Clear();
         ExtensionAssets.Clear();
         Program.Extensions.RunOnAllExtensions(e =>
@@ -358,11 +364,29 @@ public class WebServer
                     tabFooter.Append($"<div class=\"tab-pane tab-pane-vw\" id=\"{id}\" role=\"tabpanel\">\n{content}\n</div>\n");
                 }
             }
+            if (Directory.Exists($"{e.FilePath}Tabs/GenerateBottom/"))
+            {
+                foreach (string file in Directory.EnumerateFiles($"{e.FilePath}Tabs/GenerateBottom/", "*.html"))
+                {
+                    string simpleName = file.AfterLast('/').BeforeLast('.');
+                    string id = T2IParamTypes.CleanTypeName(simpleName);
+                    string content = File.ReadAllText(file);
+                    string perm = $"view_extension_tab_{id}";
+                    if (!Permissions.Registered.ContainsKey(perm))
+                    {
+                        Permissions.Register(new(perm, $"View Extension Tab {simpleName}", $"Allows access to the {simpleName} extension tab on the main page.", PermissionDefault.USER, Permissions.GroupExtensionTabs));
+                    }
+                    bottomTabHeader.Append($"<li class=\"nav-item\" role=\"presentation\" data-requiredpermission=\"{perm}\"><a class=\"nav-link translate\" id=\"maintab_{id}\" data-bs-toggle=\"tab\" href=\"#{id}\" aria-selected=\"false\" tabindex=\"-1\" role=\"tab\">{simpleName}</a></li>\n");
+                    bottomTabFooter.Append($"<div class=\"tab-pane genpage-bottom-tab\" id=\"{id}\" role=\"tabpanel\">\n{content}\n</div>\n");
+                }
+            }
         });
         PageHeaderExtra = new(stylesheets.ToString());
         PageFooterExtra = new(scripts.ToString());
         T2ITabHeader = new(tabHeader.ToString());
         T2ITabBody = new(tabFooter.ToString());
+        T2IBottomTabHeader = new(bottomTabHeader.ToString());
+        T2IBottomTabBody = new(bottomTabFooter.ToString());
     }
 
     /// <summary>Called by <see cref="Program"/>, generally should not be touched externally.</summary>

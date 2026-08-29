@@ -1,7 +1,7 @@
 /** TagDex - the Characters browse tab.
  *
- * Auto-wired: WebServer.cs discovers Tabs/Text2Image/*.html, injects the nav item and pane, and registers the
- * `view_extension_tab_characters` permission. No core edits.
+ * Auto-wired: WebServer.cs discovers Tabs/GenerateBottom/*.html, injects the nav item and pane into the Generate
+ * bottom bar, and registers the `view_extension_tab_characters` permission. No core edits.
  *
  * Uses the core GenPageBrowserClass as a library. Two non-obvious constraints that shape the code below:
  *  - The 'Cards' format is the only one that writes the descriptor's `description` as innerHTML into the card body,
@@ -43,8 +43,15 @@ class TagDexTabClass {
         /** Whether the dataset manage drawer is open. */
         this.manageOpen = false;
         /** Whether a reference-image generation is currently running. The server serializes these anyway; this just
-         * keeps the UI from queueing a pile of them behind one click each. */
+         * keeps the UI from queueing a pile of them behind one click each. Shared with the batch sweep below, so a
+         * single-card click and a running sweep can never overlap either. */
         this.generatingThumb = false;
+        /** Whether the "Generate All Visible" sweep is currently running. */
+        this.batchRunning = false;
+        /** Set by the Cancel button. Checked before every step; a step already in flight always finishes, only the
+         * next one is skipped - the server has no cancel route, and there is only one request in flight at a time
+         * to cancel anyway. */
+        this.batchCancelled = false;
     }
 
     /** Wires the tab. Called once at script load; all real work is deferred to first open. */
@@ -365,6 +372,8 @@ class TagDexTabClass {
         });
         getRequiredElementById('tagdex_refresh').addEventListener('click', () => this.requery());
         getRequiredElementById('tagdex_manage_toggle').addEventListener('click', () => this.onManageToggle());
+        getRequiredElementById('tagdex_batch_generate').addEventListener('click', () => this.startBatchGenerate());
+        getRequiredElementById('tagdex_batch_cancel').addEventListener('click', () => this.cancelBatchGenerate());
         // One delegated listener on the container, whose identity is stable across browser rebuilds (build() only
         // clears innerHTML). Avoids inline onclick, which would need escaping for names like "jeanne_d'arc".
         getRequiredElementById('tagdex_browser_container').addEventListener('click', event => {
@@ -670,6 +679,116 @@ class TagDexTabClass {
         });
     }
 
+    /** Finds every currently-rendered card that still shows the placeholder image, for the batch sweep below.
+     * Cards render lazily - an unrevealed `<img>` never gets a real `src` attribute, only `dataset.src` (see
+     * `browsers.js` `makeVisible`), while a card repainted by `repaintCardThumb` gets a real `src` regardless of
+     * whether it has been revealed yet. Checking the attribute first and falling back to the dataset value covers
+     * both states correctly; checking `img.src` directly would not, since an `<img>` with no `src` attribute
+     * reports the page's own URL rather than an empty string. */
+    collectPlaceholderCards() {
+        let container = document.getElementById('tagdex_browser_container');
+        if (!container) {
+            return [];
+        }
+        let cards = [];
+        for (let block of container.querySelectorAll('.model-block')) {
+            let name = block.dataset.name;
+            if (!name) {
+                continue;
+            }
+            let img = block.querySelector('img');
+            let src = (img && (img.getAttribute('src') || img.dataset.src)) || '';
+            if (src.includes(TagDexTabClass.PlaceholderImage)) {
+                let nameEl = block.querySelector('.tagdex-card-name');
+                cards.push({ div: block, name: name, display: nameEl ? nameEl.innerText : name });
+            }
+        }
+        return cards;
+    }
+
+    /** "Generate All Visible" button handler. Queues every placeholder card currently on screen and runs them
+     * sequentially - see `runBatchStep` for why sequential is required, not just preferred. */
+    startBatchGenerate() {
+        if (this.batchRunning) {
+            return;
+        }
+        if (this.generatingThumb) {
+            this.setBatchStatus('A reference image is already generating - wait for it to finish before starting a batch sweep.');
+            return;
+        }
+        let cards = this.collectPlaceholderCards();
+        if (cards.length == 0) {
+            this.setBatchStatus('Nothing to generate - every visible card already has a reference image.');
+            return;
+        }
+        this.batchRunning = true;
+        this.batchCancelled = false;
+        getRequiredElementById('tagdex_batch_generate').disabled = true;
+        getRequiredElementById('tagdex_batch_cancel').style.display = '';
+        this.runBatchStep(cards, 0);
+    }
+
+    /** Runs one card of the batch sweep, then recurses onto the next. Deliberately sequential and never
+     * `Promise.all`-style fanned out: `TagDexThumbs.cs` guards generation with a single-slot `SemaphoreSlim`, so
+     * concurrent requests would only queue up behind it server-side while consuming a websocket connection each for
+     * no gain - and it is what lets Cancel take effect after the in-flight request alone, rather than an unknown
+     * pile of already-sent ones. */
+    runBatchStep(cards, index) {
+        let total = cards.length;
+        if (this.batchCancelled || index >= total) {
+            this.finishBatch(this.batchCancelled ? `Cancelled after ${index} of ${total}.` : `Done - generated ${total} of ${total}.`);
+            return;
+        }
+        let { div, name, display } = cards[index];
+        this.generatingThumb = true;
+        this.setBatchStatus(`Generating ${index + 1} of ${total}: ${display}...`);
+        let input = getGenInput();
+        makeWSRequest('TagDexGenerateThumbnail', { source: this.source, name: name, rawInput: input }, data => {
+            if (data.status == 'queued') {
+                this.setBatchStatus(`Generating ${index + 1} of ${total}: ${display} (queued, ${data.queue_depth} waiting)...`);
+            }
+            else if (data.gen_progress && data.gen_progress.overall_percent != null) {
+                this.setBatchStatus(`Generating ${index + 1} of ${total}: ${display} (${Math.round(data.gen_progress.overall_percent * 100)}%)`);
+            }
+            else if (data.success) {
+                this.generatingThumb = false;
+                this.repaintCardThumb(div, data.thumb);
+                this.runBatchStep(cards, index + 1);
+            }
+        }, 0, error => {
+            this.generatingThumb = false;
+            this.setBatchStatus(`Generating ${index + 1} of ${total}: ${display} failed (${error}) - continuing...`);
+            this.runBatchStep(cards, index + 1);
+        });
+    }
+
+    /** Cancel button handler. The step already in flight always finishes and repaints its card - only the next one
+     * is skipped, per the `batchCancelled` field comment. */
+    cancelBatchGenerate() {
+        if (!this.batchRunning || this.batchCancelled) {
+            return;
+        }
+        this.batchCancelled = true;
+        getRequiredElementById('tagdex_batch_cancel').disabled = true;
+    }
+
+    /** Resets the batch controls once a sweep stops, whether it finished, failed out, or was cancelled. */
+    finishBatch(message) {
+        this.batchRunning = false;
+        this.batchCancelled = false;
+        getRequiredElementById('tagdex_batch_generate').disabled = false;
+        let cancelButton = getRequiredElementById('tagdex_batch_cancel');
+        cancelButton.style.display = 'none';
+        cancelButton.disabled = false;
+        this.setBatchStatus(message);
+    }
+
+    /** Writes the batch sweep's own progress line, separate from `setStatus` so a running sweep's progress and a
+     * search's result count never overwrite each other. */
+    setBatchStatus(text) {
+        getRequiredElementById('tagdex_batch_status').innerText = text;
+    }
+
     /** Sets one entry's reference image from whatever image is currently selected on the Generate tab.
      * Complements generateThumb: the image worth keeping is often one already made and then inpainted, upscaled, or
      * cherry-picked out of a batch, none of which regenerating from the tag alone would reproduce. */
@@ -722,6 +841,12 @@ class TagDexTabClass {
             // Generated thumbs reuse one URL per entry, so they need the cache buster; the static placeholder does
             // not, and busting it would refetch the same asset on every delete.
             target.src = thumb == TagDexTabClass.PlaceholderImage ? thumb : `${thumb}?t=${Date.now()}`;
+            // The batch sweep reaches cards that have not scrolled into view yet, so the img can still be lazy:
+            // `browsers.js` makeVisible would overwrite src from the stale dataset.src on the next scroll, silently
+            // reverting the image we just wrote - and leaving the card looking un-generated to the next sweep,
+            // which reads the same dataset.src. Mark it revealed exactly the way makeVisible does.
+            target.classList.remove('lazyload');
+            delete target.dataset.src;
         }
         else {
             this.requery();
