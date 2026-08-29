@@ -312,7 +312,9 @@ body.coarse-pointer .mobile-fullview-share-btn {
 .mobile-firstrun-toast {
     position: fixed;
     left: 50%;
-    top: calc(var(--safe-top, env(safe-area-inset-top)) + 0.5rem);
+    /* +3.2rem, not +0.5rem: the top tab strip starts at --safe-top and is ~2.75rem tall, so a smaller
+       offset parks the toast directly on top of the tabs (seen on device). */
+    top: calc(var(--safe-top, env(safe-area-inset-top)) + 3.2rem);
     transform: translateX(-50%) translateY(-200%);
     z-index: 99998;
     display: flex;

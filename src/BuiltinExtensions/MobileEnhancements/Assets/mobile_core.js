@@ -223,7 +223,15 @@ class MobileEnhancements {
         // Pick whichever screen axis is the current portrait height - iOS has historically disagreed with
         // itself about whether screen.width/height swap on rotation.
         let screenH = Math.abs(screen.height - window.innerHeight) <= Math.abs(screen.width - window.innerHeight) ? screen.height : screen.width;
-        if (screenH - window.innerHeight >= 20) {
+        // Only a genuinely-reserved top exempts us, and the window being shorter than the screen does NOT
+        // prove that. This used to be `screenH - innerHeight >= 20 -> 0`, and it misfired on the target
+        // device: the installed app there runs 62px short (894/956, per the diag table in
+        // docs/MobilePWA-Optimization-Plan.md) but the shortfall is a letterboxed band at the BOTTOM - the
+        // top still renders under the clock, which put the tab strip back behind the status bar. The
+        // window's own screen offset is the discriminator: a webview laid out below the status bar sits at
+        // screenY >= the bar height, a full-bleed one sits at 0. `|| 0` covers platforms that don't report it,
+        // which fails toward padding - a thin dead band, not an unreachable tab strip.
+        if ((window.screenY || 0) >= 20) {
             return 0;
         }
         let known = MobileEnhancements.IosStatusBarHeights[Math.round(screenH)];

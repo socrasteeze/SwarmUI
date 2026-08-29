@@ -101,7 +101,8 @@ const safeAreaCases = [
     { name: 'iOS zero inset while full-bleed falls back (iPhone 15/16)', env: 0, innerH: 852, innerW: 393, screenH: 852, screenW: 393, expect: 59 },
     { name: 'iOS zero inset while full-bleed falls back (Pro Max)', env: 0, innerH: 932, innerW: 430, screenH: 932, screenW: 430, expect: 59 },
     { name: 'iOS zero inset while full-bleed falls back (iPhone 12-14)', env: 0, innerH: 844, innerW: 390, screenH: 844, screenW: 390, expect: 47 },
-    { name: 'OS already reserved the bar - no double padding', env: 0, innerH: 793, innerW: 393, screenH: 852, screenW: 393, expect: 0 },
+    { name: 'OS already reserved the bar (screenY = bar height) - no double padding', env: 0, innerH: 793, innerW: 393, screenH: 852, screenW: 393, screenY: 59, expect: 0 },
+    { name: 'bottom-letterboxed but full-bleed at top (screenY 0) still pads - the 894/956 device', env: 0, innerH: 894, innerW: 440, screenH: 956, screenW: 440, screenY: 0, expect: 62 },
     { name: 'landscape adds nothing (iOS hides the status bar)', env: 0, innerH: 393, innerW: 852, screenH: 852, screenW: 393, expect: 0 },
     { name: 'unknown notch-class screen errs high rather than clipping', env: 0, innerH: 1000, innerW: 400, screenH: 1000, screenW: 400, expect: 59 },
     { name: 'home-button iPhone gets the classic 20px bar', env: 0, innerH: 667, innerW: 375, screenH: 667, screenW: 375, expect: 20 },
@@ -122,6 +123,9 @@ const safeAreaOut = await page.evaluate(({ coreClass, cases }) => {
         Object.defineProperty(window, 'innerHeight', { value: c.innerH, configurable: true });
         Object.defineProperty(window, 'innerWidth', { value: c.innerW, configurable: true });
         Object.defineProperty(window, 'screen', { value: { height: c.screenH, width: c.screenW }, configurable: true });
+        // screenY is the reserved-top discriminator: a webview laid out below the status bar reports its
+        // offset there; a full-bleed one reports 0. Cases that don't specify it get the full-bleed default.
+        Object.defineProperty(window, 'screenY', { value: c.screenY || 0, configurable: true });
         out.push({ name: c.name, got: inst.measureSafeAreaTop(), expect: c.expect });
     }
     // Non-standalone must be inert - desktop and plain-browser mobile are untouched by any of this.
