@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -149,7 +150,11 @@ public class WebServer
         });
         timer.Check("[Web] WebApp builder prep");
         builder.Services.AddRazorPages();
-        builder.Services.AddResponseCompression();
+        builder.Services.AddResponseCompression(options =>
+        {
+            options.EnableForHttps = true;
+            options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["image/svg+xml", "application/manifest+json", "text/javascript"]);
+        });
         builder.Logging.SetMinimumLevel(LogLevel);
         WebApp = builder.Build();
         WebApp.Use(async (context, next) =>
@@ -231,7 +236,22 @@ public class WebServer
         }
         WebApp.Lifetime.ApplicationStopping.Register(() => Program.Shutdown());
         timer.Check("[Web] StartStop handler");
-        WebApp.UseStaticFiles(new StaticFileOptions());
+        WebApp.UseStaticFiles(new StaticFileOptions()
+        {
+            OnPrepareResponse = ctx =>
+            {
+                // Every asset URL carries "?vary=" = Utilities.VaryID (version + ".GIT-" + commit hash), which rolls on every commit,
+                // so a "vary"-tagged request can be cached immutably; anything else gets a short cache window.
+                if (ctx.Context.Request.Query.ContainsKey("vary"))
+                {
+                    ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+                }
+                else
+                {
+                    ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=3600";
+                }
+            }
+        });
         timer.Check("[Web] static files");
         static string fixRoute(HttpRequest request)
         {
@@ -444,6 +464,21 @@ public class WebServer
         return (path, null, null);
     }
 
+    /// <summary>Sets the Cache-Control header for a successful <see cref="ViewExtensionScript"/> response.
+    /// A "vary"-tagged request carries <see cref="Utilities.VaryID"/> (version + ".GIT-" + commit hash, which rolls
+    /// on every commit) and so can be cached immutably; anything else gets a short cache window.</summary>
+    private static void SetExtensionFileCacheControl(HttpContext context)
+    {
+        if (context.Request.Query.ContainsKey("vary"))
+        {
+            context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+        }
+        else
+        {
+            context.Response.Headers["Cache-Control"] = "public, max-age=86400";
+        }
+    }
+
     /// <summary>Web route for scripts from extensions.</summary>
     public async Task ViewExtensionScript(HttpContext context)
     {
@@ -452,6 +487,7 @@ public class WebServer
         {
             context.Response.ContentType = Utilities.GuessContentType(requested);
             context.Response.StatusCode = 200;
+            SetExtensionFileCacheControl(context);
 #if DEBUG
             await context.Response.WriteAsync(script.Getter());
 #else
@@ -462,6 +498,7 @@ public class WebServer
         {
             context.Response.ContentType = Utilities.GuessContentType(requested);
             context.Response.StatusCode = 200;
+            SetExtensionFileCacheControl(context);
 #if DEBUG
             await context.Response.Body.WriteAsync(data.Getter());
 #else
