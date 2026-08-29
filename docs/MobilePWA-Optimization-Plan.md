@@ -212,6 +212,12 @@ is letterboxed — despite the meta being present in `index.html`, re-applied by
 `fixViewport()`, and `apple-mobile-web-app-status-bar-style: black-translucent` being injected. The bar is
 correctly positioned at the bottom of the viewport it is given; the viewport is simply not the screen.
 
+Second consequence, found on-device 2026-08-28 on the genpage: the 62px shortfall is a band at the
+BOTTOM while the top still renders under the clock, so `measureSafeAreaTop()`'s old "window shorter than
+screen means iOS reserved the top" guard misfired and returned 0 - the tab strip sat behind the status bar.
+The guard now discriminates with `window.screenY` (a top-reserved webview sits at screenY >= the bar height;
+a full-bleed one at 0), pinned by two cases in `verify-mobile-perf.mjs` including this exact device shape.
+
 Consequence worth knowing: with the bottom inset reporting 0, `--m-safe-bottom` computes to 0, so
 `.m-bottom-nav`'s `padding-bottom` collapses. That padding is doing nothing on this device — the clearance
 comes from the reserved band instead. If a future iOS starts reporting the inset properly, the padding
