@@ -70,8 +70,20 @@ class TagDexTabClass {
         if (!navLink) {
             return;
         }
+        // Wire the control row NOW rather than on first open. It is pure listener attachment over static
+        // markup with no layout or data dependency, and doing it here removes the whole class of "which tab
+        // activation event actually fires in this tab bar" bugs: the Datasets button, the dataset picker and
+        // the search box work the moment the page is live, however the pane ends up revealed.
+        this.buildControls();
         navLink.addEventListener('shown.bs.tab', () => this.onShown());
         navLink.addEventListener('click', () => setTimeout(() => this.onShown(), 5));
+        // Only the dataset round trip and the card browser stay deferred, so a page load that never opens
+        // this tab costs nothing and the grid lays out against a pane that already has real dimensions.
+        // If the tab is already the active one at session-ready (restored from the URL hash, or the user's
+        // saved bottom-bar tab), no click is coming - do that deferred half immediately.
+        if (navLink.classList.contains('active')) {
+            this.onShown();
+        }
     }
 
     /** First open builds the browser; later opens just refresh.
@@ -84,6 +96,8 @@ class TagDexTabClass {
             return;
         }
         this.openHandled = true;
+        // Idempotent, and already done in init() - kept so this method stays correct on its own if some
+        // future caller reaches it before init has run.
         this.buildControls();
         this.loadSources(() => {
             this.ensureBrowser();
