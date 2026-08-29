@@ -163,7 +163,15 @@ both bail paths, inactive guard, touchend, touchcancel). Doc line flipped TODO �
   card-painting code must do the same three writes (`src`, remove `.lazyload`, delete `dataset.src`).
 - **A pinch always begins as a single touch.** Any touch layer that takes state on finger 1 must release
   it when finger 2 arrives — see `holdingPanState`/`releasePanState()` in `mobile_fullview_touch.js`.
-- **The `maintab_{id}` nav-link id is a contract.** TagDex's lazy init (`tagdex_tab.js:59`) and the tab
+- **`shown.bs.tab` never fires for a Generate-tab bar tab.** Every nav link inside a
+  `.swarm-gen-tab-subnav` collection (which `#bottombartabcollection` is) gets wrapped in a
+  `MovableGenTab`, whose constructor does `navElem.removeAttribute('data-bs-toggle')` and installs its own
+  `clickOn` handler (`layout.js:2-26`) — Bootstrap's tab JS is deliberately disabled there. Only
+  `#toptablist` is a plain Bootstrap tab bar. This silently broke the whole Characters panel on the move
+  (panel rendered, zero listeners wired, empty source `<select>`); fixed by also listening for `click`,
+  deferred 5ms so `MovableGenTab.clickOn`'s queued `reapplyPositions()` has given the pane real dimensions
+  before the card browser lays out. Any extension pane moved into a Generate tab bar must do the same.
+- **The `maintab_{id}` nav-link id is a contract.** TagDex's lazy init (`tagdex_tab.js:66`) and the tab
   discovery hook both depend on it; renaming the emitted id breaks first-open init silently.
 - Carried forward: `\s` in `Data/Settings.fds` paths is FDS escaping, not corruption. A running server
   locks the exe and owns the settings file — stop it with the `ShutdownServer` API, not a kill. A
