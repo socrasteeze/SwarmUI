@@ -331,6 +331,6 @@ public class MobileEnhancementsExtension : Extension
             + "\n<meta name=\"apple-mobile-web-app-capable\" content=\"yes\" />"
             + "\n<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\" />"
             + "\n<meta name=\"apple-mobile-web-app-title\" content=\"SwarmUI\" />"
-            + $"\n<link rel=\"apple-touch-icon\" href=\"{icons}/apple-touch-icon-180.png\" />";
+            + $"\n<link rel=\"apple-touch-icon\" href=\"{icons}/apple-touch-icon-180.png?vary={Utilities.VaryID}\" />";
     }
 }

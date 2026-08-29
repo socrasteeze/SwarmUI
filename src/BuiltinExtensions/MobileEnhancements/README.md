@@ -13,7 +13,7 @@ It is intentionally built as a self-contained extension (new files only, zero ed
 
 ## Icons
 
-`Assets/icons/*` are generated from the repo's `src/wwwroot/favicon.ico` (128×128, upscaled). They are a functional placeholder — dropping a higher-resolution source logo in and regenerating the PNGs (192, 512, maskable 512, apple-touch 180) is a clean drop-in improvement. The maskable variant pads the glyph into the ~80% safe zone on the `#161616` theme background.
+`Assets/icons/*` are generated from the repo's `src/wwwroot/favicon.ico` (128×128, upscaled). They are a functional placeholder — dropping a higher-resolution source logo in and regenerating the PNGs (192, 512, maskable 512, apple-touch 180) is a clean drop-in improvement. The maskable variant pads the glyph into the ~80% safe zone on the `#161616` theme background. As of 2026-08-28 they are palette-quantized PNGs (`-strip`, adaptive palette, no visible banding on the alpha edge) instead of naive full-RGBA upscales — the four files total well under 150KB, down from ~449KB.
 
 ## Coupling notes
 
