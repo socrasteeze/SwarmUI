@@ -40,6 +40,8 @@ class TagDexTabClass {
         this.downloading = {};
         /** Live download row elements, keyed by source ID, so a running download's row survives a list rebuild. */
         this.downloadRows = {};
+        /** Whether the first-open build has already been kicked off. See onShown. */
+        this.openHandled = false;
         /** Whether the dataset manage drawer is open. */
         this.manageOpen = false;
         /** Whether a reference-image generation is currently running. The server serializes these anyway; this just
@@ -54,20 +56,34 @@ class TagDexTabClass {
         this.batchCancelled = false;
     }
 
-    /** Wires the tab. Called once at script load; all real work is deferred to first open. */
+    /** Wires the tab. Called once at script load; all real work is deferred to first open.
+     *
+     * Two listeners, because the two tab bars this pane can live in activate tabs by different mechanisms:
+     *  - Top-level tabs (`#toptablist`) are plain Bootstrap tabs, which fire `shown.bs.tab`.
+     *  - Generate-tab bars (`.swarm-gen-tab-subnav`, which `#bottombartabcollection` is) are managed by
+     *    `genTabLayout`: `MovableGenTab`'s constructor strips `data-bs-toggle` off every nav link and
+     *    handles clicks itself, so Bootstrap never activates them and `shown.bs.tab` NEVER fires there.
+     * The click path defers a tick: `MovableGenTab.clickOn` only queues `reapplyPositions()` on a 1ms
+     * timer, and the browser needs the pane to have real dimensions before it lays cards out. */
     init() {
         let navLink = document.getElementById('maintab_characters');
         if (!navLink) {
             return;
         }
         navLink.addEventListener('shown.bs.tab', () => this.onShown());
+        navLink.addEventListener('click', () => setTimeout(() => this.onShown(), 5));
     }
 
-    /** First open builds the browser; later opens just refresh. */
+    /** First open builds the browser; later opens just refresh.
+     * Guards on `openHandled`, not on `this.browser`: the browser only exists once the async `loadSources`
+     * round trip lands, so a second click (or the click and `shown.bs.tab` listeners both firing, if this
+     * pane is ever moved to a Bootstrap-driven tab bar) would otherwise re-run `buildControls` and attach a
+     * duplicate set of listeners to every control. */
     onShown() {
-        if (this.browser) {
+        if (this.openHandled) {
             return;
         }
+        this.openHandled = true;
         this.buildControls();
         this.loadSources(() => {
             this.ensureBrowser();
