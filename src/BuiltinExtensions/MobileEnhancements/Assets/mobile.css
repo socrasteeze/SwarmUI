@@ -273,3 +273,73 @@ body.small-window .model-block-big .model-descblock {
     width: auto;
     min-width: 0;
 }
+
+/* --- T7: in-viewer Share button --- */
+/* Created by mobile_fullview_touch.js only when navigator.share exists AND the pointer is coarse (checked
+   fresh, in JS, before the element is ever created) - so this selector, though scoped to body.coarse-pointer
+   like every other rule in this file, is doubly redundant with the JS gate rather than the sole thing
+   keeping it off desktop: the element itself simply does not exist there. Positioned as a fixed overlay
+   (independent of imageview_modal_imagewrap's own layout/zoom transforms) in a free corner of the image
+   area, clear of the existing counter/[Close] control (top:1rem; right:10%; see genpage.css). >=44px in
+   both dimensions per the same touch-target spec the rest of Phase 3 above follows. */
+body.coarse-pointer .mobile-fullview-share-btn {
+    position: fixed;
+    top: calc(var(--safe-top, env(safe-area-inset-top)) + 3.6rem);
+    right: 0.6rem;
+    z-index: 1050;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.8rem;
+    border-radius: 0.5rem;
+    background: var(--background-panel, #222);
+    color: var(--text, #eee);
+    border: 1px solid var(--border-color, #444);
+    font-size: 0.85rem;
+    opacity: 0.92;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* --- T8: first-run standalone layout tip toast --- */
+/* Created by mobile_core.js the first time the app is opened installed, small-window, and on Genpage (never
+   on /simple - see MobileEnhancements.showFirstRunToast() for the exact gating). Same slide-down-from-top
+   treatment as the connection banner above, anchored below it (a real connectivity problem, if one happens
+   to coincide with first run, is the more urgent thing to read) and above the busy bar. Auto-dismisses on
+   its own but always keeps an explicit close control, per Phase 3's touch-target rules below. */
+.mobile-firstrun-toast {
+    position: fixed;
+    left: 50%;
+    top: calc(var(--safe-top, env(safe-area-inset-top)) + 0.5rem);
+    transform: translateX(-50%) translateY(-200%);
+    z-index: 99998;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: var(--background-panel, #222);
+    color: var(--text, #eee);
+    border: 1px solid var(--border-color, #444);
+    padding: 0.5rem 0.6rem 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: transform 0.25s ease-out;
+    max-width: 90vw;
+    text-align: left;
+}
+.mobile-firstrun-toast.visible {
+    transform: translateX(-50%) translateY(0);
+}
+.mobile-firstrun-toast-close {
+    flex: 0 0 auto;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    cursor: pointer;
+    opacity: 0.8;
+}

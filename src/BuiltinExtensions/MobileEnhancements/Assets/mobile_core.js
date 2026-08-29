@@ -28,6 +28,14 @@ class MobileEnhancements {
     /** Milliseconds to wait after a resize before re-measuring the top inset. */
     static SafeTopSettleMs = 200;
 
+    /** localStorage key gating the first-run standalone layout-tip toast (T8, Phase 5 item 3). Set the
+     * instant the toast is shown, not when it's dismissed, so it fires exactly once ever no matter how (or
+     * whether) the user closes it. */
+    static FirstRunToastFlag = 'mobile_firstrun_layout_toast';
+
+    /** Milliseconds before the first-run toast auto-dismisses on its own. */
+    static FirstRunToastAutoDismissMs = 10000;
+
     /** Construct and immediately wire up the mobile/PWA baseline. */
     constructor() {
         this.isStandalone = this.detectStandalone();
@@ -41,6 +49,7 @@ class MobileEnhancements {
         this.watchSafeAreaTop();
         this.registerServiceWorker();
         this.addMobileReturnLink();
+        this.setupFirstRunToast();
     }
 
     /**
@@ -286,6 +295,70 @@ class MobileEnhancements {
                 console.log(`SwarmUI PWA service worker registration failed: ${err}`);
             });
         });
+    }
+
+    /**
+     * Arranges the one-time first-run toast (T8, Phase 5 item 3 of docs/MobilePWA-Optimization-Plan.md)
+     * pointing a standalone-installed phone user at the User tab's Mobile/Desktop layout dropdown. Deferred
+     * to the 'load' event, not run inline from the constructor: body.small-window is set by genTabLayout's
+     * own initial layout pass, which is scheduled through scheduleReapply() -> requestAnimationFrame (see
+     * layout.js) and is not guaranteed to have run yet at construction time - checking it too early could
+     * miss a standalone phone that starts out (briefly) unclassified and never show the tip at all.
+     */
+    setupFirstRunToast() {
+        window.addEventListener('load', () => this.showFirstRunToast());
+    }
+
+    /**
+     * The actual first-run-toast gate + display. ALL of standalone, small-window, and Genpage (never
+     * `/simple`, which loads this same script but has no user-settings tab - so the element this checks for
+     * is simply absent there) are required, plus the localStorage flag being unset. Sets the flag the
+     * instant it decides to show, before the toast is even built, so a page unload mid-toast still counts
+     * as "shown" and this never fires twice. Never changes any user setting itself - it only links to where
+     * the user can.
+     */
+    showFirstRunToast() {
+        if (!this.isStandalone || !document.body.classList.contains('small-window')) {
+            return;
+        }
+        if (!document.getElementById('usersettingstabbutton')) {
+            return;
+        }
+        try {
+            if (localStorage.getItem(MobileEnhancements.FirstRunToastFlag) != null) {
+                return;
+            }
+            localStorage.setItem(MobileEnhancements.FirstRunToastFlag, '1');
+        }
+        catch (e) {
+            // localStorage inaccessible (private mode, storage disabled, etc.) - fail closed rather than
+            // risk showing this on every single launch with no way to remember it was already seen.
+            return;
+        }
+        let toast = document.createElement('div');
+        toast.className = 'mobile-firstrun-toast';
+        let text = document.createElement('span');
+        text.textContent = 'Tip: pick Mobile or Desktop layout in the User tab.';
+        let close = document.createElement('span');
+        close.className = 'mobile-firstrun-toast-close';
+        close.setAttribute('role', 'button');
+        close.setAttribute('aria-label', 'Dismiss');
+        close.textContent = '×';
+        let dismissed = false;
+        let dismiss = () => {
+            if (dismissed) {
+                return;
+            }
+            dismissed = true;
+            toast.classList.remove('visible');
+            setTimeout(() => toast.remove(), 300);
+        };
+        close.addEventListener('click', dismiss);
+        toast.appendChild(text);
+        toast.appendChild(close);
+        document.body.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('visible'));
+        setTimeout(dismiss, MobileEnhancements.FirstRunToastAutoDismissMs);
     }
 }
 
