@@ -33,11 +33,20 @@ class MobileFullViewTouch {
         this.lastTapY = 0;
         this.tapToggleTimer = null;
         this.animating = false;
+        // T6 (adjacent-image preload): the two warmed Image() objects are held here so they survive until
+        // the browser finishes fetching/decoding them - an unreferenced Image() can be GC'd mid-flight.
+        this.preloadImg1 = null;
+        this.preloadImg2 = null;
+        // T7 (in-viewer Share button): the button element itself and the observer that re-injects it.
+        this.shareButton = null;
+        this.contentObserver = null;
+        this.shareNoCloseTimer = null;
         let content = imageFullView.content;
         content.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
         content.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
         content.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
         content.addEventListener('touchcancel', this.onTouchCancel.bind(this), { passive: false });
+        this.watchContent();
     }
 
     /** Reset per-gesture state. */
@@ -60,11 +69,15 @@ class MobileFullViewTouch {
         return imageFullView.isOpen() && window.matchMedia('(pointer: coarse)').matches;
     }
 
-    /** True if the touch should be left to the browser: native media controls, or the scrollable metadata /
-     *  action-button area under the image. */
+    /** True if the touch should be left to the browser: native media controls, the scrollable metadata /
+     *  action-button area under the image, or the floating Share button (T7) overlaid on the image itself -
+     *  without this it would otherwise read as "tap on the image" and get swallowed by the pan/tap gesture
+     *  state machine below (toggling metadata, or worse, being interpreted as half of a double-tap zoom)
+     *  instead of reaching the button's own tap handler. */
     isOnControls(target) {
         return findParentOfClass(target, 'video-controls') || findParentOfClass(target, 'audio-controls')
-            || findParentOfClass(target, 'audio-waveform-wrap') || findParentOfClass(target, 'imageview_popup_modal_undertext');
+            || findParentOfClass(target, 'audio-waveform-wrap') || findParentOfClass(target, 'imageview_popup_modal_undertext')
+            || findParentOfClass(target, 'mobile-fullview-share-btn');
     }
 
     /** True if the touch is on the image itself (vs the letterbox / outside area). */
@@ -423,6 +436,12 @@ class MobileFullViewTouch {
                         ni.style.transform = 'translateX(0)';
                     }
                     this.haptic();
+                    // T6: warm the new current image's own neighbours now that the swap has committed. The
+                    // watchContent() observer below also fires for this same navigation (showImage() rebuilt
+                    // imageFullView.content to get here) and calls preloadAdjacent() itself; that's fine
+                    // (preloadAdjacent() is idempotent - reusing an already-warm URL just hits cache), this
+                    // call just guarantees it happens even if a future refactor changes that observer.
+                    this.preloadAdjacent();
                     setTimeout(() => {
                         this.clearInner();
                         this.animating = false;
@@ -447,6 +466,271 @@ class MobileFullViewTouch {
     haptic() {
         if (navigator.vibrate) {
             navigator.vibrate(8);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // T6: adjacent-image preload (docs/MobilePWA-Optimization-Plan.md section 2b)
+    // ---------------------------------------------------------------------------------------------------
+
+    /**
+     * Preload the +/-1 neighbour images around whatever is currently open in the full-view modal, so a
+     * follow-up swipe in either direction shows an already-decoded image instead of a blank/loading frame.
+     * Resolves neighbours exactly the way the core shiftToNextImagePreview does it
+     * (src/wwwroot/js/genpage/gentab/currentimagehandler.js, ~line 720-790, read-only reference - never
+     * edited): history mode walks lastHistoryImageDiv's `.image-block` siblings; batch mode walks
+     * #current_image_batch's `.image-block-img-inner` list and maps back to each one's `.image-block`
+     * parent. Reads that parent's `dataset.src` - the full-resolution URL - rather than the strip
+     * thumbnail's own `img.src` (another agent's parallel work points the strip's `img.src` at a lower-res
+     * preview URL; `dataset.src` stays full-res regardless, so this stays correct either way). Warms each
+     * with a throwaway `new Image()`. No-ops in a backgrounded tab (nothing to gain warming images the user
+     * cannot currently see) or once the touch viewer itself is not open.
+     */
+    preloadAdjacent() {
+        if (document.hidden || !this.isActive()) {
+            return;
+        }
+        if (typeof currentImageHelper == 'undefined' || !currentImageHelper) {
+            return;
+        }
+        let curImgElem = currentImageHelper.getCurrentImage();
+        if (!curImgElem) {
+            return;
+        }
+        let doCycle = typeof getUserSetting == 'function' ? getUserSetting('ui.imageshiftingcycles', 'true') == 'true' : true;
+        let blocks;
+        let index;
+        if (curImgElem.dataset.batch_id == 'history') {
+            if (typeof lastHistoryImageDiv == 'undefined' || !lastHistoryImageDiv || !lastHistoryImageDiv.parentElement) {
+                return;
+            }
+            blocks = [...lastHistoryImageDiv.parentElement.children].filter(div => div.classList.contains('image-block'));
+            index = blocks.findIndex(div => div == lastHistoryImageDiv);
+        }
+        else {
+            let batchArea = document.getElementById('current_image_batch');
+            if (!batchArea) {
+                return;
+            }
+            let imgs = [...batchArea.getElementsByClassName('image-block-img-inner')].filter(i => findParentOfClass(i, 'image-block-placeholder') == null);
+            function getSrc(elem) {
+                if (elem.tagName == 'VIDEO') {
+                    let source = elem.querySelector('source');
+                    return source ? source.src : '';
+                }
+                return elem.src;
+            }
+            let curSrc = getSrc(curImgElem);
+            // The batch strip's thumbnails may carry a `?preview=true` suffix on their own `img.src` that
+            // the main current image's src does not (see getThumbnailSrc / appendImage in
+            // currentimagehandler.js), so the resolved-URL compare alone matches nothing and this would
+            // silently never preload anything in batch mode. Fall back to comparing the raw unresolved srcs
+            // stashed in dataset, exactly as shiftToNextImagePreview does.
+            let curRawSrc = curImgElem.dataset.src;
+            blocks = imgs.map(img => findParentOfClass(img, 'image-block'));
+            index = imgs.findIndex((img, i) => {
+                if (getSrc(img) == curSrc) {
+                    return true;
+                }
+                let block = blocks[i];
+                return block != null && curRawSrc != null && block.dataset.src == curRawSrc;
+            });
+        }
+        if (index == -1 || !blocks || blocks.length == 0) {
+            return;
+        }
+        this.preloadImg1 = this.warmSrc(this.neighbourSrc(blocks, index - 1, doCycle));
+        this.preloadImg2 = this.warmSrc(this.neighbourSrc(blocks, index + 1, doCycle));
+    }
+
+    /**
+     * Full-resolution `dataset.src` of the `.image-block` at `index` in `blocks` (wrapping around when
+     * `doCycle`, matching the user's own cycle setting rather than always/never wrapping), or null when
+     * there is nothing worth preloading there: out of bounds and not cycling, a still-loading placeholder,
+     * a `data:` URL (already in memory, nothing to fetch), or a video/audio entry (the viewer streams those
+     * rather than showing a decoded bitmap, so warming them through `new Image()` accomplishes nothing).
+     */
+    neighbourSrc(blocks, index, doCycle) {
+        let len = blocks.length;
+        if (len == 0) {
+            return null;
+        }
+        if (index < 0) {
+            if (!doCycle) {
+                return null;
+            }
+            index = len - 1;
+        }
+        else if (index >= len) {
+            if (!doCycle) {
+                return null;
+            }
+            index = 0;
+        }
+        let block = blocks[index];
+        if (!block || block.classList.contains('image-block-placeholder')) {
+            return null;
+        }
+        let src = block.dataset.src;
+        if (!src || src.startsWith('data:') || isVideoExt(src) || isAudioExt(src)) {
+            return null;
+        }
+        return src;
+    }
+
+    /** Warm one URL with a throwaway Image() (a no-op for a null/falsy src), returned so the caller can hold
+     *  it on `this` and keep it alive until the browser finishes fetching/decoding it. */
+    warmSrc(src) {
+        if (!src) {
+            return null;
+        }
+        let img = new Image();
+        img.src = src;
+        return img;
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // T7: in-viewer Share button (touch + Web Share API only)
+    // ---------------------------------------------------------------------------------------------------
+
+    /**
+     * Watches the full-view modal's content for the complete innerHTML rebuild that showImage() does on
+     * every open and every navigation (currentimagehandler.js) - anything appended as a child of
+     * imageFullView.content does not survive that rebuild, so this re-applies the per-image setup
+     * (Share button injection, adjacent-image preload) each time it happens. This is also the "once when
+     * the viewer becomes active for a new image" trigger for both T6 and T7, covering navigation methods
+     * this file doesn't itself drive (arrow keys, clicking a history/batch thumbnail directly).
+     */
+    watchContent() {
+        if (!imageFullView || !imageFullView.content) {
+            return;
+        }
+        let onChange = () => {
+            this.ensureShareButton();
+            this.preloadAdjacent();
+        };
+        this.contentObserver = new MutationObserver(onChange);
+        this.contentObserver.observe(imageFullView.content, { childList: true });
+    }
+
+    /**
+     * (Re)inject the floating Share button into the currently open image, if this device qualifies
+     * (a coarse/touch pointer AND the Web Share API exists - both checked fresh on every call, so this
+     * never has stale state to react to) and it is not already present. A no-op everywhere else, including
+     * every desktop browser regardless of Web Share API support - the pointer check alone keeps the element
+     * from ever being created there.
+     */
+    ensureShareButton() {
+        if (!navigator.share || !window.matchMedia('(pointer: coarse)').matches) {
+            return;
+        }
+        let wrap = imageFullView.content.querySelector('.imageview_modal_imagewrap');
+        if (!wrap || wrap.querySelector('.mobile-fullview-share-btn')) {
+            return;
+        }
+        let btn = document.createElement('div');
+        btn.className = 'mobile-fullview-share-btn';
+        btn.textContent = 'Share';
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('tabindex', '0');
+        btn.setAttribute('aria-label', 'Share this image');
+        let activate = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.suppressModalClose();
+            this.doShare();
+        };
+        // touchend (not click) does the real work, and preventDefault()s to suppress the synthetic click that
+        // would otherwise follow: this button lives inside imageview_modal_imagewrap, which is NOT one of the
+        // classes ImageFullViewHelper's own document-level click listener exempts from its
+        // tap-outside-closes-the-modal behavior (currentimagehandler.js) - a real click reaching that listener
+        // would close the viewer instead of sharing it. suppressModalClose() is the same noClose backstop this
+        // file's own handleTap() already relies on for on-image taps, kept here in case some browser still lets
+        // a click through despite preventDefault.
+        btn.addEventListener('touchend', activate, { passive: false });
+        // Fallback for non-touch activation (e.g. assistive tech triggering a synthetic click) - harmless to
+        // keep even though this button is never created on a fine-pointer device in the first place. The
+        // pointerdown below is what makes it actually reachable: that document-level click listener runs in the
+        // CAPTURE phase, i.e. before this one, so without noClose already set by then it would close the modal
+        // and stopPropagation() the click before it ever arrives here.
+        btn.addEventListener('pointerdown', () => this.suppressModalClose());
+        btn.addEventListener('click', activate);
+        wrap.appendChild(btn);
+        this.shareButton = btn;
+    }
+
+    /**
+     * Tell ImageFullViewHelper's document-level click listener to skip its tap-outside-closes-the-modal pass
+     * for whatever click this activation may produce, then clear the flag again shortly afterwards. The clear
+     * matters: that listener resets `noClose` itself, but only when a click actually reaches it, and the
+     * touch path here preventDefault()s the synthetic click out of existence - so the flag would otherwise
+     * stay set indefinitely and silently eat the user's NEXT tap-outside instead of closing the viewer.
+     */
+    suppressModalClose() {
+        imageFullView.noClose = true;
+        if (this.shareNoCloseTimer) {
+            clearTimeout(this.shareNoCloseTimer);
+        }
+        this.shareNoCloseTimer = setTimeout(() => {
+            this.shareNoCloseTimer = null;
+            imageFullView.noClose = false;
+        }, 700);
+    }
+
+    /**
+     * Share the currently open image/video via the Web Share API. Prefers sharing the actual file, so the
+     * receiving app gets real media data instead of a link the recipient may not be able to open (an
+     * internal server hostname, a login-gated page); falls back to a plain URL share whenever the file
+     * can't be built or isn't shareable. AbortError (the user dismissing the native share sheet) is
+     * swallowed - that is the user's own choice, not a failure. Any other failure surfaces through the same
+     * global error toast the rest of the app uses (site.js's showError).
+     */
+    async doShare() {
+        if (!this.isActive() || !navigator.share) {
+            return;
+        }
+        let src = imageFullView.currentSrc;
+        if (!src) {
+            return;
+        }
+        try {
+            let absUrl = new URL(src, location.href).href;
+            let file = await this.buildShareFile(src, absUrl);
+            if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file] });
+                return;
+            }
+            await navigator.share({ url: absUrl });
+        }
+        catch (err) {
+            if (err && err.name == 'AbortError') {
+                return;
+            }
+            showError(`Share failed: ${err}`);
+        }
+    }
+
+    /**
+     * Fetch `src` and wrap it as a File for navigator.share({files}). Never throws - any failure (network
+     * error, CORS, a data: URL) returns null instead, so the caller falls back to a plain URL share.
+     */
+    async buildShareFile(src, absUrl) {
+        if (src.startsWith('data:')) {
+            return null;
+        }
+        try {
+            let response = await fetch(absUrl);
+            if (!response.ok) {
+                return null;
+            }
+            let blob = await response.blob();
+            let mediaType = getMediaType(src);
+            let extMatch = src.split('?')[0].match(/\.([a-zA-Z0-9]+)$/);
+            let ext = extMatch ? extMatch[1] : (mediaType == 'video' ? 'mp4' : (mediaType == 'audio' ? 'mp3' : 'png'));
+            return new File([blob], `share.${ext}`, { type: blob.type || `${mediaType}/*` });
+        }
+        catch (err) {
+            return null;
         }
     }
 }
