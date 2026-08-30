@@ -181,13 +181,15 @@ One commit (or PR) per phase: 1 → 2 → 3 → 4 (→ 5). Phases 2–4 are inde
 6. Desktop no-regression pass (large-window UI visually unchanged) every phase.
 7. After any future upstream merge: re-run this gate + re-check the coupling watchlist.
 
-## Known, accepted: the bottom-nav gap in the installed iOS app (2026-08-23)
+## The bottom-nav gap in the installed iOS app (2026-08-23, fix shipped 2026-08-29)
 
-On the target iPhone (iOS 18.7 / WebKit, 956pt screen) the installed app renders a band of reserved space
-below `.m-bottom-nav`, so the bar does not touch the physical screen edge. **Investigated and accepted as
-a device/WebKit behaviour, not a fork defect. Do not re-chase it without new information.**
+On the target iPhone (iOS 18.7 / WebKit, 956pt screen) the installed app rendered a band of reserved space
+below `.m-bottom-nav`, so the bar did not touch the physical screen edge. First logged as "accepted device
+behaviour"; **re-read on 2026-08-29 the diag numbers below identify the cause, and a fix shipped** — see
+"Resolution" at the end of this section. The measurements are kept because they are the evidence.
 
-Measured on device with `Assets/m/_diag.html`:
+Measured on device with `Assets/m/_diag.html` (under status-bar-style `black-translucent`, the value shipped
+at the time):
 
 | | |
 |---|---|
@@ -225,6 +227,19 @@ Consequence worth knowing: with the bottom inset reporting 0, `--m-safe-bottom` 
 comes from the reserved band instead. If a future iOS starts reporting the inset properly, the padding
 resumes and no change is needed.
 
+**Resolution (2026-08-29).** The shortfall is not an arbitrary number: 62px is exactly this device's
+status-bar height (`IosStatusBarHeights[956]`). So iOS was sizing the web view as if the status bar were
+*reserved* (the `black`/`default` geometry, 956 − 62) while positioning it as if *translucent* (full-bleed,
+y=0). The reserved 62px had nowhere to go but the bottom, outside the page canvas — hence unpaintable by
+`html` background or `theme-color`. The fix asks for the geometry iOS was already computing:
+`MobileEnhancementsExtension.StatusBarStyle` is now `black`, so the same 894px view starts below the clock
+and ends at the screen edge — no band, no content under the status bar, and `--safe-top` legitimately 0.
+`measureSafeAreaTop()` reads the injected meta and returns 0 unless it is `black-translucent`, so the
+fallback table survives for anyone who flips the constant back; `verify-mobile-perf.mjs` pins both (50/50).
+Cost: an opaque black status-bar strip instead of `#161616`. **Not yet device-verified** — delete and re-add
+the home-screen app so iOS re-reads the meta, then open `_diag.html` (it now prints the meta value) and
+check `screen.height - innerHeight` is still 62 but the band is gone. If it is not, this diagnosis is wrong.
+
 ## Coupling watchlist (re-check after every upstream merge)
 
 These fork files depend on unedited core internals. Upstream refactors won't cause git conflicts — they cause silent breakage, so check these by hand:
@@ -238,7 +253,7 @@ These fork files depend on unedited core internals. Upstream refactors won't cau
 | `mobile_share.js` | Model Downloader DOM: element IDs `utilitiestabbutton`, `modeldownloadertabbutton`, `model_downloader_url` (`Text2Image.cshtml` / `UtilitiesTab.cshtml`); `modelDownloader` global + its `oninput`/`urlInput` wiring; `triggerChangeFor`/`sessionReadyCallbacks` globals | tab-button + URL-field IDs unchanged; input event still fetches Civitai metadata |
 | `layout.js` perf (`scheduleReapply`, mobile eval guard) | `reapplyPositions()` internals + the prompt-input / window-resize call sites | rAF-coalescing still correct; the `<400px` width-nudge still `!isSmallWindow`-only |
 | `layout.js` `getViewportHeight()` ↔ `body` padding-bottom | `getViewportHeight()` subtracts `body`'s computed `padding-bottom` (the installed-PWA safe-area inset from `mobile.css`'s `body.pwa-standalone`), and all six callers depend on that single definition: `reapplyPositions`, `reapplyMobilePositions` (via `viewH`), `setMobileTopbarCollapse`, `openMobilePanel`, `applyMobileDragTransform`, `getMobileGestureForTouch`, and the bottom-edge swipe test | **This row exists because of a real silent failure — read it before "simplifying" any of it.** The fork originally put this correction inside `reapplyPositions()` when that was one function; upstream's `b8c9718` split it into `reapplyMobilePositions()`/`reapplyDesktopPositions()` and the correction was orphaned onto the desktop half, **with no merge conflict**, leaving mobile sizing to the full window for weeks. After any upstream merge: confirm the mobile path still reaches a padding-aware height, and confirm no call site has grown its own second `paddingBottom` subtraction (that double-counts — the bottom-edge swipe zone had one and it was removed). **The mobile and desktop layout paths are separate functions; fixing one does not fix the other, and git will not tell you.** |
-| `mobile_core.js` `measureSafeAreaTop()` → `--safe-top` | `body.pwa-standalone { padding-top: var(--safe-top, env(safe-area-inset-top)) }` in `mobile.css`; the `pwa-standalone` class still being applied; `layout.js` deriving its mobile heights from the root div's live top offset (so the padding self-corrects) rather than from `innerHeight` directly | **iOS reports a top safe-area inset of 0 for home-screen web apps** even under `black-translucent`, which is why the raw `env()` left the top tab strip under the status bar. Do not "simplify" this back to a bare `env()`. The fallback is gated on standalone + iOS + portrait + a proven-full-bleed window (`screen.height - innerHeight < 20`); dropping any gate produces a permanent dead band somewhere (Android portrait PWAs, landscape, or a window iOS already shortened). If upstream/WebKit ever starts reporting the top inset correctly, the reported value already wins automatically — no change needed. The status-bar-height table is only reached when the browser reports nothing, and errs high for unrecognized hardware on purpose |
+| `mobile_core.js` `measureSafeAreaTop()` → `--safe-top` | `body.pwa-standalone { padding-top: var(--safe-top, env(safe-area-inset-top)) }` in `mobile.css`; the `pwa-standalone` class still being applied; `layout.js` deriving its mobile heights from the root div's live top offset (so the padding self-corrects) rather than from `innerHeight` directly | **iOS reports a top safe-area inset of 0 for home-screen web apps** even under `black-translucent`, which is why the raw `env()` left the top tab strip under the status bar. Do not "simplify" this back to a bare `env()`. The fallback is gated on standalone + iOS + portrait + a proven-full-bleed window (`screen.height - innerHeight < 20`); dropping any gate produces a permanent dead band somewhere (Android portrait PWAs, landscape, or a window iOS already shortened). If upstream/WebKit ever starts reporting the top inset correctly, the reported value already wins automatically — no change needed. The status-bar-height table is only reached when the browser reports nothing, and errs high for unrecognized hardware on purpose. **Since 2026-08-29 the whole fallback is inert in production**: the extension injects status-bar-style `black` (`MobileEnhancementsExtension.StatusBarStyle`) and `measureSafeAreaTop()` returns 0 for anything but `black-translucent`. Keep the meta and that check in step |
 | `layout.js` `mobileMetrics` cache (`refreshMobileMetrics`) | `setMobileTopbarCollapse` and `applyMobileDragTransform` read cached measurements instead of measuring; the cache is invalidated at the top of `reapplyPositions()` and refilled by the pass. **`rootTopBase - collapsePx` replaces a live `getBoundingClientRect()`**, and that identity holds only because `genpage.css`'s `body.small-window > #toptablist` applies the collapse as a `translateY` *plus an equal negative `margin-bottom`* | If upstream changes how the collapse is applied — drops the negative margin, switches to `height`, adds a transition — the arithmetic silently diverges from the real offset and mobile panels size wrongly with no error. `verify-mobile-perf.mjs` sweeps 41 collapse values against the real CSS and is the cheap way to check this. Also: anything new that changes `#alt_prompt_region`'s height, the bottom peek, or `body`'s padding **must** route through `reapplyPositions()`, or the cache goes stale |
 | `GenTabModals.cshtml` paste box (`contenteditable`) | The `image_editor_paste_modal` body: the box is a `contenteditable` div with `data-placeholder`, not an `<input>`, and its `<style>` block lives in the same file. `handlePasteModalPaste` reads an `<img>` back out of it; `openPasteModal` clears it with `innerHTML` | If upstream reworks this modal, keep the div — reverting to an `<input>` silently makes the modal desktop-only again with no error. Check `--text-soft`/`--border-color`/`--background`/`--text` still exist in the themes |
 | `image_editor.js` clipboard rejection routing | `pasteSelectionFromClipboard`'s `navigator.clipboard.read()` promise shape; the `image_editor_paste_modal` / `image_editor_paste_pastebox` element IDs in `GenTabModals.cshtml`; `WebUtil.ModalHeader` still emitting a **non-`fade`** modal | The fork moved upstream's four modal-opening lines into a new `openPasteModal()` — an upstream edit inside the old `if (!navigator.clipboard ...)` block conflicts against a function that no longer has them; apply it inside `openPasteModal()`. If `ModalHeader` gains `fade`, the trailing synchronous `box.focus()` stops landing and needs a `shown.bs.modal` re-focus |
