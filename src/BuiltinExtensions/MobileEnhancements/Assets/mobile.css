@@ -56,7 +56,11 @@ body.small-window {
    inset IS reported on the same device, which is why --safe-bottom works and this did not. mobile_core.js
    uses the reported value whenever there is one and only substitutes a measured fallback once it has
    confirmed the app is genuinely running full-bleed. The env() in the var fallback covers the window before
-   that script runs, and non-iOS standalone where the reported value was always correct. */
+   that script runs, and non-iOS standalone where the reported value was always correct.
+   Since 2026-08-29 the extension ships status-bar-style "black" rather than black-translucent (see
+   MobileEnhancementsExtension.StatusBarStyle for the on-device reason), under which iOS reserves the bar
+   itself and --safe-top is 0. The rule stays as written so the translucent mode keeps working if it is
+   ever switched back. */
 body.pwa-standalone {
     box-sizing: border-box;
     padding-top: var(--safe-top, env(safe-area-inset-top));

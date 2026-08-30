@@ -177,15 +177,35 @@ class MobileEnhancements {
     }
 
     /**
+     * The page's requested iOS status-bar style ('black', 'default', 'black-translucent'), lowercased, or
+     * 'black-translucent' when the meta is absent. The extension injects this meta on every page
+     * (MobileEnhancementsExtension.StatusBarStyle), so "absent" only happens on a page that loads this
+     * script without the extension's head tags - a harness - and the translucent default keeps the
+     * fallback below reachable there.
+     */
+    statusBarStyle() {
+        let meta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+        if (!meta) {
+            return 'black-translucent';
+        }
+        return (meta.getAttribute('content') || 'black-translucent').trim().toLowerCase();
+    }
+
+    /**
      * Height of the OS status bar currently overlaying the app, in CSS px (0 when nothing overlays it).
      *
-     * The browser's reported inset is used whenever it reports one. It does not always report one: iOS gives
-     * home-screen web apps a top inset of 0 even under 'apple-mobile-web-app-status-bar-style:
-     * black-translucent', which is precisely the mode that lays the content out *underneath* the status bar.
-     * So the app renders behind the clock and Dynamic Island with nothing reserving that space, and the top
-     * tab strip is unreachable. A zero here is therefore not evidence that there is nothing to avoid - note
-     * the BOTTOM inset does get reported on the same device (that is what --safe-bottom consumes), which
-     * rules out the app simply not being in standalone mode.
+     * Only 'apple-mobile-web-app-status-bar-style: black-translucent' lays the app out underneath the status
+     * bar. Under 'black' or 'default' (the extension ships 'black' as of 2026-08-29 - see StatusBarStyle in
+     * MobileEnhancementsExtension.cs for the on-device history) iOS reserves the bar itself and the web view
+     * starts below it, so there is nothing to clear and this returns 0 outright.
+     *
+     * Under translucent, the browser's reported inset is used whenever it reports one. It does not always
+     * report one: iOS gives home-screen web apps a top inset of 0 in that mode, which is precisely the mode
+     * that lays the content out *underneath* the status bar. So the app renders behind the clock and Dynamic
+     * Island with nothing reserving that space, and the top tab strip is unreachable. A zero here is
+     * therefore not evidence that there is nothing to avoid - note the BOTTOM inset does get reported on the
+     * same device (that is what --safe-bottom consumes), which rules out the app simply not being in
+     * standalone mode.
      *
      * The fallback is gated on proving the app really is running full-bleed. If iOS laid the web view out
      * below the status bar itself, the window is already shorter than the screen by that much, and padding
@@ -203,6 +223,11 @@ class MobileEnhancements {
         // fallback would put a permanent dead band across the top of, for example, an Android edge-to-edge
         // portrait PWA that has nothing to avoid.
         if (!this.isIos()) {
+            return 0;
+        }
+        // A non-translucent status bar is reserved by iOS: the web view begins under it, so a reported zero
+        // is a real zero here too. Padding on top of that is the double-count the gates below exist to avoid.
+        if (this.statusBarStyle() != 'black-translucent') {
             return 0;
         }
         // Landscape: iOS hides the status bar outright for standalone web apps, so there is nothing to clear.

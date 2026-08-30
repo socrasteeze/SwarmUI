@@ -45,8 +45,10 @@
            1. Service worker registration. Without it /simple had NO worker at all (verified: 0 registrations), so
               the offline fallback and installability criteria never applied to the app users actually install.
            2. --safe-top. iOS reports env(safe-area-inset-top) as 0 for home-screen web apps even under
-              black-translucent (which MobileEnhancementsExtension injects), so the header rendered behind the
-              clock / Dynamic Island. m.css now consumes var(--safe-top, env(...)) - see the .m-app rule.
+              black-translucent, so the header rendered behind the clock / Dynamic Island. m.css consumes
+              var(--safe-top, env(...)) - see the .m-app rule. Since 2026-08-29 the extension injects
+              status-bar-style "black" instead (iOS reserves the bar itself), so --safe-top resolves to 0 in
+              production; the measured fallback stays in place for the translucent mode.
            3. body.pwa-standalone / body.coarse-pointer classes.
          DELIBERATE SIDE EFFECT: its fixViewport() rewrites the viewport meta above and drops `maximum-scale=1`,
          restoring pinch zoom. That is intended - maximum-scale=1 is the documented WCAG 1.4.4 failure pattern and

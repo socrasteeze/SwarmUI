@@ -71,7 +71,10 @@
    apple-mobile-web-app-status-bar-style: black-translucent that MobileEnhancementsExtension injects, which is
    the very mode that lays content out UNDERNEATH the status bar. A zero there is not evidence there is nothing
    to avoid; the bottom inset does report on the same device (that is what --m-safe-bottom caps). Bare env() is
-   why the header used to render behind the clock and Dynamic Island in the installed app. */
+   why the header used to render behind the clock and Dynamic Island in the installed app.
+   Since 2026-08-29 the extension injects status-bar-style "black" instead of black-translucent (see
+   MobileEnhancementsExtension.StatusBarStyle): iOS reserves the bar itself, --safe-top is 0, and the 62px
+   the target iPhone used to leave as a dead band under the bottom nav now sits at the top where the clock is. */
 .m-app {
     display: flex;
     flex-direction: column;

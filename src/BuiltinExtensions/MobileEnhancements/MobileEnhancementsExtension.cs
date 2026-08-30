@@ -19,6 +19,18 @@ public class MobileEnhancementsExtension : Extension
     /// <summary>Browser theme / PWA status-bar color, matched to the modern_dark background (<c>--background: #161616</c>).</summary>
     public static string ThemeColor = "#161616";
 
+    /// <summary>Value of the <c>apple-mobile-web-app-status-bar-style</c> meta injected on every page.
+    /// <para><c>black</c>, not <c>black-translucent</c>, since 2026-08-29. Translucent asks iOS to lay the app out
+    /// underneath the status bar (full-bleed), and on the fork's target iPhone (iOS 18.7, 956pt screen) that mode
+    /// produced a web view 62px shorter than the screen - exactly the status-bar height - yet still positioned at
+    /// the top: content ran under the clock AND a 62px unpaintable band sat below the bottom nav, with every
+    /// <c>env(safe-area-inset-*)</c> reporting 0. <c>black</c> makes iOS reserve those same 62px where the status bar
+    /// actually is, so the web view starts below the clock and ends at the screen edge. The only cost is that the
+    /// status-bar strip is opaque black rather than the theme's #161616.</para>
+    /// <para>The safe-top fallback in <c>mobile_core.js</c> reads this meta and stays inert unless it is
+    /// <c>black-translucent</c>, so flipping this back re-enables that path automatically.</para></summary>
+    public static string StatusBarStyle = "black";
+
     /// <summary>Query key and value that select the Classic variant of the web manifest. See <see cref="ServeManifest"/>.</summary>
     public static string ManifestUiKey = "ui", ClassicUiValue = "classic";
 
@@ -330,7 +342,7 @@ public class MobileEnhancementsExtension : Extension
             + $"\n<meta name=\"theme-color\" content=\"{ThemeColor}\" />"
             + "\n<meta name=\"mobile-web-app-capable\" content=\"yes\" />"
             + "\n<meta name=\"apple-mobile-web-app-capable\" content=\"yes\" />"
-            + "\n<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\" />"
+            + $"\n<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"{StatusBarStyle}\" />"
             + "\n<meta name=\"apple-mobile-web-app-title\" content=\"SwarmUI\" />"
             + $"\n<link rel=\"apple-touch-icon\" href=\"{icons}/apple-touch-icon-180.png?vary={Utilities.VaryID}\" />";
     }
