@@ -192,6 +192,13 @@ public class API
             {
                 return;
             }
+            // Client hung up mid-request (page reloaded or backgrounded while a POST body was still arriving) - Kestrel
+            // surfaces that as a BadHttpRequestException ("Unexpected end of request content"). Nothing server-side failed.
+            if (ex is BadHttpRequestException || context.RequestAborted.IsCancellationRequested)
+            {
+                Logs.Debug($"[WebAPI] Client disconnected during API request '{context.Request.Path}': {ex.Message}");
+                return;
+            }
             if (ex is WebSocketException wserr && wserr.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
             {
                 await Error($"Remote WebSocket disconnected unexpectedly (ConnectionClosedPrematurely). Did your browser crash while generating?");
