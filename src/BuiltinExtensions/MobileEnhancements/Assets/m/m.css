@@ -236,7 +236,6 @@
 .m-preview-grid,
 .m-model-results,
 .m-sheet,
-.m-preset-strip,
 .m-image-strip,
 .m-folder-chips,
 .m-ac-strip {
@@ -247,7 +246,6 @@
 .m-preview-grid::-webkit-scrollbar,
 .m-model-results::-webkit-scrollbar,
 .m-sheet::-webkit-scrollbar,
-.m-preset-strip::-webkit-scrollbar,
 .m-image-strip::-webkit-scrollbar,
 .m-folder-chips::-webkit-scrollbar,
 .m-ac-strip::-webkit-scrollbar {
@@ -294,42 +292,11 @@
 }
 
 /* --- Create tab --- */
-.m-preset-strip {
+.m-preset-row {
     display: flex;
     gap: 0.4rem;
-    overflow-x: auto;
-    padding-bottom: 0.3rem;
-    -webkit-overflow-scrolling: touch;
-    -webkit-mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
-    mask-image: linear-gradient(to right, black calc(100% - 1.5rem), transparent);
-}
-.m-preset-chip {
-    flex: 0 0 auto;
-    display: flex;
     align-items: center;
-    gap: 0.35rem;
-    background: var(--background-panel);
-    color: var(--text);
-    border: 1px solid var(--border-color);
-    border-radius: 1.2rem;
-    padding: 0.25rem 0.7rem 0.25rem 0.3rem;
-    min-height: 44px;
-    max-width: 60vw;
-}
-.m-preset-chip img {
-    width: 34px;
-    height: 34px;
-    object-fit: cover;
-    border-radius: 50%;
-}
-.m-preset-chip-title {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.m-preset-chip.m-selected {
-    border-color: var(--emphasis);
-    background: color-mix(in srgb, var(--emphasis) 25%, var(--background-panel));
+    margin-bottom: 0.4rem;
 }
 .m-strip-empty {
     color: var(--text-soft);
@@ -437,24 +404,33 @@
     align-items: center;
     gap: 0.3rem;
 }
-.m-seed-lock {
+.m-seed-control {
+    flex: 0 0 auto;
+}
+.m-seed-random {
     background: var(--background-panel);
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
-    min-width: 44px;
+    color: var(--text);
+    padding: 0 0.7rem;
     min-height: 44px;
-    font-size: 17px;
-}
-.m-seed-lock.m-selected {
-    border-color: var(--emphasis);
 }
 .m-seed-input {
-    width: 6.5rem;
-    min-height: 40px;
+    width: 7rem;
+    min-height: 44px;
     padding: 0 0.4rem;
+    border-radius: 0.5rem 0 0 0.5rem;
 }
-.m-seed-input:disabled {
-    opacity: 0.45;
+.m-seed-clear {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-left: 0;
+    border-radius: 0 0.5rem 0.5rem 0;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    font-size: 19px;
 }
 .m-quick-label {
     font-size: 13px;
@@ -546,15 +522,12 @@
     text-align: center;
     font-variant-numeric: tabular-nums;
 }
-.m-aspect-select,
-.m-size-select {
+.m-resolution-select {
     min-height: 44px;
     padding: 0 0.4rem;
-    flex: 1 1 0;
+    flex: 1 1 auto;
     min-width: 0;
-}
-.m-size-select:disabled {
-    opacity: 0.45;
+    width: 100%;
 }
 .m-ratio-row {
     display: flex;
@@ -571,12 +544,6 @@
     min-height: 40px;
     padding: 0 0.4rem;
 }
-.m-res-readout {
-    margin-top: 0.35rem;
-    color: var(--text-soft);
-    font-variant-numeric: tabular-nums;
-}
-
 /* --- Live preview (sticky top of the Create panel, so it stays visible while the params scroll under it.
        The generate bar is NOT sticky - it rides just above the prompt box instead)
 
@@ -823,15 +790,19 @@
 .m-create-panel > * {
     flex: 0 0 auto;
 }
-/* --- Architecture picker --- */
-.m-arch-row {
-    margin-bottom: 0.4rem;
+/* --- Architecture and preset pickers --- */
+.m-arch-select,
+.m-preset-select {
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 0 0.4rem;
+    min-width: 0;
 }
 .m-arch-select {
-    width: 100%;
-    box-sizing: border-box;
-    min-height: 40px;
-    padding: 0 0.4rem;
+    flex: 0 1 38%;
+}
+.m-preset-select {
+    flex: 1 1 62%;
 }
 /* The "limited to X / show all" escape hatch inside the model and LoRA pickers. */
 .m-arch-note {
@@ -1153,12 +1124,6 @@
     flex: 1 1 auto;
     min-width: 0;
 }
-.m-lora-weight-readout {
-    color: var(--emphasis);
-    font-weight: bold;
-    min-width: 2.5rem;
-    text-align: right;
-}
 /* 44px square. It sits at the end of a LoRA row with space to spare, and it is destructive - an undersized
    destructive control is the worst combination of the two. */
 .m-lora-remove {
@@ -1171,10 +1136,41 @@
     align-items: center;
     justify-content: center;
 }
-.m-lora-slider {
-    width: 100%;
+.m-lora-weight-picker {
+    display: grid;
+    grid-template-columns: 44px minmax(4rem, 1fr) 44px;
+    align-items: center;
     margin-top: 0.3rem;
-    min-height: 30px;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+.m-lora-weight-button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: var(--button-background);
+    color: var(--text);
+    font-size: 20px;
+}
+.m-lora-weight-button:first-child {
+    border-right: 1px solid var(--border-color);
+}
+.m-lora-weight-button:last-child {
+    border-left: 1px solid var(--border-color);
+}
+.m-lora-weight-input {
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 0.4rem;
+    border: 0;
+    border-radius: 0;
+    background: var(--background-panel);
+    color: var(--emphasis);
+    text-align: center;
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;
 }
 .m-lora-search {
     width: 100%;

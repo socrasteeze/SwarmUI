@@ -283,16 +283,30 @@ class MCreate {
         panel.classList.add('m-create-panel');
         panel.appendChild(this.previewWrap);
         panel.appendChild(this.resolvedWrap);
-        this.archRow = mUI.el('div', 'm-arch-row');
+        this.presetRow = mUI.el('div', 'm-preset-row');
         this.archSelect = mUI.el('select', 'm-arch-select');
         this.archSelect.addEventListener('change', () => {
             mState.archFilter = this.archSelect.value;
             mState.changed();
         });
-        this.archRow.appendChild(this.archSelect);
-        panel.appendChild(this.archRow);
-        this.presetStrip = mUI.el('div', 'm-preset-strip');
-        panel.appendChild(this.presetStrip);
+        this.presetRow.appendChild(this.archSelect);
+        this.presetSelect = mUI.el('select', 'm-preset-select');
+        this.presetSelect.addEventListener('change', () => {
+            let title = this.presetSelect.value;
+            if (!title) {
+                return;
+            }
+            let idx = mState.activePresets.indexOf(title);
+            if (idx == -1) {
+                mState.activePresets.push(title);
+            }
+            else {
+                mState.activePresets.splice(idx, 1);
+            }
+            mState.changed();
+        });
+        this.presetRow.appendChild(this.presetSelect);
+        panel.appendChild(this.presetRow);
         // Model and LoRAs share one row: two taps that open two sheets, no reason to spend two rows on them.
         this.pickerRow = mUI.el('div', 'm-picker-row');
         this.modelButton = mUI.el('button', 'm-picker-button m-model-button');
@@ -301,6 +315,9 @@ class MCreate {
         this.loraButton = mUI.el('button', 'm-picker-button');
         this.loraButton.addEventListener('click', () => this.openLoraSheet());
         this.pickerRow.appendChild(this.loraButton);
+        if (typeof mTagDex != 'undefined' && typeof mTagDex.installBrowse == 'function') {
+            mTagDex.installBrowse(this.pickerRow);
+        }
         this.resetButton = mUI.el('button', 'm-picker-button m-reset-button', '↺');
         this.resetButton.title = 'Reset params';
         this.resetButton.addEventListener('click', () => {
@@ -509,21 +526,21 @@ class MCreate {
 
     /** Architecture picker: one entry per preset folder. Hidden unless there are at least two groups to
      * choose between, since a single-group picker is a control that can only ever say one thing. A stored
-     * filter naming a group that no longer exists falls back to "all" rather than showing an empty strip. */
+     * filter naming a group that no longer exists falls back to "all" rather than showing an empty list. */
     renderArch() {
         let groups = mState.presetGroups();
         if (groups.length < 2) {
-            this.archRow.style.display = 'none';
+            this.archSelect.style.display = 'none';
             return;
         }
-        this.archRow.style.display = '';
+        this.archSelect.style.display = '';
         if (mState.archFilter && !groups.includes(mState.archFilter)) {
             mState.archFilter = '';
         }
         this.archSelect.innerHTML = '';
         let all = document.createElement('option');
         all.value = '';
-        all.textContent = 'All architectures';
+        all.textContent = 'All';
         this.archSelect.appendChild(all);
         for (let group of groups) {
             let option = document.createElement('option');
@@ -534,52 +551,45 @@ class MCreate {
         this.archSelect.value = mState.archFilter;
     }
 
-    /** Preset chip strip: starred first, tap toggles, selection order preserved (merge order). */
+    /** Preset picklist: starred first, selecting an entry toggles it, selection order remains merge order. */
     renderPresets() {
-        this.presetStrip.innerHTML = '';
+        this.presetSelect.innerHTML = '';
+        let placeholder = document.createElement('option');
+        placeholder.value = '';
         if (mState.presets.length == 0) {
-            this.presetStrip.appendChild(mUI.el('span', 'm-strip-empty', 'No presets yet - create some in the full UI.'));
+            placeholder.textContent = 'No presets';
+            this.presetSelect.appendChild(placeholder);
+            this.presetSelect.disabled = true;
             return;
         }
+        this.presetSelect.disabled = false;
+        placeholder.textContent = mState.activePresets.length == 0 ? 'Presets' : `Presets (${mState.activePresets.length})`;
+        this.presetSelect.appendChild(placeholder);
         // An ACTIVE preset always shows, even when the architecture filter would hide it. Filtering it out
-        // of the strip would not deactivate it - it would keep merging into every generation with no chip
-        // left on screen to tap off, which is a trap rather than a filter.
+        // of the list would not deactivate it - it would keep merging into every generation with no option
+        // left on screen to toggle off, which is a trap rather than a filter.
         let visible = mState.presets.filter(preset => !mState.archFilter
             || MState.presetGroup(preset.title) == mState.archFilter
             || mState.activePresets.includes(preset.title));
         if (visible.length == 0) {
-            this.presetStrip.appendChild(mUI.el('span', 'm-strip-empty', `No presets under "${mState.archFilter}".`));
+            placeholder.textContent = 'No presets';
+            this.presetSelect.disabled = true;
             return;
         }
         let sorted = [...visible].sort((a, b) => (b.is_starred ? 1 : 0) - (a.is_starred ? 1 : 0));
         for (let preset of sorted) {
-            let chip = mUI.el('button', 'm-preset-chip');
-            if (preset.preview_image) {
-                let img = document.createElement('img');
-                img.src = preset.preview_image;
-                img.loading = 'lazy';
-                chip.appendChild(img);
-            }
-            // With a group selected the folder prefix is the same on every visible chip, so it is spending
-            // scarce chip width to say nothing. Under "all" it is the only architecture cue there is.
+            let option = document.createElement('option');
+            option.value = preset.title;
+            // With a group selected the folder prefix is the same on every visible option, so it is spending
+            // scarce picker width to say nothing. Under "all" it is the only architecture cue there is.
             let label = preset.title;
             if (mState.archFilter && label.startsWith(`${mState.archFilter}/`)) {
                 label = label.substring(mState.archFilter.length + 1);
             }
-            chip.appendChild(mUI.el('span', 'm-preset-chip-title', label));
-            chip.classList.toggle('m-selected', mState.activePresets.includes(preset.title));
-            chip.addEventListener('click', () => {
-                let idx = mState.activePresets.indexOf(preset.title);
-                if (idx == -1) {
-                    mState.activePresets.push(preset.title);
-                }
-                else {
-                    mState.activePresets.splice(idx, 1);
-                }
-                mState.changed();
-            });
-            this.presetStrip.appendChild(chip);
+            option.textContent = `${mState.activePresets.includes(preset.title) ? '✓ ' : ''}${label}`;
+            this.presetSelect.appendChild(option);
         }
+        this.presetSelect.value = '';
     }
 
     /** Model button label. Hidden entirely when the user lacks the model parameter permission, since
@@ -1152,29 +1162,42 @@ class MCreate {
         box.focus({ 'preventScroll': true });
     }
 
-    /** Quick params row: seed lock + value, images count, aspect ratio, side length, resolution readout. */
+    /** Quick params row: seed mode, images count, tuning steppers, and one combined resolution picker. */
     buildQuickParams() {
         let wrap = mUI.el('div', 'm-quick-wrap');
         let row = mUI.el('div', 'm-quick-row');
-        let seedWrap = mUI.el('div', 'm-quick-item');
-        this.seedLock = mUI.el('button', 'm-seed-lock');
-        this.seedLock.addEventListener('click', () => {
-            mState.seedLocked = !mState.seedLocked;
-            if (mState.seedLocked && (!mState.params['seed'] || `${mState.params['seed']}` == '-1')) {
+        let seedWrap = mUI.el('div', 'm-quick-item m-seed-control');
+        this.seedRandom = mUI.el('button', 'm-seed-random', 'Random');
+        this.seedRandom.addEventListener('click', () => {
+            mState.seedLocked = true;
+            if (!mState.params['seed'] || `${mState.params['seed']}` == '-1') {
                 mState.params['seed'] = `${Math.floor(Math.random() * 2147483647)}`;
             }
             mState.changed();
+            requestAnimationFrame(() => {
+                this.seedInput.focus();
+                this.seedInput.select();
+            });
         });
-        seedWrap.appendChild(this.seedLock);
+        seedWrap.appendChild(this.seedRandom);
         this.seedInput = document.createElement('input');
         this.seedInput.type = 'text';
         this.seedInput.inputMode = 'numeric';
         this.seedInput.className = 'm-seed-input';
+        this.seedInput.setAttribute('aria-label', 'Seed');
         this.seedInput.addEventListener('input', () => {
             mState.params['seed'] = this.seedInput.value;
             mState.save();
         });
         seedWrap.appendChild(this.seedInput);
+        this.seedClear = mUI.el('button', 'm-seed-clear', '×');
+        this.seedClear.setAttribute('aria-label', 'Use random seed');
+        this.seedClear.addEventListener('click', () => {
+            mState.seedLocked = false;
+            mState.params['seed'] = '-1';
+            mState.changed();
+        });
+        seedWrap.appendChild(this.seedClear);
         row.appendChild(seedWrap);
         this.imagesGroup = mUI.el('div', 'm-quick-item m-seg-group m-batch-group');
         for (let n of ['1', '2', '4']) {
@@ -1232,28 +1255,28 @@ class MCreate {
         tuneRow.appendChild(this.buildNumberStepper('cfgscale', 'CFG', { 'default': 7, 'min': 0, 'max': 100, 'step': 0.5 }));
         wrap.appendChild(tuneRow);
         let resRow = mUI.el('div', 'm-quick-row');
-        this.aspectSelect = document.createElement('select');
-        this.aspectSelect.className = 'm-aspect-select';
-        this.aspectSelect.addEventListener('change', () => {
-            mState.params['aspectratio'] = this.aspectSelect.value;
-            // Picking from the list replaces any image-matched ratio: choosing 'Custom' by hand means
-            // "leave width/height alone", not "keep scaling the ratio I matched earlier".
-            mState.customRatio = 0;
-            mState.changed();
-        });
-        resRow.appendChild(this.aspectSelect);
-        this.sizeSelect = document.createElement('select');
-        this.sizeSelect.className = 'm-size-select';
-        this.sizeSelect.addEventListener('change', () => {
+        this.resolutionSelect = document.createElement('select');
+        this.resolutionSelect.className = 'm-resolution-select';
+        this.resolutionSelect.setAttribute('aria-label', 'Resolution');
+        this.resolutionSelect.addEventListener('change', () => {
+            let parts = this.resolutionSelect.value.split('\n');
+            let previousAspect = mState.params['aspectratio'];
+            mState.params['aspectratio'] = parts[0];
             // Empty string, not delete: '' means "the user chose Auto", absent means "never set", and only
-            // the latter gets seeded to 1024. Deleting here would make Auto snap straight back to 1024.
-            mState.params['sidelength'] = this.sizeSelect.value;
+            // the latter gets seeded to 1024.
+            mState.params['sidelength'] = parts[1] || '';
+            // Picking Custom from a different ratio is the manual escape hatch. Keeping an already-matched
+            // Custom option selected must not discard the ratio that option describes.
+            if (parts[0] == 'Custom' && previousAspect != 'Custom') {
+                mState.customRatio = 0;
+            }
+            else if (parts[0] != 'Custom') {
+                mState.customRatio = 0;
+            }
             mState.changed();
         });
-        resRow.appendChild(this.sizeSelect);
+        resRow.appendChild(this.resolutionSelect);
         wrap.appendChild(resRow);
-        this.resReadout = mUI.el('div', 'm-res-readout');
-        wrap.appendChild(this.resReadout);
         return wrap;
     }
 
@@ -1298,12 +1321,12 @@ class MCreate {
 
     /** Syncs the quick-param controls from state. */
     renderQuickParams() {
-        this.seedLock.textContent = mState.seedLocked ? '🔒' : '🎲';
-        this.seedLock.classList.toggle('m-selected', mState.seedLocked);
+        this.seedRandom.style.display = mState.seedLocked ? 'none' : '';
+        this.seedInput.style.display = mState.seedLocked ? '' : 'none';
+        this.seedClear.style.display = mState.seedLocked ? '' : 'none';
         if (document.activeElement != this.seedInput) {
-            this.seedInput.value = mState.seedLocked ? `${mState.params['seed'] ?? ''}` : '-1';
+            this.seedInput.value = `${mState.params['seed'] ?? ''}`;
         }
-        this.seedInput.disabled = !mState.seedLocked;
         // Visibility is recomputed every render rather than decided at build time: this panel can be built
         // before ListT2IParams lands, when paramMeta is still empty, and the row would stay hidden forever.
         // Absent from paramMeta means the session may not set the param (or the extension is disabled).
@@ -1326,33 +1349,26 @@ class MCreate {
             }
             control.value.textContent = `${shown}`;
         }
+        this.renderResolutionSelect();
+    }
+
+    /** One final-resolution picker. Each option binds an aspect ratio and base side length together, so the
+     * Create panel no longer asks the user to reconcile two dropdowns with a third readout. */
+    renderResolutionSelect() {
+        let stateChanged = false;
         let aspectMeta = mState.paramMeta['aspectratio'];
         let serverValues = aspectMeta && aspectMeta.values ? aspectMeta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '9:16', 'Custom'];
         // Server ratios first, then the fork-added ones, with Custom kept last as the manual escape hatch.
-        let values = serverValues.filter(v => v != 'Custom').concat(Object.keys(MState.ExtraAspects)).concat(['Custom']);
-        if (this.aspectSelect.options.length != values.length) {
-            this.aspectSelect.innerHTML = '';
-            for (let v of values) {
-                let opt = document.createElement('option');
-                opt.value = v;
-                opt.textContent = v;
-                this.aspectSelect.appendChild(opt);
-            }
-        }
+        let aspects = serverValues.filter(v => v != 'Custom').concat(Object.keys(MState.ExtraAspects)).concat(['Custom']);
         // Seed the state from the shown default rather than leaving it unset: an absent aspectratio is not
-        // the same as the displayed one, and the difference is invisible - the picker would read "1:1"
-        // while the server fell through to its raw width/height defaults.
+        // the same as the displayed one, and the server would otherwise fall through to raw dimensions.
         if (!mState.params['aspectratio']) {
             mState.params['aspectratio'] = aspectMeta && aspectMeta.default ? aspectMeta.default : '1:1';
-            mState.save();
+            stateChanged = true;
         }
-        this.aspectSelect.value = mState.params['aspectratio'];
-        this.renderSizeSelect();
-    }
-
-    /** Side-length ladder plus the live width x height readout. A ladder rather than the desktop's
-     * 32-step slider: every value anyone actually uses is on it, and each entry is a thumb-sized target. */
-    renderSizeSelect() {
+        if (!aspects.includes(mState.params['aspectratio'])) {
+            aspects.splice(aspects.length - 1, 0, mState.params['aspectratio']);
+        }
         let meta = mState.paramMeta['sidelength'];
         // Floor at 1024 regardless of what the parameter allows: every current architecture is a 1024-native
         // model, and the sub-1024 rungs only existed to serve SD1.x. Auto still reports a model's real native
@@ -1360,45 +1376,69 @@ class MCreate {
         let min = Math.max(1024, meta && meta.min ? meta.min : 0);
         let max = meta && meta.max ? meta.max : 16384;
         let ladder = [1024, 1152, 1280, 1408, 1536, 1792, 2048].filter(v => v >= min && v <= max);
+        if (ladder.length == 0) {
+            ladder.push(Math.min(max, min));
+        }
         // A stored side length below the new floor (or off the ladder entirely) is carried as its own option
         // rather than silently snapping - reusing params from an old image must reproduce that image.
         let stored = parseInt(mState.params['sidelength']) || 0;
         if (stored && !ladder.includes(stored)) {
             ladder = [...ladder, stored].sort((a, b) => a - b);
         }
-        if (this.sizeSelect.options.length != ladder.length + 1) {
-            this.sizeSelect.innerHTML = '';
-            for (let v of ladder) {
-                let opt = document.createElement('option');
-                opt.value = `${v}`;
-                opt.textContent = `${v}px`;
-                this.sizeSelect.appendChild(opt);
-            }
-            let auto = document.createElement('option');
-            auto.value = '';
-            auto.textContent = 'Auto (model native)';
-            this.sizeSelect.appendChild(auto);
-        }
-        // Seeded rather than left blank so the default is a concrete, visible 1024 instead of an "Auto" that
-        // resolves somewhere else - a Qwen checkpoint's native size is 1328, which is not what you expect to
-        // get from a control showing no number.
+        // Seeded rather than left blank so the default is a concrete, visible 1024 instead of an Auto value
+        // that resolves differently per checkpoint.
         if (!mState.params['sidelength'] && mState.params['sidelength'] !== '') {
             mState.params['sidelength'] = `${ladder.includes(1024) ? 1024 : ladder[0]}`;
+            stateChanged = true;
+        }
+        this.resolutionSelect.innerHTML = '';
+        for (let aspect of aspects) {
+            let ratio = MState.ExtraAspects[aspect] || (aspect == 'Custom' ? mState.customRatio : 0);
+            let hasRatio = MState.AspectReferences[aspect] || ratio;
+            if (!hasRatio) {
+                let opt = document.createElement('option');
+                opt.value = `${aspect}\n${mState.params['sidelength'] || ''}`;
+                let rawWidth = parseInt(mState.params['width']);
+                let rawHeight = parseInt(mState.params['height']);
+                opt.textContent = rawWidth && rawHeight ? `${rawWidth} × ${rawHeight} · Custom` : 'Custom · full UI';
+                this.resolutionSelect.appendChild(opt);
+                continue;
+            }
+            let group = document.createElement('optgroup');
+            group.label = aspect == 'Custom' ? 'Matched' : aspect;
+            let auto = document.createElement('option');
+            auto.value = `${aspect}\n`;
+            auto.textContent = `Auto · ${aspect == 'Custom' ? 'matched' : aspect}`;
+            group.appendChild(auto);
+            for (let sideLength of ladder) {
+                let dims = MState.AspectReferences[aspect]
+                    ? MState.resolutionFor(aspect, sideLength)
+                    : MState.dimsForRatio(ratio, sideLength);
+                if (!dims) {
+                    continue;
+                }
+                let opt = document.createElement('option');
+                opt.value = `${aspect}\n${sideLength}`;
+                opt.textContent = `${dims[0]} × ${dims[1]} · ${aspect == 'Custom' ? 'matched' : aspect}`;
+                group.appendChild(opt);
+            }
+            this.resolutionSelect.appendChild(group);
+        }
+        let selected = `${mState.params['aspectratio']}\n${mState.params['sidelength'] || ''}`;
+        this.resolutionSelect.value = selected;
+        if (this.resolutionSelect.value != selected) {
+            // A malformed/stale stored size should never leave the control visually blank. Keep the state
+            // untouched for reuse fidelity, but carry it as one explicit option at the top.
+            let dims = mState.previewResolution();
+            let carried = document.createElement('option');
+            carried.value = selected;
+            carried.textContent = dims ? `${dims[0]} × ${dims[1]} · ${mState.params['aspectratio']}` : `${mState.params['aspectratio']} · stored`;
+            this.resolutionSelect.insertBefore(carried, this.resolutionSelect.firstChild);
+            this.resolutionSelect.value = selected;
+        }
+        if (stateChanged) {
             mState.save();
         }
-        this.sizeSelect.value = `${mState.params['sidelength']}`;
-        // The size only stops applying when there is no ratio at all to scale - ie 'Custom' picked by hand
-        // with no image-matched ratio behind it. A matched ratio, however odd, still scales with the length.
-        let aspect = this.aspectSelect.value;
-        let hasRatio = MState.AspectReferences[aspect] || MState.ExtraAspects[aspect] || (aspect == 'Custom' && mState.customRatio);
-        this.sizeSelect.disabled = !hasRatio;
-        let res = mState.previewResolution();
-        if (!hasRatio) {
-            this.resReadout.textContent = res ? `Custom ${res[0]} × ${res[1]} — set width/height in the full UI` : 'Custom — set width/height in the full UI';
-            return;
-        }
-        let label = aspect == 'Custom' && mState.customRatio ? 'matched to image' : aspect;
-        this.resReadout.textContent = res ? `${res[0]} × ${res[1]} (${label})` : '';
     }
 
     /** Advanced chips: every param set by preset/reuse without a dedicated control, X-clearable. */
@@ -1583,7 +1623,7 @@ class MCreate {
         return this.loraMap.get(name) || this.loraMap.get(MState.stripModelExt(name)) || { 'name': name };
     }
 
-    /** LoRA bottom sheet: active LoRAs with weight sliders, add-picker from ListModels. */
+    /** LoRA bottom sheet: active LoRAs with exact 0.05-step weight pickers, add-picker from ListModels. */
     openLoraSheet() {
         let content = mUI.el('div', 'm-lora-sheet');
         let renderRows;
@@ -1606,9 +1646,8 @@ class MCreate {
                     top.appendChild(thumb);
                 }
                 top.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag(), true));
-                let readout = mUI.el('span', 'm-lora-weight-readout', `${loras[i].weight}`);
-                top.appendChild(readout);
-                let remove = mUI.el('span', 'm-lora-remove', '×');
+                let remove = mUI.el('button', 'm-lora-remove', '×');
+                remove.setAttribute('aria-label', `Remove ${mUI.modelName(loras[i].name)}`);
                 remove.addEventListener('click', () => {
                     let cur = mState.getLoras();
                     cur.splice(i, 1);
@@ -1617,20 +1656,34 @@ class MCreate {
                 });
                 top.appendChild(remove);
                 row.appendChild(top);
-                let slider = document.createElement('input');
-                slider.type = 'range';
-                slider.min = '-2';
-                slider.max = '2';
-                slider.step = '0.05';
-                slider.value = `${loras[i].weight}`;
-                slider.className = 'm-lora-slider';
-                slider.addEventListener('input', () => {
-                    readout.textContent = slider.value;
+                let weight = mUI.el('div', 'm-lora-weight-picker');
+                let minus = mUI.el('button', 'm-lora-weight-button', '−');
+                minus.setAttribute('aria-label', `Decrease ${mUI.modelName(loras[i].name)} weight`);
+                weight.appendChild(minus);
+                let input = document.createElement('input');
+                input.type = 'number';
+                input.inputMode = 'decimal';
+                input.min = '-2';
+                input.max = '2';
+                input.step = '0.05';
+                input.value = `${loras[i].weight}`;
+                input.className = 'm-lora-weight-input';
+                input.setAttribute('aria-label', `${mUI.modelName(loras[i].name)} weight`);
+                weight.appendChild(input);
+                let plus = mUI.el('button', 'm-lora-weight-button', '+');
+                plus.setAttribute('aria-label', `Increase ${mUI.modelName(loras[i].name)} weight`);
+                weight.appendChild(plus);
+                let setWeight = (value) => {
+                    let next = Math.min(2, Math.max(-2, Math.round(value * 20) / 20));
+                    input.value = `${parseFloat(next.toFixed(2))}`;
                     let cur = mState.getLoras();
-                    cur[i].weight = parseFloat(slider.value);
+                    cur[i].weight = next;
                     mState.setLoras(cur);
-                });
-                row.appendChild(slider);
+                };
+                minus.addEventListener('click', () => setWeight((parseFloat(input.value) || 0) - 0.05));
+                plus.addEventListener('click', () => setWeight((parseFloat(input.value) || 0) + 0.05));
+                input.addEventListener('change', () => setWeight(parseFloat(input.value) || 0));
+                row.appendChild(weight);
                 listWrap.appendChild(row);
             }
         };

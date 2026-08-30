@@ -121,25 +121,35 @@ trap the next person can repeat, not merely a bug that got fixed.
 1. **Restart the server, don't just refresh.** `WebServer.ExtensionAssets` holds each extension asset in a
    `LazyOrReusable` that reads the file once per process lifetime, so extension JS/CSS edits are invisible
    until a restart. Then hard-refresh (Ctrl+Shift+R) — `?vary=` is the commit read at startup.
-2. **Nothing here has been used in a browser, let alone on a phone.** Highest-value manual pass, in order:
-   batch-strip thumbnails still navigate with arrow keys and swipe (defect 1's blast radius); the Share
-   button on a real iOS/Android device; the thumbnail cache surviving an offline reload; the first-run toast
-   firing exactly once and never on `/simple`; the icons in an actual installed-app launcher.
-3. **Carried forward, still never done:** the hands-on browser pass for the TagDex Characters bottom-bar tab
-   (first-open init, card reflow, prompt injection), per-card generate / use-current-image / delete, LLLite
-   models, and the touchscreen image-compare gestures.
+2. **The desktop-browser mobile pass has started; the phone/PWA pass has not.** `/simple`'s compact controls
+   and TagDex sheet were exercised against the restarted Release server at a 430px viewport. Highest-value
+   remaining checks, in order: batch-strip thumbnails still navigate with arrow keys and swipe (defect 1's
+   blast radius); the Share button on a real iOS/Android device; the thumbnail cache surviving an offline
+   reload; the first-run toast firing exactly once and never on `/simple`; the icons in an actual installed-
+   app launcher.
+3. **TagDex browser pass partially complete 2026-08-29.** The Characters tab first-opened against Danbooru,
+   reflowed without horizontal overflow, and inserted a card trigger into the prompt. The per-card action
+   menu exposed Insert, Generate, use-current, delete, and source-link actions. Side-effecting Generate /
+   use-current / delete requests, the batch sweep + Cancel, LLLite models, and touchscreen image-compare
+   gestures remain unexecuted.
 4. **Re-run the prompts that reliably went black.** If they recur with the DiT in bf16, the next suspect is
    `comfy-aimdo` (DynamicVRAM, async weight offloading) — not audited.
 5. **Scope gap in the thumbnail change.** With `Paths.AppendUserNameToOutputPath = false`, srcs are `Output/…`
    and `getThumbnailSrc` skips them, so the optimization silently does nothing in that config. The server
    would honour previews there; extend the helper if that config ever matters here.
-6. **Parked backlog** (corrected — the previous handoff listed several already-shipped items): `/simple`
-   browse sheet, the prompt coach (`docs/SimplePromptCoach-Plan.md`, wholly unstarted), Phase 5 item 1
+6. **Parked backlog** (corrected — the previous handoff listed several already-shipped items): the prompt
+   coach (`docs/SimplePromptCoach-Plan.md`, wholly unstarted), Phase 5 item 1
    (Simple tab as mobile home), §3.3 sidebar swipe animation (**premise stale** — the `layout.js:465` TODO it
    was written against no longer exists), §2c full overlay chrome, server-reachable-but-app-down detection.
    Haptics, wake-lock, manifest shortcuts and the SW thumbnail cache are all **shipped** and should stop
    being listed as parked.
-7. No auth is configured on this install.
+7. **Implemented 2026-08-29; desktop-browser pass complete.** `/simple` now has one combined final-resolution
+   picker, paired Architecture/Preset picklists, Random-to-explicit seed editing, exact 0.05 LoRA weight
+   controls, and the TagDex Characters browse sheet. Deleting the current genpage image now falls back to
+   the newest surviving current-session image, then blank. The opt-in Playwright suite is 237/237 green;
+   the restarted Release server confirmed the controls, source selection, first 50 character cards, prompt
+   insertion, and LoRA increment/removal paths at a 430px viewport. Physical-device coverage remains open.
+8. No auth is configured on this install.
 
 ## Findings recorded, no action taken
 

@@ -1,6 +1,6 @@
 /**
- * /simple Create-panel harness (fork). Two claims, both of the kind that is easy to assert and easy to get
- * wrong:
+ * /simple Create-panel harness (fork). It guards the controls and geometry that are easy to assert and easy
+ * to get wrong:
  *
  * 1. The preview canvas is RESERVED. The block holding the generated images is the same height idle, queued,
  *    generating and done, so nothing below it - the model row, Generate, the prompt box - moves while a
@@ -8,6 +8,10 @@
  *    the complaint actually was.
  * 2. Starred models sort first. The pickers cap how many rows they render, so on a real library this is what
  *    decides whether a favourite is on screen at all.
+ * 3. The compact priority controls keep their contracts: Random seed expansion, one final-resolution picker,
+ *    paired architecture/preset picklists, exact 0.05 LoRA weights, and TagDex browse-to-prompt insertion.
+ * 4. Deleting the selected genpage image chooses the newest surviving image from the current-session batch,
+ *    or clears the canvas when none survives. The shipped helper is extracted rather than copied.
  *
  * Runs the REAL shipped source: index.html with its server tokens substituted, the real m.css, and the real
  * m_*.js modules, with the Create panel built directly instead of booting (m_app.js is stubbed out, since
@@ -26,6 +30,8 @@ import { dirname, resolve } from 'path';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const M = `${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m`;
+const TAGDEX = `${REPO}/src/BuiltinExtensions/TagDex/Assets`;
+const OUTPUT_HISTORY = `${REPO}/src/wwwroot/js/genpage/gentab/outputhistory.js`;
 const WIDTH = 390, HEIGHT = 844;
 const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -44,6 +50,9 @@ const FILES = {
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,
     '/css/themes/modern.css': `${REPO}/src/wwwroot/css/themes/modern.css`,
     '/css/themes/modern_dark.css': `${REPO}/src/wwwroot/css/themes/modern_dark.css`,
+    '/ExtensionFile/TagDexExtension/Assets/tagdex_core.js': `${TAGDEX}/tagdex_core.js`,
+    '/ExtensionFile/TagDexExtension/Assets/m_tagdex.js': `${TAGDEX}/m_tagdex.js`,
+    '/ExtensionFile/TagDexExtension/Assets/m_tagdex.css': `${TAGDEX}/m_tagdex.css`,
 };
 for (const file of CLIENT) {
     FILES[`/ExtensionFile/MobileEnhancementsExtension/Assets/m/${file}`] = `${M}/${file}`;
@@ -53,6 +62,28 @@ const results = [];
 function check(name, pass, detail) {
     results.push({ name, pass });
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  ${detail}` : ''}`);
+}
+
+/** Pulls one free function from shipped JS by brace matching. */
+function extractFunction(src, name) {
+    const start = src.indexOf(`function ${name}(`);
+    if (start < 0) {
+        throw new Error(`function ${name} not found`);
+    }
+    let brace = src.indexOf('{', start);
+    let depth = 0;
+    for (let i = brace; i < src.length; i++) {
+        if (src[i] == '{') {
+            depth++;
+        }
+        else if (src[i] == '}') {
+            depth--;
+            if (depth == 0) {
+                return src.slice(start, i + 1);
+            }
+        }
+    }
+    throw new Error(`unbalanced function ${name}`);
 }
 
 const browser = await chromium.launch(process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
@@ -72,12 +103,29 @@ await page.route('**/*', async route => {
 await page.addInitScript(() => {
     window.showError = function (message) { window.__err = message; };
     window.getUserSetting = () => '';
-    window.genericRequest = () => {};
+    window.genericRequest = (route, args, callback) => {
+        if (route == 'TagDexListSources') {
+            callback({
+                sources: [
+                    { id: 'danbooru_character', label: 'Danbooru characters', kind: 'character', present: true },
+                    { id: 'danbooru_artist', label: 'Danbooru artists', kind: 'artist', present: true }
+                ],
+                prefs: { active_sources: ['danbooru_character'] }
+            });
+        }
+        else if (route == 'TagDexSearchEntries') {
+            callback({
+                total: 1,
+                results: [{ name: 'hatsune_miku', display: 'Hatsune Miku', trigger: 'hatsune_miku, vocaloid', count: 123456, copyright_display: 'Vocaloid', kind: 'character' }]
+            });
+        }
+    };
     window.makeWSRequest = () => null;
     window.getSession = () => {};
     window.getImageOutPrefix = () => 'View/local';
     window.isValidMediaPath = (path) => typeof path == 'string' && (path.startsWith('inputs/') || path.startsWith('raw/') || path.startsWith('Starred/'));
     window.getTextSelRange = () => [0, 0];
+    window.largeCountStringify = value => `${value}`;
     window.session_id = 'test';
     window.permissions = { hasPermission: () => true };
 });
@@ -90,6 +138,139 @@ await page.evaluate(() => {
     panel.classList.add('m-tab-active');
     mCreate.build(panel);
 });
+
+// ---- Priority-control regressions ----
+const initialControls = await page.evaluate(() => ({
+    randomLabel: document.querySelector('.m-seed-random').textContent,
+    seedInputHidden: getComputedStyle(document.querySelector('.m-seed-input')).display == 'none',
+    resolutionPickers: document.querySelectorAll('.m-resolution-select').length,
+    oldResolutionPickers: document.querySelectorAll('.m-aspect-select, .m-size-select, .m-res-readout').length,
+    tagDexButtons: document.querySelectorAll('.m-tagdex-browse-button').length
+}));
+check('seed starts as one Random button', initialControls.randomLabel == 'Random' && initialControls.seedInputHidden, JSON.stringify(initialControls));
+check('aspect and size are one final-resolution picker', initialControls.resolutionPickers == 1 && initialControls.oldResolutionPickers == 0, JSON.stringify(initialControls));
+check('TagDex browse is mounted once in the Create picker row', initialControls.tagDexButtons == 1, `${initialControls.tagDexButtons} buttons`);
+
+await page.click('.m-seed-random');
+await page.waitForFunction(() => document.activeElement == document.querySelector('.m-seed-input')
+    && getComputedStyle(document.querySelector('.m-seed-clear')).display != 'none');
+const explicitSeed = await page.evaluate(() => ({
+    locked: mState.seedLocked,
+    numeric: /^\d+$/.test(`${mState.params.seed}`),
+    focused: document.activeElement == document.querySelector('.m-seed-input'),
+    clearVisible: getComputedStyle(document.querySelector('.m-seed-clear')).display != 'none'
+}));
+check('Random expands to a focused editable numeric seed', explicitSeed.locked && explicitSeed.numeric && explicitSeed.focused && explicitSeed.clearVisible, JSON.stringify(explicitSeed));
+await page.fill('.m-seed-input', '12345');
+check('typed seed is stored exactly', await page.evaluate(() => mState.params.seed == '12345'));
+await page.click('.m-seed-clear');
+await page.waitForFunction(() => getComputedStyle(document.querySelector('.m-seed-random')).display != 'none');
+const randomAgain = await page.evaluate(() => ({ locked: mState.seedLocked, seed: mState.params.seed, randomVisible: getComputedStyle(document.querySelector('.m-seed-random')).display != 'none' }));
+check('seed X reverts to Random and -1', !randomAgain.locked && randomAgain.seed == '-1' && randomAgain.randomVisible, JSON.stringify(randomAgain));
+
+await page.selectOption('.m-resolution-select', '16:9\n1024');
+const resolution = await page.evaluate(() => ({
+    aspect: mState.params.aspectratio,
+    side: mState.params.sidelength,
+    dims: mState.previewResolution(),
+    label: document.querySelector('.m-resolution-select').selectedOptions[0].textContent
+}));
+check('combined resolution selection writes aspect and side length together', resolution.aspect == '16:9' && resolution.side == '1024', JSON.stringify(resolution));
+check('combined picker names the final dimensions', resolution.dims.join('x') == '1344x768' && resolution.label.includes('1344 × 768'), JSON.stringify(resolution));
+
+await page.evaluate(() => {
+    mState.presets = [
+        { title: 'ill/pose', is_starred: true, param_map: {} },
+        { title: 'qwen/edit', is_starred: false, param_map: {} }
+    ];
+    mState.activePresets = [];
+    mState.archFilter = '';
+    mCreate.render();
+});
+const picklists = await page.evaluate(() => ({
+    sameRow: document.querySelector('.m-arch-select').parentElement == document.querySelector('.m-preset-select').parentElement,
+    all: document.querySelector('.m-arch-select').options[0].textContent,
+    presetLabel: document.querySelector('.m-preset-select').options[0].textContent
+}));
+check('architecture and presets share one picklist row', picklists.sameRow, JSON.stringify(picklists));
+check('architecture all-option is concise', picklists.all == 'All', JSON.stringify(picklists));
+await page.selectOption('.m-preset-select', 'ill/pose');
+await page.waitForFunction(() => document.querySelector('.m-preset-select').options[0].textContent == 'Presets (1)');
+const presetOn = await page.evaluate(() => ({
+    active: mState.activePresets.join(','),
+    label: document.querySelector('.m-preset-select').options[0].textContent,
+    marked: [...document.querySelector('.m-preset-select').options].some(option => option.textContent == '✓ ill/pose')
+}));
+check('preset picklist toggles a preset on and marks it', presetOn.active == 'ill/pose' && presetOn.label == 'Presets (1)' && presetOn.marked, JSON.stringify(presetOn));
+await page.selectOption('.m-preset-select', 'ill/pose');
+check('preset picklist toggles the same preset off', await page.evaluate(() => mState.activePresets.length == 0));
+
+await page.evaluate(() => {
+    mCreate.indexLoras([{ name: 'Consistency_Edit_V2.safetensors', title: 'Consistency Edit V2', trigger_phrase: '' }]);
+    mState.setLoras([{ name: 'Consistency_Edit_V2.safetensors', weight: 0.2 }]);
+    mCreate.openLoraSheet();
+});
+check('LoRA weight uses a 0.05-step picker, not a slider', await page.evaluate(() =>
+    document.querySelectorAll('.m-lora-weight-picker').length == 1 && document.querySelectorAll('.m-lora-slider').length == 0));
+await page.click('.m-lora-weight-picker .m-lora-weight-button:last-child');
+const loraWeight = await page.evaluate(() => ({ state: mState.getLoras()[0].weight, shown: document.querySelector('.m-lora-weight-input').value }));
+check('LoRA plus advances exactly 0.05', loraWeight.state == 0.25 && loraWeight.shown == '0.25', JSON.stringify(loraWeight));
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.setLoras([]);
+});
+
+await page.click('.m-tagdex-browse-button');
+await page.waitForSelector('.m-tagdex-card');
+const tagDexSheet = await page.evaluate(() => ({
+    title: document.querySelector('.m-tagdex-browse-sheet .m-sheet-title').textContent,
+    source: document.querySelector('.m-tagdex-source').value,
+    result: document.querySelector('.m-tagdex-card-name').textContent
+}));
+check('TagDex browse loads the preferred dataset and results', tagDexSheet.title == 'Characters' && tagDexSheet.source == 'danbooru_character' && tagDexSheet.result == 'Hatsune Miku', JSON.stringify(tagDexSheet));
+await page.click('.m-tagdex-card');
+check('TagDex browse inserts the selected trigger into the prompt', await page.evaluate(() => mState.params.prompt == 'hatsune_miku, vocaloid'));
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.params.prompt = '';
+    mState.changed();
+});
+
+await page.addScriptTag({ content: extractFunction(readFileSync(OUTPUT_HISTORY, 'utf8'), 'showMostRecentSessionImage') });
+const deleteFallback = await page.evaluate(() => {
+    let batch = document.createElement('div');
+    batch.id = 'current_image_batch';
+    // appendImage prepends each output, so current batch DOM order is newest-first.
+    for (let src of ['newest.png', 'older.png']) {
+        let block = document.createElement('div');
+        block.className = 'image-block';
+        block.dataset.src = src;
+        block.dataset.metadata = `{ "src": "${src}" }`;
+        block.dataset.batch_id = src;
+        batch.appendChild(block);
+    }
+    document.body.appendChild(batch);
+    window.__fallback = { clicked: '', shown: '', closed: false, blank: false };
+    window.clickImageInBatch = block => { window.__fallback.clicked = block.dataset.src; };
+    window.imageFullView = {
+        close: () => { window.__fallback.closed = true; },
+        showImage: src => { window.__fallback.shown = src; }
+    };
+    window.setCurrentImage = src => { window.__fallback.blank = src == null; };
+    let shifted = showMostRecentSessionImage('deleted.png', true);
+    for (let block of [...batch.children]) {
+        block.remove();
+    }
+    let blanked = showMostRecentSessionImage('deleted.png', false);
+    batch.remove();
+    return { shifted, blanked, ...window.__fallback };
+});
+check('deleted current image falls back to the newest session image', deleteFallback.shifted && deleteFallback.clicked == 'newest.png' && deleteFallback.shown == 'newest.png', JSON.stringify(deleteFallback));
+check('deleted last session image falls back to blank canvas', !deleteFallback.blanked && deleteFallback.closed && deleteFallback.blank, JSON.stringify(deleteFallback));
 
 /** y of the first thing below the preview that the user cares about, plus the panel's total height. */
 const geometry = () => page.evaluate(() => {

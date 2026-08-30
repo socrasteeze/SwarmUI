@@ -52,3 +52,91 @@
 .m-tagdex-action:disabled {
     opacity: 0.5;
 }
+
+.m-tagdex-browse-sheet {
+    padding-bottom: 0.4rem;
+}
+
+.m-tagdex-browse-controls {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+}
+
+.m-tagdex-source,
+.m-tagdex-search {
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 0.5rem;
+}
+
+.m-tagdex-source {
+    flex: 0 1 45%;
+}
+
+.m-tagdex-search {
+    flex: 1 1 55%;
+}
+
+.m-tagdex-browse-status {
+    color: var(--text-soft);
+    min-height: 1.5rem;
+    padding: 0.1rem 0.2rem 0.3rem;
+    font-size: 13px;
+}
+
+.m-tagdex-browse-results {
+    display: flex;
+    flex-direction: column;
+}
+
+.m-tagdex-card {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    min-height: 60px;
+    padding: 0.4rem 0.2rem;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+    background: none;
+    color: var(--text);
+    text-align: left;
+}
+
+.m-tagdex-card-image {
+    width: 52px;
+    height: 52px;
+    flex: 0 0 auto;
+    border-radius: 0.35rem;
+    object-fit: cover;
+}
+
+.m-tagdex-card-text {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.m-tagdex-card-name,
+.m-tagdex-card-sub,
+.m-tagdex-card-count {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m-tagdex-card-name {
+    font-weight: bold;
+}
+
+.m-tagdex-card-sub,
+.m-tagdex-card-count {
+    color: var(--text-soft);
+    font-size: 12px;
+}
+
+.m-tagdex-more {
+    margin-top: 0.5rem;
+}
