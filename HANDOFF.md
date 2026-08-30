@@ -154,3 +154,124 @@ node --check src/BuiltinExtensions/CharacterSheet/Assets/charsheet.js
 # Isolated boot check: expect "is now running", both extensions prepped, zero errors.
 dotnet src/bin/Release/net8.0/SwarmUI.dll --ci_test true --launch_mode none --loglevel debug --data_dir <throwaway> --port 7899
 ```
+
+## Done — verification session (2026-08-30, after `cd5e15f4`)
+
+Everything here was run against the **live server on port 8085** by driving the websocket API headlessly, not
+through the browser. **Open items 1, 4 and 5 below are now closed**; item 2 and 6 are not.
+
+**Interrogate works end to end (closes Open 1).** A real image through `wd14tagger` returned ~50 coherent tags.
+That exercises the whole chain: `SwarmLoadImageB64` -> `WD14Tagger|pysssss` -> `SwarmAddSaveMetadataWS` ->
+the 12347 text channel -> `ExtraMeta` -> the websocket route. The node contract, written from reading that
+repo's `nodes.py` rather than from a live `object_info`, was correct.
+
+**WD14 was already installed** on the ComfyUI backend, so no node pack had to be added. `ListInterrogateBackends`
+enumerated 11 tagger models off the live `object_info`, confirming the `RawObjectInfoParsers` hook works.
+**Those model names carry no `.onnx` suffix** (`wd-v1-4-moat-tagger-v2`, not `...-v2.onnx`) - `ResolveWD14Model`
+matches by prefix, which is the only reason a hardcoded default did not fail Comfy validation.
+
+**Character Sheet orchestration works (closes Open 4).** A 2-panel per-panel run on a fast SDXL checkpoint
+produced two generations and one composited 1024x533 sheet in history with both captions drawn correctly.
+That covers panel planning, the `CreateImageTask` fan-out, ImageSharp compositing, labelling, and the save path.
+
+**Model-family caps verified.** `CharacterSheetInfo` returns `minimax_h3` cap 9 / one-shot / frames 2,
+`flux2` cap 4, and `qwen_image_edit_plus` cap 3 with the correct reason string.
+
+**The per-panel prompt defect was found by that test, not by reading** - each panel drew several figures because
+the shared style text said "character reference sheet". Fixed in `cd5e15f4`. Open 5 is therefore partly closed:
+the pathological case is gone, but the wording is still untuned against real output.
+
+### Load-bearing facts from this session
+
+- **These routes can be driven headlessly.** Node 25's global `WebSocket` plus `POST /API/GetNewSession` is
+  enough to exercise `InterrogateImage` and `CharacterSheetRun` without a browser, which is how everything above
+  was verified. Far faster than clicking, and it is the way to test any future websocket route.
+- **`qwenEdit2511FP8_v10.safetensors` is mis-tagged and it is not this fork's bug.** SwarmUI classifies it as
+  architecture `qwen-image`, not `qwen-image-edit`, so `IsQwenImageEdit()` is false for it and **core SwarmUI
+  will not use the edit text-encode path for that checkpoint either** - the sheet tool reporting `generic` cap 1
+  is just agreeing with core. The other five Qwen Edit checkpoints are tagged `qwen-image-edit-plus` and behave
+  correctly. Fix is to set the architecture on that one file in the Models tab.
+- **`live_release` cannot be rebuilt while the server is running** - it holds `SwarmUI.exe` and the copy fails
+  with MSB3027. Stop the server first, or build to the default output and deploy on the next restart.
+
+### Autocomplete word list - state of play
+
+The active `AutoCompletionsSource` is **`NoobAIXL1.1_underscore.csv`**, the oldest of the three lists on disk.
+Measured, normalized for convention:
+
+| File | Rows | `1girl` count | Convention | Vocabulary |
+|---|---|---|---|---|
+| `NoobAIXL1.1_underscore.csv` | 141,802 | 6,160,038 | 100% underscore | danbooru + e621 |
+| `gelbooru_anima_2026-06-11.csv` | 235,255 | 9,259,271 | 100% space | gelbooru/danbooru only |
+| `illustriousV1.0_underscore.csv` | 93,908 | 6,172,043 | 100% underscore | danbooru |
+
+- **The two conventions make the files look unrelated.** Raw, they share only ~26k tags; normalized
+  (`strip().replace(' ','_')`) they share 94,666. Any comparison or merge MUST normalize first.
+- Normalized, the Anima list **adds 140,580 tags** over NoobAI's and its post counts are roughly a year fresher.
+- But NoobAI's list holds **47,136 tags the Anima list lacks, and they are e621 vocabulary** - the highest-count
+  ones are `mammal`, `anthro`, `hi_res`, `female`, `male`, `genitals`, `clothing`, `fur`, `duo`. NoobAI XL was
+  trained on danbooru **and** e621; the gelbooru-derived Anima list carries none of it.
+- `gelbooru_anima_2026-06-11.csv` has 9 rows with leading or trailing whitespace in the tag column - a scrape
+  artifact, harmless but worth stripping in any rebuild.
+
+## Done — Anima autocomplete list (2026-08-30)
+
+**Shipped and live.** `AutoCompletionsSource` is now `anima_gelbooru_2026-08-13.csv` with `SpacingMode: None`,
+verified through `GetMyUserData`: 136,856 entries load, `@dairi` inserts as `@dairi, ` with alias `dairi`,
+`score_7` and `^_^` keep their underscores, `sole female` is present. Full rationale is in
+`docs/Anima-Autocomplete.md`; only the parts that doc does not carry are recorded here.
+
+**The previously active `NoobAIXL1.1_underscore.csv` was wrong on four independent counts** — built for NoobAI
+XL v1.1 (SDXL family, a different architecture entirely), underscored while the model card asks for spaces,
+danbooru+e621 while the card designates Gelbooru, tag cutoff 2024-11-03, and **zero `@`-prefixed artists** out
+of ~50,000 artist rows. Every artist completion it offered was syntax Anima was not trained to read.
+
+**Built `anima_gelbooru_2026-08-13.csv`** (136,856 rows) via the new `tools/compile_anima_tags.py`, from
+BetaDoggo's `anima-2.9B-preview-V1.csv`. Repaired 1,953 HTML-entity-corrupted tag names, converted underscores
+to spaces with `score_1`-`score_9` and ~20 kaomoji exempted, merged 40,857 Danbooru aliases (alias coverage
+10,558 -> 67,099 rows), added the 45 control tags the card names, and dropped 3 rows starting with `#` that
+SwarmUI silently discards anyway.
+
+### Corrections to what this session originally concluded
+
+An earlier pass in this same session compiled `anima_2026-08-30.csv` and recommended it. **That file has been
+deleted and its conclusions were wrong in two ways**, both caught by a follow-up research sweep:
+- **Its name asserted a recency it did not have.** The data inside was the 2026-06-11 Gelbooru snapshot, not
+  August. Name a compiled list after the source data's date, never the build date.
+- **It invented 44 post counts between 86,000,000 and 90,000,000** to pin control tags to the top of the
+  frequency sort. Gelbooru's entire corpus is ~14.1M posts, so those were impossible values sitting in a column
+  that holds real counts everywhere else. The replacement leaves them at `0`; the default `Active` sort orders
+  by tag length anyway, so the weighting was never needed.
+
+### Load-bearing facts
+
+- **A newly added list file is invisible until the autocomplete cache refreshes.** `GetMyUserData` returned
+  **0 entries** with the setting correctly pointed at a file that existed on disk. `TriggerRefresh` fixed it.
+  Do not diagnose an empty list as a bad file.
+- **`anima-1.0.csv` is not Gelbooru-based despite its release note saying so.** Its `1girl` is 7,868,012, which
+  is Danbooru's level, not Gelbooru's 9.5M, and it lacks Gelbooru-first vocabulary like `sole_female` (3.9M).
+  It is the only list matching official Anima's 2025-09-01 cutoff, so it remains the fallback if post-cutoff
+  vocabulary ever proves to be a real problem — but it breaks the card's explicit Gelbooru rule.
+- **`SpacingMode` must stay `None`.** It is a blanket `_`->space replace with no exemptions, so `Spaces` would
+  rewrite `score_7` to `score 7` and mangle every kaomoji tag. Convention is handled at compile time instead.
+- **BetaDoggo's `Model-Tags` release is rolling.** The page reads "Published Feb 9, 2025" (the git tag date)
+  while assets are uploaded into it continuously — the Anima 2.9B asset is dated 2026-08-13. Read per-asset
+  `created_at`, never the release date.
+- **Gelbooru's tag API needs a free account** (`api_key` + `user_id`; 401 without). The keyless web listing is
+  hard-capped at `pid=20000` and silently repeats page 1 past that, so it cannot be paginated to a threshold —
+  a loop that paginates until the post count crosses 50 never terminates.
+- **Gelbooru exposes no tag creation date**, so a Gelbooru-sourced list cannot be backdated to a model's
+  knowledge cutoff. That is the structural reason no perfectly-matched Anima list exists anywhere.
+- The user runs **both** Anima generations: 36 official Anima 1.x checkpoints and one 2.9B
+  (`anima29BP1Turbo11`). The chosen list serves both; the 2.9B checkpoint is why its later cutoff is not waste.
+
+### Open — autocomplete
+12. **Old lists are still on disk and still selectable.** `NoobAIXL1.1_underscore.csv` is legitimate for actual
+    NoobAI checkpoints (though `ChenkinNoob-XL-V0.5_underscore.csv`, 2026-04-10, is 14 months fresher);
+    `gelbooru_anima_2026-06-11.csv` is now fully superseded and can be deleted.
+13. **Nothing rebuilds this automatically.** When BetaDoggo publishes a newer Gelbooru-sourced Anima asset,
+    re-run `tools/compile_anima_tags.py` against it. The compiler takes source and destination paths and does
+    not care which base it is given.
+14. **The `@` artist convention is unverified in practice.** It comes from the model card, and the list now
+    follows it, but no side-by-side generation was run to confirm `@name` actually beats bare `name` on these
+    checkpoints.

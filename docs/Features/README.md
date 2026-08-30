@@ -12,5 +12,6 @@ See [The Docs Readme](/docs/README.md) for general listing of documentation and 
 - [UISounds](/docs/Features/UISounds.md) for info about sound playback in the UI (eg a sound to play after generations complete).
 - [AutoScalingBackend](/docs/Features/AutoScalingBackend.md) for info about the specialty advanced usage "Auto-Scaling" backend (for Slurm/Kubernetes/etc).
 - [Upscaling](/docs/Features/Upscaling.md) for info about upscaling images and videos (ie increasing resolution, especially to improve quality).
+- [Anima Autocomplete](/docs/Anima-Autocomplete.md) for which tag word list to use with the Anima model family, and how to rebuild it.
 - [Interrogate](/src/BuiltinExtensions/Interrogate/README.md) for info about generating tags or a text prompt from an image.
 - [Character Sheet](/src/BuiltinExtensions/CharacterSheet/README.md) for info about building multi-view character reference sheets.
