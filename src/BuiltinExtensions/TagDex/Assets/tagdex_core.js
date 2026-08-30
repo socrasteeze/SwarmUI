@@ -318,6 +318,41 @@ class TagDexCoreClass {
         }
     }
 
+    /** Returns the part of a trigger that still needs inserting at the host's current word boundary.
+     *
+     * The stock completers search and replace one space-delimited word. A TagDex trigger can span several words,
+     * so accepting `hatsune miku, vocaloid` after typing `hatsune mi` used to retain the completed first word and
+     * insert the whole trigger after it. Narrowing only TagDex's inserted value keeps the host's own matching and
+     * splice rules intact: `miku` still inserts the full trigger, while `hatsune mi` inserts only its remaining
+     * `miku, vocaloid` tail. */
+    insertionForPrompt(trigger, prompt, wordIndex) {
+        if (!trigger || wordIndex <= 0 || wordIndex >= prompt.length) {
+            return trigger;
+        }
+        let current = prompt.substring(wordIndex).toLowerCase();
+        let before = prompt.substring(0, wordIndex);
+        let beforeLow = before.toLowerCase();
+        let triggerLow = trigger.toLowerCase();
+        for (let i = 1; i < trigger.length; i++) {
+            if (!/\s/.test(trigger[i - 1]) || /\s/.test(trigger[i])) {
+                continue;
+            }
+            if (!triggerLow.substring(i).startsWith(current)) {
+                continue;
+            }
+            let prefix = triggerLow.substring(0, i);
+            if (!beforeLow.endsWith(prefix)) {
+                continue;
+            }
+            let prefixStart = before.length - prefix.length;
+            if (prefixStart > 0 && /[A-Za-z0-9_]/.test(before[prefixStart - 1])) {
+                continue;
+            }
+            return trigger.substring(i);
+        }
+        return trigger;
+    }
+
     /** Merges character suggestions into an autocomplete host's result list.
      * The only thing required of `host` is findLastWordIndex(), which both PromptTabCompleteClass and MAutoComplete
      * expose identically. Using the host's own copy is load-bearing: the caller computes the splice offset with its
@@ -333,7 +368,8 @@ class TagDexCoreClass {
         if (lastBrace != -1 && prompt.lastIndexOf('>') < lastBrace) {
             return base;
         }
-        let word = prompt.substring(host.findLastWordIndex(prompt));
+        let wordIndex = host.findLastWordIndex(prompt);
+        let word = prompt.substring(wordIndex);
         if (word.length < 2) {
             return base;
         }
@@ -359,6 +395,7 @@ class TagDexCoreClass {
                 continue;
             }
             let entry = this.entryAt(hit, plainOnly);
+            entry.name = this.insertionForPrompt(entry.name, prompt, wordIndex);
             if (seen.has(entry.tagdex.name)) {
                 continue;
             }

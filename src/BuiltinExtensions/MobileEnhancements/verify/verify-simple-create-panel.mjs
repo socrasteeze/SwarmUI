@@ -9,7 +9,8 @@
  * 2. Starred models sort first. The pickers cap how many rows they render, so on a real library this is what
  *    decides whether a favourite is on screen at all.
  * 3. The compact priority controls keep their contracts: Random seed expansion, one final-resolution picker,
- *    paired architecture/preset picklists, exact 0.05 LoRA weights, and TagDex browse-to-prompt insertion.
+ *    paired architecture/preset picklists, exact 0.05 LoRA weights, TagDex browse-to-prompt insertion, and
+ *    multi-word TagDex typeahead acceptance.
  * 4. Deleting the selected genpage image chooses the newest surviving image from the current-session batch,
  *    or clears the canvas when none survives. The shipped helper is extracted rather than copied.
  *
@@ -239,6 +240,39 @@ await page.evaluate(() => {
     mState.params.prompt = '';
     mState.changed();
 });
+
+const tagDexTypeahead = await page.evaluate(() => {
+    window.getTextSelRange = box => [box.selectionStart, box.selectionEnd];
+    tagDexCore.status = 'ready';
+    tagDexCore.prefs.typeahead_enabled = true;
+    tagDexCore.prefs.quota_alone = 10;
+    tagDexCore.match = () => [{ strong: true }];
+    tagDexCore.recordAt = () => ({
+        source: 'danbooru_character',
+        kind: 'character',
+        tagType: 1,
+        name: 'hatsune_miku',
+        trigger: 'hatsune miku, vocaloid',
+        copyright: 'vocaloid',
+        tags: [],
+        count: 123456
+    });
+    let box = document.querySelector('.m-prompt-box');
+    let accept = (prompt) => {
+        setTextContent(box, prompt);
+        setTextSelRange(box, prompt.length, prompt.length);
+        box.dispatchEvent(new Event('input'));
+        let chip = document.querySelector('.m-ac-chip:not(.m-ac-help)');
+        chip.click();
+        return getTextContent(box);
+    };
+    return {
+        single: accept('miku'),
+        multiple: accept('hatsune mi')
+    };
+});
+check('TagDex typeahead keeps single-word trigger insertion intact', tagDexTypeahead.single == 'hatsune miku, vocaloid', JSON.stringify(tagDexTypeahead));
+check('TagDex typeahead does not duplicate an already typed name prefix', tagDexTypeahead.multiple == 'hatsune miku, vocaloid', JSON.stringify(tagDexTypeahead));
 
 await page.addScriptTag({ content: extractFunction(readFileSync(OUTPUT_HISTORY, 'utf8'), 'showMostRecentSessionImage') });
 const deleteFallback = await page.evaluate(() => {
