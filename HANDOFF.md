@@ -1,9 +1,9 @@
 # HANDOFF
 
-**Updated:** 2026-08-30 · **Branch:** main · **Base:** 03719fe5 (= origin/main) · **Tree:** dirty (two new .bat files)
+**Updated:** 2026-08-30 · **Branch:** main · **Base:** 8856c73d (= origin/main) · **Tree:** clean
 
 ## State
-Two new builtin extensions are committed but **unpushed and never exercised against a live ComfyUI backend** —
+Two new builtin extensions are committed and pushed but **never exercised against a live ComfyUI backend** —
 all gates pass, no interrogation or sheet has actually been generated. Everything below turns on that testing.
 
 ## Done this session
@@ -25,8 +25,8 @@ all gates pass, no interrogation or sheet has actually been generated. Everythin
    history with reusable metadata, captions legible.
 5. **Tune the sheet prompt wording** — `SheetPlan.cs`. Pure guesswork until real output exists; the only file that
    needs changing for this, and it is structurally isolated.
-6. **Commit `stop.bat` / `restart.bat`.** `stop.bat` is tested; `restart.bat`'s pull-and-launch path is not —
-   it was never run, because running it starts a server.
+6. **Exercise `restart.bat` once.** Its pull-and-launch path was never run, because running it starts a server.
+   `stop.bat` is tested.
 7. **Not built:** the planned "Analyze pose image" button wiring Character Sheet to Interrogate.
 
 ## Decisions
