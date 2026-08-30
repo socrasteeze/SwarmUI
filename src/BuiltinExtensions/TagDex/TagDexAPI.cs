@@ -393,7 +393,11 @@ public partial class TagDexExtension
         Dictionary<string, int> byTrigger = [];
         for (int i = 0; i < list.Entries.Length; i++)
         {
-            byTrigger[Normalize(list.Entries[i].Trigger)] = i;
+            // TryAdd, not assignment: Normalize folds filename-illegal characters and trailing dots to nothing, so
+            // a handful of tag pairs ('awa' / 'awa.', 'unown' / 'unown_?') share one key and are indistinguishable
+            // on disk. Entries is sorted count-descending, so first-wins gives the thumbnail to the tag the model
+            // actually learned. Assignment would hand it to the obscure twin.
+            byTrigger.TryAdd(Normalize(list.Entries[i].Trigger), i);
             byTrigger.TryAdd(Normalize(list.Entries[i].Name), i);
         }
         int imported = 0;
@@ -427,14 +431,25 @@ public partial class TagDexExtension
         return new JObject() { ["success"] = true, ["imported"] = imported, ["unmatched"] = unmatched };
     }
 
-    /// <summary>Normalizes a name for loose matching: lowercase, with underscores and spaces treated as equivalent.</summary>
+    /// <summary>Characters illegal in Windows filenames. External exporters (eg AnimaDex) replace these before
+    /// writing, so a thumbnail's on-disk stem for a tag like '2b_(nier:automata)' can never contain the colon.
+    /// Treating them as equivalent to space on BOTH sides of the import match recovers those entries.</summary>
+    public static readonly char[] IllegalFileChars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
+    /// <summary>Normalizes a name for loose matching: lowercase, with underscores, spaces, and
+    /// filename-illegal characters treated as equivalent, and trailing dots dropped (Windows strips them).</summary>
     public static string Normalize(string value)
     {
         if (string.IsNullOrEmpty(value))
         {
             return "";
         }
-        return value.ToLowerFast().Replace('_', ' ').Trim();
+        value = value.ToLowerFast().Replace('_', ' ');
+        foreach (char c in IllegalFileChars)
+        {
+            value = value.Replace(c, ' ');
+        }
+        return value.TrimEnd(' ', '.').Trim();
     }
 
     /// <summary>Builds the JSON description of one entry, as sent to the browse tab.</summary>
