@@ -487,7 +487,8 @@ public class User
         // self-contained block with no added usings, keeping the fork's core delta minimal. The extension names this file.
         if (!hasExplicitPrefixTag && T2IParamTypes.TryGetType("filenameprefix", out T2IParamType prefixType, user_input) && user_input.TryGetRaw(prefixType, out object prefixRaw))
         {
-            string prefix = Utilities.StrictFilenameClean($"{prefixRaw}".Replace("[", "").Replace("]", "").Replace('\\', '/').Replace("/", "")).Trim();
+            // KeepDots variant: interior dots survive ('v1.0'), dot runs collapse and edge dots are trimmed, so '..' cannot be produced.
+            string prefix = Utilities.StrictFilenameCleanKeepDots($"{prefixRaw}".Replace("[", "").Replace("]", "").Replace('\\', '/').Replace("/", "")).Trim();
             if (prefix.Length > maxLen)
             {
                 // Never cut between the halves of a surrogate pair. The maxLen guard matters: a MaxLenPerPart of 0

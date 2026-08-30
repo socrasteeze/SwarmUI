@@ -43,7 +43,6 @@ public partial class TagDexExtension : Extension
         TagDexData.Init();
         API.RegisterAPICall(TagDexListSources, false, PermUseTagDex);
         API.RegisterAPICall(TagDexSearchEntries, false, PermUseTagDex);
-        API.RegisterAPICall(TagDexGetEntry, false, PermUseTagDex);
         API.RegisterAPICall(TagDexGetFacets, false, PermUseTagDex);
         API.RegisterAPICall(TagDexGetPrefs, false, PermUseTagDex);
         API.RegisterAPICall(TagDexSetPrefs, true, PermUseTagDex);
@@ -164,9 +163,24 @@ public partial class TagDexExtension : Extension
 /// <summary>Builds the lean client-side typeahead index.</summary>
 public static class TagDexIndexBlob
 {
-    /// <summary>Cached serialized blobs, keyed by source ID plus minimum count. Invalidated by dropping the loaded
-    /// list, which changes its fingerprint.</summary>
+    /// <summary>Cached serialized blobs, keyed by source ID, minimum count, and the list's file timestamp and row
+    /// count. A rebuilt list gets a new key, so it never reads a stale blob - but the old key would otherwise stay
+    /// resident forever, so <see cref="TagDexData.Unload"/> calls <see cref="Evict"/> to drop every entry for
+    /// that source.</summary>
     public static ConcurrentDictionary<string, string> Cache = new();
+
+    /// <summary>Drops every cached blob belonging to one source, whatever its minimum count or fingerprint.</summary>
+    public static void Evict(string sourceId)
+    {
+        string prefix = $"{sourceId}\n";
+        foreach (string key in Cache.Keys)
+        {
+            if (key.StartsWithFast(prefix))
+            {
+                Cache.TryRemove(key, out _);
+            }
+        }
+    }
 
     /// <summary>A short fingerprint of a loaded list, used as the immutable-cache URL segment.</summary>
     public static string Fingerprint(TagDexList list, int minCount)

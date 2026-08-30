@@ -51,7 +51,7 @@ regardless of which port it listens on.
 **This corrects an earlier conclusion.** A previous session recorded that `Host: 0.0.0.0` "claims the port
 on every interface and kills the same-port trick", and that Swarm had to be moved to loopback first. That
 was wrong. Moving Swarm to loopback does work, but it costs all LAN access for no gain, and it was reverted.
-If a note anywhere still says loopback is required, it is stale.
+If a note anywhere still says loopback is required, it is stale. (Swept 2026-08-29: a repo-wide search for "loopback" found no surviving claim that it is required — `AGENTS.md`'s Fork Delta entry for this doc already says "loopback is not required".)
 
 ## Rejected alternatives
 

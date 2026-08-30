@@ -48,8 +48,9 @@ public class ComfyNodePatchesExtension : Extension
     /// TeaCache imports that symbol at module top level, so on current ComfyUI the import raises and the ENTIRE node
     /// pack fails to load - killing TeaCache acceleration for every supported model (flux, flux-kontext, wan,
     /// hunyuan_video, hidream, lumina_2, ...), even though the symbol's only use is one LTXV-specific line.
-    /// SwarmUI still offers its 'TeaCache Mode' parameter regardless, because that feature flag is gated on the node
-    /// folder existing rather than on the nodes actually loading, so the failure is silent until generation time.
+    /// The 'teacache' feature flag is gated on the TeaCache node actually appearing in the backend's object_info (fork edit in
+    /// ComfyUIBackendExtension.OnPreInit; it was previously set presumptively when the node folder existed), so a failed import now
+    /// hides the 'TeaCache Mode' parameter rather than failing at generation time - but the acceleration is still lost without this repair.
     ///
     /// TeaCache upstream (welltop-cn/ComfyUI-TeaCache) has not been touched since 2025-07-12 and does not carry a fix.
     /// The repair makes the import optional and falls back to the model's own relocated method at the call site - which

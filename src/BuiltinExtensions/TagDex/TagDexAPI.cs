@@ -160,7 +160,7 @@ public partial class TagDexExtension
         }
         TagDexPrefs prefs = TagDexPrefs.For(session);
         TagDexQuery query = TagDexSearch.BuildQuery(search, copyright, hairColor, hairLength, eyeColor, gender,
-            minCount < 0 ? prefs.DisplayMinCount : minCount, false);
+            minCount < 0 ? prefs.DisplayMinCount : minCount);
         long start = Environment.TickCount64;
         TagDexResults results = TagDexSearch.Run(list, query, sortBy, sortReverse, offset, limit);
         JArray array = [];
@@ -186,24 +186,6 @@ public partial class TagDexExtension
             response["copyrights"] = folders;
         }
         return response;
-    }
-
-    /// <summary>API route: full detail for one entry by exact name.</summary>
-    [API.APIDescription("Gets the full record for one TagDex entry by exact name.", "\"entry\": { \"name\": \"hatsune_miku\", ... }")]
-    public async Task<JObject> TagDexGetEntry(Session session,
-        [API.APIParameter("Dataset ID.")] string source,
-        [API.APIParameter("Exact tag name.")] string name)
-    {
-        TagDexList list = TagDexData.EnsureLoaded(source);
-        if (list is null)
-        {
-            return new JObject() { ["error"] = $"Dataset '{source}' is not downloaded yet.", ["missing_data"] = true };
-        }
-        if (!list.ByName.TryGetValue(name, out int index))
-        {
-            return new JObject() { ["error"] = $"No entry named '{name}' in '{source}'." };
-        }
-        return new JObject() { ["entry"] = DescribeEntry(list, index) };
     }
 
     /// <summary>API route: the facet vocabularies plus the copyright rollup, for building filter controls.</summary>

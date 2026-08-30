@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<!-- Device diagnostic for the /simple client. Fork-owned, deliberately dependency-free.
+<!-- Device diagnostic for the /simple client. Fork-owned. Its only dependency is mobile_core.js, which is
+     loaded here precisely because it is the thing under test (see below).
 
      This fork's target device is an iPhone, and none of the verify/*.mjs harnesses can reproduce a real
      iOS safe-area inset, a standalone launch context, or a secure-context difference - a desktop Chromium
@@ -7,8 +8,11 @@
      diagnosable only by guesswork against a screenshot. This page prints the numbers instead: open it on
      the device, screenshot it, and the values below distinguish causes that otherwise look identical.
 
-     It mirrors the meta tags and CSS variables that /simple's index.html and m.css actually use, so what it
-     reports is what they see. Keep it in sync if those change. -->
+     It mirrors the meta tags /simple's index.html uses and reads the raw env() insets the way m.css does for
+     its fallbacks. The top inset m.css and mobile.css ACTUALLY consume is --safe-top, which is not an env()
+     value at all but a measurement published by mobile_core.js (measureSafeAreaTop, standalone only) - so
+     that script is loaded here too and its output reported alongside the raw values. Keep in sync if those
+     change. -->
 <html>
 <head>
     <meta charset="utf-8" />
@@ -19,7 +23,7 @@
     <title>SwarmUI device diagnostic</title>
     <style>
         :root {
-            /* Read back exactly the way m.css consumes them. */
+            /* The raw env() values, read back the way m.css's fallbacks consume them. */
             --probe-top: env(safe-area-inset-top);
             --probe-bottom: env(safe-area-inset-bottom);
             --probe-left: env(safe-area-inset-left);
@@ -62,8 +66,15 @@
         A band below this bar means the web view is not full-bleed. Established 2026-08-23: it is reachable by
         neither page CSS nor theme-color. See the mobile plan doc before chasing it again.
     </div>
+    <!-- Same script /simple loads, so --safe-top here is computed exactly as it is there. Placed after the body
+         content (its constructor touches document.body) and before the readout below. Its other side effects
+         are inert on this page: no tab strip to dock a link into, no settings tab to point a toast at, and
+         the service worker it registers is the one the app registers anyway. -->
+    <script src="/ExtensionFile/MobileEnhancementsExtension/Assets/mobile_core.js"></script>
     <script>
         const cs = getComputedStyle(document.documentElement);
+        const core = (typeof mobileEnhancements != 'undefined') ? mobileEnhancements : null;
+        const safeTop = document.documentElement.style.getPropertyValue('--safe-top').trim();
         const mm = (q) => window.matchMedia(q).matches;
         const px = (v) => (v || '').trim() || '0px';
         const rows = [
@@ -85,6 +96,10 @@
             ['env safe-area-inset-bottom', px(cs.getPropertyValue('--probe-bottom'))],
             ['env safe-area-inset-left', px(cs.getPropertyValue('--probe-left'))],
             ['env safe-area-inset-right', px(cs.getPropertyValue('--probe-right'))],
+            ['--safe-top (mobile_core.js)', safeTop || (core ? '(unset - not standalone)' : '(mobile_core.js failed to load)')],
+            ['mobile_core isStandalone', core ? core.isStandalone : 'n/a'],
+            ['mobile_core measureSafeAreaTop()', core ? core.measureSafeAreaTop() + 'px' : 'n/a'],
+            ['window.screenY', window.screenY],
             ['navigator.clipboard', typeof navigator.clipboard],
             ['clipboard.read', navigator.clipboard ? typeof navigator.clipboard.read : 'n/a'],
             ['userAgent', navigator.userAgent]

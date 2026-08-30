@@ -48,8 +48,6 @@ class MImageEdit {
     static MaxFreeRotateDegrees = 75;
 
     constructor() {
-        /** Index into mState.promptImages this session is editing, or null when nothing is open. */
-        this.index = null;
         /** The authoritative working canvas, at full source resolution. Never attached to the DOM itself -
          * render() copies its pixels into displayCanvas, which is what's actually on screen. Rotate/crop/undo
          * replace this reference wholesale rather than mutating in place, which is what makes snapshotting it
@@ -90,7 +88,6 @@ class MImageEdit {
         if (!entry) {
             return;
         }
-        this.index = index;
         this.canvas = null;
         this.displayCanvas = null;
         this.history = [];

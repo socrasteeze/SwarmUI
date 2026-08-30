@@ -282,7 +282,6 @@ class MCreate {
 
     /** Builds the Create panel once. */
     build(panel) {
-        this.panel = panel;
         // Flex column so children keep their natural height rather than being shrunk to fit (see m.css).
         panel.classList.add('m-create-panel');
         panel.appendChild(this.previewWrap);

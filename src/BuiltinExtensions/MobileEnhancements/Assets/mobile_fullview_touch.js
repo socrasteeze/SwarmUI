@@ -47,9 +47,7 @@ class MobileFullViewTouch {
         // the browser finishes fetching/decoding them - an unreferenced Image() can be GC'd mid-flight.
         this.preloadImg1 = null;
         this.preloadImg2 = null;
-        // T7 (in-viewer Share button): the button element itself and the observer that re-injects it.
-        this.shareButton = null;
-        this.contentObserver = null;
+        // T7 (in-viewer Share button): the noClose backstop timer - see suppressModalClose().
         this.shareNoCloseTimer = null;
         let content = imageFullView.content;
         content.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false, capture: true });
@@ -597,17 +595,19 @@ class MobileFullViewTouch {
      * (Share button injection, adjacent-image preload) each time it happens. This is also the "once when
      * the viewer becomes active for a new image" trigger for both T6 and T7, covering navigation methods
      * this file doesn't itself drive (arrow keys, clicking a history/batch thumbnail directly).
+     *
+     * The observer is never disconnected on purpose: this singleton lives exactly as long as the page, and
+     * imageFullView.content is a permanent element, so there is no teardown moment for it to hook.
      */
     watchContent() {
         if (!imageFullView || !imageFullView.content) {
             return;
         }
-        let onChange = () => {
+        let observer = new MutationObserver(() => {
             this.ensureShareButton();
             this.preloadAdjacent();
-        };
-        this.contentObserver = new MutationObserver(onChange);
-        this.contentObserver.observe(imageFullView.content, { childList: true });
+        });
+        observer.observe(imageFullView.content, { childList: true });
     }
 
     /**
@@ -653,7 +653,6 @@ class MobileFullViewTouch {
         btn.addEventListener('pointerdown', () => this.suppressModalClose());
         btn.addEventListener('click', activate);
         wrap.appendChild(btn);
-        this.shareButton = btn;
     }
 
     /**

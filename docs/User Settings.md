@@ -41,4 +41,4 @@ It is inserted automatically, so it applies whatever format is in effect - inclu
 
 To place it somewhere other than the start, put a `[filenameprefix]` tag in your format instead; the automatic insertion is skipped whenever the format contains that tag.
 
-Slashes, square brackets and dots are stripped from the prefix, and it is capped at 40 characters. A prefix that reduces to nothing is treated as unset.
+Slashes and square brackets are stripped from the prefix, leading/trailing dots and `..` runs are removed (interior dots such as `v1.0` are kept), and it is capped at 40 characters. A prefix that reduces to nothing is treated as unset. Note that for roles without `AllowUnsafeOutpaths`, SwarmUI's own final output-path clean still removes every dot, so `v1.0` reaches disk as `v10` unless that role setting is enabled.

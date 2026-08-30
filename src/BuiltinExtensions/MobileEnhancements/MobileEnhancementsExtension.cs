@@ -35,6 +35,7 @@ public class MobileEnhancementsExtension : Extension
     {
         ScriptFiles.Add("Assets/busy_indicator.js");
         ScriptFiles.Add("Assets/mobile_core.js");
+        ScriptFiles.Add("Assets/mobile_thumbnails.js");
         ScriptFiles.Add("Assets/mobile_fullview_touch.js");
         ScriptFiles.Add("Assets/mobile_network.js");
         ScriptFiles.Add("Assets/mobile_share.js");

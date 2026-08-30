@@ -66,6 +66,21 @@
     <script>
         // Auto-recover the moment the browser reports the network is back.
         window.addEventListener('online', () => location.reload());
+        // The service worker serves this page for ANY failed navigation, and a failed navigation while the
+        // browser says it is online means the network is fine and the SwarmUI process is what is missing.
+        // Say that instead of blaming the connection, and re-probe until it answers. The probe is a HEAD so
+        // the worker passes it straight through (non-GET) and it can never be answered from cache; any
+        // response at all, including an error status, means the web server is back.
+        if (navigator.onLine) {
+            document.querySelector('.offline-title').textContent = 'SwarmUI isn\'t running';
+            document.querySelector('.offline-msg').textContent = 'Your connection is fine, but the SwarmUI server didn\'t answer. Start it and this page will reload on its own.';
+            let probe = () => {
+                fetch(location.href, { method: 'HEAD', cache: 'no-store' })
+                    .then(() => location.reload())
+                    .catch(() => setTimeout(probe, 5000));
+            };
+            setTimeout(probe, 5000);
+        }
     </script>
 </body>
 </html>

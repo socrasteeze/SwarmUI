@@ -12,7 +12,6 @@ class MModels {
 
     /** Builds the Models panel once. */
     build(panel) {
-        this.panel = panel;
         let toggle = mUI.el('div', 'm-seg-group m-models-toggle');
         for (let [label, sub] of [['Checkpoints', 'Stable-Diffusion'], ['LoRAs', 'LoRA']]) {
             let btn = mUI.el('button', 'm-seg-button', label);

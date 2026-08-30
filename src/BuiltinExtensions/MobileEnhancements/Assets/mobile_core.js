@@ -53,18 +53,22 @@ class MobileEnhancements {
     }
 
     /**
-     * In the installed app only, puts a "Mobile UI" link on any non-/simple page so the user can get back.
-     * It docks into the top tab strip where there is one, and falls back to a floating pill where there is
-     * not (login, install, the error page).
+     * In the installed app only, docks a "Mobile UI" link into the genpage's top tab strip so the user can
+     * get back to /simple.
      *
      * Standalone has no address bar and no browser back button, and /simple's own "Classic UI" link navigates
      * here with nothing pointing back - so a tap that was meant as a peek at the full UI stranded the user
      * until they force-quit the app. The share target has the same shape and is worse: it cold-starts at
      * /ShareTarget which redirects here, so there is no history entry to swipe back to at all.
      *
+     * Only two pages ever run this script: the genpage (the extension's ScriptFiles inject through
+     * WebServer.PageFooterExtra, which only Text2Image.cshtml renders - login, install and the error page
+     * never load it) and /simple, which links it explicitly and is excluded below. #toptablist always
+     * exists on the genpage, so there is no "no tab strip" case to fall back from; the diag page also loads
+     * this and simply has no strip, which is the right outcome there.
+     *
      * Deliberately standalone-only. In a normal browser tab the address bar and back gesture already solve
-     * this, and injecting a floating link into every Razor page on desktop would be an unwanted change to the
-     * main UI - this exists to repair a navigation dead end, not to add an affordance.
+     * this - this exists to repair a navigation dead end, not to add an affordance.
      */
     addMobileReturnLink() {
         if (!this.isStandalone) {
@@ -78,38 +82,24 @@ class MobileEnhancements {
                 return;
             }
             let tabs = document.getElementById('toptablist');
-            if (tabs) {
-                // Docked into the tab strip rather than floated over it. As a fixed top-right pill it sat on
-                // top of whichever tab happened to be underneath, and once Genpage became installable in its
-                // own right (the Classic manifest variant) that overlap was on screen for a whole session
-                // instead of only for a peek from /simple. The strip already scrolls horizontally under
-                // body.small-window and its items are `flex: 0 0 auto`, so one more item at the end costs no
-                // layout and cannot collide with anything.
-                let item = document.createElement('li');
-                item.className = 'nav-item swarm-mobile-return';
-                item.setAttribute('role', 'presentation');
-                let tab = document.createElement('a');
-                tab.className = 'nav-link';
-                tab.href = '/simple';
-                tab.textContent = 'Mobile UI';
-                item.appendChild(tab);
-                tabs.appendChild(item);
+            if (!tabs) {
                 return;
             }
-            // No tab strip on this page, so fall back to the floating pill.
-            let link = document.createElement('a');
-            link.className = 'swarm-mobile-return';
-            link.href = '/simple';
-            link.textContent = 'Mobile UI';
-            // Inline-styled rather than in mobile.css: this element only ever exists in the installed app, and
-            // keeping its styling next to the one place that creates it avoids a rule in a shared stylesheet
-            // that appears to apply to every page but never matches on any of them.
-            link.style.cssText = 'position:fixed;z-index:1002;right:0.6rem;font-size:13px;padding:0.5rem 0.8rem;'
-                + 'min-height:44px;display:inline-flex;align-items:center;border-radius:0.5rem;'
-                + 'background:var(--background-panel,#222);color:var(--text,#eee);border:1px solid var(--border-color,#444);'
-                + 'text-decoration:none;opacity:0.92;'
-                + 'top:calc(var(--safe-top, env(safe-area-inset-top)) + 0.4rem);';
-            document.body.appendChild(link);
+            // Docked into the tab strip rather than floated over it. As a fixed top-right pill it sat on
+            // top of whichever tab happened to be underneath, and once Genpage became installable in its
+            // own right (the Classic manifest variant) that overlap was on screen for a whole session
+            // instead of only for a peek from /simple. The strip already scrolls horizontally under
+            // body.small-window and its items are `flex: 0 0 auto`, so one more item at the end costs no
+            // layout and cannot collide with anything.
+            let item = document.createElement('li');
+            item.className = 'nav-item swarm-mobile-return';
+            item.setAttribute('role', 'presentation');
+            let tab = document.createElement('a');
+            tab.className = 'nav-link';
+            tab.href = '/simple';
+            tab.textContent = 'Mobile UI';
+            item.appendChild(tab);
+            tabs.appendChild(item);
         };
         if (document.body) {
             add();

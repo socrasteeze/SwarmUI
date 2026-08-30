@@ -62,6 +62,8 @@ class MApp {
         let classic = mUI.el('a', 'm-more-item', 'Open Classic UI');
         classic.href = '/Text2Image';
         list.appendChild(classic);
+        // One preference for both UIs: `m_client_haptics` is read by m_gen.js here and by mobile_network.js
+        // on the genpage, so this is the single place the user sets it - the genpage has no equivalent control.
         let haptics = mUI.el('button', 'm-more-item');
         let renderHaptics = () => {
             haptics.textContent = `Haptics: ${localStorage.getItem('m_client_haptics') == 'off' ? 'Off' : 'On'}`;
@@ -171,18 +173,6 @@ class MApp {
         });
     }
 
-    /** Deletes every Cache Storage entry, unregisters the service worker, then reloads.
-     *
-     * This exists because a plain reload is NOT an escape hatch on iOS. The installed (Home Screen) app runs in
-     * its own storage container, separate from Safari - so "clear Safari data" does nothing for it, and there is
-     * no address bar, no devtools and no reload button to hold. If a bad or stale asset ever gets into Cache
-     * Storage there, a user has no way out except deleting and reinstalling the app. This is that way out.
-     *
-     * Order matters: caches are deleted BEFORE the worker is unregistered. Unregister first and a still-running
-     * worker can service one more fetch and repopulate what was just deleted. Reload goes through
-     * location.reload() only after both settle, so the fresh page load has no controller and no cache to hit.
-     * Everything is best-effort - a browser with no SW support or a rejected delete still ends in a reload,
-     * which is strictly no worse than the button not existing. */
     /** Fires the server restart and hands off to the watcher.
      *
      * `UpdateAndRestart` with force and nothing else set is the same call the genpage's own extension
@@ -275,6 +265,18 @@ class MApp {
         mUI.warn('The server did not restart. Check the server logs.');
     }
 
+    /** Deletes every Cache Storage entry, unregisters the service worker, then reloads.
+     *
+     * This exists because a plain reload is NOT an escape hatch on iOS. The installed (Home Screen) app runs in
+     * its own storage container, separate from Safari - so "clear Safari data" does nothing for it, and there is
+     * no address bar, no devtools and no reload button to hold. If a bad or stale asset ever gets into Cache
+     * Storage there, a user has no way out except deleting and reinstalling the app. This is that way out.
+     *
+     * Order matters: caches are deleted BEFORE the worker is unregistered. Unregister first and a still-running
+     * worker can service one more fetch and repopulate what was just deleted. Reload goes through
+     * location.reload() only after both settle, so the fresh page load has no controller and no cache to hit.
+     * Everything is best-effort - a browser with no SW support or a rejected delete still ends in a reload,
+     * which is strictly no worse than the button not existing. */
     async hardRefresh() {
         try {
             if (window.caches) {

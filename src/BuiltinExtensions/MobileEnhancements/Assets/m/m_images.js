@@ -32,7 +32,6 @@ class MImages {
 
     /** Builds the Images panel once. */
     build(panel) {
-        this.panel = panel;
         let bar = mUI.el('div', 'm-images-bar');
         this.sortSelect = document.createElement('select');
         this.sortSelect.className = 'm-sort-select';

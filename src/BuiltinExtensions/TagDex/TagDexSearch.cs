@@ -25,9 +25,6 @@ public struct TagDexQuery
 
     /// <summary>Per-user display floor on post count.</summary>
     public int MinCount;
-
-    /// <summary>When true, only prefix matches count as hits.</summary>
-    public bool PrefixOnly;
 }
 
 /// <summary>The result of one search: a page of entry indices plus the unpaged total.</summary>
@@ -100,7 +97,7 @@ public static class TagDexSearch
             {
                 // Fall back to the copyright, so searching "genshin" surfaces its cast even though no character's
                 // own name contains it.
-                if (!query.PrefixOnly && entry.Copyright is not null && entry.Copyright.Contains(query.Text, StringComparison.Ordinal))
+                if (entry.Copyright is not null && entry.Copyright.Contains(query.Text, StringComparison.Ordinal))
                 {
                     weak.Add(i);
                 }
@@ -117,16 +114,13 @@ public static class TagDexSearch
                     strong.Add(i);
                 }
             }
-            else if (!query.PrefixOnly)
+            else if (name[hit - 1] == '_')
             {
-                if (name[hit - 1] == '_')
-                {
-                    strong.Add(i);
-                }
-                else
-                {
-                    weak.Add(i);
-                }
+                strong.Add(i);
+            }
+            else
+            {
+                weak.Add(i);
             }
         }
         int total = exact.Count + strong.Count + weak.Count;
@@ -166,14 +160,13 @@ public static class TagDexSearch
     }
 
     /// <summary>Builds a query from raw request strings. Facet values are comma-separated and OR within a facet.</summary>
-    public static TagDexQuery BuildQuery(string text, string copyright, string hairColor, string hairLength, string eyeColor, string gender, int minCount, bool prefixOnly)
+    public static TagDexQuery BuildQuery(string text, string copyright, string hairColor, string hairLength, string eyeColor, string gender, int minCount)
     {
         TagDexQuery query = new()
         {
             Text = string.IsNullOrWhiteSpace(text) ? "" : text.Trim().ToLowerFast().Replace(' ', '_'),
             Copyright = string.IsNullOrWhiteSpace(copyright) ? null : TagDexNames.FromFolderToken(copyright.Trim()),
-            MinCount = Math.Max(0, minCount),
-            PrefixOnly = prefixOnly
+            MinCount = Math.Max(0, minCount)
         };
         query.HairColors = (uint)MaskFor(TagDexVocab.HairColors, hairColor);
         query.EyeColors = (ushort)MaskFor(TagDexVocab.EyeColors, eyeColor);
