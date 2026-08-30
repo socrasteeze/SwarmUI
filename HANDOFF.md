@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-08-28 · **Branch:** main · **Base:** 8ed7c3da (= origin/main at sweep start) · **Committed locally, NOT pushed**
+**Updated:** 2026-08-29 · **Branch:** main · **Base:** c7461070 (= origin/main) · **Pushed**
 
 > Line cap intentionally bypassed. This is the full record of the mobile-PWA performance sweep: what shipped,
 > why each change is shaped the way it is, the six defects that verification caught before they landed, and the
@@ -8,8 +8,22 @@
 
 ## State
 
-A mobile-PWA performance pass is committed on `main` in five commits, none pushed. Pushing requires the
-`/clean` skill per fork law.
+The mobile-PWA performance pass and the follow-on mobile-controls work are committed **and pushed**;
+`origin/main` is at `c7461070`. Any further push still requires the `/clean` skill per fork law.
+
+**2026-08-29 defect sweep.** A repo-wide audit filed 39 tracker items and then fixed the ones that needed no
+operator input. The one that matters: the fork's fullview touch layer was
+**double-firing against upstream's own touch handlers** — upstream had since given `ImageFullViewHelper` its
+own pinch-zoom and pan on the identical element, so every pinch applied zoom twice per frame and every swipe
+also panned. Fixed by moving the fork's listeners to capture phase and suppressing the core's (see the
+`mobile_fullview_touch.js` Fork Delta entry; the `isOnControls` exception list is load-bearing). Also fixed:
+the service worker's navigation-preload `cache.put` was unguarded and untrimmed on the primary Chromium path,
+the share-target client rejected `www.`/`http` Civitai URLs the server had already accepted, `/simple` had a
+cluster of silent failures (state saves, stuck model/LoRA sheets, a provably dead `HideErrorMessages` filter),
+`launch-windows.bat`'s auto-pull could hang on a merge-commit editor, and TagDex's whole prefs system plus its
+thumbnail-import route had no UI caller at all. Gates: Release build 0/0, `dotnet format` clean, isolated
+`--ci-test` boot exit 0, and **241/241 Playwright checks across all six suites** (two new ones added to cover
+the error filter's real code path, which the old test only exercised through a global it invented itself).
 
 Gates green on the merged tree: `dotnet build SwarmUI.sln --configuration Release` = 0 warnings / 0 errors;
 `dotnet format --verify-no-changes` and `dotnet format style --verify-no-changes` clean; `node --check` clean

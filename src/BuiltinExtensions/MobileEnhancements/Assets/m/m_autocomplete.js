@@ -117,6 +117,12 @@ class MAutoComplete {
             if (data.warning) {
                 mUI.warn(data.warning);
             }
+            // The server silently swaps a `character_tags` source for a sibling `all_tags` one (TagDex already
+            // owns character lookup). That is wanted, so it is not a toast - but it does mean the list in use
+            // is not the configured one, which is worth a line when someone asks why a tag is missing.
+            if (data.source && data.configured_source && data.source != data.configured_source) {
+                console.log(`SwarmUI: autocomplete using '${data.source}' instead of configured '${data.configured_source}'.`);
+            }
             this.loadFrom(data);
             this.retryAfter = 0;
             let active = document.activeElement;
@@ -139,6 +145,11 @@ class MAutoComplete {
                 }
                 else if (low == 'autocomplete.sortmode' && value) {
                     this.sortMode = `${value}`;
+                }
+                else if (low == 'ui.hideerrormessages') {
+                    // Not an autocomplete setting, but this is the one GetUserSettings call /simple makes and
+                    // mUI's showError override has no other source for it - getUserSetting is genpage-only.
+                    mUI.setErrorFilters(value);
                 }
             }
         }, 0, () => { });

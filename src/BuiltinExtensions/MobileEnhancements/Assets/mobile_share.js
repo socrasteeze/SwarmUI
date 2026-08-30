@@ -34,10 +34,26 @@ class ShareTargetHandler {
         }
     }
 
-    /** True when the URL points at a Civitai domain the Model Downloader can load metadata for. */
+    /** True when the URL points at a Civitai domain the Model Downloader can load metadata for.
+     *  Host-based, matching MobileEnhancementsExtension.IsCivitaiUrl on the server exactly: a literal
+     *  `https://civitai.com/` prefix test rejected the `www.` and `http` forms that the server had already
+     *  accepted when it set the share flag, so those shares reached this page and then silently opened an
+     *  empty downloader. Both sides must answer the same question or the gap reappears. */
     isCivitaiUrl(url) {
-        let lower = url.toLowerCase();
-        return lower.startsWith('https://civitai.com/') || lower.startsWith('https://civitai.red/') || lower.startsWith('https://civitai.green/');
+        let parsed;
+        try {
+            parsed = new URL(url.trim());
+        }
+        catch (e) {
+            return false;
+        }
+        if (parsed.protocol != 'http:' && parsed.protocol != 'https:') {
+            return false;
+        }
+        let host = parsed.hostname.toLowerCase();
+        return host == 'civitai.com' || host.endsWith('.civitai.com')
+            || host == 'civitai.red' || host.endsWith('.civitai.red')
+            || host == 'civitai.green' || host.endsWith('.civitai.green');
     }
 
     /** If the share flag is present, clear it (so refresh/reconnect doesn't re-fire) and open the downloader. */

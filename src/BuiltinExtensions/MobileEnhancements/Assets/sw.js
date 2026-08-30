@@ -223,9 +223,15 @@ self.addEventListener('fetch', event => {
                 // cache it under the same rules networkFirst would so the offline fallback stays in sync.
                 const preload = await event.preloadResponse;
                 if (preload) {
-                    if (preload.ok) {
+                    if (preload.ok && request.method == 'GET') {
                         const cache = await caches.open(CACHE_STATIC);
-                        cache.put(request, preload.clone());
+                        // Same shape as networkFirst's put, and for the same reasons: not awaited so the
+                        // navigation never waits on disk, but .catch'd so a QuotaExceededError cannot become
+                        // an unhandled rejection, and trimmed so the cache does not stay full. This is the
+                        // primary navigation path on Chromium, so it is the one that must not skip either.
+                        cache.put(request, preload.clone())
+                            .then(() => trimCache(CACHE_STATIC, MAX_STATIC_ENTRIES))
+                            .catch(err => console.log(`SwarmUI SW: preload cache put failed (${err})`));
                     }
                     return preload;
                 }

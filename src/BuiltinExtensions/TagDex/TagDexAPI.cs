@@ -67,7 +67,10 @@ public class TagDexPrefs
                 return prefs;
             }
             JObject data = raw.ParseToJson();
-            if (data.TryGetValue("active_sources", out JToken sources) && sources is JArray array && array.Count > 0)
+            // An empty array is honored, not treated as unset: the manage drawer's per-dataset Typeahead
+            // checkboxes can legitimately all be off, and TryGetValue already separates that from an absent or
+            // corrupt key (which still falls through to the default below).
+            if (data.TryGetValue("active_sources", out JToken sources) && sources is JArray array)
             {
                 prefs.ActiveSources = [.. array.Select(v => $"{v}")];
             }

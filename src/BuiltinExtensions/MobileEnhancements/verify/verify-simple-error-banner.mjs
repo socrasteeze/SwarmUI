@@ -162,6 +162,17 @@ await page.evaluate(msg => showError(msg), SHORT);
 check('ui.HideErrorMessages still suppresses matching errors',
     await page.evaluate(() => document.querySelector('.m-header-error').style.display == 'none'));
 await page.evaluate(() => { window.getUserSetting = () => ''; });
+// getUserSetting above only exists because the line before it invents one - it is a genpage global and /simple
+// never loads the file that defines it. mUI.errorFilters is the source that actually populates on this client
+// (from GetUserSettings), so it needs its own check or the filter can go dead again without failing anything.
+await page.evaluate(() => { delete window.getUserSetting; mUI.setErrorFilters('session interrupted'); });
+await page.evaluate(msg => showError(msg), SHORT);
+check('mUI.errorFilters suppresses matching errors with no getUserSetting present',
+    await page.evaluate(() => document.querySelector('.m-header-error').style.display == 'none'));
+await page.evaluate(msg => showError(msg), 'a totally unrelated failure');
+check('a non-matching error still shows while a filter is set',
+    await page.evaluate(() => document.querySelector('.m-header-error').style.display != 'none'));
+await page.evaluate(() => { mUI.setErrorFilters(''); mUI.clearError(); });
 
 // ---- 7. Landscape (the manifest declares orientation "any", so this really happens) ----
 await page.setViewportSize({ width: HEIGHT, height: WIDTH });
