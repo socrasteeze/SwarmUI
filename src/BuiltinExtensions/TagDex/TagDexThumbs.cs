@@ -6,9 +6,13 @@ using SwarmUI.Media;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
 using SwarmUI.WebAPI;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Webp;
+using SixLabors.ImageSharp.Processing;
 using System.IO;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
+using ISImage = SixLabors.ImageSharp.Image;
 
 namespace SwarmUI.Builtin_TagDexExtension;
 
@@ -208,21 +212,101 @@ public partial class TagDexExtension
         {
             return null;
         }
-        ImageFile small = file.ToMetadataJpg(null) ?? file;
+        TagDexLocal.ThumbConfig cfg = TagDexLocal.Thumbs();
         string root = $"{TagDexData.ThumbsPath}/{list.Source.ID}";
         Directory.CreateDirectory(root);
         string stem = TagDexNames.SafeFileName(entry.Name);
-        string path = $"{root}/{stem}.jpg";
-        // Write to a temp name then move, so an interrupted write cannot leave a truncated file that the thumbnail
-        // listing would then treat as valid.
+
+        // Keep the untouched original before anything is resized or re-encoded. The thumbnail below is
+        // lossy and small by design; this is the copy you go back to if you ever want a different size,
+        // a different format, or the real pixels the model produced.
+        if (cfg.KeepOriginals)
+        {
+            try
+            {
+                string origRoot = $"{TagDexLocal.OriginalsPath}/{list.Source.ID}";
+                Directory.CreateDirectory(origRoot);
+                WriteAtomic($"{origRoot}/{stem}.png", ToLosslessPng(file));
+            }
+            catch (Exception ex)
+            {
+                // Never fail the thumbnail over the archive copy - the thumbnail is what the UI needs.
+                Logs.Warning($"[TagDex] Could not store original for '{entry.Name}': {ex.ReadableString()}");
+            }
+        }
+
+        byte[] thumbData = ToThumbWebp(file, cfg.Height, cfg.Quality);
+        string path = $"{root}/{stem}.webp";
+        WriteAtomic(path, thumbData);
+        // Remove same-stem siblings in other formats. ThumbnailFor probes .jpg before .webp, so a
+        // previously written .jpg would keep being served and this write would look like it did nothing.
+        // Only the thumbs directory is touched; the originals archive is a separate tree.
+        foreach (string stale in new[] { $"{root}/{stem}.jpg", $"{root}/{stem}.png" })
+        {
+            try
+            {
+                if (File.Exists(stale))
+                {
+                    File.Delete(stale);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logs.Debug($"[TagDex] Could not remove stale thumbnail '{stale}': {ex.ReadableString()}");
+            }
+        }
+        return ThumbUrl(list.Source.ID, $"{stem}.webp");
+    }
+
+    /// <summary>Writes bytes via a temp file and a move, so an interrupted write cannot leave a truncated
+    /// file that the thumbnail listing would treat as valid.</summary>
+    public static void WriteAtomic(string path, byte[] data)
+    {
         string temp = $"{path}.tmp";
-        File.WriteAllBytes(temp, small.RawData);
+        File.WriteAllBytes(temp, data);
         if (File.Exists(path))
         {
             File.Delete(path);
         }
         File.Move(temp, path);
-        return ThumbUrl(list.Source.ID, $"{stem}.jpg");
+    }
+
+    /// <summary>Proportional WebP at the configured height.
+    /// <para>Replaces <c>ImageFile.ToMetadataJpg</c>, which is upstream's model-preview helper: it forces
+    /// a 256px short side and hard-codes JPEG. Measured on real cards, that JPEG ran ~9% larger than the
+    /// equivalent WebP while holding fewer pixels, and JPEG is the wrong codec for anime line art - flat
+    /// colour and hard edges are exactly what DCT ringing damages. 445px matches AnimaDex's geometry so
+    /// both catalogues hold identically sized images.</para></summary>
+    public static byte[] ToThumbWebp(ImageFile file, int height, int quality)
+    {
+        // Never dispose ToIS - it is a cache held on the ImageFile itself, so disposing it here would
+        // leave the same file unusable for the originals write and the AnimaDex push that follow.
+        // Only the clone below is ours to dispose.
+        ISImage img = file.ToIS;
+        int width = Math.Max(1, (int)Math.Round(img.Width * (height / (double)img.Height)));
+        using ISImage resized = img.Clone(i => i.Resize(width, height));
+        using MemoryStream ms = new();
+        resized.SaveAsWebp(ms, new WebpEncoder()
+        {
+            FileFormat = WebpFileFormatType.Lossy,
+            Quality = quality
+        });
+        return ms.ToArray();
+    }
+
+    /// <summary>The full-resolution image as lossless PNG.
+    /// <para>Returns the raw bytes untouched when the input is already PNG, so the archived copy is the
+    /// generator's exact output rather than a re-encode of it.</para></summary>
+    public static byte[] ToLosslessPng(ImageFile file)
+    {
+        if (file.Type == MediaType.ImagePng)
+        {
+            return file.RawData;
+        }
+        // Same caveat as ToThumbWebp: ToIS is cached on the file, so it must not be disposed here.
+        using MemoryStream ms = new();
+        file.ToIS.SaveAsPng(ms);
+        return ms.ToArray();
     }
 
     /// <summary>Derives a stable seed from a tag name, so regenerating the same entry reproduces the same image
