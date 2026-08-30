@@ -172,3 +172,48 @@ Then a headless boot, then by hand:
 - Browse tab: facet navigation, search, chips appending single tags.
 - Enable an artist dataset; confirm `banned_artist` / `conditional_dnp` / `avoid_posting` are suppressed.
 - On-device iOS pass for `/simple`.
+
+## Two-way sync with AnimaDex (2026-08-30)
+
+TagDex and AnimaDex now push images to each other, so a reference generated
+on either side appears on both.
+
+**Outbound (TagDex -> AnimaDex).** `TagDexAnimaDex.PushAsync` POSTs to
+AnimaDex's `POST /api/dev/ingest` with `{mode, slug, source, image}`.
+Wired into both write paths through `WriteThumbAndSync`: the generate route
+(`TagDexGenerateThumbnail`) and the set-from-existing route
+(`TagDexSetThumbnail`). Fire-and-forget via `Utilities.RunCheckedTask` — a
+sync failure never fails the thumbnail that already succeeded.
+
+**Inbound (AnimaDex -> TagDex)** is unchanged: AnimaDex calls
+`TagDexSetThumbnail`, which it has always been able to do.
+
+Five things that are load-bearing:
+
+1. **The push sends the pre-downscale image.** `WriteThumb` stores a 256px
+   JPEG; AnimaDex keeps a full-size PNG and derives its own 297x445 WebP.
+   Pushing the thumbnail would cap AnimaDex's quality forever. `WriteThumb`
+   does not mutate its argument (`ToMetadataJpg` returns a new file), so the
+   original is still in hand at the call site.
+2. **`syncBack=false` breaks the cycle.** AnimaDex sets it when calling
+   `TagDexSetThumbnail`; without it the image AnimaDex just pushed would be
+   pushed straight back to `/api/dev/ingest`, rewriting the source file and
+   bumping `image_version` a second time. Verified: a regenerate bumps the
+   version exactly once.
+3. **Config is a file, not prefs.** See the AGENTS.md row — prefs are
+   USER-tier writable and echoed to every browser, so a push target there is
+   an exfiltration primitive. `Data/TagDex/animadex.json` is read
+   server-side only and never serialized into a response. It re-reads on
+   mtime change, so edits apply without a restart.
+4. **Only the danbooru datasets map.** `ModeFor` returns `characters` /
+   `artists` for `danbooru_character` / `danbooru_artist` and null for
+   everything else. AnimaDex is built from the danbooru CSVs, so e621 and
+   `anima_styles` entries have no row there — pushing them would be a
+   guaranteed 404 per image.
+5. **A 404 from AnimaDex is normal, not an error.** TagDex's datasets are far
+   larger; roughly 6% of even the danbooru characters have no AnimaDex row,
+   and AnimaDex has no route that creates one. Logged at Debug, not Warning.
+
+Verified end to end 2026-08-30: clicking Generate on a `flandre_scarlet`
+card wrote a 16,598-byte TagDex JPEG and pushed an 805,948-byte PNG to
+AnimaDex, which built its own 34,690-byte WebP from it.

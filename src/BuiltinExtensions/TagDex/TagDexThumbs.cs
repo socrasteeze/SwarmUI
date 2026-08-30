@@ -90,7 +90,9 @@ public partial class TagDexExtension
             {
                 try
                 {
-                    written = WriteThumb(list, in entry, image);
+                    written = image?.File is ImageFile produced
+                        ? WriteThumbAndSync(list, in entry, produced)
+                        : null;
                 }
                 catch (Exception ex)
                 {
@@ -132,7 +134,8 @@ public partial class TagDexExtension
     public async Task<JObject> TagDexSetThumbnail(Session session,
         [API.APIParameter("Dataset ID.")] string source,
         [API.APIParameter("Exact tag name to set the reference for.")] string name,
-        [API.APIParameter("Image-data-string of the new reference image.")] string image)
+        [API.APIParameter("Image-data-string of the new reference image.")] string image,
+        [API.APIParameter("Whether to forward this image on to a configured AnimaDex instance. Pass false when the image CAME from AnimaDex, to stop it echoing straight back.")] bool syncBack = true)
     {
         TagDexList list = TagDexData.EnsureLoaded(source);
         if (list is null)
@@ -151,7 +154,12 @@ public partial class TagDexExtension
         string written;
         try
         {
-            written = WriteThumb(list, in entry, ImageFile.FromDataString(image));
+            ImageFile incoming = ImageFile.FromDataString(image);
+            // syncBack=false is how AnimaDex breaks the cycle: without it, an image AnimaDex just
+            // pushed here would be pushed straight back, rewriting the file it came from and bumping
+            // its version a second time.
+            written = syncBack ? WriteThumbAndSync(list, in entry, incoming)
+                               : WriteThumb(list, in entry, incoming);
         }
         catch (Exception ex)
         {
@@ -173,6 +181,22 @@ public partial class TagDexExtension
     public static string WriteThumb(TagDexList list, in TagDexEntry entry, T2IEngine.ImageOutput image)
     {
         return image?.File is not ImageFile file ? null : WriteThumb(list, in entry, file);
+    }
+
+    /// <summary>Writes the thumbnail, then pushes the ORIGINAL image on to AnimaDex if that sync is
+    /// configured.
+    /// <para>Split from <see cref="WriteThumb"/> so the push sees the full-resolution file rather than
+    /// the 256px JPEG stored here - AnimaDex derives its own thumbnail from what it receives, so sending
+    /// the downscaled copy would cap its quality permanently. <see cref="WriteThumb"/> does not mutate
+    /// its argument (<c>ToMetadataJpg</c> returns a new file), so the original is still intact.</para></summary>
+    public static string WriteThumbAndSync(TagDexList list, in TagDexEntry entry, ImageFile file)
+    {
+        string written = WriteThumb(list, in entry, file);
+        if (written is not null)
+        {
+            TagDexAnimaDex.PushAsync(list.Source.ID, entry.Name, file);
+        }
+        return written;
     }
 
     /// <summary>Writes an image file out as this entry's thumbnail, returning its served URL.
