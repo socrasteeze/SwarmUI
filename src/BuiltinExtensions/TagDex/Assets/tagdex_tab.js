@@ -946,8 +946,11 @@ class TagDexTabClass {
             return;
         }
         this.setStatus(`Saving current image as reference for ${record.display || record.name}...`);
-        // resize256 matches what the model preview flow sends, keeping the upload small; the server still runs it
-        // through the same JPEG helper the generate route uses.
+        // Send the image at FULL resolution - do not pass imageToData's resize256.
+        // That flag shrinks to 256*256 total pixels (a 896x1344 render becomes ~212x309) and re-encodes
+        // as JPEG. It was harmless when the server downscaled to 256px anyway, but the server now stores
+        // a 445px-tall WebP and optionally archives the untouched original, so a pre-shrunk upload gets
+        // scaled back UP - which is exactly the soft, blocky reference this used to produce.
         imageToData(currentImgSrc, dataURL => {
             if (!dataURL) {
                 this.setStatus('Could not read the current image.');
@@ -959,7 +962,7 @@ class TagDexTabClass {
             }, 0, error => {
                 this.setStatus(`Could not save reference: ${error}`);
             });
-        }, true);
+        });
     }
 
     /** Deletes one entry's reference image, reverting the card to the placeholder.

@@ -283,8 +283,12 @@ public partial class TagDexExtension
         // leave the same file unusable for the originals write and the AnimaDex push that follow.
         // Only the clone below is ours to dispose.
         ISImage img = file.ToIS;
-        int width = Math.Max(1, (int)Math.Round(img.Width * (height / (double)img.Height)));
-        using ISImage resized = img.Clone(i => i.Resize(width, height));
+        // Never enlarge. Upscaling a small source produces a soft, blocky reference that looks worse
+        // than simply storing what was given - and it is silent, because the file lands at the expected
+        // dimensions. A source shorter than the target keeps its native size instead.
+        int targetHeight = Math.Min(height, img.Height);
+        int width = Math.Max(1, (int)Math.Round(img.Width * (targetHeight / (double)img.Height)));
+        using ISImage resized = img.Clone(i => i.Resize(width, targetHeight));
         using MemoryStream ms = new();
         resized.SaveAsWebp(ms, new WebpEncoder()
         {
