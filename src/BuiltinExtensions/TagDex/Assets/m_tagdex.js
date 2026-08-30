@@ -16,6 +16,8 @@ class MTagDexClass {
     constructor() {
         /** Whether install() has already run. */
         this.installed = false;
+        /** Whether the Create-panel browse button has already been mounted. */
+        this.browseInstalled = false;
     }
 
     /** Wraps the /simple completer. No-ops anywhere MAutoComplete is absent. */
@@ -96,6 +98,153 @@ class MTagDexClass {
         mUI.registerMoreItem('TagDex datasets', () => this.openDatasetSheet());
     }
 
+    /** Mounts the Characters picker beside the Create panel's model and LoRA pickers. Called from m_create.js
+     * because TagDex loads before MCreate and cannot safely patch a panel that does not exist yet. */
+    installBrowse(row) {
+        if (this.browseInstalled || !row || typeof mUI == 'undefined') {
+            return;
+        }
+        this.browseInstalled = true;
+        let button = mUI.el('button', 'm-picker-button m-tagdex-browse-button', 'Characters');
+        button.addEventListener('click', () => this.openBrowseSheet());
+        row.appendChild(button);
+    }
+
+    /** Opens the compact character/artist browser. It uses the same server search as the genpage browse tab,
+     * but deliberately limits the phone surface to dataset + text search: facets remain in the full UI. */
+    openBrowseSheet() {
+        let content = mUI.el('div', 'm-tagdex-browse-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Characters'));
+        let controls = mUI.el('div', 'm-tagdex-browse-controls');
+        let source = document.createElement('select');
+        source.className = 'm-tagdex-source';
+        source.setAttribute('aria-label', 'Dataset');
+        controls.appendChild(source);
+        let search = document.createElement('input');
+        search.type = 'search';
+        search.placeholder = 'Search';
+        search.className = 'm-tagdex-search';
+        search.setAttribute('aria-label', 'Search characters and artists');
+        controls.appendChild(search);
+        content.appendChild(controls);
+        let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
+        content.appendChild(status);
+        let results = mUI.el('div', 'm-tagdex-browse-results');
+        content.appendChild(results);
+        let more = mUI.el('button', 'm-wide-button m-tagdex-more', 'Load more');
+        more.style.display = 'none';
+        content.appendChild(more);
+        mUI.openSheet(content);
+        let ctx = { 'sources': [], 'source': '', 'limit': 50, 'token': 0, 'timer': null, 'total': 0 };
+        let runSearch = () => {
+            if (!ctx.source) {
+                results.innerHTML = '';
+                status.textContent = 'No datasets. Download one from More.';
+                more.style.display = 'none';
+                return;
+            }
+            let token = ++ctx.token;
+            status.textContent = 'Searching...';
+            genericRequest('TagDexSearchEntries', {
+                'source': ctx.source,
+                'search': search.value.trim(),
+                'sortBy': 'relevance',
+                'offset': 0,
+                'limit': ctx.limit,
+                'withFolders': false
+            }, data => {
+                if (token != ctx.token) {
+                    return;
+                }
+                results.innerHTML = '';
+                if (data.missing_data) {
+                    status.textContent = 'Dataset not downloaded.';
+                    more.style.display = 'none';
+                    return;
+                }
+                let records = data.results || [];
+                ctx.total = data.total || 0;
+                for (let i = 0; i < records.length; i++) {
+                    results.appendChild(this.buildBrowseRow(records[i]));
+                }
+                if (records.length == 0) {
+                    results.appendChild(mUI.el('div', 'm-strip-empty', 'No matches.'));
+                }
+                status.textContent = records.length < ctx.total
+                    ? `${records.length.toLocaleString()} of ${ctx.total.toLocaleString()}`
+                    : `${ctx.total.toLocaleString()} match${ctx.total == 1 ? '' : 'es'}`;
+                more.style.display = records.length < ctx.total && ctx.limit < 250 ? '' : 'none';
+            }, 0, error => {
+                if (token != ctx.token) {
+                    return;
+                }
+                results.innerHTML = '';
+                status.textContent = 'Search failed.';
+                more.style.display = 'none';
+                mUI.warn(`TagDex: ${error}`);
+            });
+        };
+        source.addEventListener('change', () => {
+            ctx.source = source.value;
+            ctx.limit = 50;
+            runSearch();
+        });
+        search.addEventListener('input', () => {
+            clearTimeout(ctx.timer);
+            ctx.timer = setTimeout(() => {
+                ctx.limit = 50;
+                runSearch();
+            }, 180);
+        });
+        more.addEventListener('click', () => {
+            ctx.limit = Math.min(250, ctx.limit + 50);
+            runSearch();
+        });
+        this.fetchSources((sources, prefs) => {
+            ctx.sources = sources.filter(item => item.present);
+            source.innerHTML = '';
+            for (let i = 0; i < ctx.sources.length; i++) {
+                let option = document.createElement('option');
+                option.value = ctx.sources[i].id;
+                option.textContent = ctx.sources[i].label;
+                source.appendChild(option);
+            }
+            let preferred = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id)) : '';
+            ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : '');
+            source.value = ctx.source;
+            runSearch();
+        });
+    }
+
+    /** Builds one browse result. The whole row is the action: tapping inserts the trigger at the Create
+     * prompt's remembered caret and leaves the sheet open for another pick. */
+    buildBrowseRow(record) {
+        let row = mUI.el('button', 'm-tagdex-card');
+        row.setAttribute('aria-label', `Add ${record.display || record.name}`);
+        let image = document.createElement('img');
+        image.className = 'm-tagdex-card-image';
+        image.src = record.thumb || 'imgs/model_placeholder.jpg';
+        image.loading = 'lazy';
+        image.alt = '';
+        row.appendChild(image);
+        let textWrap = mUI.el('span', 'm-tagdex-card-text');
+        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-name', record.display || record.name));
+        if (record.copyright_display) {
+            textWrap.appendChild(mUI.el('span', 'm-tagdex-card-sub', record.copyright_display));
+        }
+        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-count', `${largeCountStringify(record.count)} posts`));
+        row.appendChild(textWrap);
+        row.addEventListener('click', () => {
+            if (typeof mCreate == 'undefined' || typeof mCreate.insertIntoPrompt != 'function') {
+                mUI.warn('Create panel is unavailable.');
+                return;
+            }
+            mCreate.insertIntoPrompt(record.trigger);
+            mUI.note(`Added ${record.display || record.name}.`);
+        });
+        return row;
+    }
+
     /** The dataset download/manage sheet. Without it /simple is a dead end - the `<character:` handler can only
      * report that there is no data, with no way to act on it.
      *
@@ -152,10 +301,10 @@ class MTagDexClass {
     /** Fetches the dataset list. Needs only tagdex_use, so it works for every account. */
     fetchSources(callback) {
         genericRequest('TagDexListSources', {}, data => {
-            callback(data.sources || []);
+            callback(data.sources || [], data.prefs || {});
         }, 0, error => {
             mUI.warn(`Could not list datasets: ${error}`);
-            callback([]);
+            callback([], {});
         });
     }
 

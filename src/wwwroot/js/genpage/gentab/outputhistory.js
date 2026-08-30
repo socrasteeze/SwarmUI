@@ -60,6 +60,26 @@ function listOutputHistoryFolderAndFiles(path, isRefresh, callback, depth) {
     });
 }
 
+/** Replaces a deleted current image with the newest still-present image from this session's batch strip.
+ * History rows are deliberately excluded: the fallback should never jump the user into an older session. */
+function showMostRecentSessionImage(deletedSrc, expand) {
+    let batch = getRequiredElementById('current_image_batch');
+    let blocks = [...batch.getElementsByClassName('image-block')].filter(block =>
+        !block.classList.contains('image-block-placeholder') && block.dataset.src && block.dataset.src != deletedSrc);
+    // appendImage prepends new batch entries, so document order is newest-first.
+    let newest = blocks.length > 0 ? blocks[0] : null;
+    if (!newest) {
+        imageFullView.close();
+        setCurrentImage(null);
+        return false;
+    }
+    clickImageInBatch(newest);
+    if (expand) {
+        imageFullView.showImage(newest.dataset.src, newest.dataset.metadata, newest.dataset.batch_id || '');
+    }
+    return true;
+}
+
 function buttonsForImage(fullsrc, src, metadata, isCurrentImage = false) {
     let isDataImage = src.startsWith('data:');
     let mediaType = getMediaType(src);
@@ -150,31 +170,26 @@ function buttonsForImage(fullsrc, src, metadata, isCurrentImage = false) {
                 if (!uiImprover.lastShift && getUserSetting('ui.checkifsurebeforedelete', true) && !confirm('Are you sure you want to delete this image?\nHold shift to bypass.')) {
                     return;
                 }
-                let deleteBehavior = getUserSetting('ui.deleteimagebehavior', 'next');
-                let shifted = deleteBehavior == 'nothing' ? false : shiftToNextImagePreview(deleteBehavior == 'next', imageFullView.isOpen());
-                if (!shifted) {
-                    imageFullView.close();
-                }
+                let currentImage = currentImageHelper.getCurrentImage();
+                let deletingCurrent = currentImage && currentImage.dataset.src == src;
+                let wasExpanded = imageFullView.isOpen();
                 genericRequest('DeleteImage', {'path': fullsrc}, data => {
                     if (e) {
                         e.remove();
                     }
                     let historySection = getRequiredElementById('imagehistorybrowser-content');
-                    let div = historySection.querySelector(`.image-block[data-name="${fullsrc}"]`);
-                    if (div) {
-                        div.remove();
+                    for (let div of [...historySection.getElementsByClassName('image-block')]) {
+                        if (div.dataset.name == fullsrc || div.dataset.name == src) {
+                            div.remove();
+                        }
                     }
-                    div = historySection.querySelector(`.image-block[data-name="${src}"]`);
-                    if (div) {
-                        div.remove();
-                    }
-                    let currentImage = currentImageHelper.getCurrentImage();
-                    if (currentImage && currentImage.dataset.src == src) {
-                        setCurrentImage(null);
-                    }
-                    div = getRequiredElementById('current_image_batch').querySelector(`.image-block[data-src="${src}"]`);
+                    let div = [...getRequiredElementById('current_image_batch').getElementsByClassName('image-block')]
+                        .find(block => block.dataset.src == src);
                     if (div) {
                         removeImageBlockFromBatch(div);
+                    }
+                    if (deletingCurrent) {
+                        showMostRecentSessionImage(src, wasExpanded);
                     }
                 });
             },
