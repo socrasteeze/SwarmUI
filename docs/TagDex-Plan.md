@@ -217,3 +217,48 @@ Five things that are load-bearing:
 Verified end to end 2026-08-30: clicking Generate on a `flandre_scarlet`
 card wrote a 16,598-byte TagDex JPEG and pushed an 805,948-byte PNG to
 AnimaDex, which built its own 34,690-byte WebP from it.
+
+### Thumbnail format: WebP, plus an optional lossless archive (2026-08-30)
+
+Reference thumbnails are **lossy WebP at 445px tall**, not the 256px JPEG
+`ImageFile.ToMetadataJpg` produces.
+
+That helper is upstream's *model preview* path: it forces a 256px short side
+and hard-codes `ISImgToJpgBytes` / `MediaType.ImageJpg`. Reusing it avoided a
+second ImageSharp path, which was a reasonable call — but the cost was never
+measured, and on this content it loses on both axes. Measured across five
+cards holding both formats, the JPEGs totalled 90 KB against 82 KB of
+equivalent WebP: **9% larger while holding fewer pixels** (256px short side
+vs 297x445). Anime line art is close to the worst case for JPEG, since flat
+colour and hard edges are exactly what DCT ringing damages.
+
+445px is not arbitrary: it matches AnimaDex's `gallery.thumb_height`, so a
+896x1344 render reduces to exactly 297x445 on both sides and the two
+catalogues hold identically sized images.
+
+**The sibling delete is load-bearing.** `ThumbnailFor` probes `.jpg` before
+`.webp`, so any previously written `.jpg` would keep being served and the
+format change would look like it did nothing. `WriteThumb` therefore deletes
+same-stem `.jpg` and `.png` in the thumbs directory after a successful write.
+Only that directory — the originals archive is a separate tree.
+
+**`keep_originals` archives the untouched full-resolution PNG** to
+`Data/TagDex/originals/{source}/{name}.png`. The thumbnail is lossy and small
+by design; this is the copy to go back to for a different size, a different
+format, or the real pixels the model produced. Roughly 0.5–1.5 MB per image,
+so it is opt-in. When the source image is already PNG the raw bytes are
+stored verbatim rather than re-encoded, so the archive is the generator's
+exact output.
+
+**`ToIS` must never be disposed.** It is a cache held on the `ImageFile`
+itself (`ImageFile._CacheISImg`), so a `using` on it would leave the same
+file unusable for the originals write and the AnimaDex push that follow in
+the same call. Only clones are disposed.
+
+Config moved from `Data/TagDex/animadex.json` to `Data/TagDex/local.json`,
+which now carries both an `animadex` section and a `thumbnails` section
+(`height`, `quality`, `keep_originals`). Same rationale as before: read
+server-side only, never serialized into an API response.
+
+Existing `.jpg` thumbnails are left alone and are still served; each is
+replaced the next time that entry is generated or set.

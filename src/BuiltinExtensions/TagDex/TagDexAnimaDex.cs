@@ -23,55 +23,6 @@ namespace SwarmUI.Builtin_TagDexExtension;
 /// settings section would be a core edit for a feature only this extension uses.</para></summary>
 public static class TagDexAnimaDex
 {
-    /// <summary>Config file path. Absent by default, which leaves the whole feature off.</summary>
-    public static string ConfigPath => $"{TagDexData.FolderPath}/animadex.json";
-
-    /// <summary>Parsed config, with the file's write time it was parsed from.</summary>
-    public record class Config(bool Enabled, string Url, string DevKey, int TimeoutSeconds)
-    {
-        public static Config Disabled = new(false, "", "", 30);
-    }
-
-    private static Config Cached = null;
-    private static DateTime CachedStamp = DateTime.MinValue;
-    private static readonly object CacheLock = new();
-
-    /// <summary>Reads the config, re-reading only when the file's timestamp changes, so editing it takes
-    /// effect without a restart but a push does not pay a disk read per image.</summary>
-    public static Config Current()
-    {
-        try
-        {
-            if (!File.Exists(ConfigPath))
-            {
-                return Config.Disabled;
-            }
-            DateTime stamp = File.GetLastWriteTimeUtc(ConfigPath);
-            lock (CacheLock)
-            {
-                if (Cached is not null && stamp == CachedStamp)
-                {
-                    return Cached;
-                }
-                JObject data = JObject.Parse(File.ReadAllText(ConfigPath));
-                Config parsed = new(
-                    data.Value<bool?>("enabled") ?? false,
-                    (data.Value<string>("url") ?? "").TrimEnd('/'),
-                    data.Value<string>("dev_key") ?? "",
-                    data.Value<int?>("timeout_seconds") ?? 30);
-                Cached = parsed;
-                CachedStamp = stamp;
-                return parsed;
-            }
-        }
-        catch (Exception ex)
-        {
-            // A malformed config must not break thumbnail generation - the push is an extra, not the job.
-            Logs.Warning($"[TagDex] Could not read AnimaDex sync config at '{ConfigPath}': {ex.ReadableString()}");
-            return Config.Disabled;
-        }
-    }
-
     /// <summary>Maps a TagDex dataset id to an AnimaDex mode, or null when that dataset has no AnimaDex
     /// counterpart.
     /// <para>Only the two danbooru sets map. AnimaDex is built from the danbooru CSVs, so an e621 entry
@@ -93,7 +44,7 @@ public static class TagDexAnimaDex
     /// downscaled copy would permanently cap the quality on that side.</para></summary>
     public static void PushAsync(string sourceId, string name, ImageFile image)
     {
-        Config cfg = Current();
+        TagDexLocal.AnimaDexConfig cfg = TagDexLocal.AnimaDex();
         if (!cfg.Enabled || string.IsNullOrWhiteSpace(cfg.Url) || image is null)
         {
             return;
