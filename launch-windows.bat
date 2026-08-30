@@ -14,9 +14,18 @@ rem Fork edit: explicit "origin main" rather than a bare "git pull" - forces eve
 rem this fork (origin), never from upstream, regardless of local branch-tracking config (branch.master.remote/.merge).
 rem Branch name updated 2026-08-13: origin's default branch was renamed from "master" to "main" (see AGENTS.md's
 rem Fork Delta); the old hardcoded "origin master" started failing every launch with "couldn't find remote ref master".
+rem --no-edit is not optional here: without it a pull that cannot fast-forward opens the merge-commit message
+rem in git's editor, which in a launcher window has no one to answer it - the launch hangs, and a cancelled
+rem window leaves MERGE_HEAD set so the next launch fails too. --no-edit takes the default message instead.
 if exist .\src\bin\always_pull (
     echo Pulling latest changes...
-    git pull origin main
+    git pull --no-edit origin main
+    if errorlevel 1 (
+        echo.
+        echo WARNING: git pull failed. Continuing with the code already on disk.
+        echo If this says you are mid-merge, run "git merge --abort" in this folder.
+        echo.
+    )
 )
 
 if not exist .git (

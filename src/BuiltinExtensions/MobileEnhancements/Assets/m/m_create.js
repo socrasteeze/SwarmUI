@@ -12,6 +12,10 @@ class MCreate {
         this.loraMap = null;
         /** Cached checkpoint list from ListModels (fetched lazily on first model sheet open). */
         this.modelList = null;
+        /** True when the last ListModels for that list failed, so the sheet offers Retry instead of sitting
+         * on "Loading..." forever. Cleared on each attempt. */
+        this.modelListError = false;
+        this.loraListError = false;
         /** Live preview tiles by `${request_id}_${batch_index}`. Only ever one batch's worth. */
         this.liveTiles = {};
         /** Request id currently on display; a different one wipes the preview. */
@@ -647,6 +651,17 @@ class MCreate {
         return mUI.el('div', 'm-list-count', `Showing ${shown} of ${total} ${noun} - search to narrow it down`);
     }
 
+    /** Failed-list row with a working Retry, for the model/LoRA sheets. Without this a failed ListModels left
+     *  the sheet reading "Loading..." forever: the cached list stays null, so re-opening silently re-fires the
+     *  same request and lands on the same dead row, with the only visible sign a toast that has since gone. */
+    buildRetryRow(message, onRetry) {
+        let wrap = mUI.el('div', 'm-strip-empty', message);
+        let retry = mUI.el('button', 'm-model-plain-row', 'Retry');
+        retry.addEventListener('click', onRetry);
+        wrap.appendChild(retry);
+        return wrap;
+    }
+
     /** Search filter shared by both pickers: matches the file name, the folder path, the metadata title,
      * and the trigger phrase, so a LoRA can be found by the word you actually type into prompts. */
     static filterModels(list, term) {
@@ -710,7 +725,9 @@ class MCreate {
             });
             results.appendChild(clear);
             if (!this.modelList) {
-                results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
+                results.appendChild(this.modelListError
+                    ? this.buildRetryRow('Could not load checkpoints.', () => loadModelList())
+                    : mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
             let arch = this.applyArchFilter(this.modelList, 'Stable-Diffusion', archState, renderResults);
@@ -746,11 +763,20 @@ class MCreate {
             results.appendChild(this.buildCountRow(shown, matches.length, 'checkpoints'));
         };
         search.addEventListener('input', renderResults);
-        if (!this.modelList) {
+        let loadModelList = () => {
+            this.modelListError = false;
+            renderResults();
             genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'Stable-Diffusion', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
                 this.modelList = data.files || [];
                 renderResults();
+            }, 0, err => {
+                this.modelListError = true;
+                renderResults();
+                showError(err);
             });
+        };
+        if (!this.modelList) {
+            loadModelList();
         }
         renderResults();
         close = mUI.openSheet(content);
@@ -1700,7 +1726,9 @@ class MCreate {
         let renderResults = () => {
             results.innerHTML = '';
             if (!this.loraList) {
-                results.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
+                results.appendChild(this.loraListError
+                    ? this.buildRetryRow('Could not load LoRAs.', () => loadLoraList())
+                    : mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
             // LoRAs are filtered by the same compat classes as checkpoints, which is what compat classes are
@@ -1745,14 +1773,23 @@ class MCreate {
         };
         search.addEventListener('input', renderResults);
         content.appendChild(addWrap);
-        if (!this.loraList) {
+        let loadLoraList = () => {
+            this.loraListError = false;
+            renderResults();
             genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
                 this.indexLoras(data.files || []);
                 // The active rows are re-rendered too: until this lands they show a bare name, with no
                 // thumbnail and no trigger phrase, because those live on the model object not in params.
                 renderRows();
                 renderResults();
+            }, 0, err => {
+                this.loraListError = true;
+                renderResults();
+                showError(err);
             });
+        };
+        if (!this.loraList) {
+            loadLoraList();
         }
         renderResults();
         mUI.openSheet(content);

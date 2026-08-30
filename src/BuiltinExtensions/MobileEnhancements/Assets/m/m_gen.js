@@ -201,10 +201,12 @@ class MGenSocket {
         }).catch(() => { });
     }
 
-    /** Releases the wake lock when idle. */
+    /** Releases the wake lock when idle. Best-effort, like the acquire: a failed release is not worth a toast
+     *  (the lock drops on its own when the page is hidden or unloaded), but it is worth a console line - a
+     *  silently swallowed one looks identical to a screen that just will not sleep. */
     releaseWakeLock() {
         if (this.wakeLock) {
-            this.wakeLock.release().catch(() => { });
+            this.wakeLock.release().catch(err => console.log(`wake lock release failed (${err})`));
             this.wakeLock = null;
         }
     }

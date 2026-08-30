@@ -189,6 +189,25 @@
     color: var(--text-soft);
 }
 
+/* Per-dataset typeahead opt-in. flex 0 0 auto so it keeps its width in the wrapping row rather than being
+   stretched like the status line next to it. */
+.tagdex-download-toggle {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-soft);
+    cursor: pointer;
+    user-select: none;
+}
+
+.tagdex-download-toggle input {
+    margin: 0;
+    cursor: pointer;
+}
+
 /* Dataset manage drawer. Reachable from the control row at any time, so a second dataset can still be added after
    the first one is installed. The height cap matters: .tagdex-browser is flex 1 1 auto with min-height 0, so an
    uncapped drawer could squeeze the results area down to nothing. */

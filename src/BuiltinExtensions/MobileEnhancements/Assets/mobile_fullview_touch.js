@@ -2,9 +2,19 @@
  * MobileEnhancements — touch layer for the fullscreen image viewer and the image-compare modal (fork extension).
  *
  * Two independent classes, each augmenting one existing core modal with native-gallery touch gestures. Both
- * only ADD touch listeners and drive the core viewer's own primitives - the desktop mouse/wheel path in
- * currentimagehandler.js is never touched. All handling is gated to coarse (touch) pointers, so mouse
- * users are wholly unaffected. See docs/MobilePWA-Optimization-Plan.md (Phase 2).
+ * drive the core viewer's own primitives, and the desktop mouse/wheel path is never touched. All handling is
+ * gated to coarse (touch) pointers, so mouse users are wholly unaffected.
+ * See docs/MobilePWA-Optimization-Plan.md (Phase 2).
+ *
+ * These listeners are CAPTURE-phase and suppress the core's own touch handling, which they must:
+ * upstream gave ImageFullViewHelper its own pinch-zoom and one-finger pan on the very same element
+ * (currentimagehandler.js, `this.content`). Two bubble-phase listeners on one node both run - upstream's
+ * `stopPropagation` cannot stop a sibling listener - so every pinch would apply zoom twice per frame and
+ * every navigation swipe would also pan the image. Capturing on the ancestor and calling `stopPropagation`
+ * stops the event before it reaches the target or the core's bubble listeners. The exception is
+ * `isOnControls` targets, which are let through untouched: native media controls need the real event, and
+ * the Share button activates on its own `touchend`. Only the FULLVIEW modal needs this - `imageCompareHelper`
+ * has no core touch listeners.
  *
  * MobileFullViewTouch augments ImageFullViewHelper (detachImg / moveImg / getHeightPercent / showImage,
  * and the global shiftToNextImagePreview used by the arrow keys). Gestures: pinch-zoom (anchored) +
@@ -42,10 +52,10 @@ class MobileFullViewTouch {
         this.contentObserver = null;
         this.shareNoCloseTimer = null;
         let content = imageFullView.content;
-        content.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
-        content.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
-        content.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
-        content.addEventListener('touchcancel', this.onTouchCancel.bind(this), { passive: false });
+        content.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false, capture: true });
+        content.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false, capture: true });
+        content.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false, capture: true });
+        content.addEventListener('touchcancel', this.onTouchCancel.bind(this), { passive: false, capture: true });
         this.watchContent();
     }
 
@@ -101,6 +111,17 @@ class MobileFullViewTouch {
         return imageFullView.content.querySelector('.imageview_modal_inner_div');
     }
 
+    /** Stops a touch this layer owns from reaching the core's own touch handlers on the same element.
+     *  Called first in every handler here, including the ones that then bail out: if this layer is active,
+     *  the core must not run its pinch/pan on the event either way. `isOnControls` targets are deliberately
+     *  let through - native media controls need the real event, and the Share button listens for its own
+     *  `touchend`, both of which a capture-phase `stopPropagation` would otherwise kill. */
+    suppressCoreTouch(e) {
+        if (this.isActive() && !this.isOnControls(e.target)) {
+            e.stopPropagation();
+        }
+    }
+
     /** Distance between two active touches. */
     touchDist(a, b) {
         let dx = a.clientX - b.clientX;
@@ -109,6 +130,7 @@ class MobileFullViewTouch {
     }
 
     onTouchStart(e) {
+        this.suppressCoreTouch(e);
         if (!this.isActive() || this.animating) {
             this.ignoring = true;
             return;
@@ -146,6 +168,7 @@ class MobileFullViewTouch {
     }
 
     onTouchMove(e) {
+        this.suppressCoreTouch(e);
         if (!this.isActive() || this.ignoring) {
             return;
         }
@@ -215,6 +238,7 @@ class MobileFullViewTouch {
     }
 
     onTouchEnd(e) {
+        this.suppressCoreTouch(e);
         if (this.ignoring) {
             this.ignoring = false;
             return;
@@ -242,6 +266,7 @@ class MobileFullViewTouch {
     }
 
     onTouchCancel(e) {
+        this.suppressCoreTouch(e);
         this.animateInnerHome();
         imageFullView.content.style.opacity = '';
         this.reset();
@@ -324,45 +349,17 @@ class MobileFullViewTouch {
     }
 
     /**
-     * Zoom the image by `factor` about the (clientX, clientY) point, replicating ImageFullViewHelper.onWheel's
-     * math exactly (height-percent zoom, max-height clamp, pixelated past threshold, metadata toggle, anchor
-     * correction) but driven by an explicit factor instead of a wheel delta.
+     * Zoom the image by `factor` about the (clientX, clientY) point. Delegates to the core's own
+     * `zoomAround`, which is the same anchored height-percent zoom the wheel path uses, so the pinch and the
+     * wheel can never drift apart. This used to be a hand-copy of that math from back when the core only had
+     * it inline inside `onWheel`; the core exposed it, so the copy is gone. The null guard stays: this can be
+     * called from a gesture that outlived the media element, where `getImg()` returns nothing.
      */
     zoomAt(clientX, clientY, factor) {
-        imageFullView.detachImg();
-        let img = imageFullView.getImg();
-        let container = imageFullView.getImgOrContainer();
-        if (!img || !container) {
+        if (!imageFullView.getImg() || !imageFullView.getImgOrContainer()) {
             return;
         }
-        let origHeight = imageFullView.getHeightPercent();
-        let width = img.naturalWidth ?? img.videoWidth;
-        let height = img.naturalHeight ?? img.videoHeight;
-        let maxHeight = Math.sqrt(width * height) * 2;
-        let newHeight = Math.max(10, Math.min(origHeight * factor, maxHeight));
-        if (newHeight > maxHeight / 5) {
-            img.style.imageRendering = 'pixelated';
-        }
-        else {
-            img.style.imageRendering = '';
-        }
-        if (newHeight > 100.1) {
-            imageFullView.toggleMetadataVisibility(false);
-        }
-        else if (newHeight < 100.1) {
-            imageFullView.toggleMetadataVisibility(true);
-        }
-        container.style.cursor = 'grab';
-        let imgLeft = imageFullView.getImgLeft();
-        let imgTop = imageFullView.getImgTop();
-        let mouseX = clientX - container.offsetLeft;
-        let mouseY = clientY - container.offsetTop;
-        let origX = mouseX / origHeight - imgLeft;
-        let origY = mouseY / origHeight - imgTop;
-        let newX = mouseX / newHeight - imgLeft;
-        let newY = mouseY / newHeight - imgTop;
-        imageFullView.moveImg((newX - origX) * newHeight, (newY - origY) * newHeight);
-        container.style.height = `${newHeight}%`;
+        imageFullView.zoomAround(clientX, clientY, factor);
     }
 
     /** Apply a transform to the inner container (used for live swipe/dismiss follow). */

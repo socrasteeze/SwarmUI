@@ -11,6 +11,9 @@ class MUI {
         /** Header error-strip elements, resolved and wired on first use by errorBar(). undefined = not looked
          * up yet, null = the markup isn't there (errors fall back to the toast). */
         this.errorEls = undefined;
+        /** Substrings from the user's ui.HideErrorMessages setting; see setErrorFilters. Empty until the
+         * settings request lands, so an early error is shown rather than silently dropped. */
+        this.errorFilters = [];
     }
 
     /** Creates an element with a class and optional text. */
@@ -329,6 +332,14 @@ class MUI {
         els.line.setAttribute('aria-expanded', `${open}`);
     }
 
+    /** Records the user's `ui.HideErrorMessages` value (pipe-separated substrings) for the showError override
+     *  at the bottom of this file. Fed from the one GetUserSettings call m_autocomplete already makes, rather
+     *  than a second request of our own. Until that lands the list is empty, which fails open: an error shows
+     *  rather than being wrongly swallowed. */
+    setErrorFilters(raw) {
+        this.errorFilters = `${raw || ''}`.split('|').map(x => x.trim()).filter(x => x);
+    }
+
     /** Resolves and wires the header error strip on first use; null when the markup isn't present. */
     errorBar() {
         if (this.errorEls !== undefined) {
@@ -405,10 +416,19 @@ mUI = new MUI();
  * guard is only so a future load-order change degrades to "no override" instead of a boot-killing throw.
  *
  * The ui.HideErrorMessages filter is re-implemented rather than delegated, because delegating would mean
- * calling the original showError - which is the toast this exists to replace. Keep the two in step. */
+ * calling the original showError - which is the toast this exists to replace. Keep the two in step.
+ *
+ * The filter list comes from mUI.errorFilters, fed by m_autocomplete's GetUserSettings call. It used to come
+ * only from getUserSetting, which is defined in the genpage's settings_editor.js - a file /simple never loads
+ * - so the `typeof getUserSetting == 'function'` test was always false here and the filter silently matched
+ * nothing at all. getUserSetting is still consulted when it does exist, so this keeps working unchanged if
+ * these scripts are ever loaded alongside the genpage's. */
 if (typeof showError == 'function') {
     window.showError = (message) => {
-        let excluded = (typeof getUserSetting == 'function' ? getUserSetting('ui.HideErrorMessages', '') : '').split('|').map(x => x.trim());
+        let excluded = [...(mUI.errorFilters || [])];
+        if (typeof getUserSetting == 'function') {
+            excluded.push(...`${getUserSetting('ui.HideErrorMessages', '')}`.split('|').map(x => x.trim()));
+        }
         for (let entry of excluded) {
             if (entry && `${message}`.includes(entry)) {
                 console.log(`Error message ${message} contains excluded message ${entry}, not showing.`);

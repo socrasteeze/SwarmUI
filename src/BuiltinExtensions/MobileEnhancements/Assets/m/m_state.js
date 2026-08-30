@@ -15,6 +15,8 @@ class MState {
         this.promptImages = [];
         /** True when the seed is locked (kept between generations) rather than randomized (-1). */
         this.seedLocked = false;
+        /** True once a save() has failed, so the "not being saved" warning fires once and not per keystroke. */
+        this.saveFailed = false;
         /** Param metadata map (id -> param object) from ListT2IParams. */
         this.paramMeta = {};
         /** Preset objects from GetMyUserData ({title, description, param_map, preview_image, is_starred}). */
@@ -588,9 +590,18 @@ class MState {
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
             };
             localStorage.setItem('m_client_state', JSON.stringify(data));
+            this.saveFailed = false;
         }
         catch (e) {
             console.error('state save failed', e);
+            // Warn once per failure run, not on every keystroke: save() is called from changed(), so a full
+            // localStorage (or Safari private mode, where setItem throws outright) would otherwise repaint the
+            // error strip continuously. Silence here used to mean the prompt/preset state stopped persisting
+            // with nothing to show for it, and the next load quietly restored a stale copy instead.
+            if (!this.saveFailed) {
+                this.saveFailed = true;
+                mUI.warn('Settings are not being saved on this device - browser storage is full or blocked.');
+            }
         }
     }
 
@@ -613,6 +624,16 @@ class MState {
         }
         catch (e) {
             console.error('state load failed', e);
+            // A corrupt/unparseable blob would otherwise be re-read and re-fail on every boot with no sign.
+            // Drop it so the client starts clean next time, and say so - the user's prompt and preset
+            // selections are gone either way, and finding that out silently is worse.
+            try {
+                localStorage.removeItem('m_client_state');
+            }
+            catch (e2) {
+                console.error('state reset failed', e2);
+            }
+            mUI.warn('Saved mobile settings could not be read and have been reset.');
         }
     }
 }

@@ -211,6 +211,7 @@ class TagDexTabClass {
                 localStatus.className = 'tagdex-download-status';
                 localStatus.innerText = `Supplied locally - ${source.rows.toLocaleString()} of ${source.total_rows.toLocaleString()} entries loaded`;
                 localRow.appendChild(localLabel);
+                this.addTypeaheadToggle(localRow, source);
                 if (canManage) {
                     this.addManageButtons(localRow, source);
                 }
@@ -228,6 +229,11 @@ class TagDexTabClass {
             status.id = `tagdex_dl_status_${source.id}`;
             status.innerText = source.present ? `Installed - ${source.rows.toLocaleString()} of ${source.total_rows.toLocaleString()} rows loaded` : '';
             row.appendChild(label);
+            // Typeahead selection is a per-user preference, not a data operation, so it is offered without the
+            // manage permission - but only for datasets that are actually on disk to be indexed.
+            if (source.present) {
+                this.addTypeaheadToggle(row, source);
+            }
             if (canManage) {
                 let button = document.createElement('button');
                 button.className = 'basic-button tagdex-button';
@@ -249,9 +255,105 @@ class TagDexTabClass {
         getRequiredElementById('tagdex_manage_count').innerText = downloadable > 0 ? `${installed}/${downloadable}` : '';
     }
 
+    /** Per-dataset "Typeahead" checkbox: adds or removes this dataset from prefs.active_sources.
+     * This is the only write path to TagDexSetPrefs. Without it active_sources was frozen at its server-side
+     * default of `["danbooru_character"]`, so downloading any other dataset added rows to the browse tab but
+     * never to prompt typeahead, with nothing in the UI to explain why or to change it. */
+    addTypeaheadToggle(row, source) {
+        let wrap = document.createElement('label');
+        wrap.className = 'tagdex-download-toggle';
+        wrap.title = 'Include this dataset in prompt-box character suggestions.';
+        let box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = (tagDexCore.prefs.active_sources || []).includes(source.id);
+        box.addEventListener('change', () => {
+            let active = [...(tagDexCore.prefs.active_sources || [])];
+            let at = active.indexOf(source.id);
+            if (box.checked && at < 0) {
+                active.push(source.id);
+            }
+            else if (!box.checked && at >= 0) {
+                active.splice(at, 1);
+            }
+            box.disabled = true;
+            this.savePrefs({ 'active_sources': active }, () => {
+                box.disabled = false;
+                // The index is built from exactly this list, so it has to be thrown away and refetched - the
+                // shards in memory are the old selection.
+                tagDexCore.status = 'unloaded';
+                tagDexCore.shards = [];
+                tagDexCore.ensureLoaded();
+            }, () => {
+                box.disabled = false;
+                box.checked = !box.checked;
+            });
+        });
+        wrap.appendChild(box);
+        wrap.appendChild(document.createTextNode(' Typeahead'));
+        row.appendChild(wrap);
+    }
+
+    /** Merges a partial change into the stored prefs and writes the whole blob back (the route takes the full
+     * object). Local state is updated only once the server has accepted it, so a failed write cannot leave the
+     * UI claiming a setting that was never saved. */
+    savePrefs(changes, onDone = null, onFail = null) {
+        let merged = Object.assign({}, tagDexCore.prefs, changes);
+        // Sent flat, NOT as {prefs: merged}: a JObject API parameter is handed the whole request payload with
+        // session_id stripped (APICallReflectBuilder), not the field that happens to share its name. Nesting it
+        // would store {"prefs": {...}}, which TagDexPrefs.For then reads as an empty object and silently
+        // replaces every setting with its default.
+        genericRequest('TagDexSetPrefs', merged, data => {
+            tagDexCore.prefs = merged;
+            if (onDone) {
+                onDone();
+            }
+        }, 0, error => {
+            showError(error);
+            if (onFail) {
+                onFail();
+            }
+        });
+    }
+
     /** Adds the Reload and Unload buttons to one dataset row. Both routes are tagdex_manage-gated server-side, and
      * the drawer these live in only opens from a toggle carrying the same permission. */
     addManageButtons(row, source) {
+        if (source.present) {
+            // Imports whatever the user dropped into Data/TagDex/imported/. The route and the folder both
+            // existed already; nothing in the UI called it, so the documented drop-zone workflow was reachable
+            // only by hand-crafting an API request.
+            let importBtn = document.createElement('button');
+            importBtn.className = 'basic-button tagdex-button';
+            importBtn.innerText = 'Import thumbs';
+            importBtn.title = 'Match image files in Data/TagDex/imported/ to entries in this dataset by file name.';
+            // Its own status span rather than a toast: the outcome is a count, it belongs next to the button
+            // that produced it, and the row already reads this way for downloads.
+            let importStatus = document.createElement('span');
+            importStatus.className = 'tagdex-download-status';
+            importBtn.addEventListener('click', () => {
+                importBtn.disabled = true;
+                importStatus.innerText = 'Importing...';
+                genericRequest('TagDexImportThumbnails', { source: source.id }, data => {
+                    importBtn.disabled = false;
+                    let imported = data.imported || 0;
+                    let unmatched = data.unmatched || 0;
+                    if (imported == 0 && unmatched == 0) {
+                        importStatus.innerText = 'No images found in Data/TagDex/imported/.';
+                        return;
+                    }
+                    importStatus.innerText = `Imported ${imported}${unmatched > 0 ? `, ${unmatched} unmatched` : ''}`;
+                    if (this.browser && source.id == this.source) {
+                        this.browser.refresh();
+                    }
+                }, 0, error => {
+                    showError(error);
+                    importBtn.disabled = false;
+                    importStatus.innerText = '';
+                });
+            });
+            row.appendChild(importBtn);
+            row.appendChild(importStatus);
+        }
         if (source.present) {
             let reload = document.createElement('button');
             reload.className = 'basic-button tagdex-button';
