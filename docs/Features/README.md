@@ -13,3 +13,4 @@ See [The Docs Readme](/docs/README.md) for general listing of documentation and 
 - [AutoScalingBackend](/docs/Features/AutoScalingBackend.md) for info about the specialty advanced usage "Auto-Scaling" backend (for Slurm/Kubernetes/etc).
 - [Upscaling](/docs/Features/Upscaling.md) for info about upscaling images and videos (ie increasing resolution, especially to improve quality).
 - [Interrogate](/src/BuiltinExtensions/Interrogate/README.md) for info about generating tags or a text prompt from an image.
+- [Character Sheet](/src/BuiltinExtensions/CharacterSheet/README.md) for info about building multi-view character reference sheets.
