@@ -465,7 +465,7 @@ Files this fork adds or changes relative to upstream:
 
   Inline prompt typeahead (type `miku`, get `hatsune miku, vocaloid`) plus an auto-wired Characters browse tab with facet filters and per-character core-tag chips. Data is the [`Laxhar/noob-wiki`](https://huggingface.co/datasets/Laxhar/noob-wiki) HuggingFace dataset — the same source AnimaDex is built from, but an unauthenticated download rather than a token-gated export. Four datasets, 1.16M rows total, downloaded on demand from inside the app.
 
-  Six things that are non-obvious and must not be "simplified" away:
+  Seven things that are non-obvious and must not be "simplified" away:
 
   | Decision | Why |
   |---|---|
@@ -475,6 +475,7 @@ Files this fork adds or changes relative to upstream:
   | Multi-word acceptance trims the completed prefix from TagDex's inserted value | Both autocomplete hosts replace one space-delimited word. For `hatsune mi`, `tagdex_core.js` inserts only `miku, vocaloid`, leaving the already typed `hatsune ` in place. Wrapping `onInput` or changing `findLastWordIndex` would alter the user's stock completion semantics; this remains TagDex-scoped. |
   | Word-boundary matches rank equal to prefix matches | Booru names put the distinguishing word last. Prefix-first put `mikuma_(kancolle)` (1,245 posts) above `hatsune_miku` (103,500) for `miku`, and buried `hakurei_reimu` entirely for `reimu`. |
   | Thumbnail filenames get a hash suffix when sanitized | 1,433 tag names contain a colon (`re:zero...`, `2b_(nier:automata)`) — illegal on Windows, and an NTFS alternate-data-stream separator. Without the hash, `re:zero` and `re_zero` collide onto one file. |
+  | Import's `Normalize` folds filename-illegal characters, and the match dict uses `TryAdd` | The mirror image of the row above: an *external* exporter already sanitized those characters out, so a thumbnail for `2b_(nier:automata)` arrives on disk as `2b (nier automata)` and can never match the colon-bearing trigger. Folding both sides recovered **1,643 characters and 51 artists** on the AnimaDex import (32,648 → 34,291). The fold makes 85 tag pairs collide (`awa`/`awa.`, `unown`/`unown_?`), which is why the dict is `TryAdd` and not assignment: `Entries` is sorted count-descending, so first-wins gives the thumbnail to the tag the model actually learned. Assignment handed it to the obscure twin. |
 
   Also: 73 copyright values contain `/` (`.hack//`, `22/7`), which would fracture the browser's folder tree — the server emits a U+2215 token with a client-side reverse map. The delayed dataset warm must swallow `OperationCanceledException` or every CI boot logs a spurious error. **Folder paths arrive with a trailing slash** — `buildTreeElements` in `browsers.js` builds each child as `` `${path}${name}/` `` — so `listEntries` must strip it before the token lookup. Passing the raw path through sent `pokemon/` as the copyright filter, which matched nothing and made every folder read as empty while the root still showed all 45k rows.
 
