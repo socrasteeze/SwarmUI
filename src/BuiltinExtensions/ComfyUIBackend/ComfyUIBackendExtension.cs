@@ -121,11 +121,8 @@ public class ComfyUIBackendExtension : Extension
             FeaturesSupported.UnionWith(["gguf"]);
             FeaturesDiscardIfNotFound.UnionWith(["gguf"]);
         }
-        if (Directory.Exists($"{FilePath}DLNodes/ComfyUI-TeaCache"))
-        {
-            FeaturesSupported.UnionWith(["teacache"]);
-            FeaturesDiscardIfNotFound.UnionWith(["teacache"]);
-        }
+        // Fork edit: no presumptive folder-based 'teacache' feature here. The flag is set only when a backend's object_info actually
+        // reports the TeaCache node (NodeToFeatureMap above), so a node pack that is installed but fails to import never offers the params.
         T2IParamTypes.ConcatDropdownValsClean(ref UpscalerModels, InternalListModelsFor("upscale_models", true).Select(u => $"model-{u}///Model: {u}"));
         T2IParamTypes.ConcatDropdownValsClean(ref UpscalerModels, InternalListModelsFor("latent_upscale_models", true).Select(u => $"latentmodel-{u}///Latent Model: {u}"));
         T2IParamTypes.ConcatDropdownValsClean(ref YoloModels, InternalListModelsFor("yolov8", false));

@@ -24,6 +24,8 @@ class TagDexTabClass {
         this.search = '';
         /** Current sort mode. */
         this.sort = 'relevance';
+        /** Whether the current sort is reversed. */
+        this.sortReverse = false;
         /** Selected facet values, keyed by facet name. */
         this.facets = { copyright: '', hairColor: '', hairLength: '', eyeColor: '', gender: '' };
         /** Server-reported dataset list. */
@@ -502,6 +504,10 @@ class TagDexTabClass {
             this.sort = event.target.value;
             this.requery();
         });
+        getRequiredElementById('tagdex_sort_reverse').addEventListener('change', event => {
+            this.sortReverse = event.target.checked;
+            this.requery();
+        });
         getRequiredElementById('tagdex_refresh').addEventListener('click', () => this.requery());
         getRequiredElementById('tagdex_manage_toggle').addEventListener('click', () => this.onManageToggle());
         getRequiredElementById('tagdex_batch_generate').addEventListener('click', () => this.startBatchGenerate());
@@ -545,8 +551,9 @@ class TagDexTabClass {
         });
     }
 
-    /** Shows the uniqueness/quality sort modes only for datasets that actually carry those scores, and falls back
-     * to relevance if the active sort just disappeared. */
+    /** Shows the uniqueness/quality sort modes only for datasets that actually carry those scores, and the series
+     * sort only for character datasets (artist rows have no copyright, so it would sort nothing). Falls back to
+     * relevance if the active sort just disappeared. */
     syncSortOptions() {
         let scored = false;
         if (this.sources) {
@@ -556,12 +563,20 @@ class TagDexTabClass {
                 }
             }
         }
+        let isCharacter = this.sourceKind() == 'character';
         let sortSelect = getRequiredElementById('tagdex_sort');
-        let options = sortSelect.querySelectorAll('.tagdex-scored-sort');
-        for (let i = 0; i < options.length; i++) {
-            options[i].style.display = scored ? '' : 'none';
+        let scoredOptions = sortSelect.querySelectorAll('.tagdex-scored-sort');
+        for (let i = 0; i < scoredOptions.length; i++) {
+            scoredOptions[i].style.display = scored ? '' : 'none';
+        }
+        let characterOptions = sortSelect.querySelectorAll('.tagdex-character-sort');
+        for (let i = 0; i < characterOptions.length; i++) {
+            characterOptions[i].style.display = isCharacter ? '' : 'none';
         }
         if (!scored && (this.sort == 'uniqueness' || this.sort == 'avg_score')) {
+            this.sort = 'relevance';
+        }
+        if (!isCharacter && this.sort == 'copyright') {
             this.sort = 'relevance';
         }
         sortSelect.value = this.sort;
@@ -658,6 +673,7 @@ class TagDexTabClass {
             eyeColor: this.facets.eyeColor,
             gender: this.facets.gender,
             sortBy: this.sort,
+            sortReverse: this.sortReverse,
             offset: 0,
             limit: this.pageSize,
             withFolders: !path

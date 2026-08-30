@@ -3,18 +3,18 @@ using System.IO;
 namespace SwarmUI.Builtin_TagDexExtension;
 
 /// <summary>Minimal RFC-4180 CSV reader for the tag datasets.
-/// <para>This deliberately does not use <see cref="SwarmUI.Utils.Utilities.SplitStandardCsv"/>. That helper has three
-/// behaviors that corrupt this specific data, all three of which are present in the live Laxhar/noob-wiki files:</para>
+/// <para>This deliberately does not use <see cref="SwarmUI.Utils.Utilities.SplitStandardCsv"/>. When this was written
+/// that helper had three behaviors that corrupted this specific data, all present in the live Laxhar/noob-wiki files:</para>
 /// <list type="number">
-/// <item>Its backslash branch advances the index without appending anything, so <c>ursula_(no\name)</c> parses as
-/// <c>ursula_(noame)</c> - it eats the backslash and the character after it. 2 rows in danbooru_character.csv.</item>
-/// <item>It only enters quoted mode after a comma immediately followed by a quote, so a quoted FIRST field is not
-/// recognized and the row shatters on any comma inside it. 60 rows in danbooru_character.csv.</item>
+/// <item>Its backslash branch advanced the index without appending anything, so <c>ursula_(no\name)</c> parsed as
+/// <c>ursula_(noame)</c>. 2 rows in danbooru_character.csv. <b>Fixed in core 2026-08-29.</b></item>
+/// <item>It only entered quoted mode after a comma immediately followed by a quote, so a quoted FIRST field was not
+/// recognized. 60 rows in danbooru_character.csv. <b>Fixed in core 2026-08-29.</b></item>
 /// <item>It allocates a List, a StringBuilder and N substrings per row, to retain 4 strings - roughly 5 million
-/// throwaway allocations across the four datasets.</item>
+/// throwaway allocations across the four datasets. Still true.</item>
 /// </list>
-/// <para>Fixing it in core is not an option: it is a core file (merge cost), and
-/// <c>AutoCompleteListHelper.GetData</c> depends on its current behavior.</para></summary>
+/// <para>The allocation cost alone justifies keeping this reader; it also means TagDex parsing never depends on a
+/// core file's behavior surviving an upstream merge.</para></summary>
 public static class TagDexCsv
 {
     /// <summary>Splits one CSV line into fields, reusing the caller's buffer.

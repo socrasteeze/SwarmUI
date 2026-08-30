@@ -158,7 +158,8 @@ class MGenSocket {
 
     /** Runs a grid generation over the same WS helper. axes = [{mode, vals}] (vals comma-joined string).
      * The axis with the most values is placed first so the contact sheet is a horizontal rectangle or a
-     * square, never vertical (fork owner's rule). Output lands in normal history as grid-<timestamp>. */
+     * square, never vertical (fork owner's rule). Output lands in normal history under the fixed `m-grid`
+     * folder (outputFolderName below) - there is no per-run timestamp in the name. */
     runGrid(baseParams, axes) {
         let sorted = [...axes].sort((a, b) => MState.toList(b.vals).length - MState.toList(a.vals).length);
         let input = {

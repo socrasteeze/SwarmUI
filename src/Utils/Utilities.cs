@@ -1613,14 +1613,20 @@ public static class Utilities
     public static string[] SplitStandardCsv(string input)
     {
         List<string> strs = [];
-        bool inQuotes = false;
+        // Fork fix: a quoted FIRST field was never detected (quote mode only began after a comma), so the row shattered on any comma inside it.
+        bool inQuotes = input.Length > 0 && input[0] == '"';
         StringBuilder current = new(64);
-        for (int i = 0; i < input.Length; i++)
+        for (int i = inQuotes ? 1 : 0; i < input.Length; i++)
         {
             char c = input[i];
             if (c == '\\')
             {
+                // Fork fix: backslash escapes the next character. Previously the escaped character was skipped rather than appended, eating two characters.
                 i++;
+                if (i < input.Length)
+                {
+                    current.Append(input[i]);
+                }
             }
             else if (c == ',' && !inQuotes)
             {
@@ -1651,5 +1657,38 @@ public static class Utilities
         }
         strs.Add(current.ToString());
         return [.. strs];
+    }
+
+    /// <summary>Fork addition. Like <see cref="StrictFilenameClean(string)"/>, but keeps interior '.' characters, so 'v1.0' stays 'v1.0' instead of becoming 'v10'.
+    /// Within each path segment, runs of dots collapse to a single dot and dots are trimmed from both ends, so no segment can be '.', '..', or start or end with a dot.
+    /// A segment whose name before its first dot is a Windows reserved device name (eg 'con.txt') gets a '_' appended to that name, mirroring the reserved-name handling of the strict clean.
+    /// Used by the filename-prefix insertion in <see cref="Accounts.User.BuildImageOutputPath"/> and by the FilenamePrefix extension's param cleaner.</summary>
+    public static string StrictFilenameCleanKeepDots(string name)
+    {
+        // Private-use codepoint: not in FilePathForbidden (ASCII-only), not in RestrictedControlChars, and not whitespace, so it passes through the strict clean untouched.
+        const char placeholder = '\uE000';
+        string cleaned = StrictFilenameClean(name.Replace($"{placeholder}", "").Replace('.', placeholder)).Replace(placeholder, '.');
+        string[] parts = cleaned.Split('/');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string part = parts[i];
+            while (part.Contains(".."))
+            {
+                part = part.Replace("..", ".");
+            }
+            // Repeat until stable so alternating whitespace and dots (eg 'a. .') cannot leave an edge dot behind.
+            string trimmed = part.Trim().Trim('.');
+            while (trimmed != part)
+            {
+                part = trimmed;
+                trimmed = part.Trim().Trim('.');
+            }
+            if (part.Contains('.') && ReservedFilenames.Contains(part.Before('.').ToLowerFast()))
+            {
+                part = $"{part.Before('.')}_.{part.After('.')}";
+            }
+            parts[i] = part;
+        }
+        return parts.Where(p => p.Length > 0).JoinString("/");
     }
 }

@@ -145,20 +145,6 @@ public static class TagDexVocab
         return map.ToFrozenDictionary();
     }
 
-    /// <summary>Returns the names of every set bit in a mask, against the given vocabulary.</summary>
-    public static List<string> Expand(string[] vocab, ulong mask)
-    {
-        List<string> result = [];
-        for (int i = 0; i < vocab.Length; i++)
-        {
-            if ((mask & (1UL << i)) != 0)
-            {
-                result.Add(vocab[i]);
-            }
-        }
-        return result;
-    }
-
     /// <summary>Resolves a facet value name to its bit index, or -1 if unrecognized.</summary>
     public static int BitFor(string[] vocab, string value)
     {

@@ -59,12 +59,6 @@ class MUI {
         return { 'primary': file, 'subtitle': folder };
     }
 
-    /** Secondary line for a model. Kept as a thin wrapper so older call sites that only wanted the dim
-     * line do not have to unpack modelLines. */
-    modelSubtitle(model) {
-        return this.modelLines(model, false).subtitle;
-    }
-
     /** The star marking a favourite model, or null when it isn't one. Rows are sorted starred-first
      * (mState.starredFirst), and a list whose order changes with nothing on screen explaining why reads as a
      * list in a random order - this is what says "these are your stars". */

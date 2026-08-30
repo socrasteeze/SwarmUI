@@ -175,10 +175,72 @@ body.small-window .alt-prompt-image {
     max-height: 4.5rem;
 }
 
+/* --- Plan 3.6: dynamic-viewport + safe-area sizing for the 100vh rules genpage.css still carries --- */
+/* On a phone browser 100vh is the LARGEST viewport (address bar hidden), so anything sized from it overhangs
+   the visible area whenever the bar is showing, and the bottom of it lands under the home indicator in an
+   installed PWA. Each rule below repeats the core value in vh first and then in dvh, so a browser without dvh
+   (older iOS) keeps exactly the core behaviour and a modern one tracks the live viewport. Only the rules that
+   apply on a phone are covered; genpage.css's own body.small-window (100svh) and its .small-window
+   #image_fullview_modal flex layout (already 100dvh) are left alone, and the desktop-only admin/user
+   management panes are not worth a rule. Class selectors only, so the id-scoped core rules for the
+   small-window fullview keep winning where they exist - these fill in the coarse-pointer-but-not-small-window
+   (tablet) case for the fullview, and every case for the compare modal and the Simple tab, which core never
+   gave mobile variants at all. */
+body.coarse-pointer .imageview_modal_imagewrap {
+    height: calc(100vh - 7rem);
+    height: calc(100dvh - 7rem);
+}
+body.coarse-pointer .imageview_modal_imagewrap.expanded-mode {
+    height: calc(min(100vw, 100vh - 2em)) !important;
+    height: calc(min(100vw, 100dvh - 2em)) !important;
+}
+/* The compare modal is a fixed Bootstrap modal like the fullview one, so body's safe-area padding never
+   reaches it; border-box keeps the inset inside the existing full-height box rather than growing past it. */
+body.coarse-pointer .image_compare_modal .imageview_modal_inner_div,
+body.small-window .image_compare_modal .imageview_modal_inner_div {
+    box-sizing: border-box;
+    height: 100vh;
+    height: 100dvh;
+    padding-bottom: var(--safe-bottom, 0px);
+}
+body.small-window .simpletabbrowserwrapper {
+    height: calc(100vh - 2rem);
+    height: calc(100dvh - 2rem);
+}
+body.small-window .simple-wrapper-flex {
+    height: calc(100vh - 2rem - 15rem);
+    height: calc(100dvh - 2rem - 15rem);
+}
+body.small-window .simple_image_container_img_wrapper {
+    height: calc(100vh - 20rem);
+    height: calc(100dvh - 20rem);
+}
+
+/* --- Plan 3.7: history/batch thumbnail ergonomics --- */
+/* The tiles themselves already clear the 44px floor in every Thumbnails size (Small is 7rem square), and
+   the history browser already requests 256px `?preview=true` srcs and lazy-loads them by scroll position
+   (outputhistory.js describeOutputFile + browsers.js makeVisible), so the one thing left under-sized on
+   touch is each tile's per-image menu (star/reuse/delete/...): a ~1em glyph, and hover-revealed to boot.
+   Give it a real hit area pinned to the tile's top-right corner, and keep it fully visible since there is
+   no hover on touch to reveal it. Scoped to the image tiles only; the model-card variant of the same
+   button is laid out differently and is not a thumbnail. */
+body.coarse-pointer .image-block .model-block-menu-button {
+    top: 0;
+    right: 0;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    opacity: 1;
+}
+
 /* --- Phase 4: connection banner --- */
 
 /* Slide-in "connection lost" banner (created by mobile_network.js). Shown on any viewport when the browser
-   reports the network is down; clears automatically when it returns. */
+   reports the network is down, or when the network is up but the SwarmUI process stops answering (the text
+   says which); clears automatically when either returns. */
 .mobile-connection-banner {
     position: fixed;
     left: 50%;

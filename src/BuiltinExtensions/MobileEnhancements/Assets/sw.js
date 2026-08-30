@@ -84,7 +84,7 @@ self.addEventListener('activate', event => {
 });
 
 /** True if the request should be left entirely to the network (API, generated media, cross-origin). */
-function isPassThrough(url, request) {
+function isPassThrough(url) {
     if (url.origin != self.location.origin) {
         return true;
     }
@@ -212,7 +212,7 @@ self.addEventListener('fetch', event => {
         event.respondWith(thumbnailCacheStrategy(event, request));
         return;
     }
-    if (isPassThrough(url, request)) {
+    if (isPassThrough(url)) {
         return;
     }
     // Full-page navigations: network-first, offline.html when the network is gone.

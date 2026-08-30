@@ -323,6 +323,28 @@ public class T2IParamTypes
         return names.SplitFast(',').Select(s => CleanModelName(s.Trim())).JoinString(",");
     }
 
+    /// <summary>Fork addition. Clamps every numeric entry of a list-param value (comma or '\n|||\n' separated) into [min, max], warning once per out-of-range entry. Non-numeric entries pass through untouched.
+    /// Used as a 'Clean' so every entry path (UI, API, presets, reused params, prompt syntax) shares one server-side bound.</summary>
+    public static string ClampNumberList(string vals, double min, double max, string paramName)
+    {
+        if (string.IsNullOrWhiteSpace(vals))
+        {
+            return vals;
+        }
+        string splitter = vals.Contains("\n|||\n") ? "\n|||\n" : ",";
+        string clampOne(string val)
+        {
+            if (!double.TryParse(val.Trim(), out double num) || (num >= min && num <= max))
+            {
+                return val;
+            }
+            double clamped = Math.Clamp(num, min, max);
+            Logs.Warning($"{paramName} value '{val.Trim()}' is outside the allowed range {min} to {max}, clamping to {clamped}.");
+            return clamped.ToString();
+        }
+        return vals.Split(splitter).Select(clampOne).JoinString(splitter);
+    }
+
     /// <summary>Applies a string edit, with support for "{value}" notation.</summary>
     public static string ApplyStringEdit(string prior, string update)
     {
@@ -708,10 +730,9 @@ public class T2IParamTypes
         LoraWeights = Register<List<string>>(new("LoRA Weights", "Weight values for the LoRA model list.\nComma separated list of weight numbers.\nMust match the length of the LoRAs input.",
             // Fork edit: genpage slider capped to +/-2 (was +/-10) to match the /simple LoRA sheet's own
             // hardcoded slider bounds (m_create.js). List-typed params aren't range-validated server-side
-            // (T2IParamTypes.ValidateParam only enforces Min/Max on INTEGER/DECIMAL) so this only narrows the
-            // UI slider - an existing preset or saved image with a weight outside +/-2 still loads and reruns
-            // unclamped, it just can't be *dragged* past +/-2 anymore.
-            "", IgnoreIf: "", Min: -2, Max: 2, Step: 0.1, IsAdvanced: true, Group: GroupAdvancedModelAddons, VisibleNormally: false
+            // (T2IParamTypes.ValidateParam only enforces Min/Max on INTEGER/DECIMAL), so the Clean below applies
+            // the same +/-2 bound to every entry path (API, presets, reused params, <lora:x:w> prompt syntax).
+            "", IgnoreIf: "", Min: -2, Max: 2, Step: 0.1, IsAdvanced: true, Group: GroupAdvancedModelAddons, VisibleNormally: false, Clean: (_, s) => ClampNumberList(s, -2, 2, "LoRA Weights")
             ));
         LoraTencWeights = Register<List<string>>(new("LoRA Tenc Weights", "Distinct weight values for the text encoders of LoRA model list.\nComma separated list of weight numbers.\nMust match the length of the LoRAs input.",
             "", IgnoreIf: "", Min: -10, Max: 10, Step: 0.1, IsAdvanced: true, Group: GroupAdvancedModelAddons, VisibleNormally: false

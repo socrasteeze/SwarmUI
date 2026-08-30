@@ -67,7 +67,7 @@ class MAutoComplete {
         let list = [];
         for (let val of raw) {
             let split = val.split('\n');
-            let entry = { 'name': split[0], 'low': split[1].replaceAll(' ', '_').toLowerCase(), 'clean': split[1], 'raw': true, 'count': 0, 'tag': 0, 'alts': [] };
+            let entry = { 'name': split[0], 'low': split[1].replaceAll(' ', '_').toLowerCase(), 'clean': split[1], 'count': 0, 'tag': 0, 'alts': [] };
             if (split.length > 2) {
                 entry.tag = split[2];
             }

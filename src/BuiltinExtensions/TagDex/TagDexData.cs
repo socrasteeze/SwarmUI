@@ -243,10 +243,14 @@ public static class TagDexData
         }
     }
 
-    /// <summary>Drops a loaded list, freeing its memory.</summary>
+    /// <summary>Drops a loaded list, freeing its memory, along with any typeahead index blobs built from it.
+    /// <para>The blob cache is keyed by the list's fingerprint, so a re-parsed list can never read a stale blob -
+    /// but without this the old fingerprint's blob would sit in memory for the life of the process, one more per
+    /// reload or re-download.</para></summary>
     public static void Unload(string sourceId)
     {
         Loaded.TryRemove(sourceId, out _);
+        TagDexIndexBlob.Evict(sourceId);
     }
 
     /// <summary>Drops and re-parses a list.</summary>
