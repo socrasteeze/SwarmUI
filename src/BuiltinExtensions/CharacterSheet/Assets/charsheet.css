@@ -1,0 +1,46 @@
+/* Character Sheet tool panel.
+   Class selectors only, per the repo CSS convention, and colors come from the theme variables so the panel tracks
+   whichever theme is active. */
+
+.charsheet-engine {
+    font-size: 0.85em;
+    color: var(--text-soft);
+    margin: 0.4rem 0 0.1rem 0;
+}
+
+.charsheet-notice {
+    font-size: 0.85em;
+    color: var(--emphasis);
+    min-height: 1.1em;
+    margin-bottom: 0.3rem;
+}
+
+.charsheet-section-title {
+    font-weight: 600;
+    margin: 0.6rem 0 0.2rem 0;
+}
+
+.charsheet-views {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.9rem;
+    margin-bottom: 0.4rem;
+}
+
+.charsheet-view-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    white-space: nowrap;
+}
+
+/* A slot past the current model's reference cap stays visible but reads as inert, so it is obvious that the model
+   is the constraint rather than the slot being broken. */
+.charsheet-slot-disabled {
+    opacity: 0.45;
+}
+
+.charsheet-slot-disabled .auto-file-label,
+.charsheet-slot-disabled .auto-file-input-button {
+    pointer-events: none;
+}
