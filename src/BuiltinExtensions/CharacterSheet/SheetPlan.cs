@@ -29,10 +29,21 @@ public static class SheetPlan
         return Views.FirstOrDefault(v => v.Key == key);
     }
 
-    /// <summary>Wording shared by every sheet prompt, keeping the character consistent and the background clean.
+    /// <summary>Wording shared by every prompt, keeping the background clean and the lighting flat.
     /// <para>A plain background and even lighting are not stylistic preferences here - they are what makes the
-    /// separate panels composite into something that reads as one sheet rather than a collage.</para></summary>
-    public const string SheetStyle = "character reference sheet, plain flat neutral background, even flat lighting, no shadows on the background, full body in frame, consistent character design across the whole image";
+    /// separate panels composite into something that reads as one sheet rather than a collage.</para>
+    /// <para>Deliberately says nothing about sheets or panels. That framing belongs only to one-shot mode: with
+    /// it in the shared text, a per-panel generation draws an entire multi-view sheet inside each panel, and the
+    /// composite ends up a sheet of sheets. Observed, not theorised.</para></summary>
+    public const string BaseStyle = "plain flat neutral background, even flat lighting, no shadows on the background, consistent character design";
+
+    /// <summary>Extra wording for a single-view panel, pinning the output to exactly one figure.
+    /// <para>"solo" and the explicit single-figure phrasing are load-bearing: without them the model reads the
+    /// turnaround vocabulary as an invitation to draw several views at once.</para></summary>
+    public const string SinglePanelStyle = "solo, a single character alone, exactly one figure, one view only, full body in frame";
+
+    /// <summary>Extra wording for a one-shot sheet, where the multi-view framing is the point.</summary>
+    public const string OneShotStyle = "character reference sheet, full body in frame, the same character in every panel";
 
     /// <summary>Builds the identity clause that ties the generation back to the supplied reference images.</summary>
     public static string IdentityClause(SheetEngines.SheetEngine engine, List<string> roles)
@@ -67,20 +78,20 @@ public static class SheetPlan
     public static string BuildOneShotPrompt(SheetEngines.SheetEngine engine, List<string> roles, List<SheetView> views, string userPrompt)
     {
         string viewList = views.Select(v => v.Fragment).JoinString("; then ");
-        string body = $"{SheetStyle}. A single image divided into {views.Count} panels side by side, showing the same character in each: {viewList}. Each panel shows {IdentityClause(engine, roles)}.";
+        string body = $"{OneShotStyle}, {BaseStyle}. A single image divided into {views.Count} panels side by side, showing the same character in each: {viewList}. Each panel shows {IdentityClause(engine, roles)}.";
         return string.IsNullOrWhiteSpace(userPrompt) ? body : $"{body} {userPrompt.Trim()}";
     }
 
     /// <summary>Builds the prompt for one panel of a per-panel sheet.</summary>
     public static string BuildPanelPrompt(SheetEngines.SheetEngine engine, List<string> roles, SheetView view, string userPrompt)
     {
-        string body = $"{SheetStyle}. A single character, {view.Fragment}. {IdentityClause(engine, roles)}.";
+        string body = $"{SinglePanelStyle}, {BaseStyle}. {view.Fragment}. {IdentityClause(engine, roles)}.";
         return string.IsNullOrWhiteSpace(userPrompt) ? body : $"{body} {userPrompt.Trim()}";
     }
 
     /// <summary>Builds the prompt for a free-text extra panel, eg a specific pose or prop shot.</summary>
     public static string BuildExtraPanelPrompt(SheetEngines.SheetEngine engine, List<string> roles, string request)
     {
-        return $"{SheetStyle}. A single character. {IdentityClause(engine, roles)}. {request.Trim()}";
+        return $"{SinglePanelStyle}, {BaseStyle}. {IdentityClause(engine, roles)}. {request.Trim()}";
     }
 }
