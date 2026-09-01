@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-08-30 · **Branch:** main · **Base:** cd5e15f4 (= origin/main) · **Tree:** clean · **Pushed**
+**Updated:** 2026-09-01 · **Branch:** main · **Base:** 15927c24 (= origin/main) · **Tree:** clean · **Pushed**
 
 > Line cap intentionally bypassed. Two separate work streams are recorded below: the extensions session
 > (Interrogate + Character Sheet, still untested), and a later TagDex session that shipped and verified a
@@ -88,7 +88,7 @@ against real output.
    needs changing for this, and it is structurally isolated.
 6. **Exercise `restart.bat` once.** Its pull-and-launch path was never run, because running it starts a server.
    `stop.bat` is tested.
-7. **Not built:** the planned "Analyze pose image" button wiring Character Sheet to Interrogate.
+7. ~~**Not built:** the planned "Analyze pose image" button wiring Character Sheet to Interrogate.~~ **Shipped 2026-09-01** (`c20fb2b4`): the button under the pose slot runs the image through the Interrogate tool's selected backend and appends the result to Extra Panels. Verified only against a backend-less server (button, request, clean error path); the full WD14 round trip on the live server is still untested.
 
 ### Open — TagDex
 8. **SwarmUI is unauthenticated and AnimaDex now depends on it.** Bound `0.0.0.0:8085`, the `local` user holds
@@ -104,6 +104,13 @@ against real output.
     matters, `ThumbnailFor`'s early return on a pre-resolved `ThumbPath` is the thing to fix.
 11. **410 of the on-disk character stems carry the hash suffix.** Never rebuild a thumbnail URL client-side
     from a slug — call `TagDexSearchEntries` and read the server-supplied `thumb` field.
+
+### Done — batch session (2026-09-01, `c02a6bad` → `15927c24`)
+- Both coupling watchlists (MobilePWA plan, TagDex plan) re-verified after upstream merge `b24d62b3`; nothing broken, line hints refreshed.
+- AGENTS.md "Build / run / verify" corrected (NUnit suite, Windows launchers, headless `--ci_test` DLL form); MobilePWA Phase 5 item 1 marked obsolete (`start_url` is already `/simple`).
+- New `src/BuiltinExtensions/TagDex/README.md`; new `tools/swarm_api.mjs` headless API driver (`--ws` for websocket routes; use `process.exitCode`, never `process.exit()` right after fetch/WebSocket on Windows or Node aborts in libuv).
+- Interrogate gained additive `interrogate()`, `fillOptionDefaults()`, and `refreshBackends(callback, errorCallback, timeoutMs)`; `run()` behaviour unchanged.
+- Process rule: this fork never opens pull requests, on any remote. Workers commit to local branches; merge locally and push `origin/main` only.
 
 ## Decisions
 - Native orchestration over importing the 2BZ ComfyUI workflow — H3's reference model, 9-image prompt channel and
