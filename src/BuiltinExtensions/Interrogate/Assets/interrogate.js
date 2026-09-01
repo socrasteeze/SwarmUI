@@ -141,12 +141,20 @@ class InterrogateHelperClass {
         getRequiredElementById('interrogate_result').value = '';
         getRequiredElementById('interrogate_chips').innerHTML = '';
         this.setStatus('');
+        this.fillOptionDefaults();
+        $('#interrogate_modal').modal('show');
+        this.refreshBackends();
+    }
+
+    /** Resets the tagger/caption option fields (threshold, character threshold, exclude tags, caption task) to
+     * their stored preferences. Split out of open() so a headless caller that built the modal DOM itself (eg
+     * Character Sheet's "Analyze pose" button, via buildModal()) can get the same defaults without opening the
+     * modal UI. */
+    fillOptionDefaults() {
         getRequiredElementById('interrogate_threshold').value = this.pref('threshold', '0.35');
         getRequiredElementById('interrogate_char_threshold').value = this.pref('char_threshold', '0.85');
         getRequiredElementById('interrogate_exclude').value = this.pref('exclude', '');
         getRequiredElementById('interrogate_task').value = this.pref('task', 'more_detailed_caption');
-        $('#interrogate_modal').modal('show');
-        this.refreshBackends();
     }
 
     /** Fills a select with options, preserving a stored choice when it is still offered. */
@@ -165,8 +173,13 @@ class InterrogateHelperClass {
         }
     }
 
-    /** Loads the backend list from the server and rebuilds the dropdowns. */
-    refreshBackends() {
+    /** Loads the backend list from the server and rebuilds the dropdowns.
+     * @param callback optional, called once the list and dropdowns are ready - lets another extension (eg
+     * Character Sheet's "Analyze pose" button) wait for the backend list before calling selectedBackend().
+     * @param errorCallback optional, called with an error message if the request fails - without it, a failure
+     * falls back to genericRequest's own default of a showError toast with no further callback.
+     * @param timeoutMs optional XHR timeout in milliseconds, forwarded to genericRequest (0 = no timeout). */
+    refreshBackends(callback = null, errorCallback = null, timeoutMs = 0) {
         genericRequest('ListInterrogateBackends', {}, data => {
             this.backends = data.backends;
             this.wd14Models = data.wd14_models || [];
@@ -185,7 +198,10 @@ class InterrogateHelperClass {
             this.fillSelect('interrogate_model', this.wd14Models, 'model');
             this.fillSelect('interrogate_caption_model', this.florence2Models, 'caption_model');
             this.syncBackendUI();
-        });
+            if (callback) {
+                callback();
+            }
+        }, 0, errorCallback, timeoutMs);
     }
 
     /** Returns the descriptor for the currently selected backend, or null. */
@@ -272,7 +288,7 @@ class InterrogateHelperClass {
             // The first run of a given model also downloads it, which can take minutes with no other feedback,
             // so say so up front rather than looking hung.
             this.setStatus('Interrogating - the first run of a model also downloads it, which can take a while...');
-            makeWSRequest('InterrogateImage', { 'image': imageData, 'backend': backend.id, 'options': JSON.stringify(options) }, data => {
+            this.interrogate(imageData, backend.id, options, data => {
                 if (data.result != null) {
                     this.running = false;
                     this.setStatus('Done.');
@@ -282,12 +298,47 @@ class InterrogateHelperClass {
                 else if (data.overall_percent != null) {
                     this.setStatus(`Working... ${Math.round(data.overall_percent * 100)}%`);
                 }
-            }, 0, error => {
+            }, error => {
                 this.running = false;
                 this.setStatus('');
                 showError(error);
             });
         });
+    }
+
+    /** Sends one interrogation request for already-resolved image data, without touching the modal UI or
+     * `running`/status state - the shared entry point behind run(), and available headlessly to other extensions
+     * that want a result without opening the Interrogate modal (eg Character Sheet's "Analyze pose" button).
+     * <p>Also guards the one failure makeWSRequest doesn't: a socket that closes without ever sending a result
+     * or error frame (a server-side fault mid-job) would otherwise leave the caller waiting forever, so onError
+     * is called once with a fixed message if that happens - applies equally to run() and to any other caller.</p>
+     * @param imageData full `data:` URI for the image to interrogate.
+     * @param backendId ID of the backend to use, from ListInterrogateBackends / this.backends.
+     * @param options backend-specific options object, from gatherOptions().
+     * @param onFrame called with every non-error frame from the server - a `result` frame is the terminal one,
+     * an `overall_percent` frame is progress.
+     * @param onError called with an error message if the request fails, or if the socket closes with no result.
+     * @returns the underlying WebSocket, or undefined if it could not be opened. */
+    interrogate(imageData, backendId, options, onFrame, onError) {
+        let settled = false;
+        let socket = makeWSRequest('InterrogateImage', { 'image': imageData, 'backend': backendId, 'options': JSON.stringify(options) }, data => {
+            if (data.result != null) {
+                settled = true;
+            }
+            onFrame(data);
+        }, 0, error => {
+            settled = true;
+            onError(error);
+        });
+        if (socket) {
+            socket.addEventListener('close', () => {
+                if (!settled) {
+                    settled = true;
+                    onError('The interrogation connection closed with no result. Check the server logs.');
+                }
+            });
+        }
+        return socket;
     }
 
     /** Resolves any image source to a data URI, fetching it first when it is a URL. */
