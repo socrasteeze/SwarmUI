@@ -15,3 +15,4 @@ See [The Docs Readme](/docs/README.md) for general listing of documentation and 
 - [Anima Autocomplete](/docs/Anima-Autocomplete.md) for which tag word list to use with the Anima model family, and how to rebuild it.
 - [Interrogate](/src/BuiltinExtensions/Interrogate/README.md) for info about generating tags or a text prompt from an image.
 - [Character Sheet](/src/BuiltinExtensions/CharacterSheet/README.md) for info about building multi-view character reference sheets.
+- [TagDex](/src/BuiltinExtensions/TagDex/README.md) for info about the character/artist/tag reference picker and prompt typeahead for booru-trained anime models.
