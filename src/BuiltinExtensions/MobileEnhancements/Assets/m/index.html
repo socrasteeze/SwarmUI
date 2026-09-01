@@ -105,7 +105,11 @@
                 <button type="button" class="m-header-error-x" aria-label="Dismiss error">&#10005;</button>
             </div>
             <div class="m-header-error-detail" style="display:none"></div>
-            <a class="m-header-link" href="/Text2Image">Classic UI</a>
+            <!-- More lives up here rather than in the bottom nav: the nav's slots are for the tabs a session
+                 actually cycles between, and settings/escape-hatches is not one of them. It is a hash link,
+                 not an <a href="/...">, so the existing router handles it - and no '/' may appear in a hash
+                 (getWSAddress corruption, see m_ui.js applyHash). Classic UI moved into the More list. -->
+            <a class="m-header-link" href="#more">More</a>
         </header>
         <main class="m-panels">
             <section class="m-panel" data-mtab="create"></section>
@@ -117,7 +121,6 @@
             <button class="m-nav-item" data-mdest="create"><span class="m-nav-icon">&#x25B3;</span>Create</button>
             <button class="m-nav-item" data-mdest="images"><span class="m-nav-icon">&#x25A6;</span>Images</button>
             <button class="m-nav-item" data-mdest="models"><span class="m-nav-icon">&#x25C8;</span>Models</button>
-            <button class="m-nav-item" data-mdest="more"><span class="m-nav-icon">&#x2630;</span>More</button>
         </nav>
     </div>
     <div class="m-boot-fail" style="display:none">

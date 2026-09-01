@@ -121,6 +121,30 @@ class MUI {
         this.moreItems.push({ 'label': label, 'onClick': onClick });
     }
 
+    /** Registers a tab AND creates its panel + bottom-nav button, so another extension can add a whole tab
+     * without editing index.html. Call at script load, same contract as registerMoreItem: every script that
+     * could register runs before m_app.js calls initRouter, which is what wires the created button. Scripts
+     * are deferred, so .m-panels/.m-bottom-nav exist by the time any of them runs. The icon is a text glyph,
+     * not an emoji - the shipped nav deliberately uses geometric characters (see the Create triangle). */
+    registerNavTab(name, label, icon, build, onShow) {
+        let panels = document.querySelector('.m-panels');
+        let nav = document.querySelector('.m-bottom-nav');
+        if (!panels || !nav || this.tabs[name]) {
+            return;
+        }
+        let panel = document.createElement('section');
+        panel.className = 'm-panel';
+        panel.dataset.mtab = name;
+        panels.appendChild(panel);
+        let btn = this.el('button', 'm-nav-item');
+        btn.dataset.mdest = name;
+        let iconSpan = this.el('span', 'm-nav-icon', icon);
+        btn.appendChild(iconSpan);
+        btn.appendChild(document.createTextNode(label));
+        nav.appendChild(btn);
+        this.registerTab(name, build, onShow);
+    }
+
     /** Wires the router and bottom nav. Call once after all tabs are registered. */
     initRouter() {
         for (let btn of document.querySelectorAll('.m-nav-item')) {

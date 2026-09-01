@@ -101,7 +101,7 @@ check('center_toast stays hidden', await page.evaluate(() => !document.querySele
 check('the strip carries the message', (await page.textContent('.m-header-error-text')).includes('session interrupted'));
 check('the title yields its space rather than the strip stacking below it',
     await page.evaluate(() => getComputedStyle(document.querySelector('.m-header-title')).display == 'none'));
-check('the Classic UI escape link stays visible, on one line', await page.evaluate(() => {
+check('the header More link stays visible, on one line', await page.evaluate(() => {
     const link = document.querySelector('.m-header-link');
     // It is a 44px-tall tap target by design, so height proves nothing about wrapping - count line boxes.
     const range = document.createRange();

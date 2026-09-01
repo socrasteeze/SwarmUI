@@ -186,3 +186,35 @@
 .m-tagdex-more {
     margin-top: 0.5rem;
 }
+
+/* The Characters tab reuses the sheet's controls/status/card classes above; .m-panel already pads the panel
+   itself, so only the pager is new. */
+.m-tagdex-pager {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.m-tagdex-page-button {
+    flex: 1 1 0;
+    min-height: 44px;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+}
+
+.m-tagdex-page-button:disabled {
+    opacity: 0.4;
+}
+
+/* Fixed-width label so "9 / 10" -> "10 / 10" cannot resize the buttons mid-tap. */
+.m-tagdex-page-label {
+    flex: 0 0 auto;
+    min-width: 5.5rem;
+    text-align: center;
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+}
