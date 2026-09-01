@@ -106,6 +106,20 @@ public class T2IPromptHandling
         return [.. output.Select(v => v.Trim())];
     }
 
+    /// <summary>Joins values so <see cref="SplitSmart"/> will split them back apart correctly.</summary>
+    public static string JoinSmart(string[] vals)
+    {
+        if (vals.Any(v => v.Contains('|')))
+        {
+            return vals.JoinString("||");
+        }
+        if (vals.Any(v => v.Contains(',')))
+        {
+            return vals.JoinString("|");
+        }
+        return vals.JoinString(",");
+    }
+
     /// <summary>Mapping of prompt tag prefixes, to allow for registration of custom prompt tags.</summary>
     public static Dictionary<string, Func<string, PromptTagContext, string>> PromptTagProcessors = [];
 
@@ -252,7 +266,7 @@ public class T2IPromptHandling
             {
                 rawVals[i] = context.Parse(rawVals[i]);
             }
-            return $"[{rawVals.Select(EscapeForTextHandler).JoinString("|")}]";
+            return $"<alternate:{JoinSmart(rawVals)}>";
         };
         PromptTagProcessors["alt"] = PromptTagProcessors["alternate"];
         PromptTagLengthEstimators["alternate"] = PromptTagLengthEstimators["random"];
@@ -275,9 +289,23 @@ public class T2IPromptHandling
             {
                 rawVals[i] = context.Parse(rawVals[i]);
             }
-            return $"[{rawVals.Select(EscapeForTextHandler).JoinString(":")}:{stepIndex}]";
+            return $"<fromto[{stepIndex:0.######}]:{JoinSmart(rawVals)}>";
         };
         PromptTagLengthEstimators["fromto"] = PromptTagLengthEstimators["random"];
+        PromptTagProcessors["weight"] = (data, context) =>
+        {
+            double? weightVal = InterpretNumber(context.PreData, context);
+            if (!weightVal.HasValue)
+            {
+                context.TrackWarning($"Weight input 'weight[{context.PreData}]:{data}' has invalid predata weight value (not a number) and will be ignored.");
+                return null;
+            }
+            return $"<weight[{weightVal:0.######}]:{context.Parse(data)}>";
+        };
+        PromptTagLengthEstimators["weight"] = (data, context) =>
+        {
+            return ProcessPromptLikeForLength(data);
+        };
         PromptTagProcessors["wildcard"] = (data, context) =>
         {
             data = context.Parse(data);
@@ -766,6 +794,10 @@ public class T2IPromptHandling
         if (val is null)
         {
             return null;
+        }
+        if (context.Input?.SourceSession?.User?.Settings?.ParamParsing?.ParseAlternativePromptSyntaxes ?? true)
+        {
+            val = LegacyPromptParser.Convert(val);
         }
         string addBefore = "", addAfter = "";
         int baseSectionId = context.SectionID;
