@@ -43,3 +43,7 @@ venv/
 node_modules/
 package.json
 package-lock.json
+
+# Local backup tooling (not part of upstream)
+/SwarmUI-Backup.ps1
+/SwarmUI-Backup.bat
