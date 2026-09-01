@@ -1118,31 +1118,41 @@ body.small-window > .tab-content.tab-hundred {
     max-width: 90vw;
 }
 .video_editor_stage {
-    height: min(50vh, 30rem);
+    height: min(62vh, 38rem);
+    padding: 5rem 2rem;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    background-color: var(--background-soft);
+    background-color: #000;
     border: 1px solid var(--light-border);
 }
 .video_editor_video_wrap {
     max-width: 100%;
     max-height: 100%;
+    overflow: visible;
 }
 .video_editor_video_wrap video {
     max-width: 100%;
-    max-height: min(50vh, 30rem);
+    max-height: min(calc(62vh - 10rem), calc(38rem - 10rem));
 }
 .video_editor_resolution {
     padding-bottom: 0.25rem;
     font-family: var(--font-monospace);
 }
+.video_editor_scale_box .auto-input {
+    max-width: none;
+}
+.video_editor_scale_box .auto-slider-range-wrapper {
+    margin-top: 0.25rem;
+    margin-bottom: 0.5rem;
+}
 .video_editor_crop_overlay {
     position: absolute;
     inset: 0;
     z-index: 1;
-    overflow: hidden;
+    overflow: visible;
     pointer-events: none;
     touch-action: none;
 }
