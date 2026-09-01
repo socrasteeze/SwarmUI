@@ -38,6 +38,10 @@ Two model behaviours worth knowing, both inherited from the technique rather tha
 - **A visible face in the outfit reference beats the face in the identity reference.** Crop the outfit image below the neck, or mask the face out.
 - **Props duplicate across panels.** Ask for one sword and you may get three.
 
+### Analyze pose
+
+Once an image is loaded into the Pose slot, an **Analyze pose** button appears underneath it. Clicking it runs that image through the Interrogate tool — using whichever backend and options are currently selected there — and appends the resulting tags or caption as a new line in Extra Panels, so a pose reference can seed its own panel prompt instead of being described by hand. The button only renders when the Interrogate extension is installed and enabled; it stays hidden until the Pose slot has an image, and shows a busy state while the request is in flight.
+
 ## Layouts
 
 `16:9 sheet` (auto grid, padded to widescreen), `single row`, `2x2 grid`, `tall left + two right`, `wide top + two below`. The last two want exactly three panels; with any other count they fall back to an auto grid rather than erroring.
