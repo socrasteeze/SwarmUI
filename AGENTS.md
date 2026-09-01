@@ -88,10 +88,13 @@ Verifying an asset edit against a live server therefore means: restart, then loa
 
 - Build: `dotnet build src/SwarmUI.csproj --configuration Release`
 - Lint (CI-enforced): `dotnet format SwarmUI.sln --verify-no-changes`
-- Headless boot check: `./launch-linux.sh --ci-test true --launch_mode none --loglevel debug`
-- Dev run: `./launch-linux-dev.sh` (rebuilds every launch); serves on `http://localhost:7801`
+- Headless boot check: `./launch-linux.sh --ci-test true --launch_mode none --loglevel debug` (Windows: `launch-windows.bat --ci_test true --launch_mode none --loglevel debug` — but note `launch-windows.bat` only builds when `src/bin/live_release/SwarmUI.exe` is missing, and the live server holds that exe, so **never** build with `-o src/bin/live_release` while it's running; build to the default `src/bin/Release/net8.0/` instead)
+- Dev run: `./launch-linux-dev.sh` (rebuilds every launch); serves on `http://localhost:7801` (Windows: `launch-windows-dev.ps1`)
 - CI: `.github/workflows/build-and-check.yml` (build + format check + headless boot)
-- **No automated tests.** Validate by static reasoning plus manually running the live app in a browser.
+- **Unit tests:** an NUnit suite lives in `SwarmUITests/` (4 tests: `PromptHandlerTests.TestSplitSmart`/`TestJoinSmart`/`TestLegacyParser`, `UtilitiesTests.TestStrictFilenameClean`). Run with `dotnet test SwarmUITests/SwarmUITests.csproj --configuration Release` (wrappers: `launchtools/run_tests.bat` / `run_tests.sh`; CI: `.github/workflows/unit-tests.yml`). They cover only prompt-splitting and filename sanitization — validate anything else by static reasoning plus running the live app.
+- **Headless boot form used on this box:** `dotnet src/bin/Release/net8.0/SwarmUI.dll --ci_test true --launch_mode none --loglevel debug --data_dir <throwaway> --port <free port>` — prints "is now running", exits by itself after ~3s, and returns exit code 1 if any error was logged. A throwaway `--data_dir` is required, or it reads the live `Data/Settings.fds` and tries to bind port 8085.
+- The Playwright harnesses in `src/BuiltinExtensions/MobileEnhancements/verify/*.mjs` are opt-in (`package.json` is gitignored, `node_modules` local) — not part of the default verify path.
+- Headless API driver: `tools/swarm_api.mjs` (GetNewSession + any route, `--ws` for websocket routes).
 - **GPU acceleration gate (backend deps):** `E:\ComfyUI\check-gpu-accel.bat` — checks both this fork's comfy backend (`dlbackend/comfy`) and the standalone `E:\ComfyUI` install. Non-zero exit means onnxruntime lost CUDA and inference silently fell back to CPU. Run it after anything that touches backend Python deps: a DLNode reinstall, a `pip install` in `dlbackend/comfy/python_embeded`, or a comfy backend update. Never repair a failure by installing plain `onnxruntime` — the package that must own the binaries is `onnxruntime-gpu`.
 
 ## Convention quick-reference
