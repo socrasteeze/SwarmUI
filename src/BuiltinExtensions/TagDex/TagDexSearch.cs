@@ -25,6 +25,12 @@ public struct TagDexQuery
 
     /// <summary>Per-user display floor on post count.</summary>
     public int MinCount;
+
+    /// <summary>Whether entries absent from <see cref="FavoriteNames"/> must be rejected.</summary>
+    public bool FavoritesOnly;
+
+    /// <summary>The caller's favorited names for the active source. Empty when no favorites exist.</summary>
+    public HashSet<string> FavoriteNames;
 }
 
 /// <summary>The result of one search: a page of entry indices plus the unpaged total.</summary>
@@ -62,6 +68,10 @@ public static class TagDexSearch
         {
             ref TagDexEntry entry = ref entries[i];
             if (entry.Count < query.MinCount)
+            {
+                continue;
+            }
+            if (query.FavoritesOnly && (query.FavoriteNames is null || !query.FavoriteNames.Contains(entry.Name)))
             {
                 continue;
             }

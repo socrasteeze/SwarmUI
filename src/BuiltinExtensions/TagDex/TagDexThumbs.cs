@@ -178,10 +178,7 @@ public partial class TagDexExtension
         return new JObject() { ["success"] = true, ["name"] = entry.Name, ["thumb"] = written };
     }
 
-    /// <summary>Writes a generated image out as this entry's thumbnail, returning its served URL.
-    /// <para>Reuses <see cref="ImageFile.ToMetadataJpg"/> - the same 256px-short-side JPEG helper the model preview
-    /// system uses - rather than introducing a second resize path. Falls back to the raw image if the conversion is
-    /// not applicable, so an unusual output type still produces a usable card.</para></summary>
+    /// <summary>Writes a generated image out as this entry's configured WebP thumbnail, returning its served URL.</summary>
     public static string WriteThumb(TagDexList list, in TagDexEntry entry, T2IEngine.ImageOutput image)
     {
         return image?.File is not ImageFile file ? null : WriteThumb(list, in entry, file);
@@ -190,9 +187,9 @@ public partial class TagDexExtension
     /// <summary>Writes the thumbnail, then pushes the ORIGINAL image on to AnimaDex if that sync is
     /// configured.
     /// <para>Split from <see cref="WriteThumb"/> so the push sees the full-resolution file rather than
-    /// the 256px JPEG stored here - AnimaDex derives its own thumbnail from what it receives, so sending
+    /// the configured WebP stored here - AnimaDex derives its own thumbnail from what it receives, so sending
     /// the downscaled copy would cap its quality permanently. <see cref="WriteThumb"/> does not mutate
-    /// its argument (<c>ToMetadataJpg</c> returns a new file), so the original is still intact.</para></summary>
+    /// its argument, so the original is still intact.</para></summary>
     public static string WriteThumbAndSync(TagDexList list, in TagDexEntry entry, ImageFile file)
     {
         string written = WriteThumb(list, in entry, file);

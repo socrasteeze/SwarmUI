@@ -151,7 +151,8 @@ public partial class TagDexExtension
         [API.APIParameter("Whether to reverse the sort.")] bool sortReverse = false,
         [API.APIParameter("How many results to skip.")] int offset = 0,
         [API.APIParameter("How many results to return, capped at 250.")] int limit = 100,
-        [API.APIParameter("Whether to include the copyright folder list in the response.")] bool withFolders = false)
+        [API.APIParameter("Whether to include the copyright folder list in the response.")] bool withFolders = false,
+        [API.APIParameter("Whether to return only the caller's favorites.")] bool favoritesOnly = false)
     {
         TagDexList list = TagDexData.EnsureLoaded(source);
         if (list is null)
@@ -159,14 +160,18 @@ public partial class TagDexExtension
             return new JObject() { ["error"] = $"Dataset '{source}' is not downloaded yet.", ["missing_data"] = true };
         }
         TagDexPrefs prefs = TagDexPrefs.For(session);
+        HashSet<string> favorites = TagDexFavorites.For(session);
+        HashSet<string> favoriteNames = TagDexFavorites.ForSource(favorites, source);
         TagDexQuery query = TagDexSearch.BuildQuery(search, copyright, hairColor, hairLength, eyeColor, gender,
             minCount < 0 ? prefs.DisplayMinCount : minCount);
+        query.FavoritesOnly = favoritesOnly;
+        query.FavoriteNames = favoriteNames;
         long start = Environment.TickCount64;
         TagDexResults results = TagDexSearch.Run(list, query, sortBy, sortReverse, offset, limit);
         JArray array = [];
         foreach (int index in results.Indices)
         {
-            array.Add(DescribeEntry(list, index));
+            array.Add(DescribeEntry(list, index, favoriteNames.Contains(list.Entries[index].Name)));
         }
         JObject response = new()
         {
@@ -453,7 +458,7 @@ public partial class TagDexExtension
     }
 
     /// <summary>Builds the JSON description of one entry, as sent to the browse tab.</summary>
-    public static JObject DescribeEntry(TagDexList list, int index)
+    public static JObject DescribeEntry(TagDexList list, int index, bool favorited = false)
     {
         ref TagDexEntry entry = ref list.Entries[index];
         JObject result = new()
@@ -482,6 +487,10 @@ public partial class TagDexExtension
         if (entry.AvgScore > 0)
         {
             result["avg_score"] = Math.Round(entry.AvgScore, 1);
+        }
+        if (favorited)
+        {
+            result["favorited"] = true;
         }
         string thumb = ThumbnailFor(list, in entry);
         if (thumb is not null)
