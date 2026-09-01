@@ -142,6 +142,11 @@ class MImages {
     /** Renders the folder chip row (".." when inside a folder). */
     renderFolders(folders) {
         this.folderChips.innerHTML = '';
+        // Sorted here rather than trusted from the server: ListImages returns folders descending (its sort is
+        // tuned for date-prefixed file names, where Z-A means newest-first), which on a folder strip is just
+        // backwards. Matches the genpage history tree, which sorts the same way for the same reason. A copy,
+        // because the caller's array is the raw response and this must not depend on render history.
+        folders = [...folders].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
         if (this.folder != '') {
             let up = mUI.el('button', 'm-folder-chip m-folder-up', '←');
             up.addEventListener('click', () => {

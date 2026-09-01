@@ -42,7 +42,12 @@ function listOutputHistoryFolderAndFiles(path, isRefresh, callback, depth) {
     }
     let prefix = path == '' ? '' : (path.endsWith('/') ? path : `${path}/`);
     genericRequest('ListImages', {'path': path, 'depth': depth, 'sortBy': sortBy, 'sortReverse': reverse}, data => {
-        let folders = data.folders.sort((a, b) => b.toLowerCase().localeCompare(a.toLowerCase()));
+        // Folders are always A-Z, and deliberately NOT tied to the file sort. Descending-by-name is right for
+        // files (their names are date-prefixed, so Z-A reads as newest-first) but means nothing for a folder
+        // list - there is no "newest" folder - so sharing the direction just rendered the tree backwards.
+        // Ascending here also overrides the server's own OrderDescending, which is fine: the server sorts for
+        // the file case and this is the only consumer that shows folders as a tree.
+        let folders = data.folders.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
         function isPreSortFile(f) {
             return f.src == 'index.html'; // Grid index files
         }
