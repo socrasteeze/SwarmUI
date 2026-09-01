@@ -98,6 +98,165 @@ class MTagDexClass {
         mUI.registerMoreItem('TagDex Datasets', () => this.openDatasetSheet());
     }
 
+    /** Registers the Characters tab in the bottom nav. Runs at script load, before m_app.js wires the
+     * router - the registerNavTab contract. The tab and the Create-row sheet share buildBrowseRow and the
+     * server search; the tab adds pagination, because "thousands of characters" as one endless list is
+     * exactly the stall this client exists to avoid. */
+    installTab() {
+        if (typeof mUI == 'undefined' || !mUI.registerNavTab) {
+            return;
+        }
+        mUI.registerNavTab('characters', 'Characters', '\u2726', panel => this.buildTab(panel), null);
+    }
+
+    /** Builds the Characters tab: dataset + search + favorites controls, one page of cards, Prev/Next.
+     *
+     * Deliberately paged rather than infinite-scrolled. A page is one bounded request (pageSize rows) and one
+     * bounded DOM (pageSize cards), so the tab costs the same whether the dataset has 500 rows or 50,000 -
+     * there is no way to scroll it into holding thousands of img elements. The panel DOM persists across tab
+     * switches (tabs build once), so returning to the tab re-shows the last page with zero requests. */
+    buildTab(panel) {
+        let wrap = mUI.el('div', 'm-tagdex-tab');
+        let controls = mUI.el('div', 'm-tagdex-browse-controls');
+        let source = document.createElement('select');
+        source.className = 'm-tagdex-source';
+        source.setAttribute('aria-label', 'Dataset');
+        controls.appendChild(source);
+        let search = document.createElement('input');
+        search.type = 'search';
+        search.placeholder = 'Search';
+        search.className = 'm-tagdex-search';
+        search.setAttribute('aria-label', 'Search characters and artists');
+        controls.appendChild(search);
+        let favorites = mUI.el('button', 'm-tagdex-favorite-filter', '\u2605 Favorites');
+        favorites.setAttribute('aria-pressed', 'false');
+        favorites.title = 'Show favorites only';
+        controls.appendChild(favorites);
+        wrap.appendChild(controls);
+        let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
+        wrap.appendChild(status);
+        let results = mUI.el('div', 'm-tagdex-browse-results');
+        wrap.appendChild(results);
+        let pager = mUI.el('div', 'm-tagdex-pager');
+        let prev = mUI.el('button', 'm-tagdex-page-button', '\u2039 Prev');
+        prev.setAttribute('aria-label', 'Previous page');
+        let pageLabel = mUI.el('span', 'm-tagdex-page-label', '');
+        let next = mUI.el('button', 'm-tagdex-page-button', 'Next \u203A');
+        next.setAttribute('aria-label', 'Next page');
+        pager.appendChild(prev);
+        pager.appendChild(pageLabel);
+        pager.appendChild(next);
+        pager.style.display = 'none';
+        wrap.appendChild(pager);
+        panel.appendChild(wrap);
+        let ctx = { 'sources': [], 'source': '', 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': false };
+        let runSearch;
+        let render = (records) => {
+            results.innerHTML = '';
+            for (let i = 0; i < records.length; i++) {
+                results.appendChild(this.buildBrowseRow(records[i], ctx.source, () => runSearch()));
+            }
+            if (records.length == 0) {
+                results.appendChild(mUI.el('div', 'm-strip-empty', ctx.favoritesOnly ? 'No favorites yet - star characters to pin them here.' : 'No matches.'));
+            }
+            let first = ctx.offset + 1;
+            let last = ctx.offset + records.length;
+            let pages = Math.max(1, Math.ceil(ctx.total / ctx.pageSize));
+            let page = Math.floor(ctx.offset / ctx.pageSize) + 1;
+            status.textContent = ctx.total == 0 ? '0 matches'
+                : `${first.toLocaleString()}\u2013${last.toLocaleString()} of ${ctx.total.toLocaleString()}`;
+            pageLabel.textContent = `${page} / ${pages}`;
+            pager.style.display = ctx.total > ctx.pageSize ? '' : 'none';
+            prev.disabled = ctx.offset <= 0;
+            next.disabled = ctx.offset + ctx.pageSize >= ctx.total;
+        };
+        runSearch = () => {
+            if (!ctx.source) {
+                results.innerHTML = '';
+                status.textContent = 'No datasets. Download one from More.';
+                pager.style.display = 'none';
+                return;
+            }
+            let token = ++ctx.token;
+            status.textContent = 'Searching...';
+            genericRequest('TagDexSearchEntries', {
+                'source': ctx.source,
+                'search': search.value.trim(),
+                'sortBy': 'relevance',
+                'offset': ctx.offset,
+                'limit': ctx.pageSize,
+                'withFolders': false,
+                'favoritesOnly': ctx.favoritesOnly
+            }, data => {
+                if (token != ctx.token) {
+                    return;
+                }
+                if (data.missing_data) {
+                    results.innerHTML = '';
+                    status.textContent = 'Dataset not downloaded.';
+                    pager.style.display = 'none';
+                    return;
+                }
+                ctx.total = data.total || 0;
+                // A stale offset (favorites unstarred down to a smaller list, or a narrower search) can point
+                // past the end. Clamp to the last real page and re-ask rather than showing an empty page 7.
+                if (ctx.offset > 0 && ctx.offset >= ctx.total) {
+                    ctx.offset = Math.max(0, (Math.ceil(ctx.total / ctx.pageSize) - 1) * ctx.pageSize);
+                    runSearch();
+                    return;
+                }
+                render(data.results || []);
+            }, 0, error => {
+                if (token != ctx.token) {
+                    return;
+                }
+                results.innerHTML = '';
+                status.textContent = 'Search failed.';
+                pager.style.display = 'none';
+                mUI.warn(`TagDex: ${error}`);
+            });
+        };
+        let restart = () => {
+            ctx.offset = 0;
+            runSearch();
+        };
+        source.addEventListener('change', () => {
+            ctx.source = source.value;
+            restart();
+        });
+        search.addEventListener('input', () => {
+            clearTimeout(ctx.timer);
+            ctx.timer = setTimeout(restart, 180);
+        });
+        favorites.addEventListener('click', () => {
+            ctx.favoritesOnly = !ctx.favoritesOnly;
+            favorites.setAttribute('aria-pressed', `${ctx.favoritesOnly}`);
+            restart();
+        });
+        let flip = (delta) => {
+            ctx.offset = Math.max(0, ctx.offset + delta * ctx.pageSize);
+            // Back to the top of the new page: keeping the old scroll depth on fresh rows reads as a glitch.
+            panel.scrollTop = 0;
+            runSearch();
+        };
+        prev.addEventListener('click', () => flip(-1));
+        next.addEventListener('click', () => flip(1));
+        this.fetchSources((sources, prefs) => {
+            ctx.sources = sources.filter(item => item.present);
+            source.innerHTML = '';
+            for (let i = 0; i < ctx.sources.length; i++) {
+                let option = document.createElement('option');
+                option.value = ctx.sources[i].id;
+                option.textContent = ctx.sources[i].label;
+                source.appendChild(option);
+            }
+            let preferred = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id)) : '';
+            ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : '');
+            source.value = ctx.source;
+            runSearch();
+        });
+    }
+
     /** Mounts the Characters picker beside the Create panel's model and LoRA pickers. Called from m_create.js
      * because TagDex loads before MCreate and cannot safely patch a panel that does not exist yet. */
     installBrowse(row) {
@@ -482,3 +641,4 @@ class MTagDexClass {
 mTagDex = new MTagDexClass();
 mTagDex.install();
 mTagDex.installMoreItem();
+mTagDex.installTab();

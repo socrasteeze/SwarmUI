@@ -390,6 +390,26 @@ class MState {
         this.changed();
     }
 
+    /** Re-fetches presets and starred models. Boot loads them once, but stars set from the genpage (or
+     * another device) after that were invisible until a full reload - on an installed PWA that can be days.
+     * Called when a picker opens: that is the moment staleness is visible, and the response is small.
+     * Throttled so a picker opened repeatedly doesn't re-ask for the same answer. */
+    refreshUserData() {
+        let now = Date.now();
+        if (this.userDataRefreshedAt && now - this.userDataRefreshedAt < 10 * 1000) {
+            return;
+        }
+        this.userDataRefreshedAt = now;
+        genericRequest('GetMyUserData', { 'includeAutocompletions': false }, data => {
+            this.presets = data.presets || [];
+            this.starredModels = data.starred_models || {};
+            this.changed();
+        }, 0, () => {
+            // A failed refresh keeps the boot-time copy; nothing to report - the picker still works.
+            this.userDataRefreshedAt = 0;
+        });
+    }
+
     /** The architecture group a preset belongs to: its title's leading folder segment ('ill/PLATT Pose' ->
      * 'ill'). Presets saved at the root of the preset list have no group and return ''. */
     static presetGroup(title) {
@@ -431,7 +451,7 @@ class MState {
         return slash == -1 ? '' : n.substring(0, slash);
     }
 
-    /** Extension-stripped model name -> compat class, for one subtype. Built once and cached.
+    /** starKey'd model name -> compat class, for one subtype. Built once and cached.
      * This has to be a map, not a scan: filterByArch calls compatClassOf once per model, so a linear scan
      * made it O(models^2) - 18,561 LoRAs measured at 3,972 ms per call on desktop, and it runs on every
      * keystroke in the picker search. Cleared by loadParamMeta, which is the only thing that replaces
@@ -441,7 +461,7 @@ class MState {
             let map = new Map();
             for (let entry of (this.models[subtype] || [])) {
                 let clazz = this.modelClasses[entry[1]];
-                map.set(MState.stripModelExt(entry[0]), clazz && clazz.compat_class ? clazz.compat_class : null);
+                map.set(MState.starKey(entry[0]), clazz && clazz.compat_class ? clazz.compat_class : null);
             }
             this.compatCache[subtype] = map;
         }
@@ -455,7 +475,7 @@ class MState {
         if (!modelName) {
             return null;
         }
-        return this.compatMapFor(subtype).get(MState.stripModelExt(modelName)) || null;
+        return this.compatMapFor(subtype).get(MState.starKey(modelName)) || null;
     }
 
     /** The compat classes an architecture group covers, inferred from the checkpoints its presets select.
@@ -495,11 +515,21 @@ class MState {
         if (!this.archFilter) {
             return models;
         }
-        let groups = new Set(this.presetGroups());
+        // Case-folded on both sides: the filter's group names come from preset titles and the folders from
+        // disk paths, and 'Flux2/' vs a 'flux2/...' preset group is the same architecture, not a different one.
+        let filter = this.archFilter.toLowerCase();
+        let groups = new Set(this.presetGroups().map(g => g.toLowerCase()));
         let classes = this.groupCompatClasses(this.archFilter);
+        let starred = this.starredNameSet(subtype);
         return models.filter(model => {
-            let folder = MState.modelFolder(model.name);
-            if (folder == this.archFilter) {
+            // A starred model is always shown, exactly like an active preset survives the same filter: the
+            // user explicitly pinned it, and a misclassified folder or compat class silently hiding a
+            // favourite is the worst failure this filter can produce.
+            if (starred.has(MState.starKey(model.name))) {
+                return true;
+            }
+            let folder = MState.modelFolder(model.name).toLowerCase();
+            if (folder == filter) {
                 return true;
             }
             if (folder && groups.has(folder)) {
@@ -513,10 +543,20 @@ class MState {
         });
     }
 
-    /** Starred names for one subtype, with and without a trailing weight-file extension. SetStarredModels
-     * stores whatever name the genpage's star button had - ListModels' full name, usually with
-     * .safetensors - but presets and some older rows omit it. Matching only the exact string dropped every
-     * favourite whose stored form disagreed, which on a 120-row cap looks like "my stars are missing". */
+    /** One model name reduced to the form starred-name matching runs on: extension stripped, lowercased,
+     * backslashes folded to forward slashes. The genpage stars whatever string its ListModels happened to
+     * report, and that disagrees with this client's ListModels in more ways than the extension - Windows
+     * paths can differ in separator, and a model renamed only by case keeps its old starred entry. Every
+     * one of those mismatches used to read as "my favorite isn't pinned". Case-folding cannot collide two
+     * genuinely different models unless they share a filename up to case, which the filesystem forbids. */
+    static starKey(name) {
+        return MState.stripModelExt(name).replaceAll('\\', '/').toLowerCase();
+    }
+
+    /** Starred names for one subtype, as starKey forms. SetStarredModels stores whatever name the genpage's
+     * star button had - ListModels' full name, usually with .safetensors - but presets and some older rows
+     * omit it. Matching only the exact string dropped every favourite whose stored form disagreed, which on
+     * a 120-row cap looks like "my stars are missing". */
     starredNameSet(subtype) {
         let set = new Set();
         let starred = this.starredModels[subtype];
@@ -524,20 +564,17 @@ class MState {
             return set;
         }
         for (let i = 0; i < starred.length; i++) {
-            let name = starred[i];
-            set.add(name);
-            set.add(MState.stripModelExt(name));
+            set.add(MState.starKey(starred[i]));
         }
         return set;
     }
 
-    /** Whether a model is starred, extension-insensitive. */
+    /** Whether a model is starred - extension-, case-, and separator-insensitive. */
     isStarred(subtype, name) {
         if (!name) {
             return false;
         }
-        let set = this.starredNameSet(subtype);
-        return set.has(name) || set.has(MState.stripModelExt(name));
+        return this.starredNameSet(subtype).has(MState.starKey(name));
     }
 
     /** Lifts starred models to the front of a picker list, leaving everything else in the order it arrived.
@@ -554,7 +591,7 @@ class MState {
         if (set.size == 0) {
             return list;
         }
-        let hit = (name) => set.has(name) || set.has(MState.stripModelExt(name));
+        let hit = (name) => set.has(MState.starKey(name));
         return list.slice().sort((a, b) => (hit(b.name) ? 1 : 0) - (hit(a.name) ? 1 : 0));
     }
 
