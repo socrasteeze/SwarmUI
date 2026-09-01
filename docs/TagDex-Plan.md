@@ -224,7 +224,7 @@ Verified end to end 2026-08-30: clicking Generate on a `flandre_scarlet`
 card wrote a 16,598-byte TagDex JPEG and pushed an 805,948-byte PNG to
 AnimaDex, which built its own 34,690-byte WebP from it.
 
-### Favorites sync (SwarmUI complete 2026-08-31; AnimaDex pending)
+### Favorites sync (SwarmUI and AnimaDex complete 2026-08-31)
 
 Favorites are per-user generic data: one deterministic JSON array under
 `tagdex/favorites`, with `source:name` keys. The slug is the identity; no
