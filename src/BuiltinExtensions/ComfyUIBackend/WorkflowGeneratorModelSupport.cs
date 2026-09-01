@@ -1565,7 +1565,7 @@ public partial class WorkflowGenerator
         }
         if (UserInput.TryGet(T2IParamTypes.SigmaShift, out double shiftVal, sectionId: sectionId))
         {
-            if (IsFlux() || IsAnyFlux2())
+            if (IsFlux() || IsAnyFlux2() || IsKrea2())
             {
                 string samplingNode = CreateNode("ModelSamplingFlux", new JObject()
                 {
@@ -1573,11 +1573,11 @@ public partial class WorkflowGenerator
                     ["width"] = UserInput.GetImageWidth(),
                     ["height"] = UserInput.GetImageHeight(),
                     ["max_shift"] = shiftVal,
-                    ["base_shift"] = 0.5 // TODO: Does this need an input?
+                    ["base_shift"] = IsKrea2() ? shiftVal : 0.5 // TODO: Does this need an input?
                 });
                 LoadingModel = [samplingNode, 0];
             }
-            else if (IsZImage() || IsAceStep15() || IsAnima() || IsKrea2() || IsBoogu())
+            else if (IsZImage() || IsAceStep15() || IsAnima() || IsBoogu())
             {
                 string samplingNode = CreateNode("ModelSamplingAuraFlow", new JObject()
                 {
