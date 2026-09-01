@@ -703,6 +703,7 @@ class MCreate {
 
     /** Checkpoint picker sheet. Same shape as the LoRA sheet: search plus a lazily fetched list. */
     openModelSheet() {
+        mState.refreshUserData();
         let content = mUI.el('div', 'm-lora-sheet');
         content.appendChild(mUI.el('div', 'm-sheet-title', 'Model'));
         let search = document.createElement('input');
@@ -1279,30 +1280,80 @@ class MCreate {
         tuneRow.appendChild(this.buildNumberStepper('steps', 'Steps', { 'default': 20, 'min': 0, 'max': 500, 'step': 1 }));
         tuneRow.appendChild(this.buildNumberStepper('cfgscale', 'CFG', { 'default': 7, 'min': 0, 'max': 100, 'step': 0.5 }));
         wrap.appendChild(tuneRow);
-        let resRow = mUI.el('div', 'm-quick-row');
-        this.resolutionSelect = document.createElement('select');
-        this.resolutionSelect.className = 'm-resolution-select';
-        this.resolutionSelect.setAttribute('aria-label', 'Resolution');
-        this.resolutionSelect.addEventListener('change', () => {
-            let parts = this.resolutionSelect.value.split('\n');
-            let previousAspect = mState.params['aspectratio'];
-            mState.params['aspectratio'] = parts[0];
-            // Empty string, not delete: '' means "the user chose Auto", absent means "never set", and only
-            // the latter gets seeded to 1024.
-            mState.params['sidelength'] = parts[1] || '';
-            // Picking Custom from a different ratio is the manual escape hatch. Keeping an already-matched
-            // Custom option selected must not discard the ratio that option describes.
-            if (parts[0] == 'Custom' && previousAspect != 'Custom') {
-                mState.customRatio = 0;
-            }
-            else if (parts[0] != 'Custom') {
-                mState.customRatio = 0;
-            }
+        // Aspect and size are two controls, not one fused list. The ratio is a framing decision that changes
+        // rarely; the size is a cost decision nudged constantly. Fusing them turned every size nudge into a
+        // scroll past every other ratio's rungs, which is what the one-picker version cost in practice.
+        let resRow = mUI.el('div', 'm-quick-row m-res-row');
+        this.aspectSelect = document.createElement('select');
+        this.aspectSelect.className = 'm-aspect-select';
+        this.aspectSelect.setAttribute('aria-label', 'Aspect ratio');
+        this.aspectSelect.addEventListener('change', () => {
+            mState.params['aspectratio'] = this.aspectSelect.value;
+            // A change event only fires when the value actually moved, so any change leaves whatever ratio a
+            // prompt image had matched - including a move onto Custom, which is the manual escape hatch.
+            mState.customRatio = 0;
             mState.changed();
         });
-        resRow.appendChild(this.resolutionSelect);
+        resRow.appendChild(this.aspectSelect);
+        resRow.appendChild(this.buildSideLengthStepper());
         wrap.appendChild(resRow);
         return wrap;
+    }
+
+    /** The size ladder as a stepper. Deliberately not buildNumberStepper: side length walks a fixed ladder of
+     * model-friendly rungs rather than a uniform increment, and the label line carries the pixels that rung
+     * produces at the current ratio - so the number the buttons move and the number that gets generated are
+     * both on screen, in the same shape as the Steps/CFG steppers directly above. */
+    buildSideLengthStepper() {
+        let wrap = mUI.el('div', 'm-number-stepper m-size-stepper');
+        this.sizeLabel = mUI.el('span', 'm-stepper-label', 'Size');
+        wrap.appendChild(this.sizeLabel);
+        let minus = mUI.el('button', 'm-stepper-button', '−');
+        minus.setAttribute('aria-label', 'Decrease size');
+        minus.addEventListener('click', () => this.adjustSideLength(-1));
+        wrap.appendChild(minus);
+        this.sizeValue = mUI.el('span', 'm-stepper-value');
+        wrap.appendChild(this.sizeValue);
+        let plus = mUI.el('button', 'm-stepper-button', '+');
+        plus.setAttribute('aria-label', 'Increase size');
+        plus.addEventListener('click', () => this.adjustSideLength(1));
+        wrap.appendChild(plus);
+        return wrap;
+    }
+
+    /** The rungs the size stepper walks, as stored-state strings. Whatever the state currently holds and the
+     * ladder does not - Auto (''), or a side length reused from an older image - is carried as an extra rung
+     * in sorted position so reuse reproduces that image, and drops off once stepped away from. */
+    sideLengthLadder() {
+        let meta = mState.paramMeta['sidelength'];
+        let min = meta && parseInt(meta.min) ? parseInt(meta.min) : 0;
+        let max = meta && parseInt(meta.max) ? parseInt(meta.max) : 16384;
+        let ladder = MCreate.SideLengths.filter(v => v >= min && v <= max);
+        if (ladder.length == 0) {
+            ladder.push(Math.min(max, Math.max(min, MCreate.SideLengths[0])));
+        }
+        let rungs = ladder.map(v => `${v}`);
+        let current = mState.params['sidelength'];
+        if (current != null && !rungs.includes(`${current}`)) {
+            // '' parses to NaN -> 0, which lands Auto below every concrete rung. That is the right place for
+            // it: stepping down from the smallest size hands back the model's own native resolution.
+            let stored = parseInt(current) || 0;
+            let at = rungs.findIndex(v => parseInt(v) > stored);
+            rungs.splice(at < 0 ? rungs.length : at, 0, `${current}`);
+        }
+        return rungs;
+    }
+
+    /** Walks the size ladder one rung, clamped at both ends rather than wrapping - a '+' that jumps from the
+     * largest size back to the smallest would silently undo a deliberate choice. */
+    adjustSideLength(direction) {
+        let rungs = this.sideLengthLadder();
+        let at = rungs.indexOf(`${mState.params['sidelength'] ?? ''}`);
+        if (at < 0) {
+            at = Math.max(0, rungs.indexOf('1024'));
+        }
+        mState.params['sidelength'] = rungs[Math.min(rungs.length - 1, Math.max(0, at + direction))];
+        mState.changed();
     }
 
     /** Builds one compact minus/value/plus control. Server metadata remains authoritative; fallback values only
@@ -1374,12 +1425,13 @@ class MCreate {
             }
             control.value.textContent = `${shown}`;
         }
-        this.renderResolutionSelect();
+        this.renderResolutionControls();
     }
 
-    /** One final-resolution picker. Each option binds an aspect ratio and base side length together, so the
-     * Create panel no longer asks the user to reconcile two dropdowns with a third readout. */
-    renderResolutionSelect() {
+    /** Aspect ratio and size, kept in step. The ratio list carries no pixel sizes and the stepper reads out
+     * the final width x height, so moving either control shows the real output size without asking the user
+     * to reconcile two dropdowns against a third readout. */
+    renderResolutionControls() {
         let stateChanged = false;
         let aspectMeta = mState.paramMeta['aspectratio'];
         let serverValues = aspectMeta && aspectMeta.values ? aspectMeta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '9:16', 'Custom'];
@@ -1394,73 +1446,29 @@ class MCreate {
         if (!aspects.includes(mState.params['aspectratio'])) {
             aspects.splice(aspects.length - 1, 0, mState.params['aspectratio']);
         }
-        let meta = mState.paramMeta['sidelength'];
-        // Floor at 1024 regardless of what the parameter allows: every current architecture is a 1024-native
-        // model, and the sub-1024 rungs only existed to serve SD1.x. Auto still reports a model's real native
-        // size if that model happens to be smaller - that's better information, not a rung on this ladder.
-        let min = Math.max(1024, meta && meta.min ? meta.min : 0);
-        let max = meta && meta.max ? meta.max : 16384;
-        let ladder = [1024, 1152, 1280, 1408, 1536, 1792, 2048].filter(v => v >= min && v <= max);
-        if (ladder.length == 0) {
-            ladder.push(Math.min(max, min));
-        }
-        // A stored side length below the new floor (or off the ladder entirely) is carried as its own option
-        // rather than silently snapping - reusing params from an old image must reproduce that image.
-        let stored = parseInt(mState.params['sidelength']) || 0;
-        if (stored && !ladder.includes(stored)) {
-            ladder = [...ladder, stored].sort((a, b) => a - b);
-        }
         // Seeded rather than left blank so the default is a concrete, visible 1024 instead of an Auto value
         // that resolves differently per checkpoint.
+        let rungs = this.sideLengthLadder();
         if (!mState.params['sidelength'] && mState.params['sidelength'] !== '') {
-            mState.params['sidelength'] = `${ladder.includes(1024) ? 1024 : ladder[0]}`;
+            mState.params['sidelength'] = rungs.includes('1024') ? '1024' : rungs[0];
             stateChanged = true;
         }
-        this.resolutionSelect.innerHTML = '';
+        this.aspectSelect.innerHTML = '';
         for (let aspect of aspects) {
-            let ratio = MState.ExtraAspects[aspect] || (aspect == 'Custom' ? mState.customRatio : 0);
-            let hasRatio = MState.AspectReferences[aspect] || ratio;
-            if (!hasRatio) {
-                let opt = document.createElement('option');
-                opt.value = `${aspect}\n${mState.params['sidelength'] || ''}`;
-                let rawWidth = parseInt(mState.params['width']);
-                let rawHeight = parseInt(mState.params['height']);
-                opt.textContent = rawWidth && rawHeight ? `${rawWidth} × ${rawHeight} · Custom` : 'Custom · full UI';
-                this.resolutionSelect.appendChild(opt);
-                continue;
-            }
-            let group = document.createElement('optgroup');
-            group.label = aspect == 'Custom' ? 'Matched' : aspect;
-            let auto = document.createElement('option');
-            auto.value = `${aspect}\n`;
-            auto.textContent = `Auto · ${aspect == 'Custom' ? 'matched' : aspect}`;
-            group.appendChild(auto);
-            for (let sideLength of ladder) {
-                let dims = MState.AspectReferences[aspect]
-                    ? MState.resolutionFor(aspect, sideLength)
-                    : MState.dimsForRatio(ratio, sideLength);
-                if (!dims) {
-                    continue;
-                }
-                let opt = document.createElement('option');
-                opt.value = `${aspect}\n${sideLength}`;
-                opt.textContent = `${dims[0]} × ${dims[1]} · ${aspect == 'Custom' ? 'matched' : aspect}`;
-                group.appendChild(opt);
-            }
-            this.resolutionSelect.appendChild(group);
+            let opt = document.createElement('option');
+            opt.value = aspect;
+            // Custom is two different things depending on whether a prompt image supplied a ratio, and the
+            // label has to say which - one sends matched pixels, the other defers to the full UI.
+            opt.textContent = aspect != 'Custom' ? aspect : (mState.customRatio ? 'Custom · matched' : 'Custom · full UI');
+            this.aspectSelect.appendChild(opt);
         }
-        let selected = `${mState.params['aspectratio']}\n${mState.params['sidelength'] || ''}`;
-        this.resolutionSelect.value = selected;
-        if (this.resolutionSelect.value != selected) {
-            // A malformed/stale stored size should never leave the control visually blank. Keep the state
-            // untouched for reuse fidelity, but carry it as one explicit option at the top.
-            let dims = mState.previewResolution();
-            let carried = document.createElement('option');
-            carried.value = selected;
-            carried.textContent = dims ? `${dims[0]} × ${dims[1]} · ${mState.params['aspectratio']}` : `${mState.params['aspectratio']} · stored`;
-            this.resolutionSelect.insertBefore(carried, this.resolutionSelect.firstChild);
-            this.resolutionSelect.value = selected;
-        }
+        this.aspectSelect.value = mState.params['aspectratio'];
+        let side = `${mState.params['sidelength'] ?? ''}`;
+        this.sizeValue.textContent = side == '' ? 'Auto' : side;
+        // Read from previewResolution, not from a local recomputation: it derives from a real buildGenInput,
+        // so the pixels on screen cannot drift from the ones that get sent.
+        let dims = mState.previewResolution();
+        this.sizeLabel.textContent = dims ? `${dims[0]} × ${dims[1]}` : 'full UI';
         if (stateChanged) {
             mState.save();
         }
@@ -1650,6 +1658,7 @@ class MCreate {
 
     /** LoRA bottom sheet: active LoRAs with exact 0.05-step weight pickers, add-picker from ListModels. */
     openLoraSheet() {
+        mState.refreshUserData();
         let content = mUI.el('div', 'm-lora-sheet');
         let renderRows;
         let listWrap = mUI.el('div', 'm-lora-rows');
@@ -1861,5 +1870,10 @@ class MCreate {
         box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
     }
 }
+
+/** The size rungs the Create panel's size stepper walks. Floored at 1024 and capped at 1536: every current
+ * architecture is 1024-native, the sub-1024 rungs only ever served SD1.x, and past 1536 a base generation
+ * costs more than upscaling the same image would. Kept short on purpose - this is a stepper, not a list. */
+MCreate.SideLengths = [1024, 1152, 1280, 1536];
 
 mCreate = new MCreate();

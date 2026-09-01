@@ -108,15 +108,16 @@
     font-weight: bold;
 }
 /* 12px text alone gave roughly a 14px-tall tap target in the header. The text stays small (it is deliberately
-   de-emphasised chrome) but the tappable box is padded out to the 44px minimum. */
+   de-emphasised chrome) but the tappable box is padded out to the 44px minimum. Now the More entry point
+   rather than the Classic UI escape (which lives inside the More list); same slot, same rules. */
 .m-header-link {
     margin-left: auto;
     color: var(--text-soft);
     text-decoration: none;
     font-size: 12px;
     /* The error strip claims the rest of the row when it shows, and this link is the only flexible thing left
-       beside it - without this it wraps to "Classic / UI" as soon as an error arrives. The strip's own text is
-       what gives way instead (it ellipsises). */
+       beside it - without this it would wrap as soon as an error arrives. The strip's own text is what gives
+       way instead (it ellipsises). */
     white-space: nowrap;
     flex: 0 0 auto;
     min-height: 44px;
@@ -525,12 +526,22 @@
     text-align: center;
     font-variant-numeric: tabular-nums;
 }
-.m-resolution-select {
+/* Aspect and size share one row rather than stacking: this panel already overflows its viewport, and a
+   second row pushes Generate further below the fold for no information the row cannot hold. nowrap keeps
+   them side by side instead of letting the stepper drop under the select at narrow widths. */
+.m-res-row {
+    flex-wrap: nowrap;
+}
+.m-aspect-select {
     min-height: 44px;
     padding: 0 0.4rem;
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
-    width: 100%;
+}
+/* Wider share than the ratio list: the label line has to hold "2016 × 1152" unellipsed, and 44px touch
+   targets on both ends of the value already claim most of the control. */
+.m-size-stepper {
+    flex: 1.5 1 0;
 }
 .m-ratio-row {
     display: flex;
