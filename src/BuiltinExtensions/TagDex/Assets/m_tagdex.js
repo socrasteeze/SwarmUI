@@ -64,7 +64,7 @@ class MTagDexClass {
         mAutoComplete.registerPrefix('character', 'Booru character or artist trigger', (prefix) => {
             tagDexCore.ensureLoaded();
             if (tagDexCore.status != 'ready') {
-                return ['\nNo character data yet - get it from More > TagDex datasets.'];
+                return ['\nNo character data yet - get it from More > TagDex Datasets.'];
             }
             if (!prefix || prefix.length < 2) {
                 return ['\nType at least two characters.'];
@@ -95,7 +95,7 @@ class MTagDexClass {
         if (typeof mUI == 'undefined' || !mUI.registerMoreItem) {
             return;
         }
-        mUI.registerMoreItem('TagDex datasets', () => this.openDatasetSheet());
+        mUI.registerMoreItem('TagDex Datasets', () => this.openDatasetSheet());
     }
 
     /** Mounts the Characters picker beside the Create panel's model and LoRA pickers. Called from m_create.js
@@ -126,16 +126,20 @@ class MTagDexClass {
         search.className = 'm-tagdex-search';
         search.setAttribute('aria-label', 'Search characters and artists');
         controls.appendChild(search);
+        let favorites = mUI.el('button', 'm-tagdex-favorite-filter', '★ Favorites');
+        favorites.setAttribute('aria-pressed', 'false');
+        favorites.title = 'Show favorites only';
+        controls.appendChild(favorites);
         content.appendChild(controls);
         let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
         content.appendChild(status);
         let results = mUI.el('div', 'm-tagdex-browse-results');
         content.appendChild(results);
-        let more = mUI.el('button', 'm-wide-button m-tagdex-more', 'Load more');
+        let more = mUI.el('button', 'm-wide-button m-tagdex-more', 'Load More');
         more.style.display = 'none';
         content.appendChild(more);
         mUI.openSheet(content);
-        let ctx = { 'sources': [], 'source': '', 'limit': 50, 'token': 0, 'timer': null, 'total': 0 };
+        let ctx = { 'sources': [], 'source': '', 'limit': 50, 'token': 0, 'timer': null, 'total': 0, 'favoritesOnly': false };
         let runSearch = () => {
             if (!ctx.source) {
                 results.innerHTML = '';
@@ -151,7 +155,8 @@ class MTagDexClass {
                 'sortBy': 'relevance',
                 'offset': 0,
                 'limit': ctx.limit,
-                'withFolders': false
+                'withFolders': false,
+                'favoritesOnly': ctx.favoritesOnly
             }, data => {
                 if (token != ctx.token) {
                     return;
@@ -165,7 +170,7 @@ class MTagDexClass {
                 let records = data.results || [];
                 ctx.total = data.total || 0;
                 for (let i = 0; i < records.length; i++) {
-                    results.appendChild(this.buildBrowseRow(records[i]));
+                    results.appendChild(this.buildBrowseRow(records[i], ctx.source, () => runSearch()));
                 }
                 if (records.length == 0) {
                     results.appendChild(mUI.el('div', 'm-strip-empty', 'No matches.'));
@@ -196,6 +201,12 @@ class MTagDexClass {
                 runSearch();
             }, 180);
         });
+        favorites.addEventListener('click', () => {
+            ctx.favoritesOnly = !ctx.favoritesOnly;
+            ctx.limit = 50;
+            favorites.setAttribute('aria-pressed', `${ctx.favoritesOnly}`);
+            runSearch();
+        });
         more.addEventListener('click', () => {
             ctx.limit = Math.min(250, ctx.limit + 50);
             runSearch();
@@ -216,25 +227,26 @@ class MTagDexClass {
         });
     }
 
-    /** Builds one browse result. The whole row is the action: tapping inserts the trigger at the Create
-     * prompt's remembered caret and leaves the sheet open for another pick. */
-    buildBrowseRow(record) {
-        let row = mUI.el('button', 'm-tagdex-card');
-        row.setAttribute('aria-label', `Add ${record.display || record.name}`);
+    /** Builds one browse result. The main action inserts the trigger at the Create prompt's remembered caret;
+     * the separate star keeps favorite changes from also modifying the prompt. */
+    buildBrowseRow(record, source, onFavoriteRemoved) {
+        let row = mUI.el('div', 'm-tagdex-card');
+        let main = mUI.el('button', 'm-tagdex-card-main');
+        main.setAttribute('aria-label', `Add ${record.display || record.name}`);
         let image = document.createElement('img');
         image.className = 'm-tagdex-card-image';
         image.src = record.thumb || 'imgs/model_placeholder.jpg';
         image.loading = 'lazy';
         image.alt = '';
-        row.appendChild(image);
+        main.appendChild(image);
         let textWrap = mUI.el('span', 'm-tagdex-card-text');
         textWrap.appendChild(mUI.el('span', 'm-tagdex-card-name', record.display || record.name));
         if (record.copyright_display) {
             textWrap.appendChild(mUI.el('span', 'm-tagdex-card-sub', record.copyright_display));
         }
         textWrap.appendChild(mUI.el('span', 'm-tagdex-card-count', `${largeCountStringify(record.count)} posts`));
-        row.appendChild(textWrap);
-        row.addEventListener('click', () => {
+        main.appendChild(textWrap);
+        main.addEventListener('click', () => {
             if (typeof mCreate == 'undefined' || typeof mCreate.insertIntoPrompt != 'function') {
                 mUI.warn('Create panel is unavailable.');
                 return;
@@ -242,6 +254,32 @@ class MTagDexClass {
             mCreate.insertIntoPrompt(record.trigger);
             mUI.note(`Added ${record.display || record.name}.`);
         });
+        row.appendChild(main);
+        let favoriteLabel = record.favorited ? 'Remove Favorite' : 'Add Favorite';
+        let favorite = mUI.el('button', `m-tagdex-favorite-button${record.favorited ? ' m-tagdex-favorite-active' : ''}`, record.favorited ? '★' : '☆');
+        favorite.setAttribute('aria-label', favoriteLabel);
+        favorite.setAttribute('aria-pressed', `${record.favorited == true}`);
+        favorite.title = record.favorited ? 'Remove from favorites' : 'Add to favorites';
+        favorite.addEventListener('click', () => {
+            favorite.disabled = true;
+            genericRequest('TagDexToggleFavorite', { 'source': source, 'name': record.name }, data => {
+                let favorited = data.favorited == true;
+                record.favorited = favorited;
+                favorite.disabled = false;
+                favorite.classList.toggle('m-tagdex-favorite-active', favorited);
+                favorite.textContent = favorited ? '★' : '☆';
+                favorite.setAttribute('aria-label', favorited ? 'Remove Favorite' : 'Add Favorite');
+                favorite.setAttribute('aria-pressed', `${favorited}`);
+                favorite.title = favorited ? 'Remove from favorites' : 'Add to favorites';
+                if (!favorited && onFavoriteRemoved) {
+                    onFavoriteRemoved();
+                }
+            }, 0, error => {
+                favorite.disabled = false;
+                mUI.warn(`Favorite failed: ${error}`);
+            });
+        });
+        row.appendChild(favorite);
         return row;
     }
 
@@ -253,7 +291,7 @@ class MTagDexClass {
      * row bug unreachable. Two large CSVs at once over cellular is not a phone use case worth the machinery. */
     openDatasetSheet() {
         let content = mUI.el('div', 'm-tagdex-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'TagDex datasets'));
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'TagDex Datasets'));
         let results = mUI.el('div', 'm-tagdex-results');
         content.appendChild(results);
         // Checked at sheet-open rather than at page boot: permissions.hasPermission() fails OPEN before the
@@ -366,8 +404,37 @@ class MTagDexClass {
         if (source.loaded) {
             actions.appendChild(this.buildActionButton(ctx, source, 'Unload', 'TagDexUnloadSource', false));
         }
+        if (source.present && (source.id == 'danbooru_character' || source.id == 'danbooru_artist')) {
+            actions.appendChild(this.buildFavoriteSyncButton(ctx, source, status));
+        }
         row.appendChild(actions);
         return row;
+    }
+
+    /** Builds the explicit two-way AnimaDex favorite reconciliation action. */
+    buildFavoriteSyncButton(ctx, source, status) {
+        let button = mUI.el('button', 'm-tagdex-action', 'Sync Favorites');
+        button.disabled = ctx.busy;
+        button.addEventListener('click', () => {
+            if (ctx.busy) {
+                mUI.warn('Another dataset operation is already running.');
+                return;
+            }
+            ctx.busy = true;
+            button.disabled = true;
+            status.textContent = 'Syncing favorites...';
+            genericRequest('TagDexReconcileFavorites', { 'source': source.id }, data => {
+                let unavailable = (data.remote_unavailable || 0) + (data.local_unavailable || 0);
+                mUI.note(`${source.label}: synced ${data.total.toLocaleString()} favorites${unavailable > 0 ? `, ${unavailable.toLocaleString()} unavailable` : ''}.`);
+                ctx.refresh();
+            }, 0, error => {
+                status.textContent = 'Sync failed.';
+                mUI.warn(`${source.label}: ${error}`);
+                ctx.busy = false;
+                button.disabled = false;
+            });
+        });
+        return button;
     }
 
     /** Builds a Reload or Unload button. `dataChanged` clears the typeahead's cached index, which a reload needs

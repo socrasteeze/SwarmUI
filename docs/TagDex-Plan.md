@@ -6,14 +6,15 @@ Read `AGENTS.md` first. Everything here follows the merge-friendly policy: **zer
 
 ## Implementation status (living)
 
-Phases 1–4 are **implemented** in `src/BuiltinExtensions/TagDex/`.
+Phases 1–7 are **implemented**.
 
 - **Phase 1 (data + typeahead)** — done. Column-name-driven CSV loader for all three shipped schemas, lazy per-dataset load with single-flight gating, in-memory search with bitmask facets, and a `getPossibleList` prototype wrap that merges character suggestions into the existing prompt popover.
 - **Phase 2 (browse tab)** — done. `Tabs/GenerateBottom/Characters.html` auto-wires a Characters tab into the Generate bottom bar; `GenPageBrowserClass` in Cards format with a copyright folder tree, five facet dropdowns, server-driven search, and per-character core-tag chips. Originally lived under `Tabs/Text2Image/` (its own top-level strip tab); moved into the Generate bottom bar by mirroring the same discovery hook (`WebServer.cs` gains a second `Tabs/GenerateBottom/*.html` scan feeding `T2IBottomTabHeader`/`T2IBottomTabBody`, rendered by `GenerateTab.cshtml` alongside its hardcoded bottom-bar nav items and panes) — same permission ID (`view_extension_tab_characters`), narrower panel.
 - **Phase 3 (all four datasets)** — done. Danbooru and e621, characters and artists, all registered and downloadable. The loader tolerates the missing `core_tags`/`copyright`/`solo_count` columns and the UI hides what the data cannot support. Booru meta tags are denylisted out of the artist lists.
 - **Phase 4 (`/simple`)** — done. `m_tagdex.js` wraps `MAutoComplete`, shares the same `tagDexCore` singleton, and adds a Characters browse sheet with dataset selection, search, paged results, and tap-to-insert triggers.
-- **Phase 5 (thumbnails)** — done. Serving, storage, safe filenames, AnimaDex-folder import, and on-demand **generation** with the user's own model via `T2IEngine.CreateImageTask`. The `anima_styles` dataset ships a real image for every row already; character cards start on the placeholder and fill in as you generate. Four things in `TagDexThumbs.cs` that are load-bearing: `DoNotSave` is set so references never enter the user's image history (we write the file ourselves); the resize reuses `ImageFile.ToMetadataJpg()` rather than a second ImageSharp path; the seed is a SHA-256 hash of the tag name, **not** `string.GetHashCode` (which is per-process randomized in .NET and would give a different image after every restart); and everything serializes behind a single-slot `SemaphoreSlim` so a batch sweep cannot occupy every backend at once. A reference can also be **set** from an image the user already has (`TagDexSetThumbnail`, image-data-string in, shares `WriteThumb` with the generate path) or **deleted** (`TagDexDeleteThumbnail`); both have card buttons.
+- **Phase 5 (thumbnails)** — done. Serving, storage, safe filenames, AnimaDex-folder import, and on-demand **generation** with the user's own model via `T2IEngine.CreateImageTask`. The `anima_styles` dataset ships a real image for every row already; character cards start on the placeholder and fill in as you generate. Four things in `TagDexThumbs.cs` that are load-bearing: `DoNotSave` is set so references never enter the user's image history (we write the file ourselves); the resize uses `ToThumbWebp` for a configured-height WebP instead of upstream's fixed 256px JPEG preview helper; the seed is a SHA-256 hash of the tag name, **not** `string.GetHashCode` (which is per-process randomized in .NET and would give a different image after every restart); and everything serializes behind a single-slot `SemaphoreSlim` so a batch sweep cannot occupy every backend at once. A reference can also be **set** from an image the user already has (`TagDexSetThumbnail`, image-data-string in, shares `WriteThumb` with the generate path) or **deleted** (`TagDexDeleteThumbnail`); both have card buttons.
 - **Phase 6 (`anima_styles`)** — done. A fifth dataset, supplied locally rather than downloaded. See below.
+- **Phase 7 (favorites)** — done 2026-08-31. Per-user durable favorites, card stars, Favorites-only search, genpage and `/simple` filters, danbooru-only outbound relay, and manage-tier union reconcile are implemented. The separate AnimaDex service now stores global favorites, exposes dev-key-gated list/set endpoints, renders 44px tile stars on phones, and relays idempotent state back to TagDex.
 
 ## The `anima_styles` dataset
 
@@ -45,7 +46,7 @@ Getting character thumbnails would need a separate export of `animadex-data/char
 
 **Done 2026-08-29.** That export was recovered from the live AnimaDex Docker container (`docker cp animadex:/animadex-data`) rather than the tar — the container had no volume mounts, so all 918 MB of it, the SQLite DB included, existed only in the writable layer. Imported: **34,291 of 36,490** character thumbnails and **15,867 of 15,868** artist thumbnails. The 2,199 remaining characters are not in `danbooru_character.csv` at all — AnimaDex's catalogue is newer than noob-wiki's last publish (both local CSVs hash-match upstream HEAD, so there is nothing to pull). `anima_styles` was installed in the same pass, bringing the totals to **92,669 references on disk** across three datasets.
 
-**Verified on real data**, not just statically: the parser was run against the live 244,932-row `danbooru_character.csv`, all API routes were exercised over HTTP, and every asset route plus the injected tab was confirmed on a running server. Build, `dotnet format --verify-no-changes`, and a headless boot all pass. A hands-on browser pass was **partially done 2026-08-29** — see "Remaining work" item 1 for exactly what was clicked and what is still unproven (the side-effecting card actions and the batch run + Cancel path).
+**Verified on real data**, not just statically: the parser was run against the live 244,932-row `danbooru_character.csv`, all API routes were exercised over HTTP, and every asset route plus the injected tab was confirmed on a running server. Build, `dotnet format --verify-no-changes`, and a headless boot all pass. The browser action pass was completed 2026-08-31; only the physical-device portions of the combined mobile verification remain.
 
 ## Why
 
@@ -110,28 +111,33 @@ src/BuiltinExtensions/TagDex/
   TagDexData.cs        dataset registry, lazy load, parse, thumbnail listing cache
   TagDexSearch.cs      query struct, scan, ranking
   TagDexAPI.cs         route handlers + per-user prefs
+  TagDexFavorites.cs   per-user favorite store + toggle/list/reconcile API routes
+  TagDexAnimaDex.cs    outbound image/favorite relay + favorite reconciliation
+  TagDexLocal.cs       server-only local config, including AnimaDex credentials
   Assets/tagdex_core.js    shared index, matcher, entry builder (genpage + /simple)
   Assets/tagdex_prompt.js  genpage getPossibleList wrap + <character:> prefix
   Assets/tagdex_tab.js     browse tab
   Assets/tagdex.css
   Assets/m_tagdex.js       /simple MAutoComplete wrap
+  Assets/m_tagdex.css      /simple dataset and character-sheet styling
   Tabs/GenerateBottom/Characters.html
 ```
 
 Data lives in `Data/TagDex/` (CSVs), `Data/TagDex/thumbs/{source}/` (images), `Data/TagDex/imported/` (drop zone).
 
-Permissions: `tagdex_use` (USER) to search and read; `tagdex_manage` (POWERUSERS) to download, reload, and import — separate because those spend bandwidth and write to the data folder.
+Permissions: `tagdex_use` (USER) to search, read, and change the caller's own favorites; `tagdex_manage` (POWERUSERS) to download, reload, import, and reconcile against AnimaDex. The reconcile route stays manage-tier because it performs outbound writes; no sessionless route was added.
 
 ## Remaining work
 
-1. **Browser pass — partially complete 2026-08-29.** Against the restarted Release server, the Characters tab initialized from Danbooru, rendered 100 of 44,874 rows at a 430px viewport without horizontal overflow, inserted a card trigger through the card image, and exposed the full per-card action menu. `/simple` selected Danbooru Characters, rendered the first 50 rows, and inserted a trigger. The *server* side of thumbnail generation is also verified end to end: queued, generated on the user's own checkpoint, wrote a 256×256 JPEG; `TagDexSetThumbnail` and `TagDexDeleteThumbnail` were exercised the same way. Still unproven through the browser are the side-effecting Generate / use-current / delete menu actions and the batch run + Cancel path.
-2. **Batch thumbnail sweep** — done. A "Generate All Visible" button + Cancel affordance next to the facet row (`Tabs/GenerateBottom/Characters.html`, `tagdex_tab.js`) scans `#tagdex_browser_container .model-block` for cards still showing `TagDexTabClass.PlaceholderImage` and calls `TagDexGenerateThumbnail` once per card, strictly sequentially via recursion (`runBatchStep`) rather than fanning out — required, not just polite, since `TagDexThumbs.cs`'s single-slot `SemaphoreSlim` (its own comment at line 18) serializes generation server-side regardless, so concurrent client requests would only queue behind it while holding a websocket connection each for nothing. Shares the existing `generatingThumb` lock with the single-card Generate button so the two can never race. Cancel sets a flag checked before each step; the in-flight request always finishes and repaints its card, only the next one is skipped — there is no server-side cancel route and, by design, never more than one request in flight to cancel anyway. The button is present and enabled in the live browser; the run was not started because it would generate user-visible output.
-3. **`/simple` browse sheet — done 2026-08-29.** A guarded call in `m_create.js` mounts Characters beside the model and LoRA pickers. The sheet uses `TagDexListSources` and `TagDexSearchEntries`, prefers the user's active downloaded dataset, loads 50 rows at a time up to 250, and inserts the tapped trigger at the remembered prompt caret. `verify-simple-create-panel.mjs` covers mounting, preferred-source selection, result rendering, and prompt insertion against the shipped assets.
+1. **Browser pass — complete 2026-08-31.** Against the restarted Release server, the genpage path exercised Regenerate Reference, Use Current Image, and Delete Reference with a byte-for-byte backup/restore of the original card. The batch path queued one isolated placeholder, cancelled after the in-flight request, repainted it, and restored the original. The 430×932 card layout has no horizontal overflow. The LLLite inventory was checked: 12 matching models, 10 classified Anima ControlNet and two older unclassified models; no generation was launched. Physical touchscreen compare gestures remain in the combined device pass with the broader `/simple` and PWA checks.
+2. **Batch thumbnail sweep** — done and browser-verified 2026-08-31. A "Generate All Visible" button + Cancel affordance next to the facet row (`Tabs/GenerateBottom/Characters.html`, `tagdex_tab.js`) scans `#tagdex_browser_container .model-block` for cards still showing `TagDexTabClass.PlaceholderImage` and calls `TagDexGenerateThumbnail` once per card, strictly sequentially via recursion (`runBatchStep`) rather than fanning out — required, not just polite, since `TagDexThumbs.cs`'s single-slot `SemaphoreSlim` serializes generation server-side regardless. Cancel sets a flag checked before each step; the in-flight request finishes and repaints its card, and no later card is queued.
+3. **`/simple` browse sheet — done, favorites added 2026-08-31.** A guarded call in `m_create.js` mounts Characters beside the model and LoRA pickers. The sheet uses `TagDexListSources` and `TagDexSearchEntries`, prefers the user's active downloaded dataset, loads 50 rows at a time up to 250, and inserts the tapped trigger at the remembered prompt caret. Stars are sibling actions rather than nested buttons, with 44px targets and a Favorites-only filter. `verify-simple-create-panel.mjs` covers the shipped assets and passes 68/68.
 4. **Multi-word typing — fixed 2026-08-29.** Both autocomplete hosts still search and replace one space-delimited word, but TagDex now trims an exact already-typed trigger prefix from its inserted value. `hatsune mi` therefore retains `hatsune ` and inserts only `miku, vocaloid`; the existing `miku` → `hatsune miku, vocaloid` path remains unchanged. This is deliberately implemented inside `tagdex_core.js` rather than by wrapping `onInput` or changing `findLastWordIndex`, so the user's stock tag completion keeps its existing splice rules. `verify-simple-create-panel.mjs` proves both paths through the shipped `/simple` autocomplete, and the restarted Release server accepted the multi-word path correctly on both `/simple` and Genpage.
-5. **Thumbnail import UI trigger — done (landed in `8f60772a`).** An "Import thumbs" button per installed dataset in the manage drawer (`tagdex_tab.js` `addManageButtons`) calls `TagDexImportThumbnails` and reports `Imported N, M unmatched` inline, refreshing the browser when the imported dataset is the active one. **The AnimaDex data drop is done as of 2026-08-29** — see "What the source tar did and did not contain" above for the counts and where the export came from.
+5. **Thumbnail import UI trigger — done (landed in `8f60772a`, live-verified 2026-08-31).** An "Import Thumbnails" button per installed dataset in the manage drawer (`tagdex_tab.js` `addManageButtons`) calls `TagDexImportThumbnails` and reports `Imported N, M unmatched` inline, refreshing the browser when the imported dataset is active. The live empty-folder path reports its outcome instead of looking inert. **The AnimaDex data drop is done as of 2026-08-29** — see "What the source tar did and did not contain" above for counts and provenance.
 
    One trap that cost a full round trip: `launch-windows.bat:62` only builds when `src/bin/live_release/SwarmUI.exe` is **missing**, so stopping the server and relaunching it silently reruns the old binary. An import re-run against edited matching code returned byte-identical results and looked like a logic bug. Build with `dotnet build src/SwarmUI.csproj --configuration Release -o src/bin/live_release` — the same invocation line 66 uses — whenever a source edit has to go live. Note also that a `///` doc comment is not a usable liveness marker; it never reaches the DLL.
 6. **Dead-code sweep — done 2026-08-29.** Removed `TagDexGetEntry` (route + handler, no callers), `TagDexQuery.PrefixOnly` (the typeahead's prefix mode lives client-side in `tagdex_core.js` and never hit the server), and `TagDexVocab.Expand`. `TagDexIndexBlob.Cache` is now evicted per source on `Unload`/`Reload`/re-download via `TagDexIndexBlob.Evict`, so stale-fingerprint blobs no longer accumulate. The Characters tab sort dropdown now exposes "Series A-Z" (`sortBy=copyright`, character datasets only) and a Reverse checkbox (`sortReverse`), both of which the server already supported.
+7. **AnimaDex favorite peer — done and deployed 2026-08-31.** The peer stores global favorites in SQLite, exposes dev-key-gated `POST /api/dev/favorite` and `GET /api/dev/favorites?mode=`, and relays explicit state to `TagDexToggleFavorite` with `syncBack=false`. A clean isolated Swarm instance proved AnimaDex-to-TagDex reconcile and TagDex-to-AnimaDex relay against the live peer. `anima_styles` remains local-only because it has no writable AnimaDex counterpart.
 
 ## Coupling watchlist — re-check after every upstream merge
 
@@ -190,8 +196,8 @@ sync failure never fails the thumbnail that already succeeded.
 
 Five things that are load-bearing:
 
-1. **The push sends the pre-downscale image.** `WriteThumb` stores a 256px
-   JPEG; AnimaDex keeps a full-size PNG and derives its own 297x445 WebP.
+1. **The push sends the pre-downscale image.** `WriteThumb` stores a 445px
+   WebP; AnimaDex keeps a full-size PNG and derives its own 297x445 WebP.
    Pushing the thumbnail would cap AnimaDex's quality forever. `WriteThumb`
    does not mutate its argument (`ToMetadataJpg` returns a new file), so the
    original is still in hand at the call site.
@@ -202,7 +208,7 @@ Five things that are load-bearing:
    version exactly once.
 3. **Config is a file, not prefs.** See the AGENTS.md row — prefs are
    USER-tier writable and echoed to every browser, so a push target there is
-   an exfiltration primitive. `Data/TagDex/animadex.json` is read
+   an exfiltration primitive. `Data/TagDex/local.json` is read
    server-side only and never serialized into a response. It re-reads on
    mtime change, so edits apply without a restart.
 4. **Only the danbooru datasets map.** `ModeFor` returns `characters` /
@@ -217,6 +223,46 @@ Five things that are load-bearing:
 Verified end to end 2026-08-30: clicking Generate on a `flandre_scarlet`
 card wrote a 16,598-byte TagDex JPEG and pushed an 805,948-byte PNG to
 AnimaDex, which built its own 34,690-byte WebP from it.
+
+### Favorites sync (SwarmUI complete 2026-08-31; AnimaDex pending)
+
+Favorites are per-user generic data: one deterministic JSON array under
+`tagdex/favorites`, with `source:name` keys. The slug is the identity; no
+filename normalization enters this path.
+
+- `TagDexToggleFavorite` toggles for browser clients, or accepts an explicit
+  `favorited` value for idempotent peer retries. `syncBack=false` breaks the
+  relay loop.
+- `TagDexListFavorites` returns one source's slugs. `TagDexSearchEntries`
+  filters before paging when `favoritesOnly=true` and marks every returned
+  favorite for card rendering.
+- Genpage and `/simple` both expose card stars and Favorites filters. The
+  `/simple` star is a sibling of the insert action, never a nested button.
+  Both phone layouts use 44px targets. On genpage the star occupies its own
+  slot beside the browser menu; the first live layout put it underneath the
+  menu hitbox, which intercepted every tap.
+- `PushFavoriteAsync` posts `{mode, slug, favorited}` using the same dev-key
+  header as image sync. `ReconcileFavoritesAsync` unions both sides and
+  writes only missing values. Unknown peer slugs are not inserted into the
+  local store. Deletes reconcile through live relays, not union.
+- Only `danbooru_character` and `danbooru_artist` map. e621 and
+  `anima_styles` remain local-only. Toggle/list stay `tagdex_use`; outbound
+  reconcile is `tagdex_manage`. No unauthenticated or sessionless route was
+  added.
+
+Live verification used a persistent isolated server and the real
+244,932-row character CSV: toggle, list, filter, explicit-state idempotency,
+new-session persistence, removal, and unknown-slug rejection all passed.
+Genpage at 430×932 and `/simple` at 390×844 passed add/filter/remove without
+horizontal overflow or TagDex page errors; the 68-check `/simple` harness is
+also green.
+
+The configured AnimaDex server now serves both favorite endpoints. Live API
+tests covered dev-key rejection, invalid state, unknown slugs, idempotent set,
+list, and exact restoration of the probe state. Cross-app validation then set
+one AnimaDex favorite, pulled it into an isolated TagDex user through union
+reconcile, cleared it from TagDex, and observed the outbound relay clear the
+live AnimaDex row. Both sides finished in their original state.
 
 ### Thumbnail format: WebP, plus an optional lossless archive (2026-08-30)
 

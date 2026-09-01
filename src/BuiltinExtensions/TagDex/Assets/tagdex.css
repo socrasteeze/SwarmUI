@@ -246,6 +246,36 @@
     background: var(--button-background-press);
 }
 
+.tagdex-favorite-filter[aria-pressed="true"] {
+    background: var(--button-background-press);
+    color: var(--text);
+}
+
+.tagdex-favorite-button {
+    position: absolute;
+    top: 0.1rem;
+    right: 2.5rem;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--shadow);
+    border-radius: 50%;
+    background: var(--button-background);
+    color: var(--text-soft);
+    cursor: pointer;
+}
+
+.tagdex-favorite-button:hover,
+.tagdex-favorite-button:focus-visible,
+.tagdex-favorite-active {
+    color: var(--emphasis);
+}
+
+.tagdex-favorite-button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
 /* Mobile. The 16px search field is deliberate - anything smaller triggers iOS focus zoom. */
 body.small-window .tagdex-select {
     max-width: 100%;
@@ -259,4 +289,9 @@ body.small-window .tagdex-download-label {
 body.small-window .tagdex-chip {
     min-height: 1.6rem;
     padding: 0.2rem 0.5rem;
+}
+
+body.small-window .tagdex-favorite-button {
+    width: 44px;
+    height: 44px;
 }

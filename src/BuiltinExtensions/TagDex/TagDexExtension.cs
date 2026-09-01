@@ -46,6 +46,8 @@ public partial class TagDexExtension : Extension
         API.RegisterAPICall(TagDexGetFacets, false, PermUseTagDex);
         API.RegisterAPICall(TagDexGetPrefs, false, PermUseTagDex);
         API.RegisterAPICall(TagDexSetPrefs, true, PermUseTagDex);
+        API.RegisterAPICall(TagDexToggleFavorite, true, PermUseTagDex);
+        API.RegisterAPICall(TagDexListFavorites, false, PermUseTagDex);
         API.RegisterAPICall(TagDexDownloadSource, false, PermManageTagDex);
         API.RegisterAPICall(TagDexReloadSource, false, PermManageTagDex);
         API.RegisterAPICall(TagDexUnloadSource, false, PermManageTagDex);
@@ -53,6 +55,7 @@ public partial class TagDexExtension : Extension
         API.RegisterAPICall(TagDexGenerateThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexSetThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexDeleteThumbnail, false, PermManageTagDex);
+        API.RegisterAPICall(TagDexReconcileFavorites, true, PermManageTagDex);
     }
 
     /// <inheritdoc/>

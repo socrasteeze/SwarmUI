@@ -59,6 +59,7 @@
 
 .m-tagdex-browse-controls {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.4rem;
     margin-bottom: 0.4rem;
 }
@@ -76,6 +77,20 @@
 
 .m-tagdex-search {
     flex: 1 1 55%;
+}
+
+.m-tagdex-favorite-filter {
+    flex: 1 1 100%;
+    min-height: 44px;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text);
+}
+
+.m-tagdex-favorite-filter[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--emphasis) 20%, var(--background-panel));
+    color: var(--emphasis);
 }
 
 .m-tagdex-browse-status {
@@ -96,12 +111,43 @@
     gap: 0.6rem;
     width: 100%;
     min-height: 60px;
+    padding: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+}
+
+.m-tagdex-card-main {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+    min-height: 60px;
     padding: 0.4rem 0.2rem;
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
     background: none;
     color: var(--text);
     text-align: left;
+}
+
+.m-tagdex-favorite-button {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    font-size: 20px;
+}
+
+.m-tagdex-favorite-button:focus-visible,
+.m-tagdex-favorite-active {
+    color: var(--emphasis);
+}
+
+.m-tagdex-favorite-button:disabled {
+    opacity: 0.5;
 }
 
 .m-tagdex-card-image {

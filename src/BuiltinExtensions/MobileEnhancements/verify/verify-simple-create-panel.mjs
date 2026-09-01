@@ -9,8 +9,8 @@
  * 2. Starred models sort first. The pickers cap how many rows they render, so on a real library this is what
  *    decides whether a favourite is on screen at all.
  * 3. The compact priority controls keep their contracts: Random seed expansion, one final-resolution picker,
- *    paired architecture/preset picklists, exact 0.05 LoRA weights, TagDex browse-to-prompt insertion, and
- *    multi-word TagDex typeahead acceptance.
+ *    paired architecture/preset picklists, exact 0.05 LoRA weights, TagDex favorites and browse-to-prompt
+ *    insertion, and multi-word TagDex typeahead acceptance.
  * 4. Deleting the selected genpage image chooses the newest surviving image from the current-session batch,
  *    or clears the canvas when none survives. The shipped helper is extracted rather than copied.
  *
@@ -104,6 +104,7 @@ await page.route('**/*', async route => {
 await page.addInitScript(() => {
     window.showError = function (message) { window.__err = message; };
     window.getUserSetting = () => '';
+    window.__tagDexFavorite = false;
     window.genericRequest = (route, args, callback) => {
         if (route == 'TagDexListSources') {
             callback({
@@ -115,10 +116,18 @@ await page.addInitScript(() => {
             });
         }
         else if (route == 'TagDexSearchEntries') {
+            let results = args.favoritesOnly && !window.__tagDexFavorite ? [] : [
+                { name: 'hatsune_miku', display: 'Hatsune Miku', trigger: 'hatsune_miku, vocaloid', count: 123456,
+                    copyright_display: 'Vocaloid', kind: 'character', favorited: window.__tagDexFavorite }
+            ];
             callback({
-                total: 1,
-                results: [{ name: 'hatsune_miku', display: 'Hatsune Miku', trigger: 'hatsune_miku, vocaloid', count: 123456, copyright_display: 'Vocaloid', kind: 'character' }]
+                total: results.length,
+                results: results
             });
+        }
+        else if (route == 'TagDexToggleFavorite') {
+            window.__tagDexFavorite = args.favorited == null ? !window.__tagDexFavorite : `${args.favorited}` == 'true';
+            callback({ success: true, favorited: window.__tagDexFavorite });
         }
     };
     window.makeWSRequest = () => null;
@@ -231,7 +240,31 @@ const tagDexSheet = await page.evaluate(() => ({
     result: document.querySelector('.m-tagdex-card-name').textContent
 }));
 check('TagDex browse loads the preferred dataset and results', tagDexSheet.title == 'Characters' && tagDexSheet.source == 'danbooru_character' && tagDexSheet.result == 'Hatsune Miku', JSON.stringify(tagDexSheet));
-await page.click('.m-tagdex-card');
+const favoriteControl = await page.evaluate(() => {
+    let button = document.querySelector('.m-tagdex-favorite-button');
+    let box = button.getBoundingClientRect();
+    return {
+        label: button.getAttribute('aria-label'),
+        pressed: button.getAttribute('aria-pressed'),
+        width: Math.round(box.width),
+        height: Math.round(box.height)
+    };
+});
+check('TagDex favorite starts clear with a 44px touch target', favoriteControl.label == 'Add Favorite'
+    && favoriteControl.pressed == 'false' && favoriteControl.width == 44 && favoriteControl.height == 44, JSON.stringify(favoriteControl));
+await page.click('.m-tagdex-favorite-button');
+check('TagDex star favorites without inserting into the prompt', await page.evaluate(() => window.__tagDexFavorite
+    && document.querySelector('.m-tagdex-favorite-button').getAttribute('aria-pressed') == 'true'
+    && mState.params.prompt == ''));
+await page.click('.m-tagdex-favorite-filter');
+check('TagDex Favorites filter keeps the favorited result', await page.evaluate(() =>
+    document.querySelector('.m-tagdex-favorite-filter').getAttribute('aria-pressed') == 'true'
+    && document.querySelectorAll('.m-tagdex-card').length == 1));
+await page.click('.m-tagdex-favorite-button');
+check('unfavoriting inside the filter removes the row', await page.evaluate(() => !window.__tagDexFavorite
+    && document.querySelectorAll('.m-tagdex-card').length == 0));
+await page.click('.m-tagdex-favorite-filter');
+await page.click('.m-tagdex-card-main');
 check('TagDex browse inserts the selected trigger into the prompt', await page.evaluate(() => mState.params.prompt == 'hatsune_miku, vocaloid'));
 await page.evaluate(() => {
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {

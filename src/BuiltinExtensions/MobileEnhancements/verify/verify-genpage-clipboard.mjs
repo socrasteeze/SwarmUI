@@ -83,9 +83,12 @@ let layerCount = () => page.evaluate(() => imageEditor.layers.length);
 /** Waits for addImageLayerFromClipboard's Image load to land. */
 let gotLayers = (count) => page.waitForFunction(n => imageEditor.layers.length >= n, count, { timeout: 2000 })
     .then(() => true, () => false);
-/** The newest layer as {w, h, pixel [r,g,b,a] at (1,1)} - the read-back of what was pasted. */
+/** The newest image layer as {w, h, pixel [r,g,b,a] at (1,1)} - the read-back of what was pasted.
+ * Mask layers sort to the end of imageEditor.layers regardless of creation order, so array tail is not newest. */
 let newestLayer = () => page.evaluate(() => {
-    let layer = imageEditor.layers[imageEditor.layers.length - 1];
+    let layer = imageEditor.layers.reduce((newest, candidate) => {
+        return !candidate.isMask && (!newest || candidate.id > newest.id) ? candidate : newest;
+    }, null);
     let d = layer.canvas.getContext('2d').getImageData(1, 1, 1, 1).data;
     return { w: layer.canvas.width, h: layer.canvas.height, pixel: [d[0], d[1], d[2], d[3]] };
 });

@@ -26,6 +26,8 @@ class TagDexTabClass {
         this.sort = 'relevance';
         /** Whether the current sort is reversed. */
         this.sortReverse = false;
+        /** Whether the result list is restricted to the caller's favorites. */
+        this.favoritesOnly = false;
         /** Selected facet values, keyed by facet name. */
         this.facets = { copyright: '', hairColor: '', hairLength: '', eyeColor: '', gender: '' };
         /** Server-reported dataset list. */
@@ -326,7 +328,7 @@ class TagDexTabClass {
             // only by hand-crafting an API request.
             let importBtn = document.createElement('button');
             importBtn.className = 'basic-button tagdex-button';
-            importBtn.innerText = 'Import thumbs';
+            importBtn.innerText = 'Import Thumbnails';
             importBtn.title = 'Match image files in Data/TagDex/imported/ to entries in this dataset by file name.';
             // Its own status span rather than a toast: the outcome is a count, it belongs next to the button
             // that produced it, and the row already reads this way for downloads.
@@ -355,6 +357,32 @@ class TagDexTabClass {
             });
             row.appendChild(importBtn);
             row.appendChild(importStatus);
+        }
+        if (source.present && (source.id == 'danbooru_character' || source.id == 'danbooru_artist')) {
+            let syncButton = document.createElement('button');
+            syncButton.className = 'basic-button tagdex-button';
+            syncButton.innerText = 'Sync Favorites';
+            syncButton.title = 'Merge local favorites with AnimaDex.';
+            let syncStatus = document.createElement('span');
+            syncStatus.className = 'tagdex-download-status';
+            syncButton.addEventListener('click', () => {
+                syncButton.disabled = true;
+                syncStatus.innerText = 'Syncing...';
+                genericRequest('TagDexReconcileFavorites', { source: source.id }, data => {
+                    syncButton.disabled = false;
+                    let unavailable = (data.remote_unavailable || 0) + (data.local_unavailable || 0);
+                    syncStatus.innerText = `Synced ${data.total || 0}${unavailable > 0 ? `, ${unavailable} unavailable` : ''}`;
+                    if (this.browser && source.id == this.source && this.favoritesOnly) {
+                        this.requery();
+                    }
+                }, 0, error => {
+                    showError(error);
+                    syncButton.disabled = false;
+                    syncStatus.innerText = '';
+                });
+            });
+            row.appendChild(syncButton);
+            row.appendChild(syncStatus);
         }
         if (source.present) {
             let reload = document.createElement('button');
@@ -508,6 +536,11 @@ class TagDexTabClass {
             this.sortReverse = event.target.checked;
             this.requery();
         });
+        getRequiredElementById('tagdex_favorites').addEventListener('click', event => {
+            this.favoritesOnly = !this.favoritesOnly;
+            event.currentTarget.setAttribute('aria-pressed', `${this.favoritesOnly}`);
+            this.requery();
+        });
         getRequiredElementById('tagdex_refresh').addEventListener('click', () => this.requery());
         getRequiredElementById('tagdex_manage_toggle').addEventListener('click', () => this.onManageToggle());
         getRequiredElementById('tagdex_batch_generate').addEventListener('click', () => this.startBatchGenerate());
@@ -515,6 +548,13 @@ class TagDexTabClass {
         // One delegated listener on the container, whose identity is stable across browser rebuilds (build() only
         // clears innerHTML). Avoids inline onclick, which would need escaping for names like "jeanne_d'arc".
         getRequiredElementById('tagdex_browser_container').addEventListener('click', event => {
+            let favorite = event.target.closest('.tagdex-favorite-button');
+            if (favorite) {
+                event.stopPropagation();
+                event.preventDefault();
+                this.toggleFavorite(favorite);
+                return;
+            }
             let chip = event.target.closest('.tagdex-chip');
             if (!chip) {
                 return;
@@ -676,7 +716,8 @@ class TagDexTabClass {
             sortReverse: this.sortReverse,
             offset: 0,
             limit: this.pageSize,
-            withFolders: !path
+            withFolders: !path,
+            favoritesOnly: this.favoritesOnly
         }, data => {
             if (data.missing_data) {
                 callback([], []);
@@ -726,7 +767,7 @@ class TagDexTabClass {
         if (this.lastTotal > this.pageSize) {
             let more = document.createElement('button');
             more.className = 'basic-button tagdex-button tagdex-more';
-            more.innerText = 'Load more';
+            more.innerText = 'Load More';
             more.addEventListener('click', () => {
                 this.pageSize = Math.min(this.pageSize + 150, 250);
                 this.requery();
@@ -739,7 +780,9 @@ class TagDexTabClass {
     describe(file) {
         let record = file.data;
         let primary = escapeHtmlNoBr(record.display || record.name);
-        let html = `<span class="tagdex-card-name tag-text tag-type-${record.kind == 'artist' ? 1 : 4}">${primary}</span>`;
+        let favoriteLabel = record.favorited ? 'Remove Favorite' : 'Add Favorite';
+        let html = `<button type="button" class="tagdex-favorite-button${record.favorited ? ' tagdex-favorite-active' : ''}" data-tagdexfavorite="${escapeHtmlNoBr(record.name)}" aria-label="${favoriteLabel}" aria-pressed="${record.favorited == true}" title="${record.favorited ? 'Remove from favorites' : 'Add to favorites'}">${record.favorited ? '&#9733;' : '&#9734;'}</button>`;
+        html += `<span class="tagdex-card-name tag-text tag-type-${record.kind == 'artist' ? 1 : 4}">${primary}</span>`;
         if (record.copyright_display) {
             html += `<span class="tagdex-card-sub">${escapeHtmlNoBr(record.copyright_display)}</span>`;
         }
@@ -770,17 +813,17 @@ class TagDexTabClass {
             html += '</span>';
         }
         let buttons = [
-            { label: 'Insert trigger', onclick: () => this.insertTag(record.trigger) },
-            { label: 'Insert trigger + all core tags', onclick: () => this.insertTag([record.trigger].concat(record.core_tags || []).join(', ')) },
-            { label: 'Insert as <character:> tag', onclick: () => this.insertTag(`<character:${record.name}>`) },
-            { label: record.thumb ? 'Regenerate reference image' : 'Generate reference image', onclick: (div) => this.generateThumb(record, div) },
-            { label: 'Use current image as reference', onclick: (div) => this.setThumbFromCurrentImage(record, div) }
+            { label: 'Insert Trigger', onclick: () => this.insertTag(record.trigger) },
+            { label: 'Insert All Tags', onclick: () => this.insertTag([record.trigger].concat(record.core_tags || []).join(', ')) },
+            { label: 'Insert Character Tag', onclick: () => this.insertTag(`<character:${record.name}>`) },
+            { label: record.thumb ? 'Regenerate Reference' : 'Generate Reference', onclick: (div) => this.generateThumb(record, div) },
+            { label: 'Use Current Image', onclick: (div) => this.setThumbFromCurrentImage(record, div) }
         ];
         // Only offered when there is something to delete - a card still showing the placeholder has no file behind it.
         if (record.thumb) {
-            buttons.push({ label: 'Delete reference image', onclick: (div) => this.deleteThumb(record, div) });
+            buttons.push({ label: 'Delete Reference', onclick: (div) => this.deleteThumb(record, div) });
         }
-        buttons.push({ label: 'Open on booru', href: record.url, is_download: false });
+        buttons.push({ label: 'Open on Booru', href: record.url, is_download: false });
         return {
             name: record.trigger,
             display: record.display || record.name,
@@ -795,6 +838,31 @@ class TagDexTabClass {
     /** GenPageBrowserClass select contract - a card click inserts the trigger only. */
     selectEntry(file, div) {
         this.insertTag(file.data.trigger);
+    }
+
+    /** Toggles one visible card's favorite state. The server owns the durable state; the card is repainted in
+     * place unless removing it from an active Favorites filter requires a fresh result page. */
+    toggleFavorite(button) {
+        if (button.disabled) {
+            return;
+        }
+        button.disabled = true;
+        let name = button.dataset.tagdexfavorite;
+        genericRequest('TagDexToggleFavorite', { source: this.source, name: name }, data => {
+            button.disabled = false;
+            let favorited = data.favorited == true;
+            button.classList.toggle('tagdex-favorite-active', favorited);
+            button.innerHTML = favorited ? '&#9733;' : '&#9734;';
+            button.setAttribute('aria-pressed', `${favorited}`);
+            button.setAttribute('aria-label', favorited ? 'Remove Favorite' : 'Add Favorite');
+            button.title = favorited ? 'Remove from favorites' : 'Add to favorites';
+            if (this.favoritesOnly && !favorited) {
+                this.requery();
+            }
+        }, 0, error => {
+            showError(error);
+            button.disabled = false;
+        });
     }
 
     /** Generates a reference image for one entry using the user's current model and settings.

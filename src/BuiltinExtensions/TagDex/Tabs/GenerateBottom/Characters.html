@@ -6,16 +6,17 @@
                 <input type="text" id="tagdex_search" class="tagdex-search" placeholder="Search characters..." autocomplete="off" />
             </div>
             <select id="tagdex_sort" class="tagdex-select auto-dropdown tagdex-data-control" title="Sort order">
-                <option value="relevance">Best match</option>
-                <option value="count">Most posts</option>
-                <option value="solo_count">Most solo posts</option>
-                <option value="uniqueness" class="tagdex-scored-sort">Most distinctive style</option>
-                <option value="avg_score" class="tagdex-scored-sort">Highest quality score</option>
+                <option value="relevance">Best Match</option>
+                <option value="count">Most Posts</option>
+                <option value="solo_count">Most Solo Posts</option>
+                <option value="uniqueness" class="tagdex-scored-sort">Most Distinctive Style</option>
+                <option value="avg_score" class="tagdex-scored-sort">Highest Quality Score</option>
                 <option value="name">Name A-Z</option>
                 <option value="copyright" class="tagdex-character-sort">Series A-Z</option>
             </select>
             <label class="tagdex-sort-reverse tagdex-data-control" title="Reverse the sort order"><input type="checkbox" id="tagdex_sort_reverse" autocomplete="off" /> <span class="translate">Reverse</span></label>
             <button id="tagdex_refresh" class="basic-button tagdex-button tagdex-data-control" title="Reload results">&#x21bb;</button>
+            <button id="tagdex_favorites" class="basic-button tagdex-button tagdex-favorite-filter tagdex-data-control" aria-pressed="false" title="Show favorites only">&#9733; Favorites</button>
             <button id="tagdex_manage_toggle" class="basic-button tagdex-button" title="Download or manage tag datasets" data-requiredpermission="tagdex_manage"><span class="translate">Datasets</span><span class="tagdex-manage-count" id="tagdex_manage_count"></span></button>
         </div>
         <div class="tagdex-row tagdex-facet-row tagdex-data-control" id="tagdex_facets"></div>
@@ -28,7 +29,7 @@
     </div>
     <div class="tagdex-empty" id="tagdex_empty" style="display:none;">
         <div class="tagdex-empty-inner">
-            <h3 class="translate">No character data yet</h3>
+            <h3 class="translate">No Character Data</h3>
             <p>
                 This picker reads the booru tag vocabulary that Anima, IllustriousXL and NoobAI were trained on.
                 Pick a dataset below to download: 244,932 characters and 419,789 artists, from the
