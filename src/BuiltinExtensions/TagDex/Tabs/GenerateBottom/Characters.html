@@ -19,13 +19,15 @@
             <button id="tagdex_favorites" class="basic-button tagdex-button tagdex-favorite-filter tagdex-data-control" aria-pressed="false" title="Show favorites only">&#9733; Favorites</button>
             <button id="tagdex_manage_toggle" class="basic-button tagdex-button" title="Download or manage tag datasets" data-requiredpermission="tagdex_manage"><span class="translate">Datasets</span><span class="tagdex-manage-count" id="tagdex_manage_count"></span></button>
         </div>
-        <div class="tagdex-row tagdex-facet-row tagdex-data-control" id="tagdex_facets"></div>
-        <div class="tagdex-row tagdex-batch-row tagdex-data-control" id="tagdex_batch_row" data-requiredpermission="tagdex_manage">
-            <button id="tagdex_batch_generate" class="basic-button tagdex-button" title="Generate a reference image for every card currently on screen that still shows the placeholder, one at a time - same route the per-card Generate button uses">Generate All Visible</button>
-            <button id="tagdex_batch_cancel" class="basic-button tagdex-button" style="display:none;" title="Stop after the image currently generating finishes - no further cards are queued">Cancel</button>
-            <span class="tagdex-batch-status" id="tagdex_batch_status"></span>
+        <div class="tagdex-row tagdex-facet-row">
+            <div class="tagdex-facet-selects tagdex-data-control" id="tagdex_facets"></div>
+            <span class="tagdex-batch-controls tagdex-data-control" id="tagdex_batch_row" data-requiredpermission="tagdex_manage">
+                <button id="tagdex_batch_generate" class="basic-button tagdex-button" title="Generate a reference image for every card currently on screen that still shows the placeholder, one at a time - same route the per-card Generate button uses">Generate All Visible</button>
+                <button id="tagdex_batch_cancel" class="basic-button tagdex-button" style="display:none;" title="Stop after the image currently generating finishes - no further cards are queued">Cancel</button>
+                <span class="tagdex-batch-status" id="tagdex_batch_status"></span>
+            </span>
+            <span class="tagdex-status tagdex-data-control" id="tagdex_status"></span>
         </div>
-        <div class="tagdex-status" id="tagdex_status"></div>
     </div>
     <div class="tagdex-empty" id="tagdex_empty" style="display:none;">
         <div class="tagdex-empty-inner">
