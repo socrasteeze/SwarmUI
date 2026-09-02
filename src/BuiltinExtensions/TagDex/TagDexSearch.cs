@@ -55,6 +55,9 @@ public static class TagDexSearch
         limit = Math.Clamp(limit, 1, MaxPageSize);
         offset = Math.Max(0, offset);
         bool hasText = !string.IsNullOrEmpty(query.Text);
+        // Core tags are stored space-separated ("aqua eyes, twintails") while the query is underscore-normalized
+        // to match names, so the tag comparison uses the query with its underscores put back as spaces.
+        string tagText = hasText ? query.Text.Replace('_', ' ') : null;
         List<int> exact = [];
         // Prefix and word-boundary matches share one bucket, ordered by post count. Booru names put the
         // distinguishing word last ("hatsune_miku", "kirisame_marisa"), so ranking prefix above boundary would put
@@ -106,8 +109,13 @@ public static class TagDexSearch
             if (hit < 0)
             {
                 // Fall back to the copyright, so searching "genshin" surfaces its cast even though no character's
-                // own name contains it.
+                // own name contains it; then to the descriptive core tags, so "twintails" or "aqua eyes" finds
+                // the characters drawn that way. Both rank below any name hit.
                 if (entry.Copyright is not null && entry.Copyright.Contains(query.Text, StringComparison.Ordinal))
+                {
+                    weak.Add(i);
+                }
+                else if (entry.CoreTags is not null && entry.CoreTags.Contains(tagText, StringComparison.Ordinal))
                 {
                     weak.Add(i);
                 }

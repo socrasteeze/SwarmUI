@@ -27,6 +27,20 @@
     margin-bottom: 0.2rem;
 }
 
+/* Second row: the facet selects, then the batch controls, then the count pushed to the right edge. */
+.tagdex-facet-selects {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.tagdex-batch-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
 .tagdex-search-wrap {
     flex: 1 1 12rem;
     min-width: 8rem;
@@ -61,10 +75,12 @@
 .tagdex-status {
     font-size: 0.85rem;
     color: var(--text-soft);
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 0.5rem;
     min-height: 1.4rem;
+    margin-left: auto;
+    white-space: nowrap;
 }
 
 .tagdex-batch-status {

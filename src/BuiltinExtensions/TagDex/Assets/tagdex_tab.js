@@ -727,9 +727,16 @@ class TagDexTabClass {
             this.lastTotal = data.total;
             let folders = [];
             if (data.copyrights) {
+                // The server lists series by character count so the cap keeps the biggest ones; the tree itself
+                // reads better A-Z, so the kept set is re-sorted by name before it is handed to the browser.
+                let kept = [];
                 for (let i = 0; i < data.copyrights.length && i < 400; i++) {
-                    this.folderToCopyright[data.copyrights[i].token] = data.copyrights[i].name;
-                    folders.push(data.copyrights[i].token);
+                    kept.push(data.copyrights[i]);
+                }
+                kept.sort((a, b) => a.name.localeCompare(b.name));
+                for (let i = 0; i < kept.length; i++) {
+                    this.folderToCopyright[kept[i].token] = kept[i].name;
+                    folders.push(kept[i].token);
                 }
             }
             let files = [];
@@ -738,7 +745,7 @@ class TagDexTabClass {
                 record.src = record.thumb || '';
                 files.push({ name: record.name, data: record });
             }
-            this.setStatus(this.statusText(data.results.length, data.total, data.took_ms));
+            this.setStatus(this.statusText(data.results.length, data.total), this.statusTitle(data.results.length, data.total, data.took_ms));
             callback(folders, files);
         }, 0, error => {
             this.setStatus(`Search failed: ${error}`);
@@ -746,23 +753,37 @@ class TagDexTabClass {
         });
     }
 
-    /** Builds the result-count line. A silent cap looks exactly like missing data, so the cap is always stated. */
-    statusText(shown, total, tookMs) {
+    /** Builds the result-count line: just the numbers. A silent cap looks exactly like missing data, so a capped
+     * result always reads "shown of total"; the explanation lives in the tooltip (statusTitle) to keep the row
+     * to one line. */
+    statusText(shown, total) {
         if (total == 0) {
             return 'No matches.';
         }
         if (shown < total) {
-            return `Showing ${shown.toLocaleString()} of ${total.toLocaleString()} matches (${tookMs} ms) - refine your search, or load more.`;
+            return `${shown.toLocaleString()} of ${total.toLocaleString()}`;
         }
-        return `${total.toLocaleString()} match${total == 1 ? '' : 'es'} (${tookMs} ms).`;
+        return `${total.toLocaleString()} match${total == 1 ? '' : 'es'}`;
+    }
+
+    /** The hover text behind the count: the timing and, when capped, what to do about it. */
+    statusTitle(shown, total, tookMs) {
+        if (total == 0) {
+            return '';
+        }
+        if (shown < total) {
+            return `Showing ${shown.toLocaleString()} of ${total.toLocaleString()} matches (${tookMs} ms). Refine the search, or load more.`;
+        }
+        return `${tookMs} ms`;
     }
 
     /** Writes the status line, appending a Load More button when the result set is capped. */
-    setStatus(text) {
+    setStatus(text, title = '') {
         let status = getRequiredElementById('tagdex_status');
         status.innerHTML = '';
         let span = document.createElement('span');
         span.innerText = text;
+        span.title = title;
         status.appendChild(span);
         if (this.lastTotal > this.pageSize) {
             let more = document.createElement('button');
