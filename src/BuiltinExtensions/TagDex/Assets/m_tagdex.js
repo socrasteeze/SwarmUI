@@ -569,15 +569,35 @@ class MTagDexClass {
         }
         textWrap.appendChild(mUI.el('span', 'm-tagdex-card-count', `${largeCountStringify(record.count)} posts`));
         main.appendChild(textWrap);
-        main.addEventListener('click', () => {
+        let insert = (text, note) => {
             if (typeof mCreate == 'undefined' || typeof mCreate.insertIntoPrompt != 'function') {
                 mUI.warn('Create panel is unavailable.');
                 return;
             }
-            mCreate.insertIntoPrompt(record.trigger);
-            mUI.note(`Added ${record.display || record.name}.`);
+            mCreate.insertIntoPrompt(text);
+            mUI.note(note);
+        };
+        main.addEventListener('click', () => {
+            insert(record.trigger, `Added ${record.display || record.name}.`);
         });
         row.appendChild(main);
+        // The trigger alone is a character's name, not their appearance: on most checkpoints it produces the
+        // right person only where the base model already knows them well. core_tags is the descriptive set the
+        // dataset ships alongside it (hair, eyes, outfit), and it is what makes an unfamiliar character render
+        // as themselves. Both are one tap, because which one is wanted depends on the model - this mirrors the
+        // desktop tab, where the card inserts the trigger and its menu offers "Insert All Tags".
+        let coreTags = record.core_tags || [];
+        if (coreTags.length > 0) {
+            let all = mUI.el('button', 'm-tagdex-alltags-button', '+');
+            let allLabel = `Add ${record.display || record.name} with all ${coreTags.length} tags`;
+            all.setAttribute('aria-label', allLabel);
+            all.title = allLabel;
+            all.addEventListener('click', () => {
+                insert([record.trigger].concat(coreTags).join(', '),
+                    `Added ${record.display || record.name} + ${coreTags.length} tags.`);
+            });
+            row.appendChild(all);
+        }
         let favoriteLabel = record.favorited ? 'Remove Favorite' : 'Add Favorite';
         let favorite = mUI.el('button', `m-tagdex-favorite-button${record.favorited ? ' m-tagdex-favorite-active' : ''}`, record.favorited ? '★' : '☆');
         favorite.setAttribute('aria-label', favoriteLabel);

@@ -172,6 +172,27 @@
     font-size: 20px;
 }
 
+/* Same 44px round target as the star, so the two read as one pair of secondary actions beside the card
+   rather than two unrelated controls. Only rendered when the record actually carries core_tags - the artist
+   datasets and e621 characters ship none, and an always-present button that sometimes inserts nothing is
+   worse than an absent one. */
+.m-tagdex-alltags-button {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    font-size: 22px;
+    line-height: 1;
+}
+
+.m-tagdex-alltags-button:focus-visible {
+    color: var(--emphasis);
+}
+
 .m-tagdex-favorite-button:focus-visible,
 .m-tagdex-favorite-active {
     color: var(--emphasis);
@@ -295,12 +316,21 @@
 }
 
 /* Floated over the image rather than beside it: a 44px button in the tile's own flow would cost more vertical
-   space than the text it sits under. */
-.m-tagdex-grid .m-tagdex-favorite-button {
+   space than the text it sits under. The all-tags button takes the opposite corner for the same reason, and
+   because the two must not overlap at the narrowest (3-column) grid. */
+.m-tagdex-grid .m-tagdex-favorite-button,
+.m-tagdex-grid .m-tagdex-alltags-button {
     position: absolute;
     top: 0.5rem;
-    right: 0.5rem;
     background: color-mix(in srgb, var(--background-panel) 80%, transparent);
+}
+
+.m-tagdex-grid .m-tagdex-favorite-button {
+    right: 0.5rem;
+}
+
+.m-tagdex-grid .m-tagdex-alltags-button {
+    left: 0.5rem;
 }
 
 /* Names wrap to two lines here instead of ellipsing at one: a tile is narrower than a list row, and the second

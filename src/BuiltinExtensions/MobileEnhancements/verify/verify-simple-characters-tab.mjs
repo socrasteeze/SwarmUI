@@ -35,7 +35,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[TOAST]', TOAST)
     .replaceAll('[VARY]', '1');
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_create.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/ExtensionFile/TagDexExtension/Assets/tagdex_core.js': `${TAGDEX}/tagdex_core.js`,
@@ -78,7 +78,8 @@ await page.addInitScript(() => {
         trigger: `char_${`${i}`.padStart(3, '0')}, series`,
         count: 1000 - i,
         copyright_display: 'Series',
-        kind: 'character'
+        kind: 'character',
+        core_tags: ['long hair', 'blue eyes']
     }));
     window.genericRequest = (route, args, callback) => {
         window.__requests.push({ route, args });
@@ -228,6 +229,43 @@ await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tag
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-card-main').click());
 const prompt = await page.evaluate(() => mState.params['prompt']);
 check('tapping a card inserts its trigger into the prompt', `${prompt}`.includes('char_000, series'), `${prompt}`);
+
+// ---- The all-tags control reaches the nav tab too ----
+// The tab and the Create-row sheet share buildBrowseRow, so this is the shared control seen from the other
+// surface - the one where the Create panel is hidden while the insert happens.
+// Seeded long enough that the box has auto-grown well past its three-row floor: a short prompt would sit at
+// the floor either way, and the height check below could not then fail on the bug it exists for.
+await page.evaluate(async () => {
+    document.querySelector('.m-panel[data-mtab="characters"]').classList.remove('m-tab-active');
+    document.querySelector('.m-panel[data-mtab="create"]').classList.add('m-tab-active');
+    mState.params['prompt'] = 'a seeded prompt long enough to wrap over several lines in a phone-width box, '
+        + 'so the prompt field has grown well past the three rows it starts at';
+    mState.changed();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    window.__grownPrompt = Math.round(document.querySelector('.m-prompt-box').getBoundingClientRect().height);
+    document.querySelector('.m-panel[data-mtab="create"]').classList.remove('m-tab-active');
+    document.querySelector('.m-panel[data-mtab="characters"]').classList.add('m-tab-active');
+    mState.params['prompt'] = '';
+    mState.changed();
+    document.querySelector('.m-tagdex-tab .m-tagdex-alltags-button').click();
+});
+const allTagsPrompt = await page.evaluate(() => mState.params['prompt']);
+check('the all-tags control adds the trigger plus the core tags',
+    `${allTagsPrompt}`.includes('char_000, series, long hair, blue eyes'), `${allTagsPrompt}`);
+// Inserting from here runs mCreate.render() against a Create panel that is display:none, where the prompt
+// box reports scrollHeight 0. That measurement used to be applied as an inline height:0px and stayed, so the
+// box came back a sliver with the prompt spilling out of it. Switching the panel back on directly rather
+// than through the router: m_app.js is absent here, so 'create' is not registered and applyHash cannot
+// reach it - which also means nothing calls onShow, leaving the guard inside autoGrow as the only defence.
+const promptBox = await page.evaluate(async () => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    document.querySelector('.m-panel[data-mtab="characters"]').classList.remove('m-tab-active');
+    document.querySelector('.m-panel[data-mtab="create"]').classList.add('m-tab-active');
+    return { grown: window.__grownPrompt,
+        onReturn: Math.round(document.querySelector('.m-prompt-box').getBoundingClientRect().height) };
+});
+check('inserting from the Characters tab does not collapse the hidden prompt box',
+    promptBox.grown > 76 && promptBox.onReturn == promptBox.grown, JSON.stringify(promptBox));
 
 await browser.close();
 const failed = results.filter(result => !result.pass).length;

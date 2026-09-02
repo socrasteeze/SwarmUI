@@ -321,6 +321,12 @@
        anyone reworking the shared rule. See also maximum-scale=1 in index.html. */
     font-size: 16px;
 }
+/* A floor under the auto-grow in m_create.js, which drives height inline. Three lines of 16px text plus the
+   0.5rem padding either side and the border, matching the rows=3 the box is built with. Without it a stale
+   or mistimed measurement can leave the box pinned at a height too small to read one line of prompt in. */
+.m-prompt-box {
+    min-height: 4.75rem;
+}
 .m-image-strip {
     display: flex;
     gap: 0.4rem;
@@ -1400,25 +1406,179 @@
     min-height: 40px;
 }
 
-/* --- Grid sheet --- */
-.m-grid-axis-row {
+/* --- Grid sheet (m_grid.js) ---
+   One collapsed card per axis, so the sheet opens as a five-line menu rather than five expanded pickers.
+   The card that is open owns the scroll; the others are one line each. */
+.m-grid-sheet {
+    display: flex;
+    flex-direction: column;
+}
+.m-grid-intro,
+.m-grid-hint {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin-bottom: 0.4rem;
+}
+.m-grid-cards {
+    display: flex;
+    flex-direction: column;
+    /* Capped so the footer's count and Run button stay on screen with a card expanded - the whole point of
+       the count is to be read before committing to a run. */
+    max-height: 52vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+.m-grid-cards::-webkit-scrollbar {
+    display: none;
+}
+.m-grid-card {
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+}
+.m-grid-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 48px;
+    padding: 0.4rem 0.2rem;
+    cursor: pointer;
+    list-style: none;
+}
+.m-grid-card-head::-webkit-details-marker {
+    display: none;
+}
+.m-grid-card-name {
+    font-weight: bold;
+    flex: 0 0 auto;
+}
+.m-grid-card-summary {
+    color: var(--text-soft);
+    font-size: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-grid-card-summary.m-grid-card-on {
+    color: var(--emphasis);
+}
+.m-grid-card-body {
+    padding: 0 0.2rem 0.6rem 0.2rem;
+}
+.m-grid-chosen {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.4rem;
+}
+.m-grid-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--background-panel);
+    border: 1px solid var(--emphasis);
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 13px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Same trade as the image tile's remove: smaller than the 44px minimum, because the chip it sits in is
+   itself shorter than that, and nothing is lost by a miss - the option list below re-toggles the same
+   value. */
+.m-grid-chip-x {
+    color: var(--text-soft);
+    font-size: 15px;
+    line-height: 1;
+    padding: 0 0.1rem;
+}
+.m-grid-quick,
+.m-grid-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+.m-grid-options {
+    max-height: 30vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+.m-grid-options::-webkit-scrollbar {
+    display: none;
+}
+/* The LoRA list is names rather than short tokens, so it stacks instead of wrapping - a row of half-elided
+   paths is unreadable where a column of full ones is not. */
+.m-grid-lora-options {
+    flex-direction: column;
+    flex-wrap: nowrap;
+}
+.m-grid-quick-button,
+.m-grid-option {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.7rem;
+    font-size: 14px;
+    text-align: left;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-grid-quick-button.m-selected,
+.m-grid-option.m-selected {
+    border-color: var(--emphasis);
+    color: var(--emphasis);
+}
+.m-grid-custom {
     display: flex;
     gap: 0.4rem;
-    margin-bottom: 0.5rem;
+    margin-top: 0.4rem;
 }
-.m-grid-axis-param {
-    flex: 0 0 34%;
-    min-height: 44px;
-}
-.m-grid-axis-vals {
-    flex: 1;
-    min-height: 44px;
-    padding: 0 0.4rem;
+.m-grid-custom-input,
+.m-grid-search {
+    flex: 1 1 auto;
+    min-width: 0;
     box-sizing: border-box;
+    padding: 0.5rem;
+    min-height: 44px;
+    /* 16px, or iOS zooms the page the moment this is focused - same floor as every other field here. */
+    font-size: 16px;
+}
+.m-grid-search {
+    width: 100%;
+    margin-bottom: 0.4rem;
+}
+.m-grid-add-button {
+    flex: 0 0 auto;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.9rem;
+}
+.m-grid-footer {
+    padding-top: 0.5rem;
+}
+.m-grid-count {
+    color: var(--text-soft);
+    font-size: 13px;
+    text-align: center;
+    margin-bottom: 0.4rem;
 }
 .m-grid-run {
     width: 100%;
-    margin-top: 0.6rem;
+}
+.m-grid-run:disabled {
+    opacity: 0.4;
 }
 
 /* --- Images tab --- */
@@ -1572,6 +1732,161 @@
     font-size: 14px;
     min-height: 48px;
     box-sizing: border-box;
+}
+
+/* --- Preset editor (m_presets.js), reached from More > Presets ---
+   Reuses the sheet chrome (.m-sheet-title, .m-edit-actions, .m-edit-cancel-button, .m-edit-save-button,
+   .m-edit-remove-button) rather than growing a parallel set: this is a third editor in the same shell as the
+   prompt-image one, and the two should not look like different apps. Only what is genuinely new is here. */
+.m-preset-sheet {
+    display: flex;
+    flex-direction: column;
+}
+.m-preset-label {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin: 0.5rem 0 0.2rem 0;
+}
+.m-preset-field {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem;
+    min-height: 44px;
+    /* Restated rather than inherited, for the same reason .m-prompt-box restates it: below 16px iOS zooms the
+       page on focus, and this sheet is nothing but focusable fields. */
+    font-size: 16px;
+}
+.m-preset-new-button {
+    width: 100%;
+    background: var(--emphasis);
+    color: var(--emphasis-text, #fff);
+    font-weight: bold;
+    border: none;
+    border-radius: 0.5rem;
+    min-height: 46px;
+    margin-bottom: 0.5rem;
+}
+.m-preset-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem;
+    min-height: 44px;
+    font-size: 16px;
+    margin-bottom: 0.4rem;
+}
+/* Capped rather than free-running: the sheet itself scrolls, and without a ceiling a long preset list pushed
+   Save and Cancel past the bottom of a phone screen with no hint they were there. */
+.m-preset-results {
+    display: flex;
+    flex-direction: column;
+    max-height: 45vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+.m-preset-results::-webkit-scrollbar {
+    display: none;
+}
+.m-preset-row-item {
+    display: flex;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+    color: var(--text);
+    padding: 0.5rem 0.2rem;
+    min-height: 48px;
+}
+.m-preset-row-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.m-preset-row-name,
+.m-preset-row-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-preset-row-sub {
+    color: var(--text-soft);
+    font-size: 12px;
+}
+.m-preset-params {
+    display: flex;
+    flex-direction: column;
+    max-height: 40vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+}
+.m-preset-params::-webkit-scrollbar {
+    display: none;
+}
+.m-preset-param-row {
+    margin-bottom: 0.4rem;
+}
+/* The parameter's own name, above its value rather than beside it: a phone-width row split between a label
+   and a field left the field too narrow to read a model path or a lora list in. */
+.m-preset-param-label {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin-bottom: 0.15rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-preset-param-value {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+.m-preset-param-remove {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    font-size: 20px;
+    line-height: 1;
+}
+.m-preset-param-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin: 0.5rem 0;
+}
+.m-preset-small-button {
+    flex: 1 1 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    font-size: 13px;
+    padding: 0 0.4rem;
+}
+.m-preset-small-button:disabled {
+    opacity: 0.5;
+}
+.m-preset-star-toggle {
+    width: 100%;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    margin-top: 0.5rem;
+    text-align: left;
+    padding: 0 0.6rem;
+}
+.m-preset-star-toggle[aria-pressed="true"] {
+    color: var(--emphasis);
+    border-color: var(--emphasis);
 }
 
 /* --- Client toast (NOT the shared error toast: that one's header is the literal word "Error", so

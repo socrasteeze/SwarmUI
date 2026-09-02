@@ -113,10 +113,31 @@ class MGenSocket {
         this.emit('status', data);
     }
 
-    /** Interrupts everything this user has queued or running in this session. */
-    interrupt() {
+    /** Interrupts everything this user has queued or running in this session.
+     *
+     * `onSettled` runs on both outcomes, so a caller can restore its button without having to guess which
+     * one happened. Both outcomes also re-poll status: on success that is how the queue count reaches zero
+     * without waiting for the next frame, and on failure it is the only thing that puts the count back to
+     * what the server actually has. The caller clears its unfinished tiles optimistically, and a failed
+     * interrupt means the batch is still running - the tiles rebuild themselves from the next progress
+     * frame (getLiveTile recreates a missing key), so status is the part that needs saying out loud.
+     *
+     * Before this had an error branch it was a 3-argument call, which meant a refused interrupt went to the
+     * global error path while the button, the queue count and the cleared preview all still claimed it had
+     * worked. */
+    interrupt(onSettled) {
+        let settle = () => {
+            if (onSettled) {
+                onSettled();
+            }
+        };
         genericRequest('InterruptAll', { 'other_sessions': false }, data => {
             this.pollStatus();
+            settle();
+        }, 0, error => {
+            this.pollStatus();
+            settle();
+            mUI.warn(`Could not interrupt: ${error}`);
         });
     }
 
