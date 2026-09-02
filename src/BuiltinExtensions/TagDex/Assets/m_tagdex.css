@@ -81,11 +81,21 @@
     flex: 2 1 12rem;
 }
 
-/* Row two: the favourites filter takes the space, the layout toggle takes only what it needs. */
+/* Row two: the favourites filter takes the leftover space, the sort and layout controls take only what they
+   need. Wrapping is allowed so a narrow phone drops the controls onto their own line rather than crushing all
+   three below a comfortable tap target. */
 .m-tagdex-filter-row {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.4rem;
     margin-bottom: 0.4rem;
+}
+
+.m-tagdex-sort {
+    flex: 0 1 auto;
+    min-width: 8rem;
+    min-height: 44px;
+    padding: 0 0.5rem;
 }
 
 .m-tagdex-view-toggle {

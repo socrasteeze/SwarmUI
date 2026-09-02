@@ -139,6 +139,21 @@ Two more routes are plain `WebServer.WebApp.MapGet` handlers, not API calls: `/T
 serves the lean typeahead index as an immutably-cached, tab-separated blob, and `/TagDexThumb/{source}/{**file}`
 serves one thumbnail image out of the data folder.
 
+## Browsing on `/simple`
+
+The Characters tab and the Create-panel Characters sheet share their controls, so the two never drift apart. The
+dataset picker and search sit on one row; the favourites filter, a sort dropdown and a layout toggle sit on the
+next, wrapping to another line on a narrow phone.
+
+Sort offers the same modes as the genpage tab, with the same server values: Best Match (`relevance`), Most Posts
+(`count`), Most Solo Posts (`solo_count`), Most Distinctive Style (`uniqueness`), Highest Quality Score
+(`avg_score`), Name A-Z (`name`) and Series A-Z (`copyright`). The two score modes are hidden unless the active
+dataset carries scores, and Series is hidden for artist datasets, since artist rows have no copyright to sort on.
+Selecting a hidden mode's dataset falls back to Best Match rather than sorting by a field of nulls.
+
+The layout toggle cycles list, two columns and three columns. Both the sort mode and the layout persist in
+browser storage under `m_client_tagdex_sort` and `m_client_tagdex_view`.
+
 ## Gotchas
 
 - **`anima_styles` cannot receive pushes.** Its entries resolve their thumbnail by a pre-set path

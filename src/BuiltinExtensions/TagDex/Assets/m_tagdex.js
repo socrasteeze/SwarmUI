@@ -136,6 +136,8 @@ class MTagDexClass {
         // below a comfortable tap target on a phone.
         let filterRow = mUI.el('div', 'm-tagdex-filter-row');
         filterRow.appendChild(favorites);
+        let sortSelect = this.buildSortSelect();
+        filterRow.appendChild(sortSelect);
         let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
         let results = mUI.el('div', 'm-tagdex-browse-results');
         filterRow.appendChild(this.buildViewToggle(results));
@@ -154,7 +156,7 @@ class MTagDexClass {
         pager.style.display = 'none';
         wrap.appendChild(pager);
         panel.appendChild(wrap);
-        let ctx = { 'sources': [], 'source': '', 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': false };
+        let ctx = { 'sources': [], 'source': '', 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': false, 'sortBy': this.sortMode() };
         let runSearch;
         let render = (records) => {
             results.innerHTML = '';
@@ -187,7 +189,7 @@ class MTagDexClass {
             genericRequest('TagDexSearchEntries', {
                 'source': ctx.source,
                 'search': search.value.trim(),
-                'sortBy': 'relevance',
+                'sortBy': ctx.sortBy || 'relevance',
                 'offset': ctx.offset,
                 'limit': ctx.pageSize,
                 'withFolders': false,
@@ -227,6 +229,13 @@ class MTagDexClass {
         };
         source.addEventListener('change', () => {
             ctx.source = source.value;
+            // Re-gate before searching: a dataset without scores must not keep a score sort selected.
+            this.syncSortOptions(sortSelect, ctx);
+            restart();
+        });
+        sortSelect.addEventListener('change', () => {
+            ctx.sortBy = sortSelect.value;
+            this.saveSortMode(ctx.sortBy);
             restart();
         });
         search.addEventListener('input', () => {
@@ -258,6 +267,7 @@ class MTagDexClass {
             let preferred = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id)) : '';
             ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : '');
             source.value = ctx.source;
+            this.syncSortOptions(sortSelect, ctx);
             runSearch();
         });
     }
@@ -296,6 +306,8 @@ class MTagDexClass {
         content.appendChild(controls);
         let filterRow = mUI.el('div', 'm-tagdex-filter-row');
         filterRow.appendChild(favorites);
+        let sortSelect = this.buildSortSelect();
+        filterRow.appendChild(sortSelect);
         let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
         let results = mUI.el('div', 'm-tagdex-browse-results');
         filterRow.appendChild(this.buildViewToggle(results));
@@ -306,7 +318,7 @@ class MTagDexClass {
         more.style.display = 'none';
         content.appendChild(more);
         mUI.openSheet(content);
-        let ctx = { 'sources': [], 'source': '', 'limit': 50, 'token': 0, 'timer': null, 'total': 0, 'favoritesOnly': false };
+        let ctx = { 'sources': [], 'source': '', 'limit': 50, 'token': 0, 'timer': null, 'total': 0, 'favoritesOnly': false, 'sortBy': this.sortMode() };
         let runSearch = () => {
             if (!ctx.source) {
                 results.innerHTML = '';
@@ -319,7 +331,7 @@ class MTagDexClass {
             genericRequest('TagDexSearchEntries', {
                 'source': ctx.source,
                 'search': search.value.trim(),
-                'sortBy': 'relevance',
+                'sortBy': ctx.sortBy || 'relevance',
                 'offset': 0,
                 'limit': ctx.limit,
                 'withFolders': false,
@@ -359,6 +371,13 @@ class MTagDexClass {
         source.addEventListener('change', () => {
             ctx.source = source.value;
             ctx.limit = 50;
+            this.syncSortOptions(sortSelect, ctx);
+            runSearch();
+        });
+        sortSelect.addEventListener('change', () => {
+            ctx.sortBy = sortSelect.value;
+            this.saveSortMode(ctx.sortBy);
+            ctx.limit = 50;
             runSearch();
         });
         search.addEventListener('input', () => {
@@ -390,8 +409,94 @@ class MTagDexClass {
             let preferred = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id)) : '';
             ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : '');
             source.value = ctx.source;
+            this.syncSortOptions(sortSelect, ctx);
             runSearch();
         });
+    }
+
+    /** Sort modes offered on the compact surfaces, mirroring the genpage tab's dropdown so the same dataset
+     * sorts the same way on both. Values are the server's (`TagDexSearch.Run`); `scored` and `character` mark the
+     * ones that only apply to some datasets, exactly as the genpage gates them. */
+    static SortModes = [
+        { 'value': 'relevance', 'label': 'Best Match' },
+        { 'value': 'count', 'label': 'Most Posts' },
+        { 'value': 'solo_count', 'label': 'Most Solo Posts' },
+        { 'value': 'uniqueness', 'label': 'Most Distinctive Style', 'needs': 'scored' },
+        { 'value': 'avg_score', 'label': 'Highest Quality Score', 'needs': 'scored' },
+        { 'value': 'name', 'label': 'Name A-Z' },
+        { 'value': 'copyright', 'label': 'Series A-Z', 'needs': 'character' }
+    ];
+
+    /** Reads the remembered sort mode, falling back to relevance for an absent or unknown value. */
+    sortMode() {
+        try {
+            let stored = localStorage.getItem('m_client_tagdex_sort');
+            for (let i = 0; i < MTagDexClass.SortModes.length; i++) {
+                if (MTagDexClass.SortModes[i].value == stored) {
+                    return stored;
+                }
+            }
+        }
+        catch (e) {
+            // Storage can throw outright in private mode - fall through to the default.
+        }
+        return 'relevance';
+    }
+
+    /** Builds the sort dropdown. Every mode is added up front; syncSortOptions hides the ones the active dataset
+     * cannot answer, which is cheaper than rebuilding the list on each dataset change. */
+    buildSortSelect() {
+        let select = document.createElement('select');
+        select.className = 'm-tagdex-sort';
+        select.setAttribute('aria-label', 'Sort order');
+        select.title = 'Sort order';
+        for (let i = 0; i < MTagDexClass.SortModes.length; i++) {
+            let mode = MTagDexClass.SortModes[i];
+            let option = document.createElement('option');
+            option.value = mode.value;
+            option.textContent = mode.label;
+            if (mode.needs) {
+                option.dataset.needs = mode.needs;
+            }
+            select.appendChild(option);
+        }
+        select.value = this.sortMode();
+        return select;
+    }
+
+    /** Hides sort modes the active dataset cannot answer: the two score-based ones unless the dataset carries
+     * scores, and the series sort unless it holds characters (artist rows have no copyright to sort on). If the
+     * selected mode is the one that just disappeared, drops back to relevance rather than silently sorting by a
+     * field of nulls. */
+    syncSortOptions(select, ctx) {
+        let scored = false;
+        let isCharacter = false;
+        for (let i = 0; i < ctx.sources.length; i++) {
+            if (ctx.sources[i].id == ctx.source) {
+                scored = ctx.sources[i].scored == true;
+                isCharacter = ctx.sources[i].kind == 'character';
+            }
+        }
+        let options = select.querySelectorAll('option');
+        for (let i = 0; i < options.length; i++) {
+            let needs = options[i].dataset.needs;
+            let allowed = !needs || (needs == 'scored' ? scored : isCharacter);
+            options[i].style.display = allowed ? '' : 'none';
+            if (!allowed && select.value == options[i].value) {
+                select.value = 'relevance';
+            }
+        }
+        ctx.sortBy = select.value;
+    }
+
+    /** Remembers the sort mode across sheets, tabs and reloads, the same way the layout toggle is remembered. */
+    saveSortMode(mode) {
+        try {
+            localStorage.setItem('m_client_tagdex_sort', mode);
+        }
+        catch (e) {
+            mUI.warn('Could not save the sort preference.');
+        }
     }
 
     /** The layouts the toggle cycles through, in order. Explicit column counts rather than an auto-fill grid:
