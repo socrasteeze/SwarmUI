@@ -75,6 +75,12 @@
          its first consumer. -->
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_image_edit.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_create.js?vary=[VARY]"></script>
+    <!-- Grid builder, opened by the Generate long-press and the More > Grid generate row. Registers its More
+         row at script load, so it must come before m_app.js; it reads MCreate/mCreate, so after m_create.js. -->
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_grid.js?vary=[VARY]"></script>
+    <!-- Preset manager, reached from More > Presets. Registers its More row at script load, so it must come
+         before m_app.js (which builds that tab); it reads MCreate.paramLabel, so after m_create.js. -->
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_presets.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_images.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_models.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_app.js?vary=[VARY]"></script>

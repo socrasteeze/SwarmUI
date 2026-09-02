@@ -23,7 +23,7 @@ class MApp {
                 mAutoComplete.loadSettings();
                 mGen.pollStatus();
             });
-            mUI.registerTab('create', p => mCreate.build(p), null);
+            mUI.registerTab('create', p => mCreate.build(p), () => mCreate.onShow());
             mUI.registerTab('images', p => mImages.build(p), () => mImages.onShow());
             mUI.registerTab('models', p => mModels.build(p), () => mModels.onShow());
             mUI.registerTab('more', p => this.buildMore(p), null);

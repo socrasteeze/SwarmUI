@@ -45,7 +45,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[VARY]', '1');
 
 /** Client modules served from the real tree. m_app.js is deliberately absent - booting needs a server. */
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_create.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,
@@ -116,10 +116,17 @@ await page.addInitScript(() => {
             });
         }
         else if (route == 'TagDexSearchEntries') {
-            let results = args.favoritesOnly && !window.__tagDexFavorite ? [] : [
+            let results = [
                 { name: 'hatsune_miku', display: 'Hatsune Miku', trigger: 'hatsune_miku, vocaloid', count: 123456,
-                    copyright_display: 'Vocaloid', kind: 'character', favorited: window.__tagDexFavorite }
+                    copyright_display: 'Vocaloid', kind: 'character', favorited: window.__tagDexFavorite,
+                    core_tags: ['twintails', 'aqua hair', 'aqua eyes', 'long hair'] },
+                // No core_tags: the artist datasets and e621 characters ship none, so the all-tags control has
+                // to be absent on such a row rather than present and inert.
+                { name: 'some_artist', display: 'Some Artist', trigger: 'some_artist', count: 4321, kind: 'artist' }
             ];
+            if (args.favoritesOnly) {
+                results = window.__tagDexFavorite ? results.slice(0, 1) : [];
+            }
             callback({
                 total: results.length,
                 results: results
@@ -148,6 +155,45 @@ await page.evaluate(() => {
     panel.classList.add('m-tab-active');
     mCreate.build(panel);
 });
+
+// ---- Prompt box height ----
+// render() is wired to mState.onChange, so it runs on every state change from every tab, and it auto-grows
+// the prompt box from scrollHeight. A hidden .m-panel is display:none and reports scrollHeight 0, which used
+// to pin the box shut at an inline height:0px that nothing recomputed when the tab came back - the box came
+// back a sliver with the prompt spilling out of it. Simulated here by leaving the create tab, changing state,
+// and returning through the same onShow the router calls.
+const promptHeights = await page.evaluate(async () => {
+    // mState.changed() defers its listeners to the next animation frame, so every measurement has to wait one
+    // out - otherwise the box is read before render() has touched it and every height reads the same.
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    let box = document.querySelector('.m-prompt-box');
+    let panel = document.querySelector('.m-panel[data-mtab="create"]');
+    mState.params['prompt'] = 'a long enough prompt that the box has grown past its three starting rows, '
+        + 'wrapping over several lines so a collapse is unmistakable in the measurement below';
+    mState.changed();
+    await settle();
+    let grown = box.getBoundingClientRect().height;
+    panel.classList.remove('m-tab-active');
+    mState.params['seed'] = 12345;
+    mState.changed();
+    await settle();
+    panel.classList.add('m-tab-active');
+    // Read before onShow: the guard inside autoGrow has to have discarded the zero-layout measurement on its
+    // own. onShow is the second line of defence, and would otherwise hide a regression in the first.
+    let onReturn = box.getBoundingClientRect().height;
+    mCreate.onShow();
+    let restored = box.getBoundingClientRect().height;
+    mState.params['prompt'] = '';
+    mState.changed();
+    await settle();
+    return { grown: Math.round(grown), onReturn: Math.round(onReturn), restored: Math.round(restored),
+        floor: Math.round(box.getBoundingClientRect().height) };
+});
+check('prompt box survives a state change made from another tab',
+    promptHeights.grown > 76 && promptHeights.onReturn == promptHeights.grown
+    && promptHeights.restored == promptHeights.grown, JSON.stringify(promptHeights));
+check('an empty prompt box still stands at its three-row floor',
+    promptHeights.floor >= 76, JSON.stringify(promptHeights));
 
 // ---- Priority-control regressions ----
 const initialControls = await page.evaluate(() => ({
@@ -289,9 +335,36 @@ check('TagDex Favorites filter keeps the favorited result', await page.evaluate(
 await page.click('.m-tagdex-favorite-button');
 check('unfavoriting inside the filter removes the row', await page.evaluate(() => !window.__tagDexFavorite
     && document.querySelectorAll('.m-tagdex-card').length == 0));
+
 await page.click('.m-tagdex-favorite-filter');
 await page.click('.m-tagdex-card-main');
 check('TagDex browse inserts the selected trigger into the prompt', await page.evaluate(() => mState.params.prompt == 'hatsune_miku, vocaloid'));
+await page.evaluate(() => {
+    mState.params.prompt = '';
+    mState.changed();
+});
+// The trigger alone is only half the record. core_tags is what makes an unfamiliar character render as
+// themselves, and the browse sheet used to offer no way to get it - the card's tap was the only action, so
+// every insertion was the bare name. Both must be reachable in one tap each, and the all-tags control must
+// not appear on a row that has no core_tags to add.
+const allTagsControl = await page.evaluate(() => {
+    let cards = document.querySelectorAll('.m-tagdex-card');
+    let button = cards[0].querySelector('.m-tagdex-alltags-button');
+    let box = button.getBoundingClientRect();
+    return {
+        label: button.getAttribute('aria-label'),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+        onArtistRow: cards[1].querySelectorAll('.m-tagdex-alltags-button').length
+    };
+});
+check('TagDex all-tags control is a 44px target, and absent where there are no core tags',
+    allTagsControl.label == 'Add Hatsune Miku with all 4 tags' && allTagsControl.width == 44
+    && allTagsControl.height == 44 && allTagsControl.onArtistRow == 0, JSON.stringify(allTagsControl));
+await page.click('.m-tagdex-card .m-tagdex-alltags-button');
+const allTagsPrompt = await page.evaluate(() => mState.params.prompt);
+check('TagDex all-tags inserts the trigger plus every core tag',
+    allTagsPrompt == 'hatsune_miku, vocaloid, twintails, aqua hair, aqua eyes, long hair', allTagsPrompt);
 await page.evaluate(() => {
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();

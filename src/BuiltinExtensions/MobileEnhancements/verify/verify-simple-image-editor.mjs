@@ -72,7 +72,7 @@ check('every index.html asset is registered in OtherAssets (would 404 otherwise)
     referenced.length > 0 && unregistered.length == 0,
     unregistered.length ? `unregistered: ${unregistered.join(', ')}` : `${referenced.length} checked`);
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_image_edit.js', 'm_create.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_image_edit.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,

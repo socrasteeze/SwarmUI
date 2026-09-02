@@ -203,6 +203,25 @@ class MImages {
             let btn = mUI.el('button', 'm-viewer-action', label);
             btn.addEventListener('click', handler);
             actions.appendChild(btn);
+            return btn;
+        };
+        /** Wraps the two actions that hit the server. Both used to be 3-argument genericRequest calls, which
+         * meant a refused star or delete went to the global error path while this sheet sat there looking
+         * exactly as it had before the press - no pending state to undo, no message beside the control, and
+         * nothing stopping a second press firing the same call again. */
+        let serverAction = (btn, label, route, args, onSuccess) => {
+            if (btn.disabled) {
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = `${label}...`;
+            genericRequest(route, args, data => {
+                onSuccess(data);
+            }, 0, error => {
+                btn.disabled = false;
+                btn.textContent = label;
+                mUI.warn(`${label} failed: ${error}`);
+            });
         };
         addAction('Reuse Params', () => {
             if (entry.metadata && mState.applyMetadata(entry.metadata)) {
@@ -225,25 +244,30 @@ class MImages {
                 mUI.warn('This image is not a saved file, so it cannot be attached as a path. Paste it into the prompt box instead.');
             }
         });
-        addAction(entry.fullsrc && entry.fullsrc.startsWith('Starred/') ? 'Unstar' : 'Star', () => {
-            if (entry.fullsrc) {
-                genericRequest('ToggleImageStarred', { 'path': entry.fullsrc }, data => {
+        let starLabel = entry.fullsrc && entry.fullsrc.startsWith('Starred/') ? 'Unstar' : 'Star';
+        let starButton = addAction(starLabel, () => {
+            if (!entry.fullsrc) {
+                mUI.warn('This image is not a saved file, so it cannot be starred.');
+                return;
+            }
+            serverAction(starButton, starLabel, 'ToggleImageStarred', { 'path': entry.fullsrc }, () => {
+                this.dirty = true;
+                close();
+                this.refresh();
+            });
+        });
+        let deleteButton = addAction('Delete', () => {
+            if (!entry.fullsrc) {
+                mUI.warn('This image is not a saved file, so it cannot be deleted.');
+                return;
+            }
+            mUI.confirm('Delete this image?', () => {
+                serverAction(deleteButton, 'Delete', 'DeleteImage', { 'path': entry.fullsrc }, () => {
                     this.dirty = true;
                     close();
                     this.refresh();
                 });
-            }
-        });
-        addAction('Delete', () => {
-            if (entry.fullsrc) {
-                mUI.confirm('Delete this image?', () => {
-                    genericRequest('DeleteImage', { 'path': entry.fullsrc }, data => {
-                        this.dirty = true;
-                        close();
-                        this.refresh();
-                    });
-                });
-            }
+            });
         });
         addAction('Raw', () => window.open(entry.url, '_blank'));
         addAction('Close', close);

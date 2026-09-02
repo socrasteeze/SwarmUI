@@ -342,9 +342,24 @@ class MCreate {
         this.interruptButton = mUI.el('button', 'm-interrupt-button', 'Interrupt');
         this.interruptButton.style.display = 'none';
         this.interruptButton.addEventListener('click', () => {
-            mGen.interrupt();
+            // Disabled for the round trip, so a second tap cannot fire a second InterruptAll at a queue the
+            // first one may already have emptied. Restored on both outcomes by the onSettled callback,
+            // because on success the button can legitimately still be on screen - another batch queued
+            // behind this one keeps queueTotal above zero - and would otherwise read "Interrupting..."
+            // for the rest of that batch.
+            if (this.interruptButton.disabled) {
+                return;
+            }
+            this.interruptButton.disabled = true;
+            this.interruptButton.textContent = 'Interrupting...';
+            mGen.interrupt(() => {
+                this.interruptButton.disabled = false;
+                this.interruptButton.textContent = 'Interrupt';
+            });
             // Anything still in flight is never going to arrive, so drop it now rather than leaving it to
-            // be swept when the next batch happens to start.
+            // be swept when the next batch happens to start. This is optimistic: if the interrupt is
+            // refused, the batch keeps running and its next progress frame rebuilds the tiles, while
+            // mGen.interrupt re-polls status to put the queue count back.
             this.clearUnfinished();
         });
         genBar.appendChild(this.interruptButton);
@@ -1803,71 +1818,38 @@ class MCreate {
         mUI.openSheet(content);
     }
 
-    /** Grid-gen sheet: >=2 axes, >=2 values each ("2x2+n"); longest axis is auto-placed horizontal by
-     * mGen.runGrid. Base params are the current Create state - "predetermined parameters". */
+    /** Opens the grid builder (m_grid.js). Kept as a method here because the Generate long-press and the
+     * More-tab row both route through it, and because what this used to be - a parameter dropdown plus a
+     * comma-separated text box - lived in this file. That form is gone: see m_grid.js for why a built
+     * surface replaced it. */
     openGridSheet() {
-        if (typeof permissions != 'undefined' && permissions.hasPermission && !permissions.hasPermission('gridgen_generate_grids')) {
-            mUI.warn('You do not have grid generation permission.');
+        if (typeof mGrid == 'undefined') {
+            mUI.warn('The grid builder is unavailable.');
             return;
         }
-        let content = mUI.el('div', 'm-grid-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'Grid Generate'));
-        let axesWrap = mUI.el('div', 'm-grid-axes');
-        content.appendChild(axesWrap);
-        let axisParams = ['steps', 'cfgscale', 'seed', 'model', 'loraweights', 'prompt', 'sidelength', 'aspectratio'].filter(p => p == 'prompt' || mState.paramMeta[p]);
-        let addAxis = () => {
-            if (axesWrap.children.length >= 3) {
-                return;
-            }
-            let row = mUI.el('div', 'm-grid-axis-row');
-            let select = document.createElement('select');
-            select.className = 'm-grid-axis-param';
-            for (let p of axisParams) {
-                let opt = document.createElement('option');
-                opt.value = p;
-                opt.textContent = p;
-                select.appendChild(opt);
-            }
-            row.appendChild(select);
-            let vals = document.createElement('input');
-            vals.type = 'text';
-            vals.placeholder = 'values, comma, separated';
-            vals.className = 'm-grid-axis-vals';
-            row.appendChild(vals);
-            axesWrap.appendChild(row);
-        };
-        addAxis();
-        addAxis();
-        let addBtn = mUI.el('button', 'm-wide-button', '+ Add axis');
-        addBtn.addEventListener('click', addAxis);
-        content.appendChild(addBtn);
-        let runBtn = mUI.el('button', 'm-generate-button m-grid-run', 'Run Grid');
-        runBtn.addEventListener('click', () => {
-            let axes = [];
-            for (let row of axesWrap.querySelectorAll('.m-grid-axis-row')) {
-                let mode = row.querySelector('.m-grid-axis-param').value;
-                let vals = row.querySelector('.m-grid-axis-vals').value.trim();
-                if (vals) {
-                    axes.push({ 'mode': mode, 'vals': vals });
-                }
-            }
-            if (axes.length < 2 || axes.some(a => MState.toList(a.vals).length < 2)) {
-                mUI.warn('Grids need at least 2 axes with 2+ values each.');
-                return;
-            }
-            let base = mState.buildGenInput();
-            delete base['images'];
-            mGen.runGrid(base, axes);
-            close();
-        });
-        content.appendChild(runBtn);
-        let close = mUI.openSheet(content);
+        mGrid.open();
     }
 
-    /** Auto-grows a textarea up to ~6 lines. */
+    /** Auto-grows a textarea up to ~6 lines.
+     *
+     * A measurement taken while the Create panel is off screen is discarded rather than applied. render()
+     * is wired to mState.onChange, so it runs on any state change from any tab, and a hidden panel
+     * (.m-panel is display:none unless .m-tab-active) reports scrollHeight 0 - which pinned the box shut at
+     * an inline height:0px and left it that way, since nothing recomputed it when the tab came back. */
     autoGrow(box) {
+        if (box.offsetParent === null) {
+            return;
+        }
         box.style.height = 'auto';
         box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
+    }
+
+    /** Runs on every activation of the Create tab. The prompt box can only be measured with layout, so any
+     * growth that happened while the tab was hidden is applied here instead. */
+    onShow() {
+        if (this.promptBox) {
+            this.autoGrow(this.promptBox);
+        }
     }
 }
 
