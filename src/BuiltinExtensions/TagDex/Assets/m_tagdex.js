@@ -131,11 +131,16 @@ class MTagDexClass {
         let favorites = mUI.el('button', 'm-tagdex-favorite-filter', '\u2605 Favorites');
         favorites.setAttribute('aria-pressed', 'false');
         favorites.title = 'Show favorites only';
-        controls.appendChild(favorites);
         wrap.appendChild(controls);
+        // Second row: the filter and the layout toggle. Kept off the picker/search row so neither shrinks
+        // below a comfortable tap target on a phone.
+        let filterRow = mUI.el('div', 'm-tagdex-filter-row');
+        filterRow.appendChild(favorites);
         let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
-        wrap.appendChild(status);
         let results = mUI.el('div', 'm-tagdex-browse-results');
+        filterRow.appendChild(this.buildViewToggle(results));
+        wrap.appendChild(filterRow);
+        wrap.appendChild(status);
         wrap.appendChild(results);
         let pager = mUI.el('div', 'm-tagdex-pager');
         let prev = mUI.el('button', 'm-tagdex-page-button', '\u2039 Prev');
@@ -288,11 +293,14 @@ class MTagDexClass {
         let favorites = mUI.el('button', 'm-tagdex-favorite-filter', '★ Favorites');
         favorites.setAttribute('aria-pressed', 'false');
         favorites.title = 'Show favorites only';
-        controls.appendChild(favorites);
         content.appendChild(controls);
+        let filterRow = mUI.el('div', 'm-tagdex-filter-row');
+        filterRow.appendChild(favorites);
         let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
-        content.appendChild(status);
         let results = mUI.el('div', 'm-tagdex-browse-results');
+        filterRow.appendChild(this.buildViewToggle(results));
+        content.appendChild(filterRow);
+        content.appendChild(status);
         content.appendChild(results);
         let more = mUI.el('button', 'm-wide-button m-tagdex-more', 'Load More');
         more.style.display = 'none';
@@ -384,6 +392,57 @@ class MTagDexClass {
             source.value = ctx.source;
             runSearch();
         });
+    }
+
+    /** The layouts the toggle cycles through, in order. Explicit column counts rather than an auto-fill grid:
+     * auto-fill gives seven tiles across on a desktop window, which is not a browsing layout anyone asked for. */
+    static ViewModes = ['list', 'grid2', 'grid3'];
+
+    /** Reads the remembered results layout. An absent or corrupt value falls back to the list, so a bad write
+     * can never leave the browser in a layout the user cannot name. */
+    viewMode() {
+        try {
+            let stored = localStorage.getItem('m_client_tagdex_view');
+            return MTagDexClass.ViewModes.includes(stored) ? stored : 'list';
+        }
+        catch (e) {
+            // localStorage throws outright in some private-mode configurations - fail to the default layout.
+            return 'list';
+        }
+    }
+
+    /** Applies a layout to a results container. The cards are the same elements in every mode; only the
+     * container's classes change, so switching never needs a re-render or another search. */
+    applyView(results, mode) {
+        results.classList.toggle('m-tagdex-grid', mode != 'list');
+        results.classList.toggle('m-tagdex-grid-2', mode == 'grid2');
+        results.classList.toggle('m-tagdex-grid-3', mode == 'grid3');
+    }
+
+    /** Builds the layout toggle, cycling List -> 2 wide -> 3 wide. Shared by the Characters tab and the
+     * Create-row sheet so the two surfaces cannot drift apart, and so one preference governs both. */
+    buildViewToggle(results) {
+        let labels = { 'list': '☰ List', 'grid2': '▦ 2 wide', 'grid3': '▦ 3 wide' };
+        let button = mUI.el('button', 'm-tagdex-view-toggle', '');
+        let sync = () => {
+            let mode = this.viewMode();
+            this.applyView(results, mode);
+            button.textContent = labels[mode];
+            button.title = 'Change the results layout';
+            button.setAttribute('aria-label', `Results layout: ${labels[mode]}`);
+        };
+        button.addEventListener('click', () => {
+            let next = MTagDexClass.ViewModes[(MTagDexClass.ViewModes.indexOf(this.viewMode()) + 1) % MTagDexClass.ViewModes.length];
+            try {
+                localStorage.setItem('m_client_tagdex_view', next);
+            }
+            catch (e) {
+                mUI.warn('Could not save the layout preference.');
+            }
+            sync();
+        });
+        sync();
+        return button;
     }
 
     /** Builds one browse result. The main action inserts the trigger at the Create prompt's remembered caret;
