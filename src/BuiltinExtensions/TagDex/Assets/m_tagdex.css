@@ -71,16 +71,37 @@
     padding: 0 0.5rem;
 }
 
+/* Both bases are well under half the row, so the picker and the search share one line at every width instead
+   of the 45%+55%+gap total forcing the search to wrap onto its own. */
 .m-tagdex-source {
-    flex: 0 1 45%;
+    flex: 1 1 12rem;
 }
 
 .m-tagdex-search {
-    flex: 1 1 55%;
+    flex: 2 1 12rem;
+}
+
+/* Row two: the favourites filter takes the space, the layout toggle takes only what it needs. */
+.m-tagdex-filter-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+}
+
+.m-tagdex-view-toggle {
+    flex: 0 0 auto;
+    min-width: 5.5rem;
+    min-height: 44px;
+    padding: 0 0.7rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text);
+    font-size: 14px;
 }
 
 .m-tagdex-favorite-filter {
-    flex: 1 1 100%;
+    flex: 1 1 auto;
     min-height: 44px;
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
@@ -217,4 +238,64 @@
     color: var(--text-soft);
     font-variant-numeric: tabular-nums;
     font-size: 13px;
+}
+
+/* Grid layout. The column count is explicit, not auto-fill: auto-fill puts seven tiles across a desktop window,
+   which is a contact sheet rather than a browsing layout. The cards are the same elements as in list mode - only
+   the container's columns and the tile's internal direction change. */
+.m-tagdex-grid {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.m-tagdex-grid-2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.m-tagdex-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.m-tagdex-grid .m-tagdex-card {
+    position: relative;
+    min-height: 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 0;
+    border: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
+    border-radius: 0.5rem;
+}
+
+.m-tagdex-grid .m-tagdex-card-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.3rem;
+    padding: 0.4rem;
+}
+
+/* The tile's image leads, so it gets the width; the 1/1 ratio keeps every row of tiles the same height even
+   when a thumbnail is missing and the placeholder stands in. */
+/* Square by default so a row of tiles lines up even where a thumbnail is missing, but capped in height: at two
+   columns on a wide desktop a true square would be a 900px portrait of one character. `cover` crops instead of
+   distorting once the cap bites. */
+.m-tagdex-grid .m-tagdex-card-image {
+    width: 100%;
+    height: auto;
+    max-height: 13rem;
+    aspect-ratio: 1 / 1;
+}
+
+/* Floated over the image rather than beside it: a 44px button in the tile's own flow would cost more vertical
+   space than the text it sits under. */
+.m-tagdex-grid .m-tagdex-favorite-button {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: color-mix(in srgb, var(--background-panel) 80%, transparent);
+}
+
+/* Names wrap to two lines here instead of ellipsing at one: a tile is narrower than a list row, and the second
+   line is free vertical space. */
+.m-tagdex-grid .m-tagdex-card-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
