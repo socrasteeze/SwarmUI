@@ -125,6 +125,7 @@ class GenPageBrowserClass {
         this.folderSelectedEvent = null;
         this.builtEvent = null;
         this.sizeChangedEvent = null;
+        this.filterEvent = null;
         this.maxPreBuild = 512;
         this.chunksRendered = 0;
         this.rerenderPlanned = false;
@@ -734,6 +735,9 @@ class GenPageBrowserClass {
                 }
                 setTimeout(() => {
                     this.update();
+                    if (this.filterEvent) {
+                        this.filterEvent();
+                    }
                 }, 1);
             });
             if (!this.showFilter) {

@@ -584,8 +584,11 @@ public class Settings : AutoConfiguration
         [ConfigComment("How many images the history view should stop trying to load after.")]
         public int MaxImagesInHistory = 1000;
 
-        [ConfigComment("How many images the history view should scan server-side before deciding the list is sufficient for sorting. Not relevant when sorting by filename.")]
+        [ConfigComment("How many images the history view should scan server-side before deciding the list is sufficient for sorting or filtering.")]
         public int MaxImagesScannedInHistory = 10000;
+
+        [ConfigComment("If true, Image History text filter will query the server (up to MaxImagesScannedInHistory) to find more results.\nIf false, only images already loaded in the browser are filtered.")]
+        public bool ImageHistoryServerFilter = true;
 
         [ConfigComment("If true, the Image History view will cache small preview thumbnails of images.\nThis should make things run faster. You can turn it off if you don't want that.")]
         public bool ImageHistoryUsePreviews = true;
@@ -685,7 +688,7 @@ public class Settings : AutoConfiguration
         [ConfigComment("Optionally specify a (raw HTML) welcome message here. If specified, will be added to the standard welcome message.")]
         public string ExtraWelcomeInfo = "";
 
-        [ConfigComment("Animated previews make the image history nicer when you've generated videos, but may negatively impact performance.\nIf having image history loaded with videos generated is negatively affecting your experience, disable this checkbox.\nAfter editing this setting, use the Reset All Metadata button in the Utilities tab.")]
+        [ConfigComment("Animated previews make the image history nicer when you've generated videos, but may negatively impact performance.\nIf having image history loaded with videos generated is negatively affecting your experience, disable this checkbox.\nAfter editing this setting, use the Reset Image Metadata button in the Utilities tab.")]
         public bool AllowAnimatedPreviews = true;
     }
 
