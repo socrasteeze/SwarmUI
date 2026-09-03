@@ -1,6 +1,6 @@
 # GenPage Prefs
 
-Stores the Generate tab's five batch-view switches on your SwarmUI account instead of leaving them in browser
+Stores the Generate tab's six batch-view switches on your SwarmUI account instead of leaving them in browser
 storage, so they follow the user rather than the browser profile.
 
 The switches are the ones behind the batch gear icon, above the batch image strip:
@@ -12,6 +12,7 @@ The switches are the ones behind the batch gear icon, above the batch image stri
 | Auto Swap To Images | `autoLoadImages` | on |
 | Show Load Spinners | `showLoadSpinners` | on |
 | Separate Batches | `separateBatches` | off |
+| Play Videos | `playBatchVideos` | on |
 
 ## Why
 
@@ -42,17 +43,22 @@ registering new ones, because that is what these are.
 | Route | Permission | Purpose |
 |---|---|---|
 | `GetGenPagePrefs` | `read_user_settings` | Returns `{"prefs": {...}}`. A user who has never saved gets `{}`, not server-side defaults. |
-| `SetGenPagePrefs` | `edit_user_settings` | Replaces the stored blob. Filters to the five known keys and coerces each to a boolean. |
+| `SetGenPagePrefs` | `edit_user_settings` | Replaces the stored blob. Filters to the six known keys and coerces each to a boolean. |
 
 ## Gotchas
 
 - **Send the toggles flat, not wrapped in a `prefs` field.** A `JObject` API parameter is handed the whole request
   payload with `session_id` stripped, not the field that happens to share the parameter's name. Nesting them makes
   every known key miss, and the route then stores `{}` and reports success. TagDex documents the same trap.
-- **`SetGenPagePrefs` replaces, it does not merge.** The client always sends all five, so this is correct as
+- **`SetGenPagePrefs` replaces, it does not merge.** The client always sends all six, so this is correct as
   written; a future partial caller would silently drop the keys it omitted.
 - **A corrupt stored blob is ignored, not fatal.** The read logs a warning and reports defaults, because failing a
   page load over an unparseable preference would be worse than losing the preference.
+- **Applying a stored value fires no `change` event.** Setting `.checked` from script does not run core's
+  handler, which is fine for the five switches that are only read back later, but `Play Videos` acts on the
+  `<video>` elements already on screen. `applyHooks` names core's `togglePlayBatchVideos` so it is called
+  explicitly when applying actually flips that switch. A switch added later with the same shape needs an entry
+  there too.
 - **Release builds cache extension assets in memory.** Edits to `genpage_prefs.js` do nothing until the server
   restarts, and the browser then needs a hard refresh.
 - This extension does not remove core's `localStorage` writes; core still makes them, and they are used as the

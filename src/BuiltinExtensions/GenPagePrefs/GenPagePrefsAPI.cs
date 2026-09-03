@@ -20,7 +20,7 @@ public static class GenPagePrefsAPI
     /// <summary>The switches this route will store, named by their existing browser-storage keys so the client can
     /// mirror one to the other without a translation table. Anything else in a submitted object is discarded, so a
     /// stale or hostile client cannot use this route as arbitrary per-user storage.</summary>
-    public static readonly string[] KnownKeys = ["autoClearBatch", "autoLoadPreviews", "autoLoadImages", "showLoadSpinners", "separateBatches"];
+    public static readonly string[] KnownKeys = ["autoClearBatch", "autoLoadPreviews", "autoLoadImages", "showLoadSpinners", "separateBatches", "playBatchVideos"];
 
     /// <summary>Registers every route in this class.</summary>
     public static void Register()
