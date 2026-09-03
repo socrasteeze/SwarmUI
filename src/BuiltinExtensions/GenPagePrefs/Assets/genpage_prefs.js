@@ -1,6 +1,6 @@
 /** Generate-tab batch toggles, stored on the user's account.
  *
- * Core keeps the five batch-gear switches in localStorage and reads them back at script time. That store is per
+ * Core keeps the six batch-gear switches in localStorage and reads them back at script time. That store is per
  * origin and dies with any "clear site data on exit" browser setting, so the switches reset when the browser
  * closes or when the same server is reached over a different address. This mirrors them to the account instead.
  *
@@ -18,7 +18,14 @@ class GenPagePrefsClass {
             'auto_load_previews_checkbox': 'autoLoadPreviews',
             'auto_load_images_checkbox': 'autoLoadImages',
             'show_load_spinners_checkbox': 'showLoadSpinners',
-            'separate_batches_checkbox': 'separateBatches'
+            'separate_batches_checkbox': 'separateBatches',
+            'play_batch_videos_checkbox': 'playBatchVideos'
+        };
+        /** Switches that drive something live on the page rather than only being read back later, named by the
+         * core function that does the driving. Applying a stored value sets `.checked` directly, which fires no
+         * change event, so core's own handler never runs and anything already on screen keeps the old state. */
+        this.applyHooks = {
+            'play_batch_videos_checkbox': 'togglePlayBatchVideos'
         };
         /** Pending debounced save, or null. */
         this.saveTimer = null;
@@ -60,6 +67,7 @@ class GenPagePrefsClass {
                 continue;
             }
             let value = prefs[key] == true;
+            let changed = elem.checked != value;
             elem.checked = value;
             try {
                 localStorage.setItem(key, `${value}`);
@@ -67,6 +75,22 @@ class GenPagePrefsClass {
             catch (e) {
                 // Storage can be unavailable outright; the account copy is authoritative either way.
             }
+            if (changed) {
+                this.runApplyHook(id);
+            }
+        }
+    }
+
+    /** Runs a switch's live-effect handler, if it has one and core defines it. Only called when applying actually
+     * changed the switch, so a page that already agrees with the account does no extra work. */
+    runApplyHook(id) {
+        let name = this.applyHooks[id];
+        if (!name) {
+            return;
+        }
+        let handler = window[name];
+        if (typeof handler == 'function') {
+            handler();
         }
     }
 
