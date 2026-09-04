@@ -205,11 +205,10 @@ public class SwarmSwarmBackend : AbstractT2IBackend
                     {
                         try
                         {
-                            // Local patch: request URLs instead of embedded base64 previews.
-                            // With a large shared model tree (~19k LoRAs) the base64 payload exceeds
-                            // .NET's string capacity, so the remote returns an empty body and the
-                            // model list silently never loads. Only 'name' is used for backend
-                            // filtering below, and preview images resolve from the local tree anyway.
+                            // Fork-local shared-tree patch: request URLs instead of embedded base64 previews.
+                            // The hub owns matching local model rows. With ~19k LoRAs, embedding remote
+                            // previews exceeds .NET's string capacity and returns an empty response.
+                            // Generic remote-only deployments need preview proxying before using this mode.
                             JObject modelsData = await HttpClient.PostJson($"{Address}/API/ListModels", new() { ["session_id"] = Session, ["path"] = "", ["depth"] = 999, ["subtype"] = runType, ["allowRemote"] = Settings.AllowForwarding, ["dataImages"] = false }, RequestAdapter());
                             JToken[] remoteModels = [.. modelsData["files"]];
                             if (fullLoad)
