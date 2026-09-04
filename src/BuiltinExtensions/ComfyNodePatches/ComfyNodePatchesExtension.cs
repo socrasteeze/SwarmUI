@@ -115,6 +115,7 @@ public class ComfyNodePatchesExtension : Extension
         {
             content = content.Replace(edit.Needle, edit.Replacement);
         }
+        SpokeModePolicy.AssertRuntimeMutationAllowed($"patch managed Comfy node source ({description})");
         File.WriteAllText(path, content);
         Logs.Init($"[ComfyNodePatches] Applied '{description}' to {path}");
     }

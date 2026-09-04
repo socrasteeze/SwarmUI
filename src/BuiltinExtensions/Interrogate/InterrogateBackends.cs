@@ -106,6 +106,7 @@ public static class InterrogateBackends
     /// <summary>Builds the Florence-2 captioning workflow.</summary>
     public static JObject BuildFlorence2Workflow(string imageB64, JObject options)
     {
+        SpokeModePolicy.AssertModelTreeWriteAllowed("run an auto-downloading Florence-2 model loader");
         string task = $"{options?["task"]}";
         if (string.IsNullOrWhiteSpace(task))
         {
@@ -175,6 +176,7 @@ public static class InterrogateBackends
     /// <summary>Builds the WD14 tagger workflow: load the image, tag it, ship the string back over the websocket.</summary>
     public static JObject BuildWD14Workflow(string imageB64, JObject options)
     {
+        SpokeModePolicy.AssertModelTreeWriteAllowed("run an auto-downloading WD14 model loader");
         return new JObject()
         {
             ["1"] = new JObject()

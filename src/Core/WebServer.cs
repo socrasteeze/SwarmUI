@@ -310,6 +310,7 @@ public class WebServer
         WebApp.MapGet("/Output/{*Path}", ViewOutput);
         WebApp.MapGet("/View/{*Path}", ViewOutput);
         WebApp.MapGet("/ViewSpecial/{*Path}", ViewSpecial);
+        WebApp.MapGet("/RemoteModelPreview/{backendID:int}", ModelsAPI.ViewRemoteModelPreview);
         WebApp.MapGet("/ExtensionFile/{*f}", ViewExtensionScript);
         WebApp.MapGet("/Audio/{*f}", ViewAudio);
         timer.Check("[Web] core maps");

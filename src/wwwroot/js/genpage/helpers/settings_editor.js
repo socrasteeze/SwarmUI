@@ -61,12 +61,20 @@ function buildSettingsMenu(container, data, prefix, tracker) {
     }
     addBlock(data);
     container.innerHTML = content;
+    for (let key of keys) {
+        if (tracker.known[key].read_only) {
+            getRequiredElementById(prefix + key).disabled = true;
+        }
+    }
     for (let runnable of runnables) {
         runnable();
     }
     let confirmer = getRequiredElementById(`${prefix}confirmer`);
     for (let key of keys) {
         let elem = getRequiredElementById(prefix + key);
+        if (tracker.known[key].read_only) {
+            continue;
+        }
         elem.addEventListener('input', () => {
             let value = null;
             if (elem.type == 'checkbox') {
@@ -101,7 +109,7 @@ function buildSettingsMenu(container, data, prefix, tracker) {
             elem.title = "This setting looks wrong. Double-check the docs in the '?' button.";
         }
         let settingData = tracker.known[key];
-        if (settingData.default_value === undefined || settingData.default_value === null || settingData.is_secret) {
+        if (settingData.read_only || settingData.default_value === undefined || settingData.default_value === null || settingData.is_secret) {
             continue;
         }
         let autoInput = findParentOfClass(elem, 'auto-input');

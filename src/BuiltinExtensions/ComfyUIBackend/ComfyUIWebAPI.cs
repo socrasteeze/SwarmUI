@@ -25,7 +25,7 @@ public static class ComfyUIWebAPI
         API.RegisterAPICall(ComfyGetGeneratedWorkflow, false, ComfyUIBackendExtension.PermDirectCalls);
         API.RegisterAPICall(DoLoraExtractionWS, true, Permissions.ExtractLoRAs);
         API.RegisterAPICall(ComfyGetNodeTypesForBackend, false, Permissions.ViewBackendsList);
-        API.RegisterAPICall(ComfyEnsureRefreshable, false, ComfyUIBackendExtension.PermDirectCalls);
+        API.RegisterAPICall(ComfyEnsureRefreshable, true, ComfyUIBackendExtension.PermDirectCalls);
         API.RegisterAPICall(ComfyInstallFeatures, true, Permissions.InstallFeatures);
         API.RegisterAPICall(ComfyListTorchInstalls, false, Permissions.InstallFeatures);
         API.RegisterAPICall(ComfyUpdateTorch, true, Permissions.InstallFeatures);
@@ -35,6 +35,7 @@ public static class ComfyUIWebAPI
     /// <summary>API route to save a comfy workflow object to persistent file.</summary>
     public static async Task<JObject> ComfySaveWorkflow(Session session, string name, string workflow, string prompt, string custom_params, string param_values, string image, string description = "", bool enable_in_simple = false, string replace = null)
     {
+        SpokeModePolicy.AssertRuntimeMutationAllowed("save a custom Comfy workflow");
         string origPath = Utilities.StrictFilenameClean(string.IsNullOrWhiteSpace(replace) ? name : replace);
         string cleaned = Utilities.StrictFilenameClean(name);
         string path = $"{ComfyUIBackendExtension.Folder}/CustomWorkflows/{cleaned}.json";
@@ -128,6 +129,7 @@ public static class ComfyUIWebAPI
     /// <summary>API route to read a delete a saved Comfy custom workflows.</summary>
     public static async Task<JObject> ComfyDeleteWorkflow(Session session, string name)
     {
+        SpokeModePolicy.AssertRuntimeMutationAllowed("delete a custom Comfy workflow");
         string path = Utilities.StrictFilenameClean(name);
         if (!ComfyUIBackendExtension.CustomWorkflows.Remove(path, out _))
         {
@@ -196,6 +198,7 @@ public static class ComfyUIWebAPI
     /// <summary>API route to ensure to install a given ComfyUI custom node feature.</summary>
     public static async Task<JObject> ComfyInstallFeatures(Session session, string features)
     {
+        SpokeModePolicy.AssertRuntimeMutationAllowed("install ComfyUI features");
         await MultiInstallLock.WaitAsync(Program.GlobalProgramCancel);
         try
         {
@@ -304,6 +307,7 @@ public static class ComfyUIWebAPI
     /// <summary>API route to update Torch for a single Comfy install folder.</summary>
     public static async Task<JObject> ComfyUpdateTorch(Session session, int backendId)
     {
+        SpokeModePolicy.AssertRuntimeMutationAllowed("update PyTorch");
         await MultiInstallLock.WaitAsync(Program.GlobalProgramCancel);
         try
         {
@@ -373,6 +377,15 @@ public static class ComfyUIWebAPI
     /// <summary>API route to create a TensorRT model.</summary>
     public static async Task<JObject> DoTensorRTCreateWS(Session session, WebSocket ws, string model, string aspect, string aspectRange, int optBatch, int maxBatch, int contextLen = 75)
     {
+        try
+        {
+            SpokeModePolicy.AssertModelTreeWriteAllowed("create a TensorRT model");
+        }
+        catch (SwarmReadableErrorException ex)
+        {
+            await ws.SendJson(new JObject() { ["error"] = ex.Message }, API.WebsocketTimeout);
+            return null;
+        }
         if (ModelsAPI.TryGetRefusalForModel(session, model, out JObject refusal))
         {
             await ws.SendJson(refusal, API.WebsocketTimeout);
@@ -515,7 +528,21 @@ public static class ComfyUIWebAPI
             File.Copy(file, $"{outPath}.engine", true);
             File.Delete(file);
             Directory.Delete(directory, true);
-            Program.RefreshAllModelSets();
+            using (ManyReadOneWriteLock.WriteClaim claim = Program.RefreshLock.LockWrite())
+            {
+                Program.RefreshAllModelSets();
+                Interlocked.Increment(ref ModelsAPI.ModelEditID);
+            }
+            try
+            {
+                await Program.Backends.RefreshRemoteModelInventoriesAsync();
+            }
+            catch (Exception ex)
+            {
+                Logs.Error($"TensorRT model was created locally, but remote model inventories failed to refresh: {ex.ReadableString()}");
+                a(new() { ["error"] = "TensorRT model saved locally. Refresh remote backends before remote generation.", ["local_mutation_completed"] = true });
+                return;
+            }
             a(new() { ["status"] = "Complete!", ["complete"] = true });
         }, session, null, ws);
         return null;
@@ -524,6 +551,15 @@ public static class ComfyUIWebAPI
     /// <summary>API route to extract a LoRA from two models.</summary>
     public static async Task<JObject> DoLoraExtractionWS(Session session, WebSocket ws, string baseModel, string otherModel, int rank, string outName)
     {
+        try
+        {
+            SpokeModePolicy.AssertModelTreeWriteAllowed("extract a LoRA model");
+        }
+        catch (SwarmReadableErrorException ex)
+        {
+            await ws.SendJson(new JObject() { ["error"] = ex.Message }, API.WebsocketTimeout);
+            return null;
+        }
         outName = Utilities.StrictFilenameClean(outName);
         if (ModelsAPI.TryGetRefusalForModel(session, baseModel, out JObject refusal)
             || ModelsAPI.TryGetRefusalForModel(session, otherModel, out refusal)
@@ -643,9 +679,32 @@ public static class ComfyUIWebAPI
             });
         }, session, null, ws);
         T2IModelHandler loras = Program.T2IModelSets["LoRA"];
-        loras.Refresh();
-        if (loras.Models.ContainsKey($"{outName}.safetensors"))
+        bool loraSaved;
+        using (ManyReadOneWriteLock.WriteClaim claim = Program.RefreshLock.LockWrite())
         {
+            loras.Refresh();
+            loraSaved = loras.Models.ContainsKey($"{outName}.safetensors");
+            if (loraSaved)
+            {
+                Interlocked.Increment(ref ModelsAPI.ModelEditID);
+            }
+        }
+        if (loraSaved)
+        {
+            try
+            {
+                await Program.Backends.RefreshRemoteModelInventoriesAsync();
+            }
+            catch (Exception ex)
+            {
+                Logs.Error($"LoRA extraction completed locally, but remote model inventories failed to refresh: {ex.ReadableString()}");
+                await ws.SendJson(new JObject()
+                {
+                    ["error"] = "LoRA saved locally. Refresh remote backends before remote generation.",
+                    ["local_mutation_completed"] = true
+                }, API.WebsocketTimeout);
+                return null;
+            }
             Logs.Info($"Completed successful LoRA extraction for user '{session.User.UserID}' saved as '{outName}'.");
             await ws.SendJson(new JObject() { ["success"] = true }, API.WebsocketTimeout);
             return null;

@@ -1149,11 +1149,13 @@ public static class T2IAPI
         """)]
     public static async Task<JObject> TriggerRefresh(Session session,
         [API.APIParameter("If true, fully refresh everything. If false, just grabs the list of current available parameters (waiting for any pending refreshes first).")] bool strong = true,
-        [API.APIParameter("Optional type of data to refresh. If unspecified, runs a general refresh. Valid options: ['wildcards']")] string refreshType = null)
+        [API.APIParameter("Optional type of data to refresh. If unspecified, runs a general refresh. Valid options: ['wildcards']")] string refreshType = null,
+        [API.APIParameter("If true, bypass the normal duplicate-refresh suppression. Requires the same control_model_refresh permission.")] bool force = false,
+        [API.APIParameter("If true, return the full parameter payload. If false, return only refresh acknowledgement fields.")] bool returnData = true)
     {
         Logs.Verbose($"User {session.User.UserID} triggered a {(strong ? "strong" : "weak")} data refresh");
-        bool botherToRun = strong && RefreshSemaphore.CurrentCount > 0; // no need to run twice at once
-        if (botherToRun && Environment.TickCount64 - LastRefreshed < 10000)
+        bool botherToRun = strong && (force || RefreshSemaphore.CurrentCount > 0); // no need to run twice at once unless a trusted caller requires a fresh post-mutation snapshot
+        if (!force && botherToRun && Environment.TickCount64 - LastRefreshed < 10000)
         {
             Logs.Debug($"User {session.User.UserID} requested weak refresh within 10 seconds of last refresh, ignoring as redundant.");
             botherToRun = false;
@@ -1163,6 +1165,8 @@ public static class T2IAPI
             Logs.Debug($"User {session.User.UserID} requested refresh, but will not perform actual refresh as they lack permission.");
             botherToRun = false;
         }
+        bool refreshRemoteModels = false;
+        bool didRefresh = false;
         try
         {
             await RefreshSemaphore.WaitAsync(Program.GlobalProgramCancel);
@@ -1173,14 +1177,35 @@ public static class T2IAPI
                 {
                     Program.ModelRefreshEvent?.Invoke();
                     LastRefreshed = Environment.TickCount64;
+                    Interlocked.Increment(ref ModelsAPI.ModelEditID);
+                    refreshRemoteModels = true;
+                    didRefresh = true;
                 }
                 else if (refreshType == "wildcards")
                 {
                     WildcardsHelper.Refresh();
+                    didRefresh = true;
                 }
                 else
                 {
                     Logs.Warning($"User {session.User.UserID} requested refresh type '{refreshType}' which is unrecognized, ignoring.");
+                }
+            }
+            if (refreshRemoteModels)
+            {
+                try
+                {
+                    await Program.Backends.RefreshRemoteModelInventoriesAsync();
+                }
+                catch (Exception ex)
+                {
+                    Logs.Error($"Local model refresh completed, but remote model inventories failed to refresh: {ex.ReadableString()}");
+                    return new JObject()
+                    {
+                        ["error"] = "Local models refreshed. Refresh remote backends before remote generation.",
+                        ["error_id"] = "remote_inventory_refresh_failed",
+                        ["local_refresh_completed"] = true
+                    };
                 }
             }
         }
@@ -1189,6 +1214,10 @@ public static class T2IAPI
             RefreshSemaphore.Release();
         }
         Logs.Debug($"Data refreshed!");
+        if (!returnData)
+        {
+            return new JObject() { ["success"] = true, ["refreshed"] = didRefresh };
+        }
         return await ListT2IParams(session);
     }
 

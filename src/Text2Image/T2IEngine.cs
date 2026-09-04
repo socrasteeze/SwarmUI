@@ -186,6 +186,21 @@ namespace SwarmUI.Text2Image
         /// <summary>Internal handler route to create an image based on a user request.</summary>
         public static async Task CreateImageTask(T2IParamInput user_input, string batchId, Session.GenClaim claim, Action<JObject> output, Action<string> setError, bool isWS, float backendTimeoutMin, Action<ImageOutput, string> saveImages, bool canCallTools)
         {
+            if (Program.IsSpokeMode && !(user_input.SourceSession?.IsSpokeController ?? false))
+            {
+                setError("Spoke mode accepts generation only from its hub controller.");
+                return;
+            }
+            if (Program.IsSpokeMode
+                && (user_input.InternalSet.ValuesInput.Keys.Any(key => key.Equals("comfyworkflowraw", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("comfyuicustomworkflow", StringComparison.OrdinalIgnoreCase))
+                    || user_input.SectionParamOverrides.Values.Any(section => section.ValuesInput.Keys.Any(key =>
+                        key.Equals("comfyworkflowraw", StringComparison.OrdinalIgnoreCase)
+                        || key.Equals("comfyuicustomworkflow", StringComparison.OrdinalIgnoreCase)))))
+            {
+                setError("Spoke mode does not accept custom Comfy workflows. Use standard hub generation parameters.");
+                return;
+            }
             long timeStart = Environment.TickCount64;
             void sendStatus()
             {

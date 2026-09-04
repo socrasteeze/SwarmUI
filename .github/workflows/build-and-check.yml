@@ -26,6 +26,8 @@ jobs:
           with:
             fetch-depth: 0
             fetch-tags: true
+        - name: Fetch upstream tags
+          run: git fetch https://github.com/mcmonkeyprojects/SwarmUI.git 'refs/tags/*:refs/tags/*'
         - uses: actions/setup-dotnet@v5
           with:
             dotnet-version: '8.x'
@@ -38,6 +40,8 @@ jobs:
           with:
             fetch-depth: 0
             fetch-tags: true
+        - name: Fetch upstream tags
+          run: git fetch https://github.com/mcmonkeyprojects/SwarmUI.git 'refs/tags/*:refs/tags/*'
         - uses: actions/setup-dotnet@v5
           with:
             dotnet-version: '8.x'

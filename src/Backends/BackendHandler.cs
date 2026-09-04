@@ -116,15 +116,6 @@ public class BackendHandler
         AutoScalingBackendType = RegisterBackendType<AutoScalingBackend>("autoscalingbackend", "Auto Scaling Backend", "(Advanced users only) Automatically launch other instances of SwarmUI to serve as dynamic additional backends.", true, false);
         LlamaSharpBackendType = RegisterBackendType<LlamaSharpLLMBackend>("localllama", "Local LLaMA.cpp GGUF Backend", "(EXPERIMENTAL) Same-process local LLaMA GGUF LLM support.", true, false);
         SimpleRemoteLLMBackendType = RegisterBackendType<SimpleRemoteLLMBackend>("simpleremotellm", "Remote LLM (OpenAI API)", "(EXPERIMENTAL) Support for any OpenAI API compatible LLM provider.", true, false);
-        Program.ModelRefreshEvent += () =>
-        {
-            List<Task> waitFor = [];
-            foreach (SwarmSwarmBackend backend in RunningBackendsOfType<SwarmSwarmBackend>())
-            {
-                waitFor.Add(backend.TriggerRefresh());
-            }
-            Task.WaitAll([.. waitFor]);
-        };
         CurrentBackendStatus = new(() =>
         {
             T2IBackendData[] backends = [.. EnumerateT2IBackends];
@@ -218,6 +209,19 @@ public class BackendHandler
                 ["any_loading"] = false
             };
         }, TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>Refreshes model inventories on every initialized, enabled remote Swarm control backend after local model state is stable.</summary>
+    public async Task RefreshRemoteModelInventoriesAsync()
+    {
+        if (Program.IsSpokeMode)
+        {
+            return;
+        }
+        SwarmSwarmBackend[] backends = [.. AllBackends.Values.Select(data => data.AbstractBackend as SwarmSwarmBackend)
+            .Where(backend => backend is not null && backend.IsAControlInstance && backend.IsEnabled && !backend.ShutDownReserve
+                && backend.Status != BackendStatus.DISABLED && backend.Status != BackendStatus.WAITING)];
+        await Task.WhenAll(backends.Select(backend => backend.TriggerRefresh()));
     }
 
     /// <summary>Metadata about backend types.</summary>
@@ -390,6 +394,7 @@ public class BackendHandler
         data.AbstractBackend.SettingsRaw = config ?? (Activator.CreateInstance(type.SettingsClass) as AutoConfiguration);
         data.AbstractBackend.Handler = this;
         data.AbstractBackend.IsReal = false;
+        data.AbstractParent = parent;
         lock (CentralLock)
         {
             data.ID = LastNonrealBackendID--;
@@ -455,7 +460,8 @@ public class BackendHandler
         }
         newSettings = data.AbstractBackend.SettingsRaw.ExcludeSecretValuesThatMatch(newSettings, "\t<secret>");
         data.AbstractBackend.SettingsRaw.Load(newSettings);
-        Logs.Verbose($"Settings applied, now: {data.AbstractBackend.SettingsRaw.Save(true)}");
+        FDSSection redactedSettings = data.AbstractBackend.SettingsRaw.SaveAllWithoutSecretValues("\t<secret>", "");
+        Logs.Verbose($"Settings applied, now: {redactedSettings}");
         if (title is not null)
         {
             data.AbstractBackend.Title = title;

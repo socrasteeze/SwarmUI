@@ -125,7 +125,7 @@ class MApp {
         // row, the only way to do that from a phone was the desktop-oriented Server tab on the genpage.
         // Permission is checked at click rather than at build, matching the TagDex sheet: hasPermission()
         // fails OPEN before the session lands, and this panel can be built by a #more deep link before then.
-        let restart = mUI.el('button', 'm-more-item', 'Restart server');
+        let restart = mUI.el('button', 'm-more-item', 'Restart Server');
         restart.addEventListener('click', () => {
             if (typeof permissions != 'undefined' && !permissions.hasPermission('restart')) {
                 mUI.warn('You do not have permission to restart the server.');
@@ -134,7 +134,7 @@ class MApp {
             // Says "interrupts" rather than "may interrupt" when there is actually queued work, because the
             // cost of this is entirely about what is in flight right now.
             let queued = mGen.queueTotal > 0 ? `This interrupts ${mGen.queueTotal} queued/running generation(s). ` : '';
-            mUI.confirm(`Restart the SwarmUI server? ${queued}It rebuilds first, so it can take a while to come back. The app will reload itself once it does.`, () => {
+            mUI.confirm(`Restart the SwarmUI server? ${queued}The app reloads when the server returns.`, () => {
                 this.restartServer(restart);
             });
         });
@@ -175,10 +175,8 @@ class MApp {
 
     /** Fires the server restart and hands off to the watcher.
      *
-     * `UpdateAndRestart` with force and nothing else set is the same call the genpage's own extension
-     * "restart server" button makes: `doUpdateServer` defaults false and no extension/backend update lists are
-     * sent, so it git-updates nothing - it writes `src/bin/must_rebuild` and requests the restart. Exit code
-     * 42 is what tells the launch script to relaunch, so **this only comes back if the server was started
+     * `RestartServer` exits with code 42 without applying updates or forcing a rebuild. That exit code
+     * tells the launch script to relaunch, so **this only comes back if the server was started
      * through a launch script**; a bare `dotnet run` just exits, which is why the watcher below eventually
      * gives up with an honest message instead of spinning forever.
      *
@@ -190,10 +188,10 @@ class MApp {
     restartServer(row) {
         row.disabled = true;
         row.textContent = 'Restarting server...';
-        genericRequest('UpdateAndRestart', { 'force': true }, data => this.awaitServerReturn(row), 0, err => {
+        genericRequest('RestartServer', {}, data => this.awaitServerReturn(row), 0, err => {
             if (typeof err == 'string') {
                 row.disabled = false;
-                row.textContent = 'Restart server';
+                row.textContent = 'Restart Server';
                 mUI.warn(`Could not restart: ${err}`);
                 return;
             }
@@ -253,7 +251,7 @@ class MApp {
                     }
                 }
                 row.disabled = false;
-                row.textContent = 'Restart server';
+                row.textContent = 'Restart Server';
                 mUI.warn('The server has not come back yet. If it was not started from a launch script, it will not restart on its own.');
                 return;
             }
@@ -261,7 +259,7 @@ class MApp {
         // Never went down: the call was accepted but the process is still serving. Most likely the restart was
         // refused somewhere past the API layer, so say that rather than pretending it worked.
         row.disabled = false;
-        row.textContent = 'Restart server';
+        row.textContent = 'Restart Server';
         mUI.warn('The server did not restart. Check the server logs.');
     }
 

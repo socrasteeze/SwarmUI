@@ -548,6 +548,20 @@ public partial class WorkflowGenerator
 
     public class ModelLoadHelpers(WorkflowGenerator g)
     {
+        /// <summary>Publishes a newly downloaded common model before generation continues.</summary>
+        private static void PublishDownloadedModel()
+        {
+            try
+            {
+                Program.RefreshAllModelSetsAndRemoteInventoriesAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                Logs.Error($"A common model downloaded locally, but remote model inventories failed to refresh: {ex.ReadableString()}");
+                throw new SwarmReadableErrorException("A required model downloaded locally. Refresh remote backends before retrying generation.");
+            }
+        }
+
         public void DoVaeLoader(string defaultVal, T2IModelCompatClass compatClass, string knownName)
         {
             DoVaeLoader(defaultVal, compatClass?.ID, knownName);
@@ -588,7 +602,7 @@ public partial class WorkflowGenerator
                 }
                 vaeFile = knownFile.FileName;
                 knownFile.DownloadNow(session: g.UserInput.SourceSession).Wait();
-                Program.RefreshAllModelSets();
+                PublishDownloadedModel();
             }
             g.LoadingVAE = g.CreateVAELoader(vaeFile, nodeId);
         }
@@ -609,7 +623,7 @@ public partial class WorkflowGenerator
             if (!Program.T2IModelSets["VAE"].Models.ContainsKey(vaeFile))
             {
                 knownFile.DownloadNow(session: g.UserInput.SourceSession).Wait();
-                Program.RefreshAllModelSets();
+                PublishDownloadedModel();
             }
             string avaeLoader = g.CreateNode("SwarmLTXVAudioVAELoader", new JObject()
             {
@@ -626,7 +640,7 @@ public partial class WorkflowGenerator
             if (!Program.T2IModelSets["VAE"].Models.ContainsKey(vaeFile))
             {
                 knownFile.DownloadNow(session: g.UserInput.SourceSession).Wait();
-                Program.RefreshAllModelSets();
+                PublishDownloadedModel();
             }
             g.CurrentAudioVae = new WGNodeData(g.CreateVAELoader(vaeFile), g, WGNodeData.DT_AUDIOVAE, g.CurrentCompat());
         }

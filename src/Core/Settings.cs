@@ -194,6 +194,9 @@ public class Settings : AutoConfiguration
 
         [ConfigComment("How many models can be loaded in a model list at once.\nPast this count, the list will simply be cut off.\nUse sub-folder organization to prevent issues.")]
         public int ModelListSanityCap = 5000;
+
+        [ConfigComment("Maximum number of model names per subtype in the compact remote-backend inventory.\nA response that exceeds this limit is marked incomplete and will not be used for routing.\nDefaults to 100000.")]
+        public int ModelInventorySanityCap = 100000;
     }
 
     /// <summary>Settings related to backends.</summary>
@@ -278,6 +281,7 @@ public class Settings : AutoConfiguration
         public string AuthBypassIPs = "127.0.0.1,::1,::ffff:127.0.0.1";
 
         [ConfigComment("If set, connections will require an Authorization header.\nThis is intended for if you're hosting your Swarm instance to a public IP and want to reduce the risks from it being exposed.\nUsing a safe reverse proxy with actual authentication such as Apache2 is recommended instead.\nThis is a simple equality check, and should be something like `Bearer some_passphrase_or_something_here`.\nDefaults to empty (no authorization required).\nIf you accidentally lock yourself out, edit `Data/Settings.fds` to remove this setting and restart Swarm.")]
+        [ValueIsSecret]
         public string RequiredAuthorization = "";
 
         [ConfigComment("If true, special network forwarding logic will apply for developer modes.\nNotably, ComfyUI Frontend NPM Developer Mode requires significant special forwarding as it misroutes itself.\nDefaults to false.")]

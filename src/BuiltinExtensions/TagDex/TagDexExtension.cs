@@ -48,13 +48,13 @@ public partial class TagDexExtension : Extension
         API.RegisterAPICall(TagDexSetPrefs, true, PermUseTagDex);
         API.RegisterAPICall(TagDexToggleFavorite, true, PermUseTagDex);
         API.RegisterAPICall(TagDexListFavorites, false, PermUseTagDex);
-        API.RegisterAPICall(TagDexDownloadSource, false, PermManageTagDex);
-        API.RegisterAPICall(TagDexReloadSource, false, PermManageTagDex);
-        API.RegisterAPICall(TagDexUnloadSource, false, PermManageTagDex);
-        API.RegisterAPICall(TagDexImportThumbnails, false, PermManageTagDex);
+        API.RegisterAPICall(TagDexDownloadSource, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexReloadSource, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexUnloadSource, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexImportThumbnails, true, PermManageTagDex);
         API.RegisterAPICall(TagDexGenerateThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexSetThumbnail, true, PermManageTagDex);
-        API.RegisterAPICall(TagDexDeleteThumbnail, false, PermManageTagDex);
+        API.RegisterAPICall(TagDexDeleteThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexReconcileFavorites, true, PermManageTagDex);
     }
 

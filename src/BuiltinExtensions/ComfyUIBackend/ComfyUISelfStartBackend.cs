@@ -66,6 +66,12 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
 
     public override int OverQueue => Settings.OverQueue;
 
+    /// <summary>Appends the authoritative final loopback listener argument for a managed spoke backend.</summary>
+    public static string ApplySpokeLoopbackListener(string arguments, bool spokeMode)
+    {
+        return spokeMode ? $"{arguments} --listen 127.0.0.1" : arguments;
+    }
+
     public static LockObject ComfyModelFileHelperLock = new();
 
     public static bool IsComfyModelFileEmitted = false;
@@ -315,9 +321,18 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
                 custom_nodes: {buildSection(ComfyUIBackendExtension.Folder, $"{Path.GetFullPath(ComfyUIBackendExtension.Folder + "/DLNodes")};{Path.GetFullPath(ComfyUIBackendExtension.Folder + "/ExtraNodes")};{CustomNodePaths.Select(Path.GetFullPath).JoinString(";")}")}
 
             """;
-            Directory.CreateDirectory(Utilities.CombinePathWithAbsolute(roots[0], Program.ServerSettings.Paths.SDClipVisionFolder.Split(';')[0]));
-            Directory.CreateDirectory(Utilities.CombinePathWithAbsolute(roots[0], Program.ServerSettings.Paths.SDClipFolder.Split(';')[0]));
-            Directory.CreateDirectory($"{roots[0]}/upscale_models");
+            static void EnsureModelDirectory(string path)
+            {
+                if (Directory.Exists(path) || SpokeModePolicy.IsActive)
+                {
+                    return;
+                }
+                SpokeModePolicy.AssertModelTreeWriteAllowed("create a ComfyUI model directory");
+                Directory.CreateDirectory(path);
+            }
+            EnsureModelDirectory(Utilities.CombinePathWithAbsolute(roots[0], Program.ServerSettings.Paths.SDClipVisionFolder.Split(';')[0]));
+            EnsureModelDirectory(Utilities.CombinePathWithAbsolute(roots[0], Program.ServerSettings.Paths.SDClipFolder.Split(';')[0]));
+            EnsureModelDirectory($"{roots[0]}/upscale_models");
             foreach (Func<string, string> yamlModifier in ModifyComfyYaml)
             {
                 yaml = yamlModifier(yaml);
@@ -411,16 +426,27 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
                 UserImageHistoryHelper.SharedSpecialFolders[$"_comfy{BackendData.ID}/"] = outputFolder;
             }
         }
-        Directory.CreateDirectory(Path.GetFullPath(ComfyUIBackendExtension.Folder + "/DLNodes"));
+        if (!SpokeModePolicy.IsActive)
+        {
+            Directory.CreateDirectory(Path.GetFullPath(ComfyUIBackendExtension.Folder + "/DLNodes"));
+        }
         string autoUpdNodes = Settings.UpdateManagedNodes.ToLowerFast();
         List<Task> tasks = [];
-        if ((autoUpdNodes == "true" || autoUpdNodes == "aggressive"))
+        if (SpokeModePolicy.IsActive && (autoUpdNodes == "true" || autoUpdNodes == "aggressive"))
+        {
+            Logs.Info("Spoke mode suppresses managed ComfyUI node updates. Update the hub and redeploy the spoke.");
+        }
+        else if (autoUpdNodes == "true" || autoUpdNodes == "aggressive")
         {
             AddLoadStatus("Will track node repo load task...");
             tasks.Add(Task.Run(EnsureNodeRepos));
         }
         string autoUpd = Settings.AutoUpdate.ToLowerFast();
-        if ((autoUpd == "true" || autoUpd == "aggressive"))
+        if (SpokeModePolicy.IsActive && (autoUpd == "true" || autoUpd == "aggressive"))
+        {
+            Logs.Info("Spoke mode suppresses ComfyUI updates. Update the hub and redeploy the spoke.");
+        }
+        else if (autoUpd == "true" || autoUpd == "aggressive")
         {
             AddLoadStatus("Will track comfy git pull auto-update task...");
             tasks.Add(Task.Run(async () =>
@@ -478,7 +504,8 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
         }
         await DoLibFixes(doFixFrontend, doLatestFrontend);
         AddLoadStatus("Starting self-start ComfyUI process...");
-        await NetworkBackendUtils.DoSelfStart(Settings.StartScript, this, $"ComfyUI-{BackendData.ID}", $"backend-{BackendData.ID}", Settings.GPU_ID, Settings.ExtraArgs.Trim() + " --port {PORT}" + addedArgs, InitInternal, (p, r) => { Port = p; RunningProcess = r; }, Settings.AutoRestart);
+        string launchArguments = ApplySpokeLoopbackListener(Settings.ExtraArgs.Trim() + " --port {PORT}" + addedArgs, SpokeModePolicy.IsActive);
+        await NetworkBackendUtils.DoSelfStart(Settings.StartScript, this, $"ComfyUI-{BackendData.ID}", $"backend-{BackendData.ID}", Settings.GPU_ID, launchArguments, InitInternal, (p, r) => { Port = p; RunningProcess = r; }, Settings.AutoRestart);
     }
 
     public async Task DoLibFixes(bool doFixFrontend, bool doLatestFrontend)
@@ -500,6 +527,7 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
             HashSet<string> libs = [.. dirs.Select(d => d.Before('-').ToLowerFast())];
             async Task pipCall(string reason, string call)
             {
+                SpokeModePolicy.AssertRuntimeMutationAllowed($"run ComfyUI dependency repair: {reason}");
                 AddLoadStatus($"{reason} for ComfyUI...");
                 Process p = DoPythonCall($"-s -m pip {call}");
                 NetworkBackendUtils.ReportLogsFromProcess(p, $"ComfyUI ({reason})", "");

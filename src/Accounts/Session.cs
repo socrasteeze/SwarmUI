@@ -42,6 +42,9 @@ public class Session : IEquatable<Session>
     /// <summary>If authorization is enabled, this is the token ID that created this session.</summary>
     public string OriginToken;
 
+    /// <summary>Whether this in-memory session was created by a hub controlling a spoke.</summary>
+    public bool IsSpokeController = false;
+
     /// <summary>If true, this session persists across restarts. If false, it sits only in memory.</summary>
     public bool Persist = true;
 

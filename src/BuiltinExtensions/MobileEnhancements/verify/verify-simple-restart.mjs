@@ -90,15 +90,15 @@ async function freshRow() {
         document.body.appendChild(panel);
         window.mApp.buildMore(panel);
         let rows = [...panel.querySelectorAll('.m-more-item')];
-        window.__row = rows.find(r => r.textContent == 'Restart server');
+        window.__row = rows.find(r => r.textContent == 'Restart Server');
         return !!window.__row;
     });
 }
 
-check('the More panel has a Restart server row', await freshRow());
+check('the More panel has a Restart Server row', await freshRow());
 check('it is distinct from the client-side Force update row', await page.evaluate(() => {
     let labels = [...document.querySelectorAll('.m-more-item')].map(r => r.textContent);
-    return labels.includes('Restart server') && labels.some(l => l.startsWith('Force update'));
+    return labels.includes('Restart Server') && labels.some(l => l.startsWith('Force update'));
 }));
 
 // ---- Permission gate ----
@@ -141,7 +141,7 @@ await page.evaluate(() => {
     window.__row.click();
 });
 check('string error (server rejected it): row restored and reported', await page.evaluate(() =>
-    !window.__row.disabled && window.__row.textContent == 'Restart server' && window.mUI.warnings.some(w => w.includes('Could not restart'))));
+    !window.__row.disabled && window.__row.textContent == 'Restart Server' && window.mUI.warnings.some(w => w.includes('Could not restart'))));
 
 // ---- The main event: two-phase watch, and no reload while the old server is still up ----
 await freshRow();
@@ -157,9 +157,9 @@ await page.evaluate(() => {
     window.genericRequest = (url, data, cb) => { window.__lastCall = { url, data }; cb({ success: true }); };
     window.__row.click();
 });
-check('it calls UpdateAndRestart with force (no git update requested)', await page.evaluate(() =>
-    window.__lastCall.url == 'UpdateAndRestart' && window.__lastCall.data.force === true
-    && window.__lastCall.data.doUpdateServer === undefined), await page.evaluate(() => JSON.stringify(window.__lastCall)));
+check('it calls RestartServer without requesting an update', await page.evaluate(() =>
+    window.__lastCall.url == 'RestartServer' && Object.keys(window.__lastCall.data).length == 0
+), await page.evaluate(() => JSON.stringify(window.__lastCall)));
 
 await page.waitForTimeout(300); // several patched polls, with the server still up throughout
 check('does NOT reload while the old server is still answering', await page.evaluate(() => !window.__reloaded));
