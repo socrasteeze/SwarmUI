@@ -47,3 +47,6 @@ package-lock.json
 # Local backup tooling (not part of upstream)
 /SwarmUI-Backup.ps1
 /SwarmUI-Backup.bat
+
+# Private local notes (contains LAN/Tailscale addresses - never push)
+/Hub-Spoke-Setup.md
