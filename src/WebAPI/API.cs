@@ -37,6 +37,12 @@ public class API
         RegisterAPICall(APICallReflectBuilder.BuildFor(method.Target, method.Method, isUserUpdate, permission));
     }
 
+    /// <summary>Returns whether a request satisfies the spoke controller boundary for state-changing APIs.</summary>
+    public static bool IsSpokeRequestAuthorized(bool spokeMode, bool isUserUpdate, bool isSpokeController)
+    {
+        return !spokeMode || !isUserUpdate || isSpokeController;
+    }
+
     /// <summary>Web access call route, triggered from <see cref="WebServer"/>.</summary>
     public static async Task HandleAsyncRequest(HttpContext context)
     {
@@ -143,6 +149,13 @@ public class API
                 await Error("API route is not a websocket but request is", "bad_request_method", "API route needs HTTP, request is websocket");
                 return;
             }
+            if (!IsSpokeRequestAuthorized(Program.IsSpokeMode, handler.IsUserUpdate, session?.IsSpokeController ?? false))
+            {
+                const string message = "Spoke mode allows state-changing API calls only from its hub controller.";
+                await Error(message);
+                await context.YieldJsonOutput(socket, StatusCodes.Status403Forbidden, Utilities.ErrorObj(message, "spoke_controller_required"));
+                return;
+            }
             if (session is not null)
             {
                 session.User.TickIsPresent();
@@ -188,6 +201,17 @@ public class API
         }
         catch (Exception ex)
         {
+            SpokeModeWriteException spokeError = ex as SpokeModeWriteException;
+            if (spokeError is null && ex is TargetInvocationException targetError)
+            {
+                spokeError = targetError.InnerException as SpokeModeWriteException;
+            }
+            if (spokeError is not null)
+            {
+                Logs.Verbose($"Spoke mode refused API request '{context.Request.Path}': {spokeError.Message}");
+                await context.YieldJsonOutput(socket, 409, Utilities.ErrorObj(spokeError.Message, "spoke_read_only"));
+                return;
+            }
             if (ex is OperationCanceledException && context.RequestAborted.IsCancellationRequested)
             {
                 return;

@@ -17,7 +17,7 @@ rem Fork Delta); the old hardcoded "origin master" started failing every launch 
 rem --no-edit is not optional here: without it a pull that cannot fast-forward opens the merge-commit message
 rem in git's editor, which in a launcher window has no one to answer it - the launch hangs, and a cancelled
 rem window leaves MERGE_HEAD set so the next launch fails too. --no-edit takes the default message instead.
-if exist .\src\bin\always_pull (
+if not defined SWARM_SPOKE_LAUNCH if exist .\src\bin\always_pull (
     echo Pulling latest changes...
     git pull --no-edit origin main
     if errorlevel 1 (

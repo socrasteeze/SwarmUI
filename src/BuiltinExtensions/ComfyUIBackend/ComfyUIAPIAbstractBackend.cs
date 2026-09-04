@@ -789,6 +789,12 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
 
     public static string GetRawWorkflowFrom(T2IParamInput input)
     {
+        if (Program.IsSpokeMode
+            && (input.TryGet(ComfyUIBackendExtension.CustomWorkflowParam, out string _)
+                || input.TryGetRaw(ComfyUIBackendExtension.FakeRawInputType, out object _)))
+        {
+            throw new SwarmReadableErrorException("Spoke mode does not accept custom Comfy workflows. Use standard hub generation parameters.");
+        }
         string workflow = null;
         if (input.TryGet(ComfyUIBackendExtension.CustomWorkflowParam, out string customWorkflowName))
         {

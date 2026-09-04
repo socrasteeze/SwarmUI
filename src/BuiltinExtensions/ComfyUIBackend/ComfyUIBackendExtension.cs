@@ -151,11 +151,12 @@ public class ComfyUIBackendExtension : Extension
         foreach (string root in Program.ServerSettings.Paths.ActualModelRoots)
         {
             string path = Utilities.CombinePathWithAbsolute(root, subpath);
-            if (createDir)
+            if (createDir && !Directory.Exists(path) && !SpokeModePolicy.IsActive)
             {
+                SpokeModePolicy.AssertModelTreeWriteAllowed("create a ComfyUI model directory");
                 Directory.CreateDirectory(path);
             }
-            else if (!Directory.Exists(path))
+            if (!Directory.Exists(path))
             {
                 continue;
             }
@@ -294,13 +295,22 @@ public class ComfyUIBackendExtension : Extension
     public void LoadWorkflowFiles()
     {
         CustomWorkflows.Clear();
-        Directory.CreateDirectory($"{FilePath}CustomWorkflows");
-        Directory.CreateDirectory($"{FilePath}CustomWorkflows/Examples");
-        string[] getCustomFlows(string path) => [.. Directory.EnumerateFiles($"{FilePath}/{path}", "*.*", new EnumerationOptions() { RecurseSubdirectories = true }).Select(f => f.Replace('\\', '/').After($"/{path}/")).Order()];
+        if (!Program.IsSpokeMode)
+        {
+            Directory.CreateDirectory($"{FilePath}CustomWorkflows");
+            Directory.CreateDirectory($"{FilePath}CustomWorkflows/Examples");
+        }
+        string[] getCustomFlows(string path)
+        {
+            string fullPath = $"{FilePath}/{path}";
+            return Directory.Exists(fullPath)
+                ? [.. Directory.EnumerateFiles(fullPath, "*.*", new EnumerationOptions() { RecurseSubdirectories = true }).Select(f => f.Replace('\\', '/').After($"/{path}/")).Order()]
+                : [];
+        }
         ExampleWorkflowNames = getCustomFlows("ExampleWorkflows");
         string[] customFlows = getCustomFlows("CustomWorkflows");
         bool anyCopied = false;
-        foreach (string workflow in ExampleWorkflowNames.Where(f => f.EndsWith(".json")))
+        foreach (string workflow in ExampleWorkflowNames.Where(f => f.EndsWith(".json") && !Program.IsSpokeMode))
         {
             if (!customFlows.Contains($"Examples/{workflow}") && !customFlows.Contains($"Examples/{workflow}.deleted"))
             {

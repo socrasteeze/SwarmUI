@@ -122,7 +122,11 @@ public class ExtensionsManager
         extras = [.. extras.Where(e => !e.TrimEnd('/').EndsWith(".delete") && !e.TrimEnd('/').EndsWith(".disable"))];
         HashSet<string> disabledFolders = [.. Program.ServerSettings.DisabledExtensions];
         extras = [.. extras.Where(e => !disabledFolders.Contains(e.AfterLast('/')))];
-        foreach (string deletable in deleteMe)
+        if (Program.IsSpokeMode && deleteMe.Length > 0)
+        {
+            Logs.Init($"Spoke mode deferred cleanup of {deleteMe.Length} pending extension uninstall folder(s). Restart without --spoke to remove them.");
+        }
+        foreach (string deletable in Program.IsSpokeMode ? [] : deleteMe)
         {
             try
             {
@@ -149,8 +153,11 @@ public class ExtensionsManager
                 if (projFile is null)
                 {
                     projFile = $"{extDir}/SwarmAutoGenExtensionProjectFile.csproj";
-                    autoGenned.Add(projFile);
-                    File.WriteAllText(projFile, ReferenceCsproj);
+                    if (!Program.IsSpokeMode)
+                    {
+                        autoGenned.Add(projFile);
+                        File.WriteAllText(projFile, ReferenceCsproj);
+                    }
                 }
                 Task<Assembly> asm = BuildExtension(extDir, projFile);
                 if (asm is not null)
@@ -207,7 +214,7 @@ public class ExtensionsManager
                 string oldUrl = section.GetString("old_url", "");
                 string[] folderNames = oldUrl.Length > 0 ? [url.AfterLast('/'), oldUrl.AfterLast('/')] : [url.AfterLast('/')];
                 KnownExtensions.Add(new ExtensionInfo(name, section.GetString("author"), section.GetString("license"), section.GetString("description"), url, oldUrl, [.. section.GetStringList("tags")], folderNames));
-                if (Program.IsCiTest && Program.IsCiTestExtensions && section.GetBool("ci-test", false).Value)
+                if (!Program.IsSpokeMode && Program.IsCiTest && Program.IsCiTestExtensions && section.GetBool("ci-test", false).Value)
                 {
                     await Utilities.RunGitProcess($"clone {url}", "./src/Extensions");
                 }
@@ -227,11 +234,11 @@ public class ExtensionsManager
         hash = hash.Length >= 8 && Utilities.AlphaNumericMatcher.IsOnlyMatches(hash[0..8]) ? hash[0..8] : "unknown";
         string target = $"./src/bin/extensions/{dllName}/{dllName}-{hash}.dll";
         // bin/obj shouldn't exist but sometimes are accidentally created. They will break things if they form, so get rid of them.
-        if (Directory.Exists($"{folder}/bin"))
+        if (!Program.IsSpokeMode && Directory.Exists($"{folder}/bin"))
         {
             Directory.Delete($"{folder}/bin", true);
         }
-        if (Directory.Exists($"{folder}/obj"))
+        if (!Program.IsSpokeMode && Directory.Exists($"{folder}/obj"))
         {
             Directory.Delete($"{folder}/obj", true);
         }
@@ -239,6 +246,10 @@ public class ExtensionsManager
         {
             Logs.Debug($"Don't need to rebuild extension {projFile}, already built.");
             return LoadInExtensionContext(dllName, Path.GetFullPath(target));
+        }
+        if (Program.IsSpokeMode)
+        {
+            throw new SwarmReadableErrorException($"Spoke mode requires a prebuilt extension artifact for '{folder.AfterLast('/')}'. Build on the hub and redeploy the spoke.");
         }
         Logs.Debug($"Building extension project: {projFile}...");
         string buildParam = $"-p:BaseIntermediateOutputPath={Path.GetFullPath($"./src/obj/extensions/{dllName}/")};TargetName={dllName}-{hash}";

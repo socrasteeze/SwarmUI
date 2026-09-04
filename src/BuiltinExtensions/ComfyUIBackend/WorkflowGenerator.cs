@@ -231,6 +231,10 @@ public partial class WorkflowGenerator
     /// <summary>Creates a new node with the given class type and input data, and optional manual ID.</summary>
     public string CreateNode(string classType, JObject input, string id = null, bool idMandatory = true)
     {
+        if (classType == "DownloadAndLoadSAM2Model" || classType == "DownloadAndLoadGIMMVFIModel")
+        {
+            SpokeModePolicy.AssertModelTreeWriteAllowed($"run auto-downloading ComfyUI node '{classType}'");
+        }
         string lookup = $"__generic_node__{classType}___{input}";
         if ((id is null || !idMandatory) && NodeHelpers.TryGetValue(lookup, out string existingNode))
         {
@@ -254,6 +258,7 @@ public partial class WorkflowGenerator
             {
                 return;
             }
+            SpokeModePolicy.AssertModelTreeWriteAllowed("download a workflow-required model");
             Logs.Info($"Downloading {name} to {filePath}...");
             double nextPerc = 0.05;
             string tmpPath = $"{filePath}.tmp";

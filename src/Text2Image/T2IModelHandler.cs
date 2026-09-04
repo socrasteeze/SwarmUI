@@ -23,6 +23,9 @@ public class T2IModelHandler
     /// <summary>If true, the engine is shutting down.</summary>
     public bool IsShutdown = false;
 
+    /// <summary>Whether the most recent model refresh scanned every configured folder successfully.</summary>
+    public volatile bool LastRefreshSucceeded = false;
+
     /// <summary>Internal model metadata cache data (per folder).</summary>
     public static ConcurrentDictionary<string, ModelDatabase> ModelMetadataCachePerFolder = [];
 
@@ -40,6 +43,9 @@ public class T2IModelHandler
 
     /// <summary>Quick internal tracker for unauthorized access errors, to aggregate the warning.</summary>
     public ConcurrentQueue<string> UnathorizedAccessSet = new();
+
+    /// <summary>Internal tracker for model folders that could not be scanned completely.</summary>
+    private readonly ConcurrentQueue<string> ScanErrorSet = new();
 
     public record class ModelDatabase(string Folder, T2IModelHandler Handler, LiteDatabase Database, ILiteCollection<ModelMetadataStore> Metadata)
     {
@@ -173,6 +179,7 @@ public class T2IModelHandler
     /// <summary>Utility to destroy all stored metadata files.</summary>
     public void MassRemoveMetadata()
     {
+        SpokeModePolicy.AssertModelTreeWriteAllowed("wipe model metadata");
         lock (MetadataLock)
         {
             foreach (ModelDatabase db in ModelMetadataCachePerFolder.Values)
@@ -254,24 +261,87 @@ public class T2IModelHandler
     /// <summary>Refresh the model list.</summary>
     public void Refresh()
     {
+        LastRefreshSucceeded = false;
         if (IsShutdown)
         {
             return;
         }
+        ConcurrentDictionary<string, T2IModel> previousModels = Models;
+        ConcurrentDictionary<string, T2IModel> newModels = new();
+        bool hasUnscannableRoot = false;
         try
         {
+            UnathorizedAccessSet.Clear();
+            ScanErrorSet.Clear();
+            bool refreshSucceeded = true;
             foreach (string path in FolderPaths)
             {
-                Directory.CreateDirectory(path);
-            }
-            ConcurrentDictionary<string, T2IModel> newModels = new();
-            foreach (string path in FolderPaths)
-            {
-                AddAllFromFolder(path, "", newModels);
+                if (!Directory.Exists(path) && !SpokeModePolicy.IsActive)
+                {
+                    try
+                    {
+                        SpokeModePolicy.AssertModelTreeWriteAllowed("create a model directory");
+                        Directory.CreateDirectory(path);
+                    }
+                    catch (Exception ex)
+                    {
+                        refreshSucceeded = false;
+                        hasUnscannableRoot = true;
+                        ScanErrorSet.Enqueue(path);
+                        Logs.Error($"Failed to create configured {ModelType} model directory '{path}': {ex.ReadableString()}");
+                        continue;
+                    }
+                }
+                if (!Directory.Exists(path))
+                {
+                    refreshSucceeded = false;
+                    hasUnscannableRoot = true;
+                    ScanErrorSet.Enqueue(path);
+                    Logs.Error($"Configured {ModelType} model directory '{path}' does not exist and was not scanned.");
+                    continue;
+                }
+                ConcurrentDictionary<string, T2IModel> rootModels = new();
+                int unauthorizedBefore = UnathorizedAccessSet.Count;
+                int scanErrorsBefore = ScanErrorSet.Count;
+                try
+                {
+                    AddAllFromFolder(path, "", rootModels);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    hasUnscannableRoot = true;
+                    UnathorizedAccessSet.Enqueue(path);
+                }
+                catch (Exception ex)
+                {
+                    hasUnscannableRoot = true;
+                    ScanErrorSet.Enqueue(path);
+                    Logs.Warning($"Error while scanning {ModelType} model root '{path}': {ex.ReadableString()}");
+                }
+                if (UnathorizedAccessSet.Count != unauthorizedBefore || ScanErrorSet.Count != scanErrorsBefore)
+                {
+                    refreshSucceeded = false;
+                }
+                foreach (KeyValuePair<string, T2IModel> entry in rootModels)
+                {
+                    if (newModels.TryGetValue(entry.Key, out T2IModel existingModel))
+                    {
+                        lock (existingModel.OtherPaths)
+                        {
+                            existingModel.OtherPaths.Add(entry.Value.RawFilePath);
+                            existingModel.OtherPaths.AddRange(entry.Value.OtherPaths);
+                        }
+                    }
+                    else
+                    {
+                        newModels[entry.Key] = entry.Value;
+                    }
+                }
             }
             lock (ModificationLock)
             {
-                Models = newModels;
+                Models = hasUnscannableRoot && !previousModels.IsEmpty ? previousModels : newModels;
+                LastRefreshSucceeded = refreshSucceeded;
             }
             Logs.Debug($"Have {Models.Count} {ModelType} models.");
             T2IModel[] dupped = [.. Models.Values.Where(m => m.OtherPaths.Count > 0)];
@@ -284,9 +354,15 @@ public class T2IModelHandler
                 Logs.Warning($"Got UnauthorizedAccessException while loading {ModelType} model paths: {UnathorizedAccessSet.Select(m => $"'{m}'").JoinString(", ")}");
                 UnathorizedAccessSet.Clear();
             }
+            ScanErrorSet.Clear();
         }
         catch (Exception e)
         {
+            lock (ModificationLock)
+            {
+                Models = previousModels.IsEmpty ? newModels : previousModels;
+                LastRefreshSucceeded = false;
+            }
             Logs.Error($"Error while refreshing {ModelType} models: {e}");
         }
     }
@@ -791,6 +867,7 @@ public class T2IModelHandler
             }
             catch (Exception ex)
             {
+                ScanErrorSet.Enqueue(path);
                 Logs.Warning($"Error while scanning model {ModelType} subfolder '{path}': {ex.ReadableString()}");
             }
         });
@@ -841,6 +918,10 @@ public class T2IModelHandler
                     if (Program.GlobalProgramCancel.IsCancellationRequested)
                     {
                         throw;
+                    }
+                    if (ex is IOException || ex is System.Security.SecurityException)
+                    {
+                        ScanErrorSet.Enqueue(fullFilename);
                     }
                     Logs.Warning($"Failed to load metadata for {fullFilename}:\n{ex.ReadableString()}");
                 }

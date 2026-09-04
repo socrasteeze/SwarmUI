@@ -20,6 +20,8 @@ def get_path():
 def download_model(path, urlbase):
     if os.path.exists(path):
         return
+    if os.environ.get("SWARM_RUNTIME_SPOKE") == "1":
+        raise RuntimeError("Spoke mode blocks the CLIPSeg model download. Install the model on the hub.")
     for file in ["config.json", "merges.txt", "model.safetensors", "preprocessor_config.json", "special_tokens_map.json", "tokenizer_config.json", "vocab.json"]:
         os.makedirs(path, exist_ok=True)
         filepath = path + file

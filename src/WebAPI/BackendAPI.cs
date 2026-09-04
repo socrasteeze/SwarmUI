@@ -74,6 +74,14 @@ public class BackendAPI
             if (full)
             {
                 data["current_model"] = t2i.Backend.CurrentModelName;
+                if (t2i.Backend is SwarmSwarmBackend remoteSwarm && remoteSwarm.IsAControlInstance)
+                {
+                    data["remote_spoke_mode"] = remoteSwarm.RemoteIsSpokeMode;
+                    data["remote_inventory_ready"] = remoteSwarm.RemoteInventoryReady;
+                    data["remote_inventory_source_version"] = remoteSwarm.RemoteInventorySourceVersion;
+                    data["remote_inventory_model_edit_id"] = remoteSwarm.RemoteInventoryModelEditID;
+                    data["remote_inventory_model_count"] = remoteSwarm.Models?.Values.Sum(names => names.Count) ?? 0;
+                }
             }
         }
         return data;
@@ -187,7 +195,6 @@ public class BackendAPI
             return new() { ["error"] = $"Backend ID {new_id} is already in use." };
         }
         FDSSection parsed = FDSSection.FromSimple(settings.ToBasicObject());
-        Logs.Verbose($"New settings to apply: {parsed}");
         BackendHandler.BackendData result = await Program.Backends.EditById(backend_id, parsed, title, new_id);
         if (result is null)
         {

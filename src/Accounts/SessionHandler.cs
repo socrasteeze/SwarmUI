@@ -22,6 +22,9 @@ public class SessionHandler
     /// <summary>How long to store sessions for before considering inactive and deleting.</summary>
     public TimeSpan MaxSessionAge = TimeSpan.FromDays(31); // TODO: Configurable
 
+    /// <summary>Maximum idle lifetime for transient hub-controller sessions on a spoke.</summary>
+    public TimeSpan MaxSpokeControllerSessionAge = TimeSpan.FromMinutes(10);
+
     /// <summary>Map of currently tracked sessions by ID.</summary>
     public ConcurrentDictionary<string, Session> Sessions = new();
 
@@ -310,6 +313,7 @@ public class SessionHandler
         Roles["owner"].Data.PermissionFlags.Add("*");
         ApplyDefaultPermissions();
         GenericSharedUser = GetUser("__shared");
+        Program.SlowTickEvent += () => CleanExpiredSpokeControllerSessions();
         Utilities.RunCheckedTask(async () =>
         {
             try
@@ -343,6 +347,22 @@ public class SessionHandler
         }
     }
 
+    /// <summary>Removes idle transient spoke-controller sessions from both in-memory indexes.</summary>
+    public int CleanExpiredSpokeControllerSessions()
+    {
+        int removed = 0;
+        foreach (Session session in Sessions.Values)
+        {
+            if (session.IsSpokeController && !session.Persist && session.Claims.IsEmpty
+                && session.TimeSinceLastUsed > MaxSpokeControllerSessionAge)
+            {
+                RemoveSession(session);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
     public Session CreateSession(string source, string userId = null, bool persist = true)
     {
         if (HasShutdown)
@@ -362,7 +382,8 @@ public class SessionHandler
             {
                 ID = Utilities.SecureRandomHex(SessionIDLength),
                 OriginAddress = source,
-                User = user
+                User = user,
+                Persist = persist
             };
             if (Sessions.TryAdd(sess.ID, sess))
             {
@@ -390,7 +411,7 @@ public class SessionHandler
         catch (Exception) { }
         Sessions.TryRemove(session.ID, out _);
         session.User.CurrentSessions.TryRemove(session.ID, out _);
-        if (!Program.NoPersist)
+        if (!Program.NoPersist && session.Persist)
         {
             lock (DBLock)
             {

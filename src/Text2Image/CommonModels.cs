@@ -29,6 +29,7 @@ public static class CommonModels
                 Logs.Warning($"Attempted re-download of pre-existing model '{FileName}', skipping.");
                 return;
             }
+            SpokeModePolicy.AssertModelTreeWriteAllowed("download a common model");
             await Utilities.DownloadFile(URL, path, updateProgress, verifyHash: Hash, session: session);
         }
     }

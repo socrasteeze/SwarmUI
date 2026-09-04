@@ -50,6 +50,9 @@ public class Program
     /// <summary>If enabled, settings will be locked to prevent user editing.</summary>
     public static bool LockSettings = false;
 
+    /// <summary>Whether this process is running as a read-only hub worker.</summary>
+    public static bool IsSpokeMode { get; private set; } = false;
+
     /// <summary>Path to the settings file, as set by command line.</summary>
     public static string SettingsFilePath;
 
@@ -143,6 +146,16 @@ public class Program
             DataDir = Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, GetCommandLineFlag("data_dir", "Data"));
             SettingsFilePath = GetCommandLineFlag("settings_file", $"{DataDir}/Settings.fds");
             LoadSettingsFile();
+            IsSpokeMode = GetCommandLineFlagAsBool("spoke", false);
+            Environment.SetEnvironmentVariable("SWARM_RUNTIME_SPOKE", IsSpokeMode ? "1" : null);
+            if (IsSpokeMode)
+            {
+                LockSettings = true;
+                ServerSettings.Metadata.ModelMetadataPerFolder = false;
+                ServerSettings.Metadata.ImageMetadataIncludeModelHash = false;
+                Logs.Init("Spoke mode active: model management is disabled. OS-level read-only permissions remain required.");
+                Logs.Init("Spoke mode effective settings: ModelMetadataPerFolder=false; ImageMetadataIncludeModelHash=false.");
+            }
             RebuildDataDir();
             if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TMPDIR")))
             {
@@ -184,6 +197,7 @@ public class Program
         {
             Logs.Error($"Command line arguments given are invalid: {ex.Message}");
             PrintCommandLineHelp();
+            Environment.ExitCode = 1;
             return;
         }
         if (ServerSettings.IsInstalled && ServerSettings.InstallDate != "2024-12-01")
@@ -202,7 +216,11 @@ public class Program
         Logs.StartLogSaving();
         timer.Check("Initial settings load");
         Extensions.PrepExtensions().Wait();
-        if (ServerSettings.Maintenance.CheckForUpdates)
+        if (IsSpokeMode && ServerSettings.Maintenance.CheckForUpdates)
+        {
+            Logs.Init("Spoke mode suppresses startup update checks. Update the hub and redeploy the spoke.");
+        }
+        else if (ServerSettings.Maintenance.CheckForUpdates)
         {
             waitFor.Add(Utilities.RunCheckedTask(async () =>
             {
@@ -443,15 +461,36 @@ public class Program
             T2IModelSets[key].Shutdown();
         }
         T2IModelSets.Clear();
+        HashSet<string> missingModelDirectories = new(StringComparer.OrdinalIgnoreCase);
+        void reportMissingModelDirectory(string path)
+        {
+            if (missingModelDirectories.Add(path))
+            {
+                Logs.Error($"Spoke mode: configured model directory '{path}' does not exist. Create it on the hub.");
+            }
+        }
+        void ensureModelDirectory(string path)
+        {
+            if (Directory.Exists(path))
+            {
+                return;
+            }
+            if (IsSpokeMode)
+            {
+                reportMissingModelDirectory(path);
+                return;
+            }
+            Directory.CreateDirectory(path);
+        }
         try
         {
             string modelRoot = ServerSettings.Paths.ActualModelRoot;
             foreach (string path in ServerSettings.Paths.SDModelFolder.Split(';'))
             {
-                Directory.CreateDirectory(Utilities.CombinePathWithAbsolute(modelRoot, path));
+                ensureModelDirectory(Utilities.CombinePathWithAbsolute(modelRoot, path));
             }
-            Directory.CreateDirectory($"{modelRoot}/upscale_models");
-            Directory.CreateDirectory($"{modelRoot}/clip");
+            ensureModelDirectory($"{modelRoot}/upscale_models");
+            ensureModelDirectory($"{modelRoot}/clip");
         }
         catch (IOException ex)
         {
@@ -488,6 +527,10 @@ public class Program
                     {
                         continue;
                     }
+                    if (IsSpokeMode && !Directory.Exists(patched))
+                    {
+                        reportMissingModelDirectory(patched);
+                    }
                     result[patched] = patched;
                     sfCount++;
                 }
@@ -495,8 +538,8 @@ public class Program
             }
             handler.FolderPaths = [.. result.Keys];
         }
-        Directory.CreateDirectory(ServerSettings.Paths.ActualModelRoot + "/tensorrt");
-        Directory.CreateDirectory(ServerSettings.Paths.ActualModelRoot + "/diffusion_models");
+        ensureModelDirectory(ServerSettings.Paths.ActualModelRoot + "/tensorrt");
+        ensureModelDirectory(ServerSettings.Paths.ActualModelRoot + "/diffusion_models");
         T2IModelSets["Stable-Diffusion"] = new() { ModelType = "Stable-Diffusion" };
         buildPathList(ServerSettings.Paths.SDModelFolder + ";tensorrt;diffusion_models;unet", T2IModelSets["Stable-Diffusion"]);
         T2IModelSets["VAE"] = new() { ModelType = "VAE" };
@@ -536,6 +579,24 @@ public class Program
             {
                 Logs.Error($"Failed to load models for {handler.ModelType}: {ex.Message}");
             }
+        }
+    }
+
+    /// <summary>Refreshes local model handlers under the model lock, advances the inventory generation, then republishes initialized remote Swarm inventories.</summary>
+    public static async Task RefreshAllModelSetsAndRemoteInventoriesAsync(bool rebuildModelLists = false)
+    {
+        using (ManyReadOneWriteLock.WriteClaim claim = RefreshLock.LockWrite())
+        {
+            if (rebuildModelLists)
+            {
+                BuildModelLists();
+            }
+            RefreshAllModelSets();
+            Interlocked.Increment(ref ModelsAPI.ModelEditID);
+        }
+        if (Backends is not null)
+        {
+            await Backends.RefreshRemoteModelInventoriesAsync();
         }
     }
 
@@ -699,14 +760,17 @@ public class Program
         try
         {
             FDSUtility.SaveToFile(ServerSettings.Save(true), SettingsFilePath);
-            bool hasAlwaysPullFile = File.Exists("./src/bin/always_pull");
-            if (ServerSettings.Maintenance.AutoPullDevUpdates && !hasAlwaysPullFile)
+            if (!IsSpokeMode)
             {
-                File.WriteAllText("./src/bin/always_pull", "true");
-            }
-            else if (!ServerSettings.Maintenance.AutoPullDevUpdates && hasAlwaysPullFile)
-            {
-                File.Delete("./src/bin/always_pull");
+                bool hasAlwaysPullFile = File.Exists("./src/bin/always_pull");
+                if (ServerSettings.Maintenance.AutoPullDevUpdates && !hasAlwaysPullFile)
+                {
+                    File.WriteAllText("./src/bin/always_pull", "true");
+                }
+                else if (!ServerSettings.Maintenance.AutoPullDevUpdates && hasAlwaysPullFile)
+                {
+                    File.Delete("./src/bin/always_pull");
+                }
             }
         }
         catch (Exception ex)
@@ -768,11 +832,22 @@ public class Program
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", environment);
         string host = GetCommandLineFlag("host", ServerSettings.Network.Host);
         int port = int.Parse(GetCommandLineFlag("port", $"{ServerSettings.Network.Port}"));
+        bool ngrokRequested = CommandLineFlags.ContainsKey("ngrok_path");
+        string cloudflared = ServerSettings.Network.CloudflaredPath;
+        bool cloudflaredRequested = CommandLineFlags.ContainsKey("cloudflared_path") || !string.IsNullOrWhiteSpace(cloudflared);
+        if (IsSpokeMode && (ngrokRequested || cloudflaredRequested))
+        {
+            throw new SwarmUserErrorException("Spoke mode does not allow ngrok or Cloudflare tunnels. Use LAN or Tailscale.");
+        }
+        if (IsSpokeMode && string.IsNullOrWhiteSpace(ServerSettings.Network.RequiredAuthorization))
+        {
+            throw new SwarmUserErrorException("Spoke mode requires controller authorization. Set Network.RequiredAuthorization.");
+        }
         if (CommonlyUsedPorts.Contains(port))
         {
             Logs.Warning($"Port {port} looks like a port commonly used by other programs. You may want to change it.");
         }
-        if (ServerSettings.Network.PortCanChange)
+        if (ServerSettings.Network.PortCanChange && !IsSpokeMode)
         {
             int origPort = port;
             while (Utilities.IsPortTaken(port))
@@ -783,6 +858,10 @@ public class Program
             {
                 Logs.Init($"Port {origPort} was taken, using {port} instead.");
             }
+        }
+        else if (IsSpokeMode && Utilities.IsPortTaken(port))
+        {
+            throw new SwarmUserErrorException($"Spoke mode requires fixed port {port}, but that port is already in use.");
         }
         WebServer.SetHost(host, port);
         NetworkBackendUtils.NextPort = ServerSettings.Network.BackendStartingPort;
@@ -796,8 +875,8 @@ public class Program
         }
         WebServer.LogLevel = Enum.Parse<LogLevel>(GetCommandLineFlag("asp_loglevel", "warning"), true);
         SessionHandler.LocalUserID = GetCommandLineFlag("user_id", SessionHandler.LocalUserID);
-        LockSettings = GetCommandLineFlagAsBool("lock_settings", false);
-        if (CommandLineFlags.ContainsKey("ngrok_path"))
+        LockSettings = IsSpokeMode || GetCommandLineFlagAsBool("lock_settings", false);
+        if (ngrokRequested)
         {
             ProxyHandler = new()
             {
@@ -808,8 +887,7 @@ public class Program
                 Args = GetCommandLineFlag("proxy_added_args", ".")[1..].Split(' ', StringSplitOptions.RemoveEmptyEntries)
             };
         }
-        string cloudflared = ServerSettings.Network.CloudflaredPath;
-        if (CommandLineFlags.ContainsKey("cloudflared_path") || !string.IsNullOrWhiteSpace(cloudflared))
+        if (cloudflaredRequested)
         {
             ProxyHandler = new()
             {
@@ -922,7 +1000,7 @@ public class Program
             Options:
               [--data_dir <path>] [--settings_file <path>] [--backends_file <path>] [--environment <Production/Development>]
               [--host <hostname>] [--port <port>] [--asp_loglevel <level>] [--loglevel <level>]
-              [--user_id <username>] [--lock_settings <true/false>] [--ngrok_path <path>] [--cloudflared_path <path>]
+              [--user_id <username>] [--lock_settings <true/false>] [--spoke <true/false>] [--ngrok_path <path>] [--cloudflared_path <path>]
               [--proxy_region <region>] [--proxy_added_args <args>] [--ngrok_basic_auth <auth-info>]
               [--launch_mode <mode>] [--require_control_within <minutes>] [--no_persist <true/false>]
               [--ci_test <true/false>] [--ci_test_extensions <true/false>]
@@ -930,6 +1008,7 @@ public class Program
 
             Generally, CLI args are almost never used. When they are are, they usually fall into the following categories:
               - `settings_file`, `lock_settings`, `backends_file`, `loglevel` may be useful to advanced users will multiple instances.
+              - `spoke` starts a read-only worker for a hub-managed model tree.
               - `cloudflared_path` is useful for remote tunnel users (eg colab).
               - `host`, `port`, and `launch_mode` may be useful in developmental usages where you need to quickly or automatically change network paths.
               - `require_control_within` is used for AutoScalingBackend especially.

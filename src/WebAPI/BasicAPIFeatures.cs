@@ -24,10 +24,11 @@ public static class BasicAPIFeatures
     {
         // Special APIs
         API.RegisterAPICall(Login);
-        API.RegisterAPICall(RegisterBasic);
-        API.RegisterAPICall(RegisterOAuth);
+        API.RegisterAPICall(RegisterBasic, true);
+        API.RegisterAPICall(RegisterOAuth, true);
         API.RegisterAPICall(GetNewSession);
         // General APIs
+        API.RegisterAPICall(CloseSession, true, Permissions.Fundamental);
         API.RegisterAPICall(Logout, true, Permissions.Fundamental);
         API.RegisterAPICall(InstallConfirmWS, true, Permissions.Install);
         API.RegisterAPICall((Func<Session, bool, Task<JObject>>)GetMyUserData, false, Permissions.FundamentalGenerateTabAccess);
@@ -246,12 +247,35 @@ public static class BasicAPIFeatures
             "output_append_user": true,
             "version": "1.2.3",
             "server_id": "abc123",
+            "spoke_mode": false,
+            "spoke_controller": false,
             "permissions": ["permission1", "permission2"]
         """)]
     public static async Task<JObject> GetNewSession(HttpContext context,
-        [API.APIParameter("If you have an admin account with manage_users permission, specify the id of a different user to impersonate here.")] string impersonateUser = null)
+        [API.APIParameter("If you have an admin account with manage_users permission, specify the id of a different user to impersonate here.")] string impersonateUser = null,
+        [API.APIParameter("If true, identify this session as a hub controlling a spoke. Has no effect on a normal server.")] bool spokeController = false)
     {
-        User user = WebServer.GetUserFor(context);
+        bool isAuthorizedSpokeController = IsAuthorizedSpokeControllerRequest(Program.IsSpokeMode, spokeController,
+            Program.ServerSettings.Network.RequiredAuthorization, context.Request.Headers.Authorization.FirstOrDefault());
+        if (Program.IsSpokeMode && spokeController && !isAuthorizedSpokeController)
+        {
+            return new JObject()
+            {
+                ["error"] = "Spoke controller authorization is required.",
+                ["error_id"] = "spoke_controller_auth_required"
+            };
+        }
+        if (isAuthorizedSpokeController && !string.IsNullOrWhiteSpace(impersonateUser))
+        {
+            return new JObject()
+            {
+                ["error"] = "Spoke controller sessions cannot impersonate users.",
+                ["error_id"] = "bad_impersonate"
+            };
+        }
+        User user = isAuthorizedSpokeController
+            ? Program.Sessions.GetUser(SessionHandler.LocalUserID)
+            : WebServer.GetUserFor(context);
         if (user is null)
         {
             return new JObject() { ["error"] = "Invalid or unauthorized." };
@@ -274,7 +298,8 @@ public static class BasicAPIFeatures
             }
             user = target;
         }
-        Session session = Program.Sessions.CreateSession(source, user.UserID);
+        Session session = Program.Sessions.CreateSession(source, user.UserID, persist: !isAuthorizedSpokeController);
+        session.IsSpokeController = isAuthorizedSpokeController;
         return new JObject()
         {
             ["session_id"] = session.ID,
@@ -282,8 +307,23 @@ public static class BasicAPIFeatures
             ["output_append_user"] = Program.ServerSettings.Paths.AppendUserNameToOutputPath,
             ["version"] = Utilities.VaryID,
             ["server_id"] = Utilities.LoopPreventionID.ToString(),
+            ["spoke_mode"] = Program.IsSpokeMode,
+            ["spoke_controller"] = session.IsSpokeController,
             ["permissions"] = JArray.FromObject(session.User.GetPermissions())
         };
+    }
+
+    /// <summary>Determines whether a requested spoke-controller session has the exact configured controller authorization.</summary>
+    public static bool IsAuthorizedSpokeControllerRequest(bool isSpokeMode, bool requested, string requiredAuthorization, string providedAuthorization)
+    {
+        return isSpokeMode && requested && !string.IsNullOrWhiteSpace(requiredAuthorization) && providedAuthorization == requiredAuthorization;
+    }
+
+    /// <summary>Closes only the current API session.</summary>
+    public static async Task<JObject> CloseSession(Session session)
+    {
+        Program.Sessions.RemoveSession(session);
+        return new JObject() { ["success"] = true };
     }
 
     [API.APIDescription("Causes a user to log out, closing all assocated sessions in the process.",

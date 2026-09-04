@@ -21,7 +21,7 @@ class ExtensionsManager {
         let restartButton = getRequiredElementById('extension_restart_button');
         restartButton.disabled = true;
         restartButton.parentElement.appendChild(createDiv(null, null, 'Restarting server... please wait a moment then refresh the page'));
-        genericRequest('UpdateAndRestart', {'force': true}, data => {});
+        genericRequest('RestartServer', {}, data => {});
     }
 
     updateExtension(name, button) {
@@ -543,6 +543,13 @@ userAdminManager = new UserAdminManager();
 //// TODO: Put these in classes
 
 let shutdownConfirmationText = translatable("Are you sure you want to shut SwarmUI down?");
+let restartConfirmationText = translatable("Are you sure you want to restart SwarmUI?");
+
+function restart_server() {
+    if (confirm(restartConfirmationText.get())) {
+        genericRequest('RestartServer', {}, data => {});
+    }
+}
 
 function shutdown_server() {
     if (confirm(shutdownConfirmationText.get())) {
@@ -648,7 +655,7 @@ function check_for_updates() {
     });
 }
 
-let restartConfirmationText = translatable("Are you sure you want to update and restart SwarmUI?");
+let updateRestartConfirmationText = translatable("Are you sure you want to update and restart SwarmUI?");
 
 function update_and_restart_server() {
     let noticeArea = getRequiredElementById('update_server_notice_area');
@@ -672,7 +679,7 @@ function update_and_restart_server() {
         }
     }
     noticeArea.style.display = 'block';
-    if (confirm(restartConfirmationText.get())) {
+    if (confirm(updateRestartConfirmationText.get())) {
         noticeArea.innerText = checkingForUpdatesText.get();
         let aggressive = getRequiredElementById('server_update_aggressive').checked;
         let force = getRequiredElementById('server_update_force_restart').checked;

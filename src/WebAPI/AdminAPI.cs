@@ -18,6 +18,13 @@ namespace SwarmUI.WebAPI;
 [API.APIClass("Administrative APIs related to server management.")]
 public static class AdminAPI
 {
+    /// <summary>Returns whether changing a setting requires model-handler and remote-inventory reconstruction.</summary>
+    public static bool IsModelPathAffectingSetting(string settingName)
+    {
+        return settingName.StartsWith("paths.", StringComparison.OrdinalIgnoreCase)
+            || settingName.StartsWith("performance.allowgpuspecific", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static void Register()
     {
         API.RegisterAPICall(ListServerSettings, false, Permissions.ReadServerSettings);
@@ -26,13 +33,14 @@ public static class AdminAPI
         API.RegisterAPICall(ListRecentLogMessages, false, Permissions.ViewLogs);
         API.RegisterAPICall(LogSubmitToPastebin, true, Permissions.ViewLogs);
         API.RegisterAPICall(ShutdownServer, true, Permissions.Shutdown);
+        API.RegisterAPICall(RestartServer, true, Permissions.Restart);
         API.RegisterAPICall(AdminTakeControl, true, Permissions.AutomatedControl);
         API.RegisterAPICall(GetServerResourceInfo, false, Permissions.ReadServerInfoPanels);
         API.RegisterAPICall(GetGlobalStatus, false, Permissions.ReadServerInfoPanels);
         API.RegisterAPICall(DebugLanguageAdd, true, Permissions.AdminDebug);
         API.RegisterAPICall(DebugGenDocs, true, Permissions.AdminDebug);
         API.RegisterAPICall(ListConnectedUsers, false, Permissions.ReadServerInfoPanels);
-        API.RegisterAPICall(CheckForUpdates, false, Permissions.Restart);
+        API.RegisterAPICall(CheckForUpdates, true, Permissions.Restart);
         API.RegisterAPICall(UpdateAndRestart, true, Permissions.Restart);
         API.RegisterAPICall(InstallExtension, true, Permissions.ManageExtensions);
         API.RegisterAPICall(UpdateExtension, true, Permissions.ManageExtensions);
@@ -60,7 +68,43 @@ public static class AdminAPI
     /// <summary>Async actions that apply backend updates if backend is in the given array of requested updates, and trigger a counter action when updates are successful or a log when failed.</summary>
     public static List<Func<Action, Action<string>, bool, string[], Task>> DoBackendUpdates = [];
 
-    public static JObject AutoConfigToParamData(AutoConfiguration config, bool hideRestricted = false)
+    /// <summary>Returns the standard rejection for mutations disabled by spoke mode.</summary>
+    private static JObject SpokeReadOnlyError()
+    {
+        return new JObject()
+        {
+            ["error"] = "This action is disabled in spoke mode. Restart without --spoke to continue.",
+            ["error_id"] = "spoke_read_only"
+        };
+    }
+
+    /// <summary>Builds the synthetic, runtime-only spoke settings group.</summary>
+    private static JObject SpokeSettingsGroup()
+    {
+        return new JObject()
+        {
+            ["type"] = "group",
+            ["name"] = "Spoke",
+            ["description"] = Program.IsSpokeMode ? "Runtime profile active" : "Runtime profile inactive",
+            ["read_only"] = true,
+            ["value"] = new JObject()
+            {
+                ["enabled"] = new JObject()
+                {
+                    ["type"] = "boolean",
+                    ["name"] = "Enabled",
+                    ["value"] = Program.IsSpokeMode,
+                    ["description"] = "Set by the --spoke launch flag",
+                    ["values"] = null,
+                    ["value_names"] = null,
+                    ["is_secret"] = false,
+                    ["read_only"] = true
+                }
+            }
+        };
+    }
+
+    public static JObject AutoConfigToParamData(AutoConfiguration config, bool hideRestricted = false, bool readOnly = false)
     {
         JObject output = [];
         foreach ((string key, AutoConfiguration.Internal.SingleFieldData data) in config.InternalData.SharedData.Fields)
@@ -75,7 +119,7 @@ public static class AdminAPI
             object defVal = config.TryGetFieldInternalData(key, out _).Default;
             if (val is AutoConfiguration subConf)
             {
-                val = AutoConfigToParamData(subConf);
+                val = AutoConfigToParamData(subConf, false, readOnly);
             }
             if (data.Field.GetCustomAttribute<SettingHiddenAttribute>() is not null)
             {
@@ -100,7 +144,8 @@ public static class AdminAPI
                 ["description"] = data.Field.GetCustomAttribute<AutoConfiguration.ConfigComment>()?.Comments ?? "",
                 ["values"] = vals == null ? null : new JArray(vals),
                 ["value_names"] = val_names == null ? null : new JArray(val_names),
-                ["is_secret"] = isSecret
+                ["is_secret"] = isSecret,
+                ["read_only"] = readOnly
             };
             if (!data.IsSection && !isSecret)
             {
@@ -138,21 +183,37 @@ public static class AdminAPI
                     "value": somevaluehere,
                     "description": "sometext",
                     "values": [...] or null,
-                    "value_names": [...] or null
+                    "value_names": [...] or null,
+                    "read_only": true or false
                 }
             }
         """)]
     public static async Task<JObject> ListServerSettings(Session session)
     {
-        return new JObject() { ["settings"] = AutoConfigToParamData(Program.ServerSettings) };
+        JObject settings = AutoConfigToParamData(Program.ServerSettings, false, Program.IsSpokeMode);
+        settings["spoke"] = SpokeSettingsGroup();
+        return new JObject() { ["settings"] = settings };
     }
 
     [API.APIDescription("Changes server settings.", "\"success\": true")]
     public static async Task<JObject> ChangeServerSettings(Session session,
         [API.APIParameter("Dynamic input of `\"settingname\": valuehere`.")] JObject rawData)
     {
+        if (Program.IsSpokeMode)
+        {
+            return SpokeReadOnlyError();
+        }
         FDSSection origPaths = Program.ServerSettings.Paths.Save(true);
         JObject settings = (JObject)rawData["settings"];
+        if (settings.Properties().Any(p => p.Name.Equals("spoke", StringComparison.OrdinalIgnoreCase)
+            || p.Name.StartsWith("spoke.", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new JObject()
+            {
+                ["error"] = "Spoke status is controlled by the --spoke launch flag.",
+                ["error_id"] = "spoke_runtime_only"
+            };
+        }
         List<string> changed = [];
         foreach ((string key, JToken val) in settings)
         {
@@ -187,7 +248,8 @@ public static class AdminAPI
         }
         Logs.Warning($"User {session.User.UserID} changed server settings: {changed.JoinString(", ")}");
         Program.SaveSettingsFile();
-        if (settings.Properties().Any(p => p.Name.StartsWith("paths.") || p.Name.StartsWith("performance.allowgpuspecific")))
+        Exception remoteModelRefreshFailure = null;
+        if (changed.Any(IsModelPathAffectingSetting))
         {
             string[] paths =
             [
@@ -212,11 +274,27 @@ public static class AdminAPI
                 Program.SaveSettingsFile();
                 return new JObject() { ["error"] = "Model paths settings are invalid, rejected change." };
             }
-            Program.BuildModelLists();
-            Program.RefreshAllModelSets();
+            try
+            {
+                await Program.RefreshAllModelSetsAndRemoteInventoriesAsync(true);
+            }
+            catch (Exception ex)
+            {
+                remoteModelRefreshFailure = ex;
+                Logs.Error($"Model paths changed locally, but remote model inventories failed to refresh: {ex.ReadableString()}");
+            }
             Program.ModelPathsChangedEvent?.Invoke();
         }
         Program.ReapplySettings();
+        if (remoteModelRefreshFailure is not null)
+        {
+            return new JObject()
+            {
+                ["error"] = "Model paths changed locally. Refresh remote backends before remote generation.",
+                ["error_id"] = "remote_inventory_refresh_failed",
+                ["local_mutation_completed"] = true
+            };
+        }
         return new JObject() { ["success"] = true };
     }
 
@@ -376,6 +454,18 @@ public static class AdminAPI
         {
             await Task.Delay(TimeSpan.FromSeconds(0.5));
             Program.Shutdown();
+        });
+        return new JObject() { ["success"] = true };
+    }
+
+    /// <summary>Restarts the server without applying updates or forcing a rebuild.</summary>
+    public static async Task<JObject> RestartServer(Session session)
+    {
+        Logs.Warning($"User {session.User.UserID} requested server restart.");
+        _ = Utilities.RunCheckedTask(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(0.5));
+            Program.RequestRestart();
         });
         return new JObject() { ["success"] = true };
     }
@@ -658,6 +748,7 @@ public static class AdminAPI
         """)]
     public static async Task<JObject> CheckForUpdates(Session session)
     {
+        SpokeModePolicy.AssertRuntimeMutationAllowed("check Git remotes for updates");
         Logs.Debug($"User {session.User.UserID} requested check for updates.");
         List<Task> fetchTasks = [];
         LockObject locker = new();
@@ -782,6 +873,10 @@ public static class AdminAPI
         [API.APIParameter("True to perform an *aggressive* git update (forcibly override common git issues).")] bool aggressive = false,
         [API.APIParameter("True to always rebuild and restart even if there's no visible update.")] bool force = false)
     {
+        if (Program.IsSpokeMode)
+        {
+            return SpokeReadOnlyError();
+        }
         Logs.Warning($"User {session.User.UserID} requested update-and-restart.");
         long updates = 0;
         List<Task> tasks = [];
@@ -845,6 +940,10 @@ public static class AdminAPI
     public static async Task<JObject> InstallExtension(Session session,
         [API.APIParameter("The name of the extension to install, from the known extensions list.")] string extensionName)
     {
+        if (Program.IsSpokeMode)
+        {
+            return SpokeReadOnlyError();
+        }
         ExtensionsManager.ExtensionInfo ext = Program.Extensions.KnownExtensions.FirstOrDefault(e => e.Name == extensionName);
         if (ext is null)
         {
@@ -872,6 +971,10 @@ public static class AdminAPI
         [API.APIParameter("The extension name (disable) or folder name (enable).")] string extensionName,
         [API.APIParameter("True to enable the extension, false to disable it.")] bool enabled)
     {
+        if (Program.IsSpokeMode)
+        {
+            return SpokeReadOnlyError();
+        }
         if (enabled)
         {
             if (!Program.Extensions.RemoveDisabledExtensionSetting(extensionName))
@@ -907,6 +1010,10 @@ public static class AdminAPI
     public static async Task<JObject> UpdateExtension(Session session,
         [API.APIParameter("The name of the extension to update.")] string extensionName)
     {
+        if (Program.IsSpokeMode)
+        {
+            return SpokeReadOnlyError();
+        }
         Extension ext = Program.Extensions.Extensions.FirstOrDefault(e => e.ExtensionName == extensionName);
         if (ext is null)
         {
@@ -931,6 +1038,10 @@ public static class AdminAPI
     public static async Task<JObject> UninstallExtension(Session session,
         [API.APIParameter("The name (if loaded) or folder name (if disabled) of the extension to uninstall.")] string extensionName)
     {
+        if (Program.IsSpokeMode)
+        {
+            return SpokeReadOnlyError();
+        }
         Extension ext = Program.Extensions.Extensions.FirstOrDefault(e => e.ExtensionName == extensionName);
         string folder = ext?.FilePath;
         if (folder is null)
@@ -1363,6 +1474,10 @@ public static class AdminAPI
 
     public static async Task<JObject> InstallDotnetUpdate(Session session)
     {
+        if (Program.IsSpokeMode)
+        {
+            return SpokeReadOnlyError();
+        }
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             return new JObject() { ["error"] = "This API route is only valid on Windows." };

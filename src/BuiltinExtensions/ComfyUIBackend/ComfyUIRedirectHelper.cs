@@ -19,6 +19,23 @@ namespace SwarmUI.Builtin_ComfyUIBackend;
 /// <summary>Helper class for network redirections for the '/ComfyBackendDirect' url path.</summary>
 public class ComfyUIRedirectHelper
 {
+    /// <summary>Normalizes a direct Comfy route for security decisions while preserving the original forwarding path.</summary>
+    public static string NormalizeDirectRoutePath(string path)
+    {
+        return (path ?? "").Before('?').Trim('/').ToLowerFast();
+    }
+
+    /// <summary>Returns whether a direct Comfy request is in the spoke's minimal read-only allowlist.</summary>
+    public static bool IsSpokeDirectRequestAllowed(string method, string path, bool isWebSocket)
+    {
+        if (isWebSocket || !string.Equals(method, HttpMethods.Get, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        string routePath = NormalizeDirectRoutePath(path);
+        return routePath == "object_info" || routePath == "api/object_info";
+    }
+
     /// <summary>Map of all currently connected users.</summary>
     public static ConcurrentDictionary<string, ComfyUser> Users = new();
 
@@ -121,6 +138,18 @@ public class ComfyUIRedirectHelper
         if (!string.IsNullOrWhiteSpace(context.Request.QueryString.Value))
         {
             path = $"{path}{context.Request.QueryString.Value}";
+        }
+        string routePath = NormalizeDirectRoutePath(path);
+        if (SpokeModePolicy.IsActive && !IsSpokeDirectRequestAllowed(context.Request.Method, path, context.WebSockets.IsWebSocketRequest))
+        {
+            context.Response.ContentType = "application/json";
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync(new JObject()
+            {
+                ["error"] = "Spoke mode exposes only read-only Comfy object information through this route."
+            }.ToString());
+            await context.Response.CompleteAsync();
+            return;
         }
         if (context.WebSockets.IsWebSocketRequest)
         {
@@ -325,8 +354,13 @@ public class ComfyUIRedirectHelper
                 context.Response.CompleteAsync();
             }
             HttpContent content = null;
-            if (path == "prompt" || path == "api/prompt")
+            if (routePath == "prompt" || routePath == "api/prompt")
             {
+                if (SpokeModePolicy.IsActive)
+                {
+                    givePostError("Spoke mode blocks direct Comfy workflow execution. Use the hub Generate tab.");
+                    return;
+                }
                 try
                 {
                     using MemoryStream memStream = new();
@@ -405,7 +439,7 @@ public class ComfyUIRedirectHelper
                     Logs.Debug($"ComfyUI redirection failed - prompt json parse: {ex.ReadableString()}");
                 }
             }
-            else if (path == "interrupt" || path == "api/interrupt")
+            else if (routePath == "interrupt" || routePath == "api/interrupt")
             {
                 using MemoryStream memStream = new();
                 await context.Request.Body.CopyToAsync(memStream);
@@ -431,7 +465,7 @@ public class ComfyUIRedirectHelper
                 response = responses.FirstOrDefault(t => t.StatusCode == HttpStatusCode.OK);
                 response ??= responses.FirstOrDefault();
             }
-            else if (path == "queue" || path == "api/queue") // eg queue delete
+            else if (routePath == "queue" || routePath == "api/queue") // eg queue delete
             {
                 List<Task<HttpResponseMessage>> tasks = [];
                 MemoryStream inputCopy = new();

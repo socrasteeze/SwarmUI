@@ -1,6 +1,8 @@
 
 using FreneticUtilities.FreneticDataSyntax;
+using SwarmUI.Core;
 using SwarmUI.DataHolders;
+using SwarmUI.Utils;
 
 namespace SwarmUI.Builtin_ComfyUIBackend;
 
@@ -33,8 +35,18 @@ public class ComfyUIAPIBackend : ComfyUIAPIAbstractBackend
 
     public override int OverQueue => Settings.OverQueue;
 
+    /// <summary>Returns whether an external Comfy address resolves syntactically to a loopback URI.</summary>
+    public static bool IsLoopbackAddress(string address)
+    {
+        return Uri.TryCreate(address, UriKind.Absolute, out Uri uri) && uri.IsLoopback;
+    }
+
     public override Task Init()
     {
+        if (Program.IsSpokeMode && !IsLoopbackAddress(Settings.Address))
+        {
+            throw new SwarmReadableErrorException("Spoke mode requires external Comfy API backends to use a loopback address. Bind Comfy to loopback or enforce an equivalent host firewall rule.");
+        }
         return InitInternal(CanIdle);
     }
 }

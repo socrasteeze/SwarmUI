@@ -141,6 +141,7 @@ public static class UtilAPI
         {
             return new JObject() { ["error"] = $"Invalid type '{type}'." };
         }
+        SpokeModePolicy.AssertModelTreeWriteAllowed("convert pickle models to safetensors");
         foreach (string path in models.FolderPaths)
         {
             Process p = PythonLaunchHelper.LaunchGeneric("launchtools/pickle-to-safetensors.py", true, [path, fp16 ? "true" : "false"]);
@@ -162,6 +163,7 @@ public static class UtilAPI
         }
         if (wipeModels)
         {
+            SpokeModePolicy.AssertModelTreeWriteAllowed("wipe model metadata");
             BackendHandler.BackendData[] backends = [.. Program.Backends.AllBackends.Values];
             foreach (BackendHandler.BackendData backend in backends)
             {

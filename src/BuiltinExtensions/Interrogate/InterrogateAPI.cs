@@ -18,7 +18,7 @@ public static class InterrogateAPI
     public static void Register()
     {
         API.RegisterAPICall(ListInterrogateBackends, false, InterrogateExtension.PermUseInterrogate);
-        API.RegisterAPICall(InterrogateImage, false, InterrogateExtension.PermUseInterrogate);
+        API.RegisterAPICall(InterrogateImage, true, InterrogateExtension.PermUseInterrogate);
     }
 
     [API.APIDescription("Lists the interrogation backends that are usable right now, and any that could be installed.",

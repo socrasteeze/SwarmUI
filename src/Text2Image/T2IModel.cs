@@ -113,7 +113,7 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
             {
                 Handler.ResetMetadataFrom(this);
             }
-            if (resave)
+            if (resave && !SpokeModePolicy.IsActive)
             {
                 ResaveModel(reader);
             }
@@ -130,6 +130,7 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
             {
                 return;
             }
+            SpokeModePolicy.AssertModelTreeWriteAllowed("resave model metadata");
             string rawFilePrefix = RawFilePath.BeforeLast('.');
             string rawSwarmJsPath = $"{rawFilePrefix}.swarm.json";
             bool earlyEnd = (!RawFilePath.EndsWith(".safetensors") && !RawFilePath.EndsWith(".sft")) || Program.ServerSettings.Metadata.EditMetadataWriteJSON;

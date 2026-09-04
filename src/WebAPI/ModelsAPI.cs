@@ -1,5 +1,6 @@
 using FreneticUtilities.FreneticExtensions;
 using FreneticUtilities.FreneticToolkit;
+using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Backends;
@@ -8,6 +9,8 @@ using SwarmUI.Media;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
 using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text.RegularExpressions;
 
@@ -16,11 +19,15 @@ namespace SwarmUI.WebAPI;
 [API.APIClass("API routes related to handling models (including loras, wildcards, etc).")]
 public static class ModelsAPI
 {
+    /// <summary>Protocol version for <see cref="ListModelInventory(Session, bool)"/>.</summary>
+    public const int ModelInventoryProtocolVersion = 1;
+
     public static long ModelEditID = 0;
 
     public static void Register()
     {
         API.RegisterAPICall(ListModels, false, Permissions.FundamentalModelAccess);
+        API.RegisterAPICall(ListModelInventory, false, Permissions.FundamentalModelAccess);
         API.RegisterAPICall(DescribeModel, false, Permissions.FundamentalModelAccess);
         API.RegisterAPICall(ListLoadedModels, false, Permissions.FundamentalModelAccess);
         API.RegisterAPICall(SelectModel, true, Permissions.LoadModelsNow);
@@ -45,7 +52,7 @@ public static class ModelsAPI
 
     public static Dictionary<string, JObject> InternalSwarmRemoteModels(string subtype)
     {
-        SwarmSwarmBackend[] backends = [.. Program.Backends.RunningBackendsOfType<SwarmSwarmBackend>().Where(b => b.RemoteModels is not null)];
+        SwarmSwarmBackend[] backends = [.. Program.Backends.RunningBackendsOfType<SwarmSwarmBackend>().Where(b => b.RemoteInventoryReady && b.RemoteModels is not null)];
         IEnumerable<Dictionary<string, JObject>> sets = backends.Select(b => b.RemoteModels.GetValueOrDefault(subtype)).Where(b => b is not null);
         if (sets.IsEmpty())
         {
@@ -155,9 +162,433 @@ public static class ModelsAPI
         return new JObject() { ["error"] = "Model not found." };
     }
 
+    /// <summary>Maximum decoded size of one proxied remote model preview.</summary>
+    public const int RemoteModelPreviewMaxBytes = 16 * 1024 * 1024;
+
+    /// <summary>Maximum JSON response size for one remote model description containing a base64 preview.</summary>
+    public const int RemoteModelPreviewMaxDescriptionBytes = 24 * 1024 * 1024;
+
+    /// <summary>Maximum number of chained Swarm preview proxies.</summary>
+    public const int RemoteModelPreviewMaxHopCount = 3;
+
+    /// <summary>Raster MIME types that may be served from the hub origin.</summary>
+    private static readonly HashSet<string> AllowedRemoteModelPreviewMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif"
+    };
+
+    /// <summary>No-redirect client used so backend credentials never cross an HTTP redirect boundary.</summary>
+    private static readonly HttpClient RemoteModelPreviewHttpClient = CreateRemoteModelPreviewHttpClient();
+
+    /// <summary>Global concurrency bound for memory-heavy remote preview fetch and decode work.</summary>
+    private static readonly SemaphoreSlim RemoteModelPreviewSemaphore = new(4, 4);
+
+    /// <summary>Relative remote routes allowed to receive server-side controller credentials.</summary>
+    private static readonly string[] AllowedRemoteModelPreviewPathPrefixes =
+    [
+        "ViewSpecial/", "RemoteModelPreview/", "imgs/", "ExtensionFile/"
+    ];
+
+    /// <summary>Creates the bounded preview client without automatic redirects.</summary>
+    private static HttpClient CreateRemoteModelPreviewHttpClient()
+    {
+        SocketsHttpHandler handler = new()
+        {
+            AllowAutoRedirect = false,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            MaxConnectionsPerServer = 8
+        };
+        HttpClient client = new(handler)
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"SwarmUI/{Utilities.Version}");
+        return client;
+    }
+
+    /// <summary>Reads HTTP content into memory while enforcing a strict byte ceiling.</summary>
+    private static async Task<byte[]> ReadBoundedRemotePreviewContent(HttpContent content, int maxBytes, CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength.HasValue && content.Headers.ContentLength.Value > maxBytes)
+        {
+            throw new SwarmReadableErrorException($"Remote model preview response exceeds the {maxBytes}-byte limit.");
+        }
+        await using Stream stream = await content.ReadAsStreamAsync(cancellationToken);
+        using MemoryStream output = new();
+        byte[] buffer = new byte[81920];
+        while (true)
+        {
+            int read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read <= 0)
+            {
+                break;
+            }
+            if (output.Length + read > maxBytes)
+            {
+                throw new SwarmReadableErrorException($"Remote model preview response exceeds the {maxBytes}-byte limit.");
+            }
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>Validates raster bytes, MIME type, and decoded dimensions, and returns the detected MIME type.</summary>
+    public static string ValidateRemoteModelPreviewBytes(byte[] data, string claimedMimeType = null)
+    {
+        if (data is null || data.Length == 0 || data.Length > RemoteModelPreviewMaxBytes)
+        {
+            throw new SwarmReadableErrorException("Remote model preview has an invalid byte length.");
+        }
+        if (claimedMimeType is not null && !AllowedRemoteModelPreviewMimeTypes.Contains(claimedMimeType))
+        {
+            throw new SwarmReadableErrorException("Remote model preview MIME type is not an allowed raster format.");
+        }
+        SixLabors.ImageSharp.Formats.IImageFormat format = SixLabors.ImageSharp.Image.DetectFormat(data);
+        SixLabors.ImageSharp.ImageInfo info = SixLabors.ImageSharp.Image.Identify(data);
+        string detectedMimeType = format?.DefaultMimeType;
+        if (info is null || string.IsNullOrWhiteSpace(detectedMimeType)
+            || !AllowedRemoteModelPreviewMimeTypes.Contains(detectedMimeType)
+            || (claimedMimeType is not null && !claimedMimeType.Equals(detectedMimeType, StringComparison.OrdinalIgnoreCase))
+            || (long)info.Width * info.Height > 16L * 1024 * 1024)
+        {
+            throw new SwarmReadableErrorException("Remote model preview content is not a valid bounded raster image.");
+        }
+        return detectedMimeType;
+    }
+
+    /// <summary>Decodes and validates one raster data URL without allowing active content or unbounded base64 allocation.</summary>
+    public static (byte[] Data, string MimeType) DecodeRemoteModelPreviewData(string preview)
+    {
+        int separator = preview?.IndexOf(";base64,", StringComparison.OrdinalIgnoreCase) ?? -1;
+        if (separator <= 5 || !preview.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SwarmReadableErrorException("Remote model preview data URL is malformed.");
+        }
+        string claimedMimeType = preview[5..separator].Trim();
+        if (!AllowedRemoteModelPreviewMimeTypes.Contains(claimedMimeType))
+        {
+            throw new SwarmReadableErrorException("Remote model preview MIME type is not an allowed raster format.");
+        }
+        string encoded = preview[(separator + ";base64,".Length)..];
+        long maximumEncodedLength = ((long)RemoteModelPreviewMaxBytes + 2) / 3 * 4;
+        if (encoded.Length > maximumEncodedLength)
+        {
+            throw new SwarmReadableErrorException("Remote model preview data exceeds the decoded byte limit.");
+        }
+        byte[] data = Convert.FromBase64String(encoded);
+        string detectedMimeType = ValidateRemoteModelPreviewBytes(data, claimedMimeType);
+        return (data, detectedMimeType);
+    }
+
+    /// <summary>Returns whether a remote preview proxy request is within the bounded chain depth.</summary>
+    public static bool IsRemoteModelPreviewHopAllowed(int hopCount)
+    {
+        return hopCount >= 0 && hopCount < RemoteModelPreviewMaxHopCount;
+    }
+
+    /// <summary>Resolves an allowlisted preview path under the configured remote base without permitting origin or base-path escape.</summary>
+    public static Uri BuildSafeRemoteModelPreviewUri(string remoteAddress, string preview)
+    {
+        if (!Uri.TryCreate($"{remoteAddress?.TrimEnd('/')}/", UriKind.Absolute, out Uri baseUri)
+            || string.IsNullOrWhiteSpace(preview) || preview.Contains('\\'))
+        {
+            throw new SwarmReadableErrorException("Remote model preview path is invalid.");
+        }
+        string relative = preview.TrimStart('/');
+        string routePath = Uri.UnescapeDataString(relative.Before('?'));
+        if (routePath.Split('/').Any(segment => segment == "..")
+            || !AllowedRemoteModelPreviewPathPrefixes.Any(prefix => routePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SwarmReadableErrorException("Remote model preview path is not allowlisted.");
+        }
+        Uri target = new(baseUri, relative);
+        string basePath = baseUri.AbsolutePath.EndsWith('/') ? baseUri.AbsolutePath : $"{baseUri.AbsolutePath}/";
+        if (!target.Scheme.Equals(baseUri.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !target.Host.Equals(baseUri.Host, StringComparison.OrdinalIgnoreCase)
+            || target.Port != baseUri.Port
+            || !target.AbsolutePath.StartsWith(basePath, StringComparison.Ordinal))
+        {
+            throw new SwarmReadableErrorException("Remote model preview path escaped its configured backend origin.");
+        }
+        return target;
+    }
+
+    /// <summary>Streams one remote model preview through the hub without exposing backend credentials or embedding every preview in inventory.</summary>
+    public static async Task ViewRemoteModelPreview(HttpContext context, int backendID)
+    {
+        User user = WebServer.GetUserFor(context);
+        if (user is null && context.Request.Headers.TryGetValue("X-Session-ID", out Microsoft.Extensions.Primitives.StringValues sessionHeader)
+            && Program.Sessions.TryGetSession(sessionHeader.FirstOrDefault(), out Session serverSession))
+        {
+            user = serverSession.User;
+        }
+        string subtype = context.Request.Query["subtype"].ToString();
+        string modelName = context.Request.Query["model"].ToString();
+        string hopText = context.Request.Headers["X-Swarm-Preview-Hop"].FirstOrDefault();
+        int hopCount = 0;
+        if (!string.IsNullOrWhiteSpace(hopText) && !int.TryParse(hopText, out hopCount))
+        {
+            await context.YieldJsonOutput(null, StatusCodes.Status400BadRequest, Utilities.ErrorObj("Remote preview hop value is invalid.", "bad_preview_hop"));
+            return;
+        }
+        if (!IsRemoteModelPreviewHopAllowed(hopCount))
+        {
+            await context.YieldJsonOutput(null, 508, Utilities.ErrorObj("Remote preview proxy hop limit reached.", "preview_hop_limit"));
+            return;
+        }
+        if (user is null || !user.HasPermission(Permissions.FundamentalModelAccess)
+            || string.IsNullOrWhiteSpace(subtype) || string.IsNullOrWhiteSpace(modelName)
+            || !user.IsAllowedModel(modelName)
+            || !Program.Backends.AllBackends.TryGetValue(backendID, out BackendHandler.BackendData backendData)
+            || backendData.AbstractBackend is not SwarmSwarmBackend remote
+            || !remote.IsAControlInstance || !remote.RemoteInventoryReady || remote.RemoteModels is null
+            || !remote.RemoteModels.TryGetValue(subtype, out Dictionary<string, JObject> subtypeModels)
+            || !subtypeModels.ContainsKey(modelName))
+        {
+            await context.YieldJsonOutput(null, StatusCodes.Status404NotFound, Utilities.ErrorObj("Remote model preview not found.", "file_not_found"));
+            return;
+        }
+        bool hasPreviewSlot = false;
+        try
+        {
+            using CancellationTokenSource timeout = Utilities.TimedCancel(TimeSpan.FromSeconds(15));
+            using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                context.RequestAborted, Program.GlobalProgramCancel, timeout.Token);
+            await RemoteModelPreviewSemaphore.WaitAsync(cancellation.Token);
+            hasPreviewSlot = true;
+            JObject description = null;
+            await remote.RunWithSession(async () =>
+            {
+                using HttpRequestMessage descriptionRequest = new(HttpMethod.Post, $"{remote.Address}/API/DescribeModel")
+                {
+                    Content = Utilities.JSONContent(new JObject()
+                    {
+                        ["session_id"] = remote.Session,
+                        ["modelName"] = modelName,
+                        ["subtype"] = subtype
+                    })
+                };
+                remote.RequestAdapter()(descriptionRequest);
+                using HttpResponseMessage descriptionResponse = await RemoteModelPreviewHttpClient.SendAsync(
+                    descriptionRequest, HttpCompletionOption.ResponseHeadersRead, cancellation.Token);
+                byte[] descriptionBytes = await ReadBoundedRemotePreviewContent(
+                    descriptionResponse.Content, RemoteModelPreviewMaxDescriptionBytes, cancellation.Token);
+                description = StringConversionHelper.UTF8Encoding.GetString(descriptionBytes).ParseToJson();
+                SwarmSwarmBackend.AutoThrowException(description);
+                if (descriptionResponse.StatusCode != HttpStatusCode.OK)
+                {
+                    throw new SwarmReadableErrorException($"Remote model description returned HTTP {(int)descriptionResponse.StatusCode}.");
+                }
+            });
+            string preview = description?["model"]?["preview_image"]?.ToString();
+            if (string.IsNullOrWhiteSpace(preview))
+            {
+                await context.YieldJsonOutput(null, StatusCodes.Status404NotFound, Utilities.ErrorObj("Remote model preview not found.", "file_not_found"));
+                return;
+            }
+            if (preview.StartsWithFast("data:"))
+            {
+                (byte[] data, string mimeType) = DecodeRemoteModelPreviewData(preview);
+                context.Response.ContentType = mimeType;
+                context.Response.ContentLength = data.Length;
+                context.Response.Headers.CacheControl = "private, max-age=300";
+                context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                await context.Response.Body.WriteAsync(data, cancellation.Token);
+                await context.Response.CompleteAsync();
+                return;
+            }
+            Uri previewUri = BuildSafeRemoteModelPreviewUri(remote.Address, preview);
+            byte[] responseData = null;
+            string responseMimeType = null;
+            await remote.RunWithSession(async () =>
+            {
+                using HttpRequestMessage request = new(HttpMethod.Get, previewUri);
+                remote.RequestAdapter()(request);
+                request.Headers.Add("X-Session-ID", remote.Session);
+                request.Headers.Add("X-Swarm-Preview-Hop", $"{hopCount + 1}");
+                using HttpResponseMessage response = await RemoteModelPreviewHttpClient.SendAsync(
+                    request, HttpCompletionOption.ResponseHeadersRead, cancellation.Token);
+                responseData = await ReadBoundedRemotePreviewContent(response.Content, RemoteModelPreviewMaxBytes, cancellation.Token);
+                if (response.StatusCode != HttpStatusCode.OK)
+                {
+                    JObject errorPayload = null;
+                    try
+                    {
+                        errorPayload = StringConversionHelper.UTF8Encoding.GetString(responseData).ParseToJson();
+                    }
+                    catch
+                    {
+                    }
+                    if (errorPayload is not null)
+                    {
+                        SwarmSwarmBackend.AutoThrowException(errorPayload);
+                    }
+                    throw new SwarmReadableErrorException($"Remote model preview returned HTTP {(int)response.StatusCode}.");
+                }
+                responseMimeType = ValidateRemoteModelPreviewBytes(responseData, response.Content.Headers.ContentType?.MediaType);
+            });
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = responseMimeType;
+            context.Response.ContentLength = responseData.Length;
+            context.Response.Headers.CacheControl = "private, max-age=300";
+            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            await context.Response.Body.WriteAsync(responseData, cancellation.Token);
+            await context.Response.CompleteAsync();
+        }
+        catch (Exception ex)
+        {
+            Logs.Debug($"Failed to proxy remote model preview from backend {backendID}: {ex.ReadableString()}");
+            if (!context.Response.HasStarted)
+            {
+                await context.YieldJsonOutput(null, StatusCodes.Status502BadGateway, Utilities.ErrorObj("Remote model preview is unavailable.", "remote_preview_unavailable"));
+            }
+        }
+        finally
+        {
+            if (hasPreviewSlot)
+            {
+                RemoteModelPreviewSemaphore.Release();
+            }
+        }
+    }
+
     public enum ModelHistorySortMode { Name, Title, DateCreated, DateModified }
 
     public record struct ModelListEntry(string Name, string Title, long TimeCreated, long TimeModified, JObject NetData);
+
+    /// <summary>Returns a compact, deterministic snapshot of every model subtype for authenticated Swarm-to-Swarm routing.</summary>
+    [API.APIDescription("Returns a compact, deterministic snapshot of every model subtype. Intended for authenticated Swarm-to-Swarm routing inventory.",
+        """
+            {
+                "version": 1,
+                "source_version": "1.2.3.GIT-abc123",
+                "model_edit_id": 42,
+                "allow_remote": true,
+                "complete": true,
+                "total": 2,
+                "returned": 2,
+                "truncated": false,
+                "parameter_count": 2,
+                "parameter_ids": ["height", "width"],
+                "subtype_count": 1,
+                "subtypes": {
+                    "Stable-Diffusion": {
+                        "complete": true,
+                        "scan_succeeded": true,
+                        "total": 2,
+                        "returned": 2,
+                        "truncated": false,
+                        "names": ["folder/a.safetensors", "folder/b.safetensors"]
+                    }
+                }
+            }
+        """)]
+    public static Task<JObject> ListModelInventory(Session session,
+        [API.APIParameter("If true, include models from remote Swarm backends connected to this server.")] bool allowRemote = true)
+    {
+        long modelEditID = Interlocked.Read(ref ModelEditID);
+        try
+        {
+            int sanityCap = Math.Max(0, Program.ServerSettings.Performance.ModelInventorySanityCap);
+            JObject subtypes = [];
+            long total = 0;
+            long returned = 0;
+            bool truncated = false;
+            bool complete = true;
+            string[] parameterIDs = [.. T2IParamTypes.Types.Keys.Order(StringComparer.Ordinal)];
+            using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
+            modelEditID = Interlocked.Read(ref ModelEditID);
+            foreach (string subtype in Program.T2IModelSets.Keys.Order(StringComparer.Ordinal))
+            {
+                T2IModelHandler handler = Program.T2IModelSets[subtype];
+                HashSet<string> names = new(StringComparer.Ordinal);
+                foreach (string name in handler.Models.Keys)
+                {
+                    if (session.User.IsAllowedModel(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+                if (allowRemote)
+                {
+                    foreach (string provider in ExtraModelProviders.Keys.Order(StringComparer.Ordinal))
+                    {
+                        Dictionary<string, JObject> provided = ExtraModelProviders[provider](subtype);
+                        if (provided is null)
+                        {
+                            throw new InvalidOperationException($"Model inventory provider '{provider}' returned null for subtype '{subtype}'.");
+                        }
+                        foreach (string name in provided.Keys)
+                        {
+                            if (session.User.IsAllowedModel(name))
+                            {
+                                names.Add(name);
+                            }
+                        }
+                    }
+                }
+                string[] sortedNames = [.. names.Order(StringComparer.Ordinal)];
+                int returnedCount = Math.Min(sortedNames.Length, sanityCap);
+                bool subtypeTruncated = returnedCount != sortedNames.Length;
+                bool scanSucceeded = handler.LastRefreshSucceeded;
+                bool subtypeComplete = scanSucceeded && !subtypeTruncated;
+                total += sortedNames.Length;
+                returned += returnedCount;
+                truncated |= subtypeTruncated;
+                complete &= subtypeComplete;
+                subtypes[subtype] = new JObject()
+                {
+                    ["complete"] = subtypeComplete,
+                    ["scan_succeeded"] = scanSucceeded,
+                    ["total"] = sortedNames.Length,
+                    ["returned"] = returnedCount,
+                    ["truncated"] = subtypeTruncated,
+                    ["names"] = JArray.FromObject(sortedNames.Take(returnedCount))
+                };
+            }
+            long finalModelEditID = Interlocked.Read(ref ModelEditID);
+            if (finalModelEditID != modelEditID)
+            {
+                throw new InvalidOperationException("Model data changed while the inventory snapshot was being built.");
+            }
+            return Task.FromResult(new JObject()
+            {
+                ["version"] = ModelInventoryProtocolVersion,
+                ["source_version"] = Utilities.VaryID,
+                ["model_edit_id"] = modelEditID,
+                ["allow_remote"] = allowRemote,
+                ["complete"] = complete,
+                ["total"] = total,
+                ["returned"] = returned,
+                ["truncated"] = truncated,
+                ["parameter_count"] = parameterIDs.Length,
+                ["parameter_ids"] = JArray.FromObject(parameterIDs),
+                ["subtype_count"] = subtypes.Count,
+                ["subtypes"] = subtypes
+            });
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"Failed to build a complete model inventory: {ex.ReadableString()}");
+            return Task.FromResult(new JObject()
+            {
+                ["version"] = ModelInventoryProtocolVersion,
+                ["source_version"] = Utilities.VaryID,
+                ["model_edit_id"] = modelEditID,
+                ["allow_remote"] = allowRemote,
+                ["complete"] = false,
+                ["total"] = 0,
+                ["returned"] = 0,
+                ["truncated"] = false,
+                ["parameter_count"] = 0,
+                ["parameter_ids"] = new JArray(),
+                ["subtype_count"] = 0,
+                ["subtypes"] = new JObject(),
+                ["error"] = "Failed to build a complete model inventory.",
+                ["error_id"] = "model_inventory_incomplete"
+            });
+        }
+    }
 
     [API.APIDescription("Returns a list of models available on the server within a given folder, with their metadata.",
         """
@@ -168,7 +599,12 @@ public static class ModelsAPI
                     "name": "namehere",
                     // etc., see `DescribeModel` for the full model description
                 }
-            ]
+            ],
+            "complete": true,
+            "scan_succeeded": true,
+            "total": 1,
+            "returned": 1,
+            "truncated": false
         """
         )]
     public static async Task<JObject> ListModels(Session session,
@@ -202,6 +638,7 @@ public static class ModelsAPI
         HashSet<string> folders = [];
         List<ModelListEntry> files = [];
         HashSet<string> dedup = [];
+        int total = 0;
         bool tryMatch(string name)
         {
             if (!name.StartsWith(path) || name.Length <= path.Length || !session.User.IsAllowedModel(name))
@@ -221,7 +658,7 @@ public static class ModelsAPI
             }
             return slashes < depth && dedup.Add(name);
         }
-        int sanityCap = Program.ServerSettings.Performance.ModelListSanityCap;
+        int sanityCap = Math.Max(0, Program.ServerSettings.Performance.ModelListSanityCap);
         using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
         if (subtype == "Wildcards")
         {
@@ -229,11 +666,11 @@ public static class ModelsAPI
             {
                 if (tryMatch(file))
                 {
-                    WildcardsHelper.Wildcard card = WildcardsHelper.GetWildcard(file);
-                    files.Add(new(card.Name, card.Name.AfterLast('/'), card.TimeCreated, card.TimeModified, card.GetNetObject(dataImages, truncate: true)));
-                    if (files.Count > sanityCap)
+                    total++;
+                    if (files.Count < sanityCap)
                     {
-                        break;
+                        WildcardsHelper.Wildcard card = WildcardsHelper.GetWildcard(file);
+                        files.Add(new(card.Name, card.Name.AfterLast('/'), card.TimeCreated, card.TimeModified, card.GetNetObject(dataImages, truncate: true)));
                     }
                 }
             }
@@ -244,10 +681,10 @@ public static class ModelsAPI
             {
                 if (tryMatch(possible.Name))
                 {
-                    files.Add(new(possible.Name, possible.Title, possible.Metadata?.TimeCreated ?? long.MaxValue, possible.Metadata?.TimeModified ?? long.MaxValue, possible.ToNetObject(dataImgs: dataImages)));
-                    if (files.Count > sanityCap)
+                    total++;
+                    if (files.Count < sanityCap)
                     {
-                        break;
+                        files.Add(new(possible.Name, possible.Title, possible.Metadata?.TimeCreated ?? long.MaxValue, possible.Metadata?.TimeModified ?? long.MaxValue, possible.ToNetObject(dataImgs: dataImages)));
                     }
                 }
             }
@@ -258,16 +695,16 @@ public static class ModelsAPI
             {
                 if (tryMatch(name))
                 {
-                    JObject toAdd = possible;
-                    if (!dataImages && toAdd.TryGetValue("preview_image", out JToken previewImg) && previewImg.ToString().StartsWith("data:"))
+                    total++;
+                    if (files.Count < sanityCap)
                     {
-                        toAdd = toAdd.DeepClone() as JObject;
-                        toAdd["preview_image"] = $"/ViewSpecial/{subtype}/{name}";
-                    }
-                    files.Add(new(name, name.AfterLast('/'), long.MaxValue, long.MaxValue, toAdd));
-                    if (files.Count > sanityCap)
-                    {
-                        break;
+                        JObject toAdd = possible;
+                        if (!dataImages && toAdd.TryGetValue("preview_image", out JToken previewImg) && previewImg.ToString().StartsWith("data:"))
+                        {
+                            toAdd = toAdd.DeepClone() as JObject;
+                            toAdd["preview_image"] = $"/ViewSpecial/{subtype}/{name}";
+                        }
+                        files.Add(new(name, name.AfterLast('/'), long.MaxValue, long.MaxValue, toAdd));
                     }
                 }
             }
@@ -293,10 +730,16 @@ public static class ModelsAPI
             files.Reverse();
         }
         Utilities.QuickGC(); // (Could potentially be quite large data, so encourage GC to not slam RAM from listing out model data)
+        bool scanSucceeded = subtype == "Wildcards" || handler.LastRefreshSucceeded;
         return new JObject()
         {
             ["folders"] = JArray.FromObject(folders.ToList()),
-            ["files"] = JArray.FromObject(files.Select(f => f.NetData).ToList())
+            ["files"] = JArray.FromObject(files.Select(f => f.NetData).ToList()),
+            ["complete"] = scanSucceeded && total == files.Count,
+            ["scan_succeeded"] = scanSucceeded,
+            ["total"] = total,
+            ["returned"] = files.Count,
+            ["truncated"] = total != files.Count
         };
     }
 
@@ -497,6 +940,7 @@ public static class ModelsAPI
         {
             return new JObject() { ["error"] = "Model not found." };
         }
+        SpokeModePolicy.AssertModelTreeWriteAllowed("edit model metadata");
         lock (handler.ModificationLock)
         {
             actualModel.Title = string.IsNullOrWhiteSpace(title) ? null : title;
@@ -571,7 +1015,7 @@ public static class ModelsAPI
 
     public static AsciiMatcher TokenTextLimiter = new(AsciiMatcher.BothCaseLetters + AsciiMatcher.Digits + " -_.,/");
 
-    [API.APIDescription("Downloads a model to the server, with websocket progress updates.\nNote that this does not trigger a model refresh itself, you must do that after a 'success' reply.", "")]
+    [API.APIDescription("Downloads a model to the server with websocket progress updates, then refreshes local and remote model inventories before reporting success.", "")]
     public static async Task<JObject> DoModelDownloadWS(Session session, WebSocket ws,
         [API.APIParameter("The URL to download a model from.")] string url,
         [API.APIParameter("The model's sub-type, eg `Stable-Diffusion`, `LoRA`, etc.")] string type,
@@ -609,6 +1053,7 @@ public static class ModelsAPI
         Dictionary<string, string> headers = [];
         try
         {
+            SpokeModePolicy.AssertModelTreeWriteAllowed("download a model");
             string outPath = $"{folder}/{name}.{extension}";
             if (File.Exists(outPath))
             {
@@ -669,17 +1114,55 @@ public static class ModelsAPI
             using (ManyReadOneWriteLock.WriteClaim claim = Program.RefreshLock.LockWrite())
             {
                 handler.Refresh();
+                Interlocked.Increment(ref ModelEditID);
             }
-            if (Program.ServerSettings.Paths.DownloaderAlwaysResave && extension == "safetensors")
+            try
             {
-                if (handler.Models.TryGetValue($"{name}.safetensors", out T2IModel model))
+                if (Program.ServerSettings.Paths.DownloaderAlwaysResave && extension == "safetensors")
                 {
-                    model.ResaveModel();
+                    if (handler.Models.TryGetValue($"{name}.safetensors", out T2IModel model))
+                    {
+                        model.ResaveModel();
+                    }
+                    else
+                    {
+                        Logs.Warning($"Could not resave model '{name}.safetensors' as it has not shown up in the backing handler. Something may have gone wrong.");
+                    }
                 }
-                else
+            }
+            catch (Exception ex)
+            {
+                Logs.Error($"Model '{name}' downloaded locally, but post-download resave failed: {ex.ReadableString()}");
+                try
                 {
-                    Logs.Warning($"Could not resave model '{name}.safetensors' as it has not shown up in the backing handler. Something may have gone wrong.");
+                    await Program.Backends.RefreshRemoteModelInventoriesAsync();
                 }
+                catch (Exception refreshEx)
+                {
+                    Logs.Error($"Remote model inventories also failed to refresh after downloading '{name}': {refreshEx.ReadableString()}");
+                }
+                await ws.SendJson(new JObject()
+                {
+                    ["error"] = "Model saved locally, but metadata processing failed. Refresh remote backends if they remain blocked.",
+                    ["error_id"] = "model_postprocess_failed",
+                    ["local_mutation_completed"] = true
+                }, API.WebsocketTimeout);
+                return null;
+            }
+            try
+            {
+                await Program.Backends.RefreshRemoteModelInventoriesAsync();
+            }
+            catch (Exception ex)
+            {
+                Logs.Error($"Model '{name}' downloaded locally, but remote model inventories failed to refresh: {ex.ReadableString()}");
+                await ws.SendJson(new JObject()
+                {
+                    ["error"] = "Model saved locally. Refresh remote backends before remote generation.",
+                    ["error_id"] = "remote_inventory_refresh_failed",
+                    ["local_mutation_completed"] = true
+                }, API.WebsocketTimeout);
+                return null;
             }
             await ws.SendJson(new JObject() { ["success"] = true }, API.WebsocketTimeout);
         }
@@ -791,47 +1274,65 @@ public static class ModelsAPI
         {
             return new JObject() { ["error"] = "Invalid sub-type." };
         }
-        using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
-        T2IModel match = null;
-        if (session.User.IsAllowedModel(modelName))
+        using (ManyReadOneWriteLock.WriteClaim claim = Program.RefreshLock.LockWrite())
         {
-            if (handler.Models.TryGetValue(modelName + ".safetensors", out T2IModel model))
+            T2IModel match = null;
+            if (session.User.IsAllowedModel(modelName))
             {
-                match = model;
-            }
-            else if (handler.Models.TryGetValue(modelName, out model))
-            {
-                match = model;
-            }
-        }
-        if (match is null)
-        {
-            return new JObject() { ["error"] = "Model not found." };
-        }
-        Action<string> deleteFile = Program.ServerSettings.Paths.RecycleDeletedImages ? Utilities.SendFileToRecycle : File.Delete;
-        void doDelete(string path)
-        {
-            deleteFile(path);
-            string fileBase = Path.GetFullPath(path).BeforeLast('.');
-            foreach (string str in T2IModelHandler.AllModelAttachedExtensions)
-            {
-                string altFile = $"{fileBase}{str}";
-                if (File.Exists(altFile))
+                if (handler.Models.TryGetValue(modelName + ".safetensors", out T2IModel model))
                 {
-                    deleteFile(altFile);
+                    match = model;
+                }
+                else if (handler.Models.TryGetValue(modelName, out model))
+                {
+                    match = model;
                 }
             }
-            AutoFolderRemove(handler, Path.GetDirectoryName(path));
-        }
-        doDelete(match.RawFilePath);
-        if (Program.ServerSettings.Paths.EditMetadataAcrossAllDups)
-        {
-            foreach (string altPath in match.OtherPaths)
+            if (match is null)
             {
-                doDelete(altPath);
+                return new JObject() { ["error"] = "Model not found." };
             }
+            SpokeModePolicy.AssertModelTreeWriteAllowed("delete a model");
+            Action<string> deleteFile = Program.ServerSettings.Paths.RecycleDeletedImages ? Utilities.SendFileToRecycle : File.Delete;
+            void doDelete(string path)
+            {
+                deleteFile(path);
+                string fileBase = Path.GetFullPath(path).BeforeLast('.');
+                foreach (string str in T2IModelHandler.AllModelAttachedExtensions)
+                {
+                    string altFile = $"{fileBase}{str}";
+                    if (File.Exists(altFile))
+                    {
+                        deleteFile(altFile);
+                    }
+                }
+                AutoFolderRemove(handler, Path.GetDirectoryName(path));
+            }
+            doDelete(match.RawFilePath);
+            if (Program.ServerSettings.Paths.EditMetadataAcrossAllDups)
+            {
+                foreach (string altPath in match.OtherPaths)
+                {
+                    doDelete(altPath);
+                }
+            }
+            handler.Refresh();
+            Interlocked.Increment(ref ModelEditID);
         }
-        handler.Models.Remove(match.Name, out _);
+        try
+        {
+            await Program.Backends.RefreshRemoteModelInventoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"Model '{modelName}' deleted locally, but remote model inventories failed to refresh: {ex.ReadableString()}");
+            return new JObject()
+            {
+                ["error"] = "Model deleted locally. Refresh remote backends before remote generation.",
+                ["error_id"] = "remote_inventory_refresh_failed",
+                ["local_mutation_completed"] = true
+            };
+        }
         return new JObject() { ["success"] = true };
     }
 
@@ -845,64 +1346,82 @@ public static class ModelsAPI
         {
             return new JObject() { ["error"] = "Invalid sub-type." };
         }
-        using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
-        T2IModel match = null;
-        if (session.User.IsAllowedModel(oldName))
+        using (ManyReadOneWriteLock.WriteClaim claim = Program.RefreshLock.LockWrite())
         {
-            if (handler.Models.TryGetValue(oldName + ".safetensors", out T2IModel model))
+            T2IModel match = null;
+            if (session.User.IsAllowedModel(oldName))
             {
-                oldName += ".safetensors";
-                match = model;
-            }
-            else if (handler.Models.TryGetValue(oldName, out model))
-            {
-                match = model;
-            }
-        }
-        if (match is null)
-        {
-            return new JObject() { ["error"] = "Model not found." };
-        }
-        (string oldNameNoExt, string ext) = match.Name.BeforeAndAfterLast('.');
-        newName = newName.BeforeLast('.');
-        newName = Utilities.StrictFilenameClean(newName).Trim().Trim('/').Replace(' ', '_');
-        if (string.IsNullOrWhiteSpace(newName) || !session.User.IsAllowedModel(oldName))
-        {
-            return new JObject() { ["error"] = "Model new name is not valid." };
-        }
-        if (handler.Models.TryGetValue(newName + ".safetensors", out _) || handler.Models.TryGetValue(newName, out _))
-        {
-            return new JObject() { ["error"] = "Model new name is already taken by an existing model." };
-        }
-        if (!match.RawFilePath.EndsWith(oldName))
-        {
-            Logs.Debug($"Model path {match.RawFilePath} does not end with {oldName}??");
-            return new JObject() { ["error"] = "Paths are being mishandled by the system. Cannot rename. (Please report this bug)" };
-        }
-        void doMoveNow(string oldPath)
-        {
-            string relevantRoot = oldPath[..^oldName.Length];
-            Directory.CreateDirectory($"{relevantRoot}/{Path.GetDirectoryName(newName)}");
-            File.Move(oldPath, $"{relevantRoot}/{newName}.{ext}");
-            foreach (string str in T2IModelHandler.AllModelAttachedExtensions)
-            {
-                string altFile = $"{relevantRoot}/{oldNameNoExt}{str}";
-                if (File.Exists(altFile))
+                if (handler.Models.TryGetValue(oldName + ".safetensors", out T2IModel model))
                 {
-                    File.Move(altFile, $"{relevantRoot}/{newName}{str}");
+                    oldName += ".safetensors";
+                    match = model;
+                }
+                else if (handler.Models.TryGetValue(oldName, out model))
+                {
+                    match = model;
                 }
             }
-            AutoFolderRemove(handler, Path.GetDirectoryName(oldPath));
-        }
-        doMoveNow(match.RawFilePath);
-        if (Program.ServerSettings.Paths.EditMetadataAcrossAllDups)
-        {
-            foreach (string altPath in match.OtherPaths)
+            if (match is null)
             {
-                doMoveNow(altPath);
+                return new JObject() { ["error"] = "Model not found." };
             }
+            (string oldNameNoExt, string ext) = match.Name.BeforeAndAfterLast('.');
+            newName = newName.BeforeLast('.');
+            newName = Utilities.StrictFilenameClean(newName).Trim().Trim('/').Replace(' ', '_');
+            if (string.IsNullOrWhiteSpace(newName) || !session.User.IsAllowedModel(oldName))
+            {
+                return new JObject() { ["error"] = "Model new name is not valid." };
+            }
+            if (handler.Models.TryGetValue(newName + ".safetensors", out _) || handler.Models.TryGetValue(newName, out _))
+            {
+                return new JObject() { ["error"] = "Model new name is already taken by an existing model." };
+            }
+            if (!match.RawFilePath.EndsWith(oldName))
+            {
+                Logs.Debug($"Model path {match.RawFilePath} does not end with {oldName}??");
+                return new JObject() { ["error"] = "Paths are being mishandled by the system. Cannot rename. (Please report this bug)" };
+            }
+            SpokeModePolicy.AssertModelTreeWriteAllowed("rename a model");
+            void doMoveNow(string oldPath)
+            {
+                string relevantRoot = oldPath[..^oldName.Length];
+                Directory.CreateDirectory($"{relevantRoot}/{Path.GetDirectoryName(newName)}");
+                File.Move(oldPath, $"{relevantRoot}/{newName}.{ext}");
+                foreach (string str in T2IModelHandler.AllModelAttachedExtensions)
+                {
+                    string altFile = $"{relevantRoot}/{oldNameNoExt}{str}";
+                    if (File.Exists(altFile))
+                    {
+                        File.Move(altFile, $"{relevantRoot}/{newName}{str}");
+                    }
+                }
+                AutoFolderRemove(handler, Path.GetDirectoryName(oldPath));
+            }
+            doMoveNow(match.RawFilePath);
+            if (Program.ServerSettings.Paths.EditMetadataAcrossAllDups)
+            {
+                foreach (string altPath in match.OtherPaths)
+                {
+                    doMoveNow(altPath);
+                }
+            }
+            handler.Refresh();
+            Interlocked.Increment(ref ModelEditID);
         }
-        Interlocked.Increment(ref ModelEditID);
+        try
+        {
+            await Program.Backends.RefreshRemoteModelInventoriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"Model '{oldName}' renamed locally to '{newName}', but remote model inventories failed to refresh: {ex.ReadableString()}");
+            return new JObject()
+            {
+                ["error"] = "Model renamed locally. Refresh remote backends before remote generation.",
+                ["error_id"] = "remote_inventory_refresh_failed",
+                ["local_mutation_completed"] = true
+            };
+        }
         return new JObject() { ["success"] = true };
     }
 }
