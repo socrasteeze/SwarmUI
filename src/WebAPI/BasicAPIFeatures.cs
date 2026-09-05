@@ -427,7 +427,7 @@ public static class BasicAPIFeatures
         Settings.User.AutoCompleteData settings = session.User.Settings.AutoComplete;
         string[] autocompletions = !includeAutocompletions || string.IsNullOrWhiteSpace(settings.Source)
             ? null
-            : AutoCompleteListHelper.GetData(settings.Source, settings.EscapeParens, settings.Suffix, settings.SpacingMode);
+            : AutoCompleteListHelper.GetData(settings.Source, settings.EscapeParens && !session.User.Settings.ParamParsing.ParseAlternativePromptSyntaxes, settings.Suffix, settings.SpacingMode);
         return new JObject()
         {
             ["user_name"] = session.User.UserID,

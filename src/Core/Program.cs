@@ -408,10 +408,8 @@ public class Program
                         }
                         break;
                     case "app":
-                        {
-                            LaunchDesktopApp();
-                            break;
-                        }
+                        LaunchDesktopApp();
+                        break;
                 }
             }
             catch (Exception ex)

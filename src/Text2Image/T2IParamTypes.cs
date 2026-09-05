@@ -435,7 +435,7 @@ public class T2IParamTypes
             "false", IgnoreIf: "false", Group: GroupImagePrompting, FeatureFlag: "sdxl"
             ));
         UseReferenceOnly = Register<bool>(new("Use Reference Only", "Use the 'Reference-Only' technique to guide the generation towards the input image.\nThis currently has side effects that notably prevent Batch from being used properly.",
-            "false", IgnoreIf: "false", Group: GroupImagePrompting, IsAdvanced: true
+            "false", IgnoreIf: "false", Group: GroupImagePrompting, IsAdvanced: true, FeatureFlag: "supports_reference_only"
             ));
         SmartImagePromptResizing = Register<bool>(new("Smart Image Prompt Resizing", "When enabled, input images for the image prompt will be intelligently resized to a scale appropriate to the model.\nIf disabled, images will be either unscaled, or scaled to the current generation parameter size.\nIt is almost always best to leave this on.",
             "true", IgnoreIf: "true", Group: GroupImagePrompting, IsAdvanced: true

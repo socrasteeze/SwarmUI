@@ -435,7 +435,8 @@ function textPromptAddKeydownHandler(elem) {
                 }
             }
         }
-        strength += up ? 0.1 : -0.1;
+        let step = parseFloat(internalSiteJsGetUserSetting('ui.weightstep', '0.1'));
+        strength += up ? step : -step;
         strength = `${formatNumberClean(strength, 5)}`;
         if (strength == "1") {
             setTextContent(elem, `${before}${mid}${after}`);
