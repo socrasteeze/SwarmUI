@@ -467,6 +467,9 @@ public class Settings : AutoConfiguration
 
             [ConfigComment("If enabled, metadata will be hidden in the image Full View by default.\nIf disabled, metadata will be shown by default.\nYou zoom still zoom in or out to show or hide the metadata at any time as usual.")]
             public bool DefaultHideMetadataInFullview = false;
+
+            [ConfigComment("How much to increase or decrease prompt weight when you hold Control and press the up/down arrow keys on selected text in a prompt box.\nDefault is 0.1.")]
+            public double WeightStep = 0.1;
         }
 
         [ConfigComment("Settings related to the user interface, entirely contained to the frontend.")]
@@ -663,7 +666,7 @@ public class Settings : AutoConfiguration
             [SettingsOptions(Impl = typeof(SourceImpl))]
             public string Source = "";
 
-            [ConfigComment("If true, the auto-completion will escape parentheses with backslashes to prevent parsing errors.")]
+            [ConfigComment("If true, the auto-completion will escape parentheses with backslashes to prevent parsing errors.\nDoes nothing if ParseAlternativePromptSyntaxes is disabled.")]
             public bool EscapeParens = true;
 
             [ConfigComment("Optional suffix to append to autocompletes, eg ', ' to append commas.")]

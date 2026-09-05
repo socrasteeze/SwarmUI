@@ -790,7 +790,7 @@ public partial class WorkflowGenerator
     public (JArray, JArray, JArray, JArray) BuildInputImageHandling(List<JArray> images, JArray pos, JArray neg, JArray latent)
     {
         JArray imgNeg = null;
-        if (IsKontext() || IsOmniGen() || IsQwenImage() || IsAnyFlux2() || IsBoogu() || IsMageFlow())
+        if (IsKontext() || IsOmniGen() || IsQwenImage() || IsAnyFlux2() || IsBoogu() || IsMageFlow() || (IsKrea2() && UserInput.Get(ComfyUIBackendExtension.EnableReferenceLatents, "none") != "none"))
         {
             if (IsOmniGen() || IsQwenImageEditPlus() || IsBoogu() || IsMageFlow())
             {
@@ -827,6 +827,15 @@ public partial class WorkflowGenerator
                 if (IsQwenImageEditPlus() || IsBoogu() || IsMageFlow())
                 {
                     neg = imgNeg;
+                }
+                if (IsKrea2())
+                {
+                    string methodNode = CreateNode("FluxKontextMultiReferenceLatentMethod", new JObject()
+                    {
+                        ["conditioning"] = pos,
+                        ["reference_latents_method"] = UserInput.Get(ComfyUIBackendExtension.EnableReferenceLatents, "none")
+                    });
+                    pos = [methodNode, 0];
                 }
             }
         }
@@ -1300,12 +1309,27 @@ public partial class WorkflowGenerator
     {
         if (UserInput.TryGet(T2IParamTypes.PromptImages, out List<Image> images) && images.Count > index)
         {
+            string textEncodedImage = UserInput.Get(ComfyUIBackendExtension.TextEncodedImage, "auto");
+            if (promptSize && textEncodedImage == "none")
+            {
+                return null;
+            }
             WGNodeData img = LoadImage(images[index], "${promptimages." + index + "}", false);
             (int width, int height) = images[index].GetResolution();
             int genWidth = UserInput.GetImageWidth(), genHeight = UserInput.GetImageHeight();
             int actual = (int)Math.Sqrt(width * height), target = (int)Math.Sqrt(genWidth * genHeight);
             bool doesFit = true;
-            if (!UserInput.Get(T2IParamTypes.SmartImagePromptResizing, true))
+            if (promptSize && textEncodedImage == "small")
+            {
+                target = 384;
+                doesFit = Math.Abs(actual - target) <= 64;
+            }
+            else if (promptSize && textEncodedImage == "large")
+            {
+                target = 1024;
+                doesFit = Math.Abs(actual - target) <= 64;
+            }
+            else if (!UserInput.Get(T2IParamTypes.SmartImagePromptResizing, true))
             {
                 doesFit = Math.Abs(actual - target) <= 64;
             }
@@ -1324,6 +1348,10 @@ public partial class WorkflowGenerator
                     } // else does fit
                 }
             }
+            else if (IsKrea2() && !promptSize) // Just match the target res.
+            {
+                doesFit = Math.Abs(actual - target) <= 64;
+            }
             else if (IsAnyFlux2()) // Not strictly limited per se but if user hasn't disabled resizing, just sanity cap
             {
                 if (actual < 512)
@@ -1336,7 +1364,7 @@ public partial class WorkflowGenerator
                     doesFit = false;
                 }
             }
-            else if ((IsBoogu() || IsQwenImageEditPlus() || IsMageFlow()) && promptSize)
+            else if ((IsBoogu() || IsQwenImageEditPlus() || IsMageFlow() || IsKrea2()) && promptSize)
             {
                 target = 384;
                 doesFit = false;
