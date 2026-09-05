@@ -1,27 +1,28 @@
 # HANDOFF
 
-**Updated:** 2026-09-04 · **Branch:** main · **Base:** 146add97 (= origin/main after this push) · **Tree:** clean
+**Updated:** 2026-09-04 · **Branch:** main · **Base:** 775713a0 (= origin/main after this push) · **Tree:** clean
 
 ## State
-Upstream sync only; no fork feature work this session. Five commits go to `origin/main`: upstream's three
-Desktop-app-launcher commits, the merge, and one whitespace fix. All gates green. Nothing needs a restart.
+Upstream sync only; no fork feature work this session. Six commits go to `origin/main`: upstream's four
+(Wayland desktop backend, aspect autodescribe, sectionalizable seeds, `StepSwapNoisy` fix), the merge `775713a0`,
+and this doc update. Zero conflicts, no fork file touched, all gates green. Nothing needs a restart.
 
 ## Done this session
-- Merged upstream `4073a6cc` (3 commits: Avalonia desktop launcher, `LaunchMode` default, docs) — `AGENTS.md` sync log
-- Fixed a format-gate regression in upstream's new `case "app":` block — `src/Core/Program.cs:410`
-- Confirmed the fork's own edits survived intact in `Settings.cs`, `Installation.cs`, `Program.cs`
-- New `Desktop/Desktop.csproj` is now inside the solution build and both format gates
+- Merged upstream `f185f256` (4 commits, 8 files, +23/-18) — details in the `AGENTS.md` sync log
+- Verified no fork-owned code was in the merge path; every hunk auto-merged with no fork text nearby
+- Confirmed upstream's new code passes both format gates unmodified this time (last window it did not)
 
 ## Open
-1. The desktop app was never launched. `Program.LaunchDesktopApp` builds and runs it on demand and no gate covers that path — `src/Core/Program.cs:465`
-2. `launchtools/install-windows.bat:35` still passes `--launch_mode webinstall`, now only a historical alias to `web`, so a fresh Windows install lands on the normal page, not the install page. Identical in upstream; left alone deliberately.
-3. The gitignored `src/Extensions/SwarmUI-VideoStages` still fails on `RunSeedVR2Stage`, removed by upstream `059dcd69`. Update it from its own upstream; never patch it here.
-4. AnimaDex: after the cache drain, restart the `animadex` container, verify read-only that favourites search returns total 3 and the sidebar shows the star toggle, then commit the staged change in that checkout.
-5. Restart SwarmUI and confirm: Analyze pose completes a WD14 round trip; batch toggles survive a browser close; `/simple` Characters sort and layout work on real data.
-6. Florence-2 caption index unverified — `ListInterrogateBackends` reports `florence2` `available: false`, so install the node pack first.
-7. H3 baseline and sheet prompt wording remain untuned against real output — `src/BuiltinExtensions/CharacterSheet/SheetPlan.cs`, GPU session, by eye.
-8. `Data/Autocompletions/gelbooru_anima_2026-06-11.csv` is superseded and can be deleted — user data, user's call.
-9. The `@artist` autocomplete convention has never been A/B checked on the Anima checkpoints.
+1. **Seeds are now sectionalizable** — `<refiner>`, `<video>`, `<segment:...>`, SeedVR, and the pixel decoder each take their own `<param[seed]:...>`. Untested on real generations here. Note SeedVR's derived default changed from `Seed + 500` to `Seed + 9`, so SeedVR output on an unchanged prompt will differ from before this merge.
+2. The desktop app was never launched, and the new Avalonia Wayland backend is Linux-only and compile-verified only — `src/Core/Program.cs:465`
+3. `launchtools/install-windows.bat:35` still passes `--launch_mode webinstall`, now only a historical alias to `web`, so a fresh Windows install lands on the normal page, not the install page. Identical in upstream; left alone deliberately.
+4. The gitignored `src/Extensions/SwarmUI-VideoStages` still fails on `RunSeedVR2Stage`, removed by upstream `059dcd69`. Update it from its own upstream; never patch it here.
+5. AnimaDex: after the cache drain, restart the `animadex` container, verify read-only that favourites search returns total 3 and the sidebar shows the star toggle, then commit the staged change in that checkout.
+6. Restart SwarmUI and confirm: Analyze pose completes a WD14 round trip; batch toggles survive a browser close; `/simple` Characters sort and layout work on real data.
+7. Florence-2 caption index unverified — `ListInterrogateBackends` reports `florence2` `available: false`, so install the node pack first.
+8. H3 baseline and sheet prompt wording remain untuned against real output — `src/BuiltinExtensions/CharacterSheet/SheetPlan.cs`, GPU session, by eye.
+9. `Data/Autocompletions/gelbooru_anima_2026-06-11.csv` is superseded and can be deleted — user data, user's call.
+10. The `@artist` autocomplete convention has never been A/B checked on the Anima checkpoints.
 
 ## Decisions
 - Fixed upstream's whitespace rather than relaxing the gate — the format check is upstream's own CI step and the pre-merge tree passed it
