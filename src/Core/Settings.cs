@@ -301,6 +301,9 @@ public class Settings : AutoConfiguration
 
         /// <summary>Converts <see cref="MaxNetworkRequestMegabytes"/> to bytes as a long.</summary>
         public long MaxReceiveBytes => MaxNetworkRequestMegabytes * (1024L * 1024);
+
+        [ConfigComment("How many parallel requests to make at the same time when downloading from HuggingFace.\nIncreasing this number will use more RAM while downloading, but also download faster.\nDepending on your network speed, 16, 32, or 64 are reasonable values.")]
+        public int HuggingFaceDownloadParallelism = 32;
     }
 
     /// <summary>Settings related to file paths.</summary>
