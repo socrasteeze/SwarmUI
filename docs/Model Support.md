@@ -631,9 +631,10 @@ For upscaling with SD3, the `Refiner Do Tiling` parameter is highly recommended 
 - **Parameters:**
     - **Prompt:** Normal general model prompting works as expected, but NSFW terms will be stripped by the models internal text-refiner.
     - **Prompt Images:** Krea 2 is not an editing model per se, but it can take in reference images in the prompt (by default only the text encoder sees this, not the core model).
-        - There are unofficial edit loras like this: [Ostris/Krea2 Style Reference](<https://huggingface.co/ostris/krea2_turbo_style_reference/blob/main/krea2_style_reference.safetensors>), results may vary.
+        - There are unofficial "Ostris" edit loras like this: [Ostris/Krea2 Style Reference](<https://huggingface.co/ostris/krea2_turbo_style_reference/blob/main/krea2_style_reference.safetensors>), results may vary.
             - For those, set **Enable Reference Latents** under Image Prompting to **Index Timestep Zero (Ostris)**.
-        - For identity edit LoRAs, use **Index (Identity Edit)** on that same dropdown.
+        - There are also "identity edit" LoRAs like this: [Krea Identity Edit](<https://huggingface.co/conradlocke/krea2-identity-edit/tree/main>)
+            - use **Index (Identity Edit)** on that same dropdown.
     - **Resolution:** Side length `1024` is the default, but it work anywhere from `128` to `4096`.
     - **Steps:** For Turbo, `8` recommended, `4` minimum. For Base normal step counts (20+).
     - **CFG:** For Turbo, `1`. For Base normal CFG ranges (4+? 7? idk, tbd)

@@ -903,28 +903,49 @@ public static class Utilities
     }
 
     /// <summary>Downloads a file from a given URL and saves it to a given filepath. Auth errors (401/403) get a hint appended to the error message to tell the user how to fix it.</summary>
-    public static async Task DownloadFile(string url, string filepath, Action<long, long, long> progressUpdate, CancellationTokenSource cancel = null, string altUrl = null, string verifyHash = null, Dictionary<string, string> headers = null, Session session = null)
+    public static async Task DownloadFile(string url, string filepath, Action<long, long, long> progressUpdate, CancellationTokenSource cancel = null, string altUrl = null, string verifyHash = null, Dictionary<string, string> headers = null, Session session = null, bool allowParallel = true)
     {
         altUrl ??= url;
         cancel ??= new();
         headers ??= [];
+        bool doParallel = allowParallel && url.StartsWith("https://huggingface.co/");
+        int chunkSize = (doParallel ? 16 : 64) * 1024 * 1024;
         string authHint = ApplyDownloadAPIKey(ref url, headers, session) ?? "This may be gated or private content that requires an API key. You can set API keys in the User Settings page.";
         using CancellationTokenSource combinedCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, cancel.Token);
         Directory.CreateDirectory(Path.GetDirectoryName(filepath));
         using FileStream writer = File.OpenWrite(filepath);
-        HttpRequestMessage request = new(HttpMethod.Get, url);
-        if (headers is not null)
+        HttpRequestMessage makeRequest(long start, long end)
         {
-            foreach ((string key, string value) in headers)
+            HttpRequestMessage request = new(HttpMethod.Get, url);
+            if (headers is not null)
             {
-                request.Headers.Add(key, value);
+                foreach ((string key, string value) in headers)
+                {
+                    request.Headers.Add(key, value);
+                }
             }
+            if (doParallel)
+            {
+                request.Headers.AcceptEncoding.Clear();
+                request.Headers.AcceptEncoding.Add(new("identity"));
+            }
+            if (doParallel || end != 0)
+            {
+                request.Headers.Range = new(start, end);
+            }
+            return request;
         }
-        HttpResponseMessage response = await UtilWebClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Program.GlobalProgramCancel);
-        long length = response.Content.Headers.ContentLength ?? 0;
-        ConcurrentQueue<byte[]> chunks = new();
+        HttpResponseMessage response = await DownloaderWebClient.SendAsync(makeRequest(0, 0), HttpCompletionOption.ResponseHeadersRead, Program.GlobalProgramCancel);
+        long length = response.Content.Headers.ContentRange?.Length ?? 0;
+        if (length == 0)
+        {
+            length = response.Content.Headers.ContentLength ?? 0;
+            doParallel = false;
+        }
+        int maxParallel = doParallel ? 16 : 1;
+        ConcurrentQueue<(int, byte[])> chunks = new();
         ConcurrentQueue<(long, long, long, bool)> progUpdates = new();
-        if (response.StatusCode != HttpStatusCode.OK)
+        if (response.StatusCode != HttpStatusCode.OK && response.StatusCode != HttpStatusCode.PartialContent)
         {
             string message = $"Failed to download {altUrl}: got response code {(int)response.StatusCode} {response.StatusCode}";
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
@@ -934,16 +955,44 @@ public static class Utilities
             }
             throw new SwarmReadableErrorException(message);
         }
+        int currentChunkId = 0;
         using Stream dlStream = await response.Content.ReadAsStreamAsync();
-        Task loadData = Task.Run(async () =>
+        async Task doLoadData(int chunkId, int step = 0)
         {
-            HttpResponseMessage workingResponse = response;
-            Stream workingStream = dlStream;
+            long start = 0, end = length;
+            int finalChunk = step * maxParallel + chunkId;
+            HttpResponseMessage workingResponse = doParallel ? null : response;
+            Stream workingStream = doParallel ? null : dlStream;
             try
             {
+                if (doParallel)
+                {
+                    start = finalChunk * (long)chunkSize;
+                    if (start >= length)
+                    {
+                        return;
+                    }
+                    end = Math.Min(start + chunkSize, length);
+                    while (step > currentChunkId / maxParallel + 1)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(0.1), combinedCancel.Token);
+                    }
+                    workingResponse = await DownloaderWebClient.SendAsync(makeRequest(start, end - 1), HttpCompletionOption.ResponseHeadersRead, Program.GlobalProgramCancel);
+                    if (workingResponse.StatusCode != HttpStatusCode.PartialContent)
+                    {
+                        string message = $"Failed to download {altUrl} (expecting Partial range continue): got response code {(int)workingResponse.StatusCode} {workingResponse.StatusCode}";
+                        if (workingResponse.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                        {
+                            string reason = await GetResponseErrorReason(workingResponse);
+                            message += reason is null ? $". {authHint}" : $" (\"{reason}\"). {authHint}";
+                        }
+                        throw new SwarmReadableErrorException(message);
+                    }
+                    workingStream = await workingResponse.Content.ReadAsStreamAsync();
+                }
                 int tryCount = 0;
                 long totalRead = 0;
-                byte[] buffer = new byte[Math.Min(length + 1024, 1024 * 1024 * 64)]; // up to 64 megabytes, just grab as big a chunk as we can at a time
+                byte[] buffer = new byte[doParallel ? (int)(end - start) : Math.Min(length + 1024, chunkSize)];
                 int nextOffset = 0;
                 while (true)
                 {
@@ -961,7 +1010,6 @@ public static class Utilities
                             Task second = await Task.WhenAny(waiting2, reading);
                             if (second == waiting2)
                             {
-                                chunks.Enqueue(null);
                                 throw new SwarmReadableErrorException("Download timed out, 5 minutes with no new data over stream.");
                             }
                             Logs.Info($"Download progressed before timeout, continuing as normal (received {new MemoryNum(await readTask)}).");
@@ -972,10 +1020,10 @@ public static class Utilities
                         {
                             if (nextOffset > 0)
                             {
-                                chunks.Enqueue(buffer[..nextOffset]);
+                                chunks.Enqueue((finalChunk, buffer[..nextOffset]));
                                 totalRead += nextOffset;
                             }
-                            chunks.Enqueue(null);
+                            chunks.Enqueue((finalChunk, null));
                             break;
                         }
                         if (nextOffset + read < 1024 * 1024 * 5)
@@ -984,19 +1032,19 @@ public static class Utilities
                         }
                         else
                         {
-                            chunks.Enqueue(buffer[..(nextOffset + read)]);
+                            chunks.Enqueue((finalChunk, buffer[..(nextOffset + read)]));
                             totalRead += nextOffset + read;
                             nextOffset = 0;
                         }
                         if (cancel is not null && cancel.IsCancellationRequested)
                         {
-                            chunks.Enqueue(null);
+                            chunks.Enqueue((finalChunk, null));
                             break;
                         }
                     }
                     catch (Exception ex)
                     {
-                        if (tryCount < 4 && totalRead > 0 && totalRead < length)
+                        if (tryCount < 4 && totalRead > 0 && totalRead < end - start)
                         {
                             Logs.Debug($"Download from '{altUrl}' failed in loadData with internal exception, (WILL RETRY): {ex.ReadableString()}");
                             tryCount++;
@@ -1004,16 +1052,8 @@ public static class Utilities
                             workingStream.Dispose();
                             workingStream = null;
                             workingResponse.Dispose();
-                            request = new(HttpMethod.Get, url);
-                            if (headers is not null)
-                            {
-                                foreach ((string key, string value) in headers)
-                                {
-                                    request.Headers.Add(key, value);
-                                }
-                            }
-                            request.Headers.Range = new(totalRead, length);
-                            workingResponse = await UtilWebClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Program.GlobalProgramCancel);
+                            HttpRequestMessage request = makeRequest(start + totalRead, end - 1);
+                            workingResponse = await DownloaderWebClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Program.GlobalProgramCancel);
                             if (workingResponse.StatusCode != HttpStatusCode.PartialContent)
                             {
                                 string message = $"Failed to download {altUrl} (expecting Partial range continue): got response code {(int)workingResponse.StatusCode} {workingResponse.StatusCode}";
@@ -1034,7 +1074,7 @@ public static class Utilities
             catch (Exception ex)
             {
                 Logs.Error($"Download from '{altUrl}' failed in loadData with internal exception: {ex.ReadableString()}");
-                chunks.Enqueue(null);
+                chunks.Enqueue((finalChunk, null));
                 throw;
             }
             finally
@@ -1042,7 +1082,27 @@ public static class Utilities
                 workingStream?.Dispose();
                 workingResponse?.Dispose();
             }
-        });
+            if (!doParallel || end >= length || cancel.IsCancellationRequested)
+            {
+                return;
+            }
+            await doLoadData(chunkId, step + 1);
+        }
+        Task loadAllData;
+        if (!doParallel)
+        {
+            loadAllData = Task.Run(async () => await doLoadData(0));
+        }
+        else
+        {
+            List<Task> tasks = [];
+            for (int i = 0; i < maxParallel; i++)
+            {
+                int captureIndex = i;
+                tasks.Add(Task.Run(async () => await doLoadData(captureIndex)));
+            }
+            loadAllData = Task.WhenAll(tasks);
+        }
         void removeFile()
         {
             writer.Dispose();
@@ -1056,12 +1116,26 @@ public static class Utilities
                 long startTime = Environment.TickCount64;
                 long lastUpdate = startTime;
                 SHA256 sha256 = SHA256.Create();
+                Dictionary<int, Queue<byte[]>> heldChunks = doParallel ? [] : null;
                 while (true)
                 {
-                    if (chunks.TryDequeue(out byte[] chunk))
+                    (int, byte[]) chunkPair = doParallel && heldChunks.TryGetValue(currentChunkId, out Queue<byte[]> heldQueue) && heldQueue.TryDequeue(out byte[] data) ? (currentChunkId, data) : (-1, null);
+                    if (chunkPair.Item1 != -1 || chunks.TryDequeue(out chunkPair))
                     {
+                        int chunkId = chunkPair.Item1;
+                        byte[] chunk = chunkPair.Item2;
+                        if (chunkId != currentChunkId)
+                        {
+                            heldChunks.GetOrCreate(chunkId, () => []).Enqueue(chunk);
+                            continue;
+                        }
                         if (chunk is null)
                         {
+                            if (doParallel && progress < length && progress == (currentChunkId + 1L) * chunkSize)
+                            {
+                                currentChunkId++;
+                                continue;
+                            }
                             Logs.Verbose($"Download {altUrl} completed with {progress} bytes.");
                             progUpdates.Enqueue((progress, length, 0, true));
                             if (length != 0 && progress != length)
@@ -1086,7 +1160,7 @@ public static class Utilities
                         }
                         progress += chunk.Length;
                         long timeNow = Environment.TickCount64;
-                        if (timeNow - lastUpdate > 1000 && chunks.Count < 3)
+                        if (timeNow - lastUpdate > 1000 && chunks.Count < maxParallel + 2)
                         {
                             long bytesPerSecond = progress * 1000 / (timeNow - startTime);
                             Logs.Verbose($"Download {altUrl} now at {new MemoryNum(progress)} / {new MemoryNum(length)}... {(progress / (double)length) * 100:00.0}% ({new MemoryNum(bytesPerSecond)} per sec)");
@@ -1140,7 +1214,7 @@ public static class Utilities
                 throw;
             }
         });
-        await Task.WhenAll(loadData, saveChunks, sendUpdates);
+        await Task.WhenAll(loadAllData, saveChunks, sendUpdates);
     }
 
     /// <summary>Converts a byte array to a hexadecimal string.</summary>
