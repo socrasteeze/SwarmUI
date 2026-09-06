@@ -17,11 +17,10 @@ implementers had missed, several of them behaviour-breaking. Details per group a
 - `/simple` — single-select presets, signature-gated re-renders (the iOS page-jump), checkpoint-compat LoRA filtering
 
 ## Open
-1. `buildLazyMultiselectAjaxSource` (`src/wwwroot/js/site.js`) has **no automated coverage**, and four defects were found in it by hand. Write `verify/verify-genpage-loras.mjs`: paging, search, out-of-page pre-selected chips, the live-list getter, and the two empty-options regressions in `loras.js` / `presets.js`.
-2. Every device- and GPU-dependent item is untouched and still owed — the physical phone passes, the four by-eye generation checks, and the live-server actions. They are on the tracker, unchanged.
-3. `docs/User Settings.md` still documents the old "dots are stripped from the prefix" behaviour, which is no longer true.
-4. The gitignored `src/Extensions/SwarmUI-VideoStages` still fails to build on `RunSeedVR2Stage`. Update it from its own upstream; never patch it here.
-5. Nothing here has been seen in a browser against the live server. The harnesses stub core or drive a throwaway instance.
+1. Every device- and GPU-dependent item is untouched and still owed — the physical phone passes, the four by-eye generation checks, and the live-server actions. They are on the tracker, unchanged. **Nothing further here can be done without you**; the automatable backlog is empty.
+2. Nothing in this sweep has been seen in a browser against the live server. The harnesses stub core or drive a throwaway instance, so a restart-and-look pass is the first thing worth doing.
+3. The gitignored `src/Extensions/SwarmUI-VideoStages` still fails to build on `RunSeedVR2Stage`. Update it from its own upstream; never patch it here.
+4. Two tracker items are closer to done than they look: `qwenEdit2511FP8_v10`'s architecture is a one-field edit in the Models tab with no code behind it, and the TagDex/AnimaDex favorites idea is complete except for phone acceptance, which the device checklist already owns.
 
 ## Decisions
 - Verifiers were told to fix what they found rather than report it back, and to mark a task landed only on their own evidence. That is what caught the LoRA-browser click doing nothing, and a depth clamp that a backslash walked straight past.
