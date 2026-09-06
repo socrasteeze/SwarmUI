@@ -87,7 +87,11 @@ before any downscaling, since AnimaDex derives its own thumbnail from what it re
 
 `anima_styles` entries resolve differently: their thumbnail path is pre-set at parse time (`TagDexEntry.ThumbPath`,
 sharded 1,000-per-folder to match the gallery export's own layout) rather than looked up by sanitized name, which
-is why the thumbnail route (`/TagDexThumb/{source}/{**file}`) is a catch-all — those paths contain a slash.
+is why the thumbnail route (`/TagDexThumb/{source}/{**file}`) is a catch-all — those paths contain a slash. A
+locally written or imported thumbnail (from `TagDexSetThumbnail`, `TagDexGenerateThumbnail`, or
+`TagDexImportThumbnails`, all of which write under the sanitized-name stem like every other dataset) is checked
+first and takes priority over the pre-set `ThumbPath` when one exists on disk; the pre-set path is only the
+fallback for an entry with no override.
 
 ## Favorites and the AnimaDex sync
 
@@ -156,10 +160,11 @@ browser storage under `m_client_tagdex_sort` and `m_client_tagdex_view`.
 
 ## Gotchas
 
-- **`anima_styles` cannot receive pushes.** Its entries resolve their thumbnail by a pre-set path
-  (`TagDexEntry.ThumbPath`), and `ServeThumbnail` never runs the sanitized-name lookup for that case — a write is
-  accepted and reported as success, but it is never served. `TagDexDownloadSource` also refuses this source
-  outright, since it has no `Url`.
+- **`anima_styles` now accepts pushes.** `ThumbnailFor` checks the sanitized-name stem first for every dataset,
+  including `anima_styles`, so a written or imported override (a push from AnimaDex, a manual set, or an import)
+  is served in preference to the entry's pre-set `ThumbPath`; an entry with no override still falls back to its
+  pre-set path exactly as before. `TagDexDownloadSource` still refuses this source, but that is unrelated — it
+  refuses because `anima_styles` has no `Url` to download from, not because of anything to do with thumbnails.
 - **Never call `TagDexDeleteThumbnail` to clear a generated image.** It deletes `.jpg`, `.webp`, *and* `.png` for
   the entry's stem — which also destroys an imported original underneath, since the archive and the served thumb
   share the same stem-matching scheme.

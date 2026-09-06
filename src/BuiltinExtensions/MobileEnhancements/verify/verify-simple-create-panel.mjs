@@ -45,7 +45,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[VARY]', '1');
 
 /** Client modules served from the real tree. m_app.js is deliberately absent - booting needs a server. */
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,
@@ -276,24 +276,44 @@ const picklists = await page.evaluate(() => ({
 }));
 check('architecture and presets share one picklist row', picklists.sameRow, JSON.stringify(picklists));
 check('architecture all-option is concise', picklists.all == 'All', JSON.stringify(picklists));
+check('preset picklist leads with a clear-selection option', picklists.presetLabel == 'No preset', JSON.stringify(picklists));
+// Single pick, not a multi-select toggle list: the picked option IS the selection, picking another replaces
+// it, and the empty option clears it. The full UI can merge several presets at once; this client cannot.
 await page.selectOption('.m-preset-select', 'ill/pose');
-await page.waitForFunction(() => document.querySelector('.m-preset-select').options[0].textContent == 'Presets (1)');
+await page.waitForFunction(() => mState.activePresets.join(',') == 'ill/pose');
 const presetOn = await page.evaluate(() => ({
     active: mState.activePresets.join(','),
-    label: document.querySelector('.m-preset-select').options[0].textContent,
-    marked: [...document.querySelector('.m-preset-select').options].some(option => option.textContent == '✓ ill/pose')
+    shown: document.querySelector('.m-preset-select').value,
+    unmarked: [...document.querySelector('.m-preset-select').options].every(option => !option.textContent.startsWith('✓'))
 }));
-check('preset picklist toggles a preset on and marks it', presetOn.active == 'ill/pose' && presetOn.label == 'Presets (1)' && presetOn.marked, JSON.stringify(presetOn));
-await page.selectOption('.m-preset-select', 'ill/pose');
-check('preset picklist toggles the same preset off', await page.evaluate(() => mState.activePresets.length == 0));
+check('preset picklist shows the picked preset as the selected option', presetOn.shown == 'ill/pose' && presetOn.unmarked, JSON.stringify(presetOn));
+await page.selectOption('.m-preset-select', 'qwen/edit');
+await page.waitForFunction(() => mState.activePresets.join(',') == 'qwen/edit');
+check('picking a second preset replaces the first rather than merging both',
+    await page.evaluate(() => mState.activePresets.length == 1 && mState.activePresets[0] == 'qwen/edit'));
+await page.selectOption('.m-preset-select', '');
+await page.waitForFunction(() => mState.activePresets.length == 0);
+check('the empty option clears the preset selection', await page.evaluate(() => mState.activePresets.length == 0));
 
 await page.evaluate(() => {
+    mState.models['LoRA'] = [['qwen/Uncapped_Only_In_Boot_List.safetensors', 'qwen-image/lora']];
     mCreate.indexLoras([{ name: 'Consistency_Edit_V2.safetensors', title: 'Consistency Edit V2', trigger_phrase: '' }]);
     mState.setLoras([{ name: 'Consistency_Edit_V2.safetensors', weight: 0.2 }]);
     mCreate.openLoraSheet();
 });
 check('LoRA weight uses a 0.05-step picker, not a slider', await page.evaluate(() =>
     document.querySelectorAll('.m-lora-weight-picker').length == 1 && document.querySelectorAll('.m-lora-slider').length == 0));
+// ListModels truncates at the server's ModelListSanityCap and truncates before it sorts, so on a large
+// library it answers with an arbitrary slice - which is why the picker's corpus is the uncapped boot list
+// from ListT2IParams, with the ListModels rows only as a metadata overlay on top of it.
+const loraCorpus = await page.evaluate(() => ({
+    names: mCreate.loraList.map(model => model.name).sort(),
+    enriched: mCreate.loraByName('Consistency_Edit_V2.safetensors').title
+}));
+check('LoRA picker lists boot-list models ListModels never returned',
+    loraCorpus.names.includes('qwen/Uncapped_Only_In_Boot_List.safetensors'), JSON.stringify(loraCorpus));
+check('ListModels rows still enrich the models they cover',
+    loraCorpus.enriched == 'Consistency Edit V2', JSON.stringify(loraCorpus));
 await page.click('.m-lora-weight-picker .m-lora-weight-button:last-child');
 const loraWeight = await page.evaluate(() => ({ state: mState.getLoras()[0].weight, shown: document.querySelector('.m-lora-weight-input').value }));
 check('LoRA plus advances exactly 0.05', loraWeight.state == 0.25 && loraWeight.shown == '0.25', JSON.stringify(loraWeight));
@@ -302,6 +322,8 @@ await page.evaluate(() => {
         elem.remove();
     }
     mState.setLoras([]);
+    // Put the boot list back the way the rest of the harness expects it - indexLoras reads it on every call.
+    mState.models['LoRA'] = [];
 });
 
 await page.click('.m-tagdex-browse-button');
@@ -593,9 +615,15 @@ const titled = await page.evaluate(() => [...document.querySelectorAll('.m-lora-
     heading: row.querySelector('.m-model-name').textContent,
     sub: (row.querySelector('.m-model-sub') || {}).textContent || ''
 })));
-check('LoRA picker: a distinct title is the heading', titled[0].heading == 'Azenda' && titled[0].sub == 'epoch_1', JSON.stringify(titled[0]));
-check('LoRA picker: missing title falls back to the file stem', titled[1].heading == 'plain', JSON.stringify(titled[1]));
-check('LoRA picker: title equal to the file stem is still the heading', titled[2].heading == 'Azenda', JSON.stringify(titled[2]));
+// Rows are looked up rather than indexed: indexLoras sorts its corpus by name (it merges the uncapped boot
+// list with the ListModels overlay, so input order means nothing), and these three checks are about the
+// heading each row renders, not where it lands in the list.
+const titledEpoch = titled.find(row => row.sub == 'epoch_1');
+const titledPlain = titled.find(row => row.heading == 'plain');
+const titledSame = titled.find(row => row.heading == 'Azenda' && row.sub != 'epoch_1');
+check('LoRA picker: a distinct title is the heading', titledEpoch && titledEpoch.heading == 'Azenda', JSON.stringify(titled));
+check('LoRA picker: missing title falls back to the file stem', !!titledPlain, JSON.stringify(titled));
+check('LoRA picker: title equal to the file stem is still the heading', !!titledSame, JSON.stringify(titled));
 
 await page.evaluate(() => {
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
@@ -619,6 +647,46 @@ const arch = await page.evaluate(() => {
 });
 check('arch filter: other known group folders are hidden',
     arch == 'ill/keep.safetensors,misc/unknown.safetensors', arch);
+
+// The checkpoint's own compat class is a second, automatic gate: picking a Qwen checkpoint must not leave
+// SDXL LoRAs in a picker that can never load them, and it must not need the architecture picker to be set.
+// Unknown class is kept (unknown is not incompatible) and so is a starred model, exactly as in filterByArch.
+const compat = await page.evaluate(() => {
+    mState.archFilter = '';
+    mState.loadParamMeta({
+        list: [],
+        models: {
+            'Stable-Diffusion': [['qwen/ckpt.safetensors', 'qwen-image'], ['ill/ckpt.safetensors', 'sdxl-base']],
+            'LoRA': [['qwen/keep.safetensors', 'qwen-image/lora'], ['ill/hide.safetensors', 'sdxl-base/lora'],
+                ['misc/unknown.safetensors', null], ['ill/starred.safetensors', 'sdxl-base/lora']]
+        },
+        model_classes: {
+            'qwen-image': { compat_class: 'qwen-image' },
+            'qwen-image/lora': { compat_class: 'qwen-image' },
+            'sdxl-base': { compat_class: 'stable-diffusion-xl-v1' },
+            'sdxl-base/lora': { compat_class: 'stable-diffusion-xl-v1' }
+        }
+    });
+    mState.starredModels = { 'LoRA': ['ill/starred.safetensors'] };
+    mState.params['model'] = 'qwen/ckpt.safetensors';
+    let list = [{ name: 'qwen/keep.safetensors' }, { name: 'ill/hide.safetensors' },
+        { name: 'misc/unknown.safetensors' }, { name: 'ill/starred.safetensors' }];
+    let picked = mState.filterByModelCompat(list, 'LoRA').map(m => m.name).join(',');
+    let active = mState.activeModelCompat();
+    delete mState.params['model'];
+    let unpicked = mState.filterByModelCompat(list, 'LoRA').length;
+    return { active, cleared: mState.activeModelCompat(), picked, unpicked };
+});
+check('checkpoint compat: an incompatible LoRA is hidden without the arch picker being set',
+    compat.picked == 'qwen/keep.safetensors,misc/unknown.safetensors,ill/starred.safetensors', JSON.stringify(compat));
+check('checkpoint compat: the class comes from the picked checkpoint',
+    compat.active == 'qwen-image' && compat.cleared == null, JSON.stringify(compat));
+check('checkpoint compat: no checkpoint picked means no filtering at all',
+    compat.unpicked == 4, JSON.stringify(compat));
+await page.evaluate(() => {
+    mState.starredModels = {};
+    mState.loadParamMeta({ list: [], models: {}, model_classes: {} });
+});
 
 // The Prefix row is hidden unless the session advertises the `filenameprefix` param - renderQuickParams
 // recomputes `prefixRow.style.display` from `mState.paramMeta` on every render (m_create.js). This harness
