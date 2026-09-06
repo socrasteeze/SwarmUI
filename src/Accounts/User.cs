@@ -487,26 +487,83 @@ public class User
         // self-contained block with no added usings, keeping the fork's core delta minimal. The extension names this file.
         if (!hasExplicitPrefixTag && T2IParamTypes.TryGetType("filenameprefix", out T2IParamType prefixType, user_input) && user_input.TryGetRaw(prefixType, out object prefixRaw))
         {
-            // KeepDots variant: interior dots survive ('v1.0'), dot runs collapse and edge dots are trimmed, so '..' cannot be produced.
-            string prefix = Utilities.StrictFilenameCleanKeepDots($"{prefixRaw}".Replace("[", "").Replace("]", "").Replace('\\', '/').Replace("/", "")).Trim();
-            if (prefix.Length > maxLen)
-            {
-                // Never cut between the halves of a surrogate pair. The maxLen guard matters: a MaxLenPerPart of 0
-                // is legal config, and would otherwise index prefix[-1] here.
-                int cut = maxLen > 0 && char.IsHighSurrogate(prefix[maxLen - 1]) ? maxLen - 1 : maxLen;
-                prefix = prefix[..cut].Trim();
-            }
-            if (prefix.Length > 0)
-            {
-                int lastSlash = path.LastIndexOf('/');
-                path = lastSlash < 0 ? $"{prefix}{path}" : $"{path[..(lastSlash + 1)]}{prefix}{path[(lastSlash + 1)..]}";
-            }
+            path = InsertFilenamePrefix(path, $"{prefixRaw}", maxLen);
         }
+        // Fork addition: enforce the role's MaxOutPathDepth, which upstream declares and serializes but never reads while building a path.
+        // Applied regardless of AllowUnsafeOutpaths - that setting is about the '.' character, not directory nesting, and stays orthogonal to this one.
+        path = ClampOutPathDepth(path, CalculatedRole.Data.MaxOutPathDepth);
         if (CalculatedRole.Data.AllowUnsafeOutpaths)
         {
             return path;
         }
-        return Utilities.StrictFilenameClean(path);
+        // Fork change: was 'StrictFilenameClean', which strips every '.' from the whole path - including the interior dots the prefix
+        // block above just carefully preserved (eg a 'v1.0' prefix would reach here as 'v1.0' and leave as 'v10'). KeepDots reuses the
+        // same StrictFilenameClean underneath (so forbidden characters, control characters, '/' collapsing, and reserved-filename padding
+        // are all unchanged) and additionally still collapses '..' runs and trims leading/trailing dots per path segment - so this is not
+        // a security relaxation, just a narrower one: interior dots survive, traversal and edge dots still cannot.
+        return Utilities.StrictFilenameCleanKeepDots(path);
+    }
+
+    /// <summary>Fork addition, extracted from <see cref="BuildImageOutputPath"/> so it is unit-testable on its own. Sanitizes
+    /// <paramref name="rawPrefix"/> the same way the FilenamePrefix param's own 'Clean' callback does (kept in sync deliberately,
+    /// since a role with 'AllowUnsafeOutpaths' skips that callback's caller and relies on this repeat), length-caps it to
+    /// <paramref name="maxLen"/> without splitting a surrogate pair, and inserts it at the start of the filename segment of
+    /// <paramref name="path"/> (ie after the last '/', or at the very start if there is none). Returns <paramref name="path"/>
+    /// unchanged if the sanitized, capped prefix is empty.</summary>
+    public static string InsertFilenamePrefix(string path, string rawPrefix, int maxLen)
+    {
+        // KeepDots variant: interior dots survive ('v1.0'), dot runs collapse and edge dots are trimmed, so '..' cannot be produced.
+        string prefix = Utilities.StrictFilenameCleanKeepDots(rawPrefix.Replace("[", "").Replace("]", "").Replace('\\', '/').Replace("/", "")).Trim();
+        if (prefix.Length > maxLen)
+        {
+            // Never cut between the halves of a surrogate pair. The maxLen guard matters: a MaxLenPerPart of 0
+            // is legal config, and would otherwise index prefix[-1] here.
+            int cut = maxLen > 0 && char.IsHighSurrogate(prefix[maxLen - 1]) ? maxLen - 1 : maxLen;
+            prefix = prefix[..cut].Trim();
+        }
+        if (prefix.Length == 0)
+        {
+            return path;
+        }
+        // '\' counts as a separator as well as '/': the outpath format is raw user text (the 'Override Outpath Format' param has no
+        // Clean callback), and the final clean converts backslashes to '/', so a format written with backslashes would otherwise get
+        // the prefix glued onto the front of a *directory* name instead of the filename.
+        int lastSlash = Math.Max(path.LastIndexOf('/'), path.LastIndexOf('\\'));
+        return lastSlash < 0 ? $"{prefix}{path}" : $"{path[..(lastSlash + 1)]}{prefix}{path[(lastSlash + 1)..]}";
+    }
+
+    /// <summary>Fork addition. Clamps how many directory levels deep <paramref name="path"/> is allowed to be, per the user's role's
+    /// <see cref="Role.RoleData.MaxOutPathDepth"/>. Collapses any directories beyond the limit into a single trailing directory rather
+    /// than throwing - an over-depth path is worth flattening, not worth failing the whole generation over. Never touches the filename
+    /// itself (the final '/'-separated part), only the folders leading up to it. A non-positive limit drops all directory nesting and
+    /// keeps just the filename. Both '/' and '\' count as directory separators - the outpath format is raw user text and the final
+    /// clean turns backslashes into '/', so counting only '/' here would let a backslash-written format skip the limit entirely.
+    /// A path that is already within the limit is returned byte-identical (original separators kept); only an over-depth path is
+    /// rewritten, and that rewrite normalizes to '/'.</summary>
+    public static string ClampOutPathDepth(string path, int maxDepth)
+    {
+        if (maxDepth < 0)
+        {
+            maxDepth = 0;
+        }
+        string[] parts = path.Replace('\\', '/').Split('/');
+        if (parts.Length <= 1)
+        {
+            // Bare filename, no directories to clamp.
+            return path;
+        }
+        string filename = parts[^1];
+        List<string> dirs = [.. parts[..^1].Where(p => p.Length > 0)];
+        if (dirs.Count <= maxDepth)
+        {
+            return path;
+        }
+        if (maxDepth == 0)
+        {
+            return filename;
+        }
+        List<string> kept = [.. dirs[..(maxDepth - 1)], dirs[(maxDepth - 1)..].JoinString("_"), filename];
+        return kept.JoinString("/");
     }
 
     /// <summary>Returns true if the user is allowed to view all models, or false if there are restrictions that apply.</summary>

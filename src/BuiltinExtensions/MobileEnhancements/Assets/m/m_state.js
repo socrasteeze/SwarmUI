@@ -39,6 +39,10 @@ class MState {
         /** Selected architecture group (a preset-title folder prefix), or '' for "all". Purely a client-side
          * browsing filter over presets and the model/LoRA pickers - never sent to the server. */
         this.archFilter = '';
+        /** Prompt Coach preferences (m_coach.js). Never holds parsed prompt sections or fetched model
+         * metadata - the visible prompt in `params` is the only prompt source of truth, and a second cached
+         * copy here would drift from it. See MState.defaultPromptGuide for the shape. */
+        this.promptGuide = MState.defaultPromptGuide();
         /** Callbacks fired after any state change that should re-render the Create surface. */
         this.changeListeners = [];
         /** Whether a state-change notification is already booked for the next animation frame. */
@@ -543,6 +547,61 @@ class MState {
         });
     }
 
+    /** The compat class of the checkpoint the next generation will actually use, or null when there is
+     * nothing to go on (no model picked, or its class declares no compat class).
+     *
+     * Read through buildGenInput rather than off params['model'] for the same reason renderModelButton does:
+     * an active preset applies AFTER the manual pick, so a preset that sets its own checkpoint is the one
+     * that decides which LoRAs will load. */
+    activeModelCompat() {
+        return this.compatClassOf('Stable-Diffusion', this.buildGenInput()['model']);
+    }
+
+    /** Filters a model list down to what the active checkpoint can actually load.
+     *
+     * This is the same compat-class rule SwarmUI itself uses to decide whether a LoRA applies, so an SDXL
+     * LoRA against a Qwen checkpoint is not a near miss to be sorted lower - it simply does not load. It is a
+     * narrower gate than the architecture picker and independent of it: the picker is a manual folder/class
+     * filter the user chooses, this follows whatever checkpoint is selected without being asked.
+     *
+     * Unknown class is kept, exactly as in filterByArch: a model with no class is not the same as an
+     * incompatible one, and Swarm reports null for anything it could not read metadata for. Starred models
+     * are kept for the same reason they survive the arch filter - the user pinned them deliberately, and a
+     * misread class silently hiding a favourite is the worst thing this filter can do. */
+    filterByModelCompat(models, subtype) {
+        let compat = this.activeModelCompat();
+        if (!compat) {
+            return models;
+        }
+        let starred = this.starredNameSet(subtype);
+        return models.filter(model => {
+            if (starred.has(MState.starKey(model.name))) {
+                return true;
+            }
+            let modelCompat = this.compatClassOf(subtype, model.name);
+            return !modelCompat || modelCompat == compat;
+        });
+    }
+
+    /** Fresh Prompt Coach preference block. `schemaVersion` guards `load()`: a future shape change bumps it,
+     * and a persisted blob at an old version is discarded rather than misread as the new shape. */
+    static defaultPromptGuide() {
+        return {
+            'schemaVersion': 1,
+            /** Normalized checkpoint path -> confirmed profile id ('anima-base'/'anima-aesthetic'/'anima-turbo'). */
+            'checkpointProfiles': {},
+            /** Normalized LoRA name (MState.starKey) -> user-assigned role (Character/Series/Artist/Style).
+             * A LoRA with no entry here reads as 'General' (m_coach.js MCoach.getLoraRole). */
+            'loraRoles': {},
+            /** Profile family (eg 'anima') -> last-picked mode ('tags'/'natural'/'hybrid'). */
+            'modeByFamily': {},
+            /** User-authored custom profiles (m_coach.js MCoach.addCustomProfile), id -> profile object in the
+             * same shape as MCoach.PROFILES. Additive to schemaVersion 1 - an old blob missing this key still
+             * loads cleanly via Object.assign(defaultPromptGuide(), ...) in load() below. */
+            'customProfiles': {}
+        };
+    }
+
     /** One model name reduced to the form starred-name matching runs on: extension stripped, lowercased,
      * backslashes folded to forward slashes. The genpage stars whatever string its ListModels happened to
      * report, and that disagrees with this client's ListModels in more ways than the extension - Windows
@@ -625,6 +684,7 @@ class MState {
                 'customRatio': this.customRatio,
                 'archFilter': this.archFilter,
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
+                'promptGuide': this.promptGuide,
             };
             localStorage.setItem('m_client_state', JSON.stringify(data));
             this.saveFailed = false;
@@ -653,11 +713,18 @@ class MState {
             if (data.params) {
                 this.params = data.params;
             }
-            this.activePresets = data.activePresets || [];
+            // Sliced to one: this client is single-preset (see MCreate.renderPresets), and a state file
+            // written before that change can still carry a whole merge stack that nothing on screen shows.
+            this.activePresets = (data.activePresets || []).slice(0, 1);
             this.seedLocked = !!data.seedLocked;
             this.customRatio = data.customRatio || 0;
             this.archFilter = data.archFilter || '';
             this.promptImages = (data.promptImagePaths || []).map(path => ({ 'kind': 'path', 'value': path }));
+            // A blob written before the Coach shipped, or at a future incompatible schema, is discarded rather
+            // than misread - the coach re-learns per-checkpoint choices rather than trusting a shape it does
+            // not recognize.
+            this.promptGuide = (data.promptGuide && data.promptGuide.schemaVersion == 1)
+                ? Object.assign(MState.defaultPromptGuide(), data.promptGuide) : MState.defaultPromptGuide();
         }
         catch (e) {
             console.error('state load failed', e);

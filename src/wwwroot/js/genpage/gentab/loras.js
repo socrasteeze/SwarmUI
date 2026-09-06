@@ -272,6 +272,16 @@ class LoraHelper {
         this.dedup = true;
         let oldLoraVals = this.getLoraParamSelections();
         if (!arraysEqual(oldLoraVals, loraVals)) {
+            // The LoRAs <select> is lazy on a large library - it carries no <option> list at all (see
+            // makeMultiselectInput in site.js), so .val() below would have nothing to select and the reorder
+            // further down would then read an empty options list and wipe this.selected, silently dropping
+            // every LoRA picked from the model browser. Append what is missing first, exactly as
+            // setDirectParamValue() and the reuse-params path already do.
+            for (let val of loraVals) {
+                if (val && !$(loraInput).find(`option[value="${val}"]`).length) {
+                    $(loraInput).append(new Option(val, val, false, false));
+                }
+            }
             $(loraInput).val(null);
             if (loraVals.length > 0) {
                 $(loraInput).val(loraVals);
