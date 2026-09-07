@@ -1,16 +1,18 @@
 # HANDOFF
 
-**Updated:** 2026-09-06 · **Branch:** main · **Base:** 180a5f6a (merge; + AGENTS log commit) · **Tree:** clean
+**Updated:** 2026-09-06 · **Branch:** main · **Base:** e802a9eb (= origin/main before this push) · **Tree:** clean
 
 ## State
-Upstream sync only; no fork feature work. Merged upstream `519ba0f4` — 6 commits, 7 files, +32/-9 — as `180a5f6a`
-with zero conflicts and no fork file needing resolution. All gates green including a clean `--ci_test` boot.
-Nothing needs a restart. Held for the user's push authorization.
+Upstream sync plus a spoke-config fix; no fork source work. Merged upstream `519ba0f4` — 6 commits, 7 files,
++32/-9 — as `180a5f6a`, zero conflicts, no fork file needing resolution. All gates green including a clean
+`--ci_test` boot. **This machine's Swarm needs a restart** to pick up the `Data/Settings.fds` change below.
 
 ## Done this session
 - Merged upstream's embed-naming trio, H3 embedding detection, `Frames` default 25→24, and the metadata panel work
 - Verified the fork's spoke guard, Civitai LoRA-class mapping, and `ToNet` overload all survived intact
 - Confirmed `src/Extensions/SwarmUI-VideoStages` is gone, which is why the boot finally exits 0
+- Aligned this machine's `SDModelFolder` and `SDVAEFolder` with the hub's, so all eight Paths settings now
+  match — untracked config, so it is not in this delivery
 
 ## Open
 1. **Embed resolution changed shape** — `<embed:...>` no longer gets its `/` rewritten to the backend separator, and the name is `CleanModelName`'d before the `\0swarmembed:` token. The Comfy node retries with `.safetensors` appended. Untested against a real subfolder embed on either backend.
@@ -25,7 +27,9 @@ Nothing needs a restart. Held for the user's push authorization.
 10. Seeds are sectionalizable and SeedVR's derived default moved from `Seed + 500` to `Seed + 9` — still untested on real generations.
 11. `Data/Autocompletions/gelbooru_anima_2026-06-11.csv` is superseded and can be deleted — user data, user's call.
 12. The `@artist` autocomplete convention has never been A/B checked on the Anima checkpoints.
-13. The spoke is still not wired up: its `swarmswarmbackend` entry stays `enabled: false` on the hub, and the two machines' `SDModelFolder`/`SDLoraFolder`/`SDVAEFolder` still disagree, which would silently filter the spoke out of `lycoris` jobs. Addresses and machine names are in the gitignored `docs/Hub-Spoke-Setup.md`, deliberately never committed.
+13. **Spoke is configured but never started.** The hub's `swarmswarmbackend` entry is already `enabled: true`, and all eight of this machine's Paths settings now match the hub's, so it resolves ~173 checkpoints and ~19.5k LoRAs off the shared drive. Nothing has been exercised: start Swarm here via `launch-fork.bat`, confirm the hub leaves idle, then queue enough work to reach the second backend in list order. Expect a slow first model scan — ~20k small files plus sidecars over SMB is the access pattern that share is worst at.
+14. Dropping `diffusion_models` from this machine's `SDModelFolder` was deliberate — it matches the hub, which never listed that folder — but it costs the local ComfyUI those 8 unet files. Reverse only if something here needs them directly.
+15. Addresses, machine names, and share names live in the gitignored `docs/Hub-Spoke-Setup.md`, deliberately never committed.
 
 ## Decisions
 - Did not port the round-trip prompt check into `/simple` — it reduces metadata on purpose and the port would duplicate `promptCidMatcher` into the mobile bundle
@@ -37,6 +41,7 @@ Nothing needs a restart. Held for the user's push authorization.
 - An empty `src/bin/live_release` breaks every `src/Extensions` build; their csproj resolves SwarmUI through `../../bin/live_release/SwarmUI.dll`
 - Release caches extension assets in memory and `VaryID` only moves on commit — commit, restart, hard refresh before judging an asset edit failed
 - A `JObject` API parameter receives the whole request payload with `session_id` stripped, not the field sharing its name
+- **`.fds` escapes a literal backslash as `\s`.** `ModelRoot: E:\smodels` means `E:\models`, and `DataPath: E:\sSwarmUI\sData` means `E:\SwarmUI\Data`. Never "correct" one of these to a bare backslash — that is what the value already is.
 - The permission classifier blocks most writes to the network share and `git commit` there; hand restart and commit to the user
 - `git diff HEAD..upstream/master` is misleading here — the fork is hundreds of commits ahead, so fork features render as deletions. Always diff from the merge base.
 
