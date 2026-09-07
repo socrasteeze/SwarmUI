@@ -529,7 +529,7 @@ public class T2IPromptHandling
                 List<string> usedEmbeds = context.Input.ExtraMeta.GetOrCreate("used_embeddings", () => new List<string>()) as List<string>;
                 usedEmbeds.Add(T2IParamTypes.CleanModelName(matched));
             }
-            return "\0swarmembed:" + matched + "\0end";
+            return "\0swarmembed:" + T2IParamTypes.CleanModelName(matched) + "\0end";
         };
         PromptTagProcessors["embedding"] = PromptTagProcessors["embed"];
         PromptTagPostProcessors["lora"] = (data, context) =>

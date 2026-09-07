@@ -62,13 +62,11 @@ class SwarmMiniMaxH3AddKeyframes(io.ComfyNode):
         images = []
         keyframes = []
         if first_frame is not None:
-            # geometry anchor: plain stretch to canvas
             img = _resize(first_frame[:1], width, height, "disabled")
             images.append(img)
             keyframes.append({"resolved_frame_index": 0, "image": img})
         if last_frame is not None:
-            # follower: aspect-preserving cover-crop
-            img = _resize(last_frame[:1], width, height, "center")
+            img = _resize(last_frame[:1], width, height, "disabled")
             images.append(img)
             keyframes.append({"resolved_frame_index": frame_count - 1, "image": img})
 

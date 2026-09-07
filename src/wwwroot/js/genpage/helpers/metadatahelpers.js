@@ -343,6 +343,17 @@ function getFormattedMetadataEntries(metadata) {
                                 val = param.value_names[index];
                             }
                         }
+                        if (param.view_type == 'video_frames') {
+                            let frames = parseInt(val);
+                            if (Number.isFinite(frames)) {
+                                let fps = parseFloat((data.sui_image_params && data.sui_image_params.videofps) || (getParamById('videofps') || {}).default);
+                                if (!Number.isFinite(fps) || fps <= 0) {
+                                    fps = 24;
+                                }
+                                let seconds = formatNumberClean(frames / fps, 2);
+                                val = `${seconds} second${seconds == 1 ? '' : 's'} (${frames} frames)`;
+                            }
+                        }
                     }
                     let valueHtml, compareValue;
                     if (typeof val == 'object') {
@@ -378,12 +389,19 @@ function getFormattedMetadataEntries(metadata) {
         let prompt = data.sui_image_params.prompt;
         if ('sui_extra_data' in data && 'original_prompt' in data.sui_extra_data) {
             let originalPrompt = data.sui_extra_data.original_prompt;
+            delete data.sui_extra_data.original_prompt;
             if (prompt.replaceAll(promptCidMatcher, '<$1>') == originalPrompt) {
                 prompt = originalPrompt;
-                delete data.sui_extra_data.original_prompt;
+            }
+            else {
+                appendEntries(appendObject({ 'Original Prompt': originalPrompt }), true);
+                appendEntries(appendObject({ 'Interpreted Prompt': prompt }), true);
+                prompt = null;
             }
         }
-        appendEntries(appendObject({ 'prompt': prompt }), true);
+        if (prompt != null) {
+            appendEntries(appendObject({ 'prompt': prompt }), true);
+        }
         delete data.sui_image_params.prompt;
     }
     if ('negativeprompt' in data.sui_image_params && data.sui_image_params.negativeprompt) {
