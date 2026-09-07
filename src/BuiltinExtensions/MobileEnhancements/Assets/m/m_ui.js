@@ -14,6 +14,12 @@ class MUI {
         /** Substrings from the user's ui.HideErrorMessages setting; see setErrorFilters. Empty until the
          * settings request lands, so an early error is shown rather than silently dropped. */
         this.errorFilters = [];
+        /** How many bottom sheets are currently on screen. .m-sheet is the only consumer of --m-kb-inset, so
+         * initKeyboardWatch skips publishing that value entirely while this is 0. */
+        this.openSheets = 0;
+        /** Set by initKeyboardWatch to its own apply(); openSheet() calls it so a sheet opening under an
+         * already-open keyboard is positioned on the frame it appears. No-op before init. */
+        this.applyKeyboardInset = () => {};
     }
 
     /** Creates an element with a class and optional text. */
@@ -75,6 +81,10 @@ class MUI {
         img.className = className;
         img.src = model.preview_image;
         img.loading = 'lazy';
+        // Off the main thread, for the same reason the history grid sets it: iOS defers lazy image work while a
+        // finger is on the glass, so a scrolled list decodes its whole newly-visible batch the moment the scroll
+        // settles. Synchronous, that batch is a multi-second freeze right after the list comes to rest.
+        img.decoding = 'async';
         return img;
     }
 
@@ -183,6 +193,8 @@ class MUI {
     /** Opens a bottom sheet with the given content element. Returns a close function. Drag-down on the grip
      * or backdrop tap dismisses (interaction contract carried over from the proven shell). */
     openSheet(contentElem) {
+        this.openSheets++;
+        this.applyKeyboardInset();
         let backdrop = this.el('div', 'm-sheet-backdrop');
         let sheet = this.el('div', 'm-sheet');
         let grip = this.el('div', 'm-sheet-grip');
@@ -194,7 +206,15 @@ class MUI {
             backdrop.classList.add('m-open');
             sheet.classList.add('m-open');
         });
+        let closed = false;
         let close = () => {
+            // Guarded: backdrop tap, grip drag and the caller's own returned close() can all fire for one sheet,
+            // and the open-sheet count below must not go negative or the keyboard watch stops publishing.
+            if (closed) {
+                return;
+            }
+            closed = true;
+            this.openSheets--;
             backdrop.classList.remove('m-open');
             sheet.classList.remove('m-open');
             setTimeout(() => {
@@ -382,10 +402,30 @@ class MUI {
         if (!window.visualViewport) {
             return;
         }
+        // Both writes are guarded against no-op updates. This handler runs on EVERY visualViewport scroll
+        // frame, and iOS fires that during ordinary page scrolling and rubber-band overscroll, not only while a
+        // keyboard is up. An unguarded setProperty on documentElement dirties a custom property on :root, which
+        // invalidates style for every element that could inherit it - the whole document, including a history
+        // grid holding hundreds of tiles - once per scroll frame. That is the scroll stutter; the value itself
+        // is 0 and unchanged for the entire scroll, so the recalc buys nothing.
+        let lastInset = null, lastOpen = null;
         let apply = () => {
-            document.body.classList.toggle('m-kb-open', this.keyboardOpen());
-            document.documentElement.style.setProperty('--m-kb-inset', `${this.keyboardInset()}px`);
+            let open = this.keyboardOpen();
+            if (open !== lastOpen) {
+                lastOpen = open;
+                document.body.classList.toggle('m-kb-open', open);
+            }
+            // --m-kb-inset has exactly one consumer, .m-sheet, so with no sheet on screen the value is measured
+            // and published for nobody - and publishing it still costs a full-document style recalc. Held at 0
+            // instead, which is what a closed sheet would read anyway; openSheet() re-runs apply() so a sheet
+            // that opens under a live keyboard gets the real inset immediately rather than one frame late.
+            let inset = this.openSheets > 0 ? this.keyboardInset() : 0;
+            if (inset !== lastInset) {
+                lastInset = inset;
+                document.documentElement.style.setProperty('--m-kb-inset', `${inset}px`);
+            }
         };
+        this.applyKeyboardInset = apply;
         // 'scroll' as well as 'resize': iOS scrolls the LAYOUT viewport under an open keyboard, which changes
         // offsetTop without changing height, so a resize-only listener would leave the inset stale mid-scroll.
         window.visualViewport.addEventListener('resize', apply);

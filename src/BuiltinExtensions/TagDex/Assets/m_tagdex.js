@@ -560,6 +560,9 @@ class MTagDexClass {
         image.className = 'm-tagdex-card-image';
         image.src = record.thumb || 'imgs/model_placeholder.jpg';
         image.loading = 'lazy';
+        // See mUI.modelThumb: lazy image work is deferred by iOS during a scroll, so a page of cards decodes in
+        // one burst when the scroll stops. Async keeps that burst off the main thread.
+        image.decoding = 'async';
         image.alt = '';
         main.appendChild(image);
         let textWrap = mUI.el('span', 'm-tagdex-card-text');
