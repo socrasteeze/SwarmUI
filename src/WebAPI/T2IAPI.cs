@@ -742,6 +742,12 @@ public static class T2IAPI
             Logs.Error(consoleError);
             return new JObject() { ["error"] = userError };
         }
+        // Root-folder hiding is deliberately applied at the top level only: the setting names folders sitting
+        // directly in the output directory (tool scratch dirs like "_comfy0", extension dirs like "VNCCS"), and
+        // hiding by bare name at any depth would silently swallow a same-named folder the user does want.
+        HashSet<string> hiddenRoots = new((session.User.Settings.HiddenHistoryFolders ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
+        bool atOutputRoot = string.IsNullOrWhiteSpace(rawPath) || rawPath.Replace('\\', '/').Trim('/') is "" or ".";
+        bool isHiddenRoot(string dir, string subDir) => hiddenRoots.Count > 0 && atOutputRoot && dir == "" && hiddenRoots.Contains(subDir);
         try
         {
             ConcurrentDictionary<string, string> dirsConc = [];
@@ -774,6 +780,10 @@ public static class T2IAPI
                             {
                                 continue;
                             }
+                            if (isHiddenRoot(dir, subDir))
+                            {
+                                continue;
+                            }
                             string subPath = dir == "" ? subDir : $"{dir}/{subDir}";
                             if (isAllowed(subPath))
                             {
@@ -797,6 +807,13 @@ public static class T2IAPI
             {
                 if (specialFolder.StartsWith(rawRefPath))
                 {
+                    // Shared special folders (Comfy scratch dirs, FrameSaver virtual dirs) are grafted in here
+                    // rather than found by the directory walk, so they need their own hidden-root check.
+                    string exposed = specialFolder[rawRefPath.Length..].Trim('/');
+                    if (isHiddenRoot("", exposed.Before('/')))
+                    {
+                        continue;
+                    }
                     addDirs(specialFolder[rawRefPath.Length..], 1);
                 }
             }

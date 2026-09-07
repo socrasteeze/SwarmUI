@@ -835,7 +835,7 @@ class TagDexTabClass {
         }
         let buttons = [
             { label: 'Insert Trigger', onclick: () => this.insertTag(record.trigger) },
-            { label: 'Insert All Tags', onclick: () => this.insertTag([record.trigger].concat(record.core_tags || []).join(', ')) },
+            { label: 'Insert All Tags', onclick: () => this.insertTag(TagDexTabClass.allTagsOf(record)) },
             { label: 'Insert Character Tag', onclick: () => this.insertTag(`<character:${record.name}>`) },
             { label: record.thumb ? 'Regenerate Reference' : 'Generate Reference', onclick: (div) => this.generateThumb(record, div) },
             { label: 'Use Current Image', onclick: (div) => this.setThumbFromCurrentImage(record, div) }
@@ -856,9 +856,26 @@ class TagDexTabClass {
         };
     }
 
-    /** GenPageBrowserClass select contract - a card click inserts the trigger only. */
+    /** GenPageBrowserClass select contract - a card click inserts the trigger plus every descriptive tag the
+     * record carries. The trigger alone is only a name, which most checkpoints render correctly just for
+     * characters the base model already knows well; core_tags is what actually pins down the appearance. The
+     * card menu still offers "Insert Trigger" for the name-only case. */
     selectEntry(file, div) {
-        this.insertTag(file.data.trigger);
+        this.insertTag(TagDexTabClass.allTagsOf(file.data));
+    }
+
+    /** The full tag line for a record: trigger first, then its core tags, deduplicated. */
+    static allTagsOf(record) {
+        let out = [];
+        let seen = new Set();
+        for (let tag of (record.trigger || '').split(',').concat(record.core_tags || [])) {
+            let clean = tag.trim();
+            if (clean.length > 0 && !seen.has(clean)) {
+                seen.add(clean);
+                out.push(clean);
+            }
+        }
+        return out.join(', ');
     }
 
     /** Toggles one visible card's favorite state. The server owns the durable state; the card is repainted in
@@ -1093,12 +1110,20 @@ class TagDexTabClass {
         }
     }
 
-    /** Appends a tag to the prompt, or removes it if already present as a comma-separated segment.
+    /** Appends a tag (or a comma-separated run of them) to the prompt, or removes them if already present as
+     * comma-separated segments.
      * Modeled on wildcards.js selectWildcard. Note that uiImprover.getLastSelectedTextbox only reports a box touched
      * within the last second, so a click from this tab reliably takes the fallback branch and appends to the end of
-     * the main prompt box - that is intended, not a caret insert. */
+     * the main prompt box - that is intended, not a caret insert.
+     * Multi-tag text toggles as a set: clicking a card whose whole tag line is already in the prompt takes it back
+     * out, while a partial match only appends the tags that are missing - so a second click after hand-editing one
+     * tag away tops the set back up rather than silently duplicating the rest. */
     insertTag(text) {
         if (!text) {
+            return;
+        }
+        let wanted = text.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        if (wanted.length == 0) {
             return;
         }
         let [promptBox, cursorPos] = uiImprover.getLastSelectedTextbox();
@@ -1108,13 +1133,13 @@ class TagDexTabClass {
         }
         let current = promptBox.value;
         let segments = current.split(',').map(s => s.trim());
-        let existing = segments.indexOf(text.trim());
-        if (existing >= 0) {
-            segments.splice(existing, 1);
-            promptBox.value = segments.filter(s => s.length > 0).join(', ');
+        let missing = wanted.filter(t => !segments.includes(t));
+        if (missing.length == 0) {
+            promptBox.value = segments.filter(s => s.length > 0 && !wanted.includes(s)).join(', ');
             triggerChangeFor(promptBox);
             return;
         }
+        text = missing.join(', ');
         let prefix = current.substring(0, cursorPos);
         let suffix = current.substring(cursorPos);
         let joiner = trimSpaces(prefix).length == 0 || trimSpaces(prefix).endsWith(',') ? ' ' : ', ';

@@ -41,6 +41,9 @@ is no in-app downloader for it — see Gotchas below.
   search, filter by hair/eye color, gender, or copyright, browse by copyright folder, and favorite entries. Manage
   buttons here (gated by `tagdex_manage`) download, reload, and unload datasets, import thumbnails, and generate or
   set a reference image per card.
+  Clicking a card inserts its trigger plus every core tag it carries - the trigger alone is only a name, and
+  core tags are what actually pin the appearance down. The card menu still offers "Insert Trigger" for the
+  name-only case, and clicking the same card again removes that whole tag set from the prompt.
 - **The `/simple` Characters sheet.** A separate implementation (`MTagDexClass` in `Assets/m_tagdex.js`) registered
   as its own bottom-nav tab and mirrored as a picker sheet next to the Create panel's model/LoRA pickers, since
   `/simple` shares no code with the genpage.
