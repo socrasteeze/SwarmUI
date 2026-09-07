@@ -102,6 +102,7 @@ Verifying an asset edit against a live server therefore means: restart, then loa
 - **C#**: never `var` (explicit types); full braced blocks always; `///` XML docs on all fields/methods/properties; use FreneticUtilities helpers (e.g. `ToLowerFast`) before reimplementing.
 - **JS**: always `let`, never `var`/`const`; prefer `==` over `===`; `else {` on its own line; full braced blocks; standard `for` loops, not `.forEach`; `/** */` docs on functions; new code uses class-based singletons (`class FooHelper {...} fooHelper = new FooHelper();`); check `util.js`/`site.js` for existing utilities first. No bundler — scripts are ordered `<script>` tags (genpage scripts registered in `Text2Image.cshtml` `@section Scripts`), cache-busted with `?vary=@Utilities.VaryID`.
 - **CSS**: class selectors only (`.foo`), never id selectors (`#foo`). Must work on modern Chrome/Firefox/Safari, desktop and mobile.
+- **`Data/*.fds` config**: `\s` is an escaped literal backslash and `\x` is an empty string. `ModelRoot: E:\smodels` means `E:\models` — never "fix" it to a bare backslash.
 
 Full per-language rules are in "Code conventions" below. There is no second conventions document — this file absorbed it.
 
@@ -175,6 +176,16 @@ Same browser-support requirement as JS. Mostly standard CSS. Always use class se
 ### Python (`src/BuiltinExtensions/ComfyUIBackend/ExtraNodes`)
 
 The only Python managed directly by SwarmUI. Mostly Comfy node formats, sometimes stray `def` functions. Reference — never edit — the ComfyUI source in `dlbackend/` and `src/BuiltinExtensions/ComfyUIBackend/DLNodes`; those are auto-downloaded upstream repos.
+
+### Config files (`Data/*.fds`)
+
+Runtime config, not source, and gitignored — but agents read and sometimes edit it, so the format's escaping matters.
+
+**`\s` is an escaped literal backslash.** Every Windows path in an `.fds` file carries it: `ModelRoot: E:\smodels` *is* `E:\models`, `DataPath: E:\sSwarmUI\sData` *is* `E:\SwarmUI\Data`, `OutputPath: E:\sPictures\s_output` *is* `E:\Pictures\_output`. A path that looks like it has a stray `s` after the drive separator is correct as written. Rewriting one to a bare backslash silently corrupts the setting and nothing warns you — it was mistaken for a typo once already (2026-09-06) and the value had to be restored from a backup.
+
+**`\x` is an empty string.** It is what an unset string setting serializes to (`AuthorizationHeader: \x`, `OAuthReturnURL: \x`). Do not read it as a literal value or as a placeholder to fill in.
+
+These two are the only escapes these files actually use. Values are tab-indented under their section, and the server rewrites the whole file on startup, so make edits with SwarmUI stopped or they will be overwritten. Back the file up before editing it.
 
 ## Upstream Sync Log
 
