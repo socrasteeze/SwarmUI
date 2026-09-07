@@ -283,22 +283,20 @@
 .m-tagdex-grid {
     display: grid;
     gap: 0.4rem;
-    justify-content: center;
 }
 
-/* `minmax(0, 13rem)` rather than `1fr`, for two separate reasons. The `0` floor is the important half: a bare
-   `1fr` track carries an automatic minimum of the item's min-content width, and the tile's image transfers a
-   minimum through its own aspect-ratio, so one track would demand more than its share and the two columns came
-   out visibly different widths (148px against 224px on a 390px phone) while overflowing the panel. The `13rem`
-   ceiling is what used to be the image's `max-height`: capping the track keeps a two-column desktop from
-   rendering one character as a 600px square, and does it without distorting the tile's own proportions. Tracks
-   shrink below the cap whenever the viewport is narrower, which is every phone. */
+/* `minmax(0, 1fr)` rather than a bare `1fr`. The `0` floor is the whole point: a bare `1fr` track carries an
+   automatic minimum of the item's min-content width, and the tile's image transfers a minimum through its own
+   aspect-ratio, so one track demanded more than its share and the two columns came out visibly different widths
+   (148px against 224px on a 390px phone) while overflowing the panel. Removing that floor makes the tracks equal
+   at every width. There is no ceiling: the tiles fill the row, which on a wide window means large tiles rather
+   than a centred band with margins either side. */
 .m-tagdex-grid-2 {
-    grid-template-columns: repeat(2, minmax(0, 13rem));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .m-tagdex-grid-3 {
-    grid-template-columns: repeat(3, minmax(0, 13rem));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .m-tagdex-grid .m-tagdex-card {
@@ -321,9 +319,9 @@
 
 /* The tile's image leads, so it gets the width; the 1/1 ratio keeps every row of tiles the same height even
    when a thumbnail is missing and the placeholder stands in.
-   The height cap that used to live here has moved onto the grid track. Held together with `width: 100%` it did
-   not cap a square - it overrode the aspect-ratio and left a 466x208 letterbox, so `cover` threw away most of a
-   portrait thumbnail. Capping the track instead keeps the same ceiling on tile size and lets the ratio hold.
+   There is deliberately no height cap here. Held together with `width: 100%` a `max-height` did not cap a
+   square - it overrode the aspect-ratio and left a 466x208 letterbox, so `cover` threw away most of a portrait
+   thumbnail. Tile size is the grid track's business now, and the ratio holds at every track width.
    `object-position` biases the crop upward because these are character portraits: a centered crop of a 2:3
    source takes the head off, which is the one part of the image that identifies the tag. */
 .m-tagdex-grid .m-tagdex-card-image {
