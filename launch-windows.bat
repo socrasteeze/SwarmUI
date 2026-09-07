@@ -54,7 +54,12 @@ if exist .\src\bin\must_rebuild (
         rmdir /s /q .\src\bin\live_release_backup
         move .\src\bin\live_release .\src\bin\live_release_backup
     )
-    rmdir /s /q .\src\bin\extensions
+    rem Fork change: a spoke never rebuilds extensions (ExtensionsManager refuses in spoke mode and expects the
+    rem artifacts deployed from the hub), so wiping them here would strip every extension from the spoke on each
+    rem commit change and break hub/spoke parameter parity. The artifacts are keyed by each extension's own git
+    rem hash, not SwarmUI's, so keeping them across a SwarmUI rebuild is correct; redeploy from the hub when an
+    rem extension itself changes. launch-spoke.bat owns the SWARM_SPOKE_LAUNCH marker.
+    if not defined SWARM_SPOKE_LAUNCH rmdir /s /q .\src\bin\extensions
     del .\src\bin\must_rebuild
 )
 
