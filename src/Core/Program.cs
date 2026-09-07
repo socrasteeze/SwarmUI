@@ -335,6 +335,7 @@ public class Program
             SaveFilePath = GetCommandLineFlag("backends_file", $"{DataDir}/Backends.fds")
         };
         Sessions = new();
+        Sessions.MaxSpokeControllerSessionAge = TimeSpan.FromMinutes(Math.Max(1, ServerSettings.Network.SpokeControllerSessionMinutes));
         Web = new();
         timer.Check("Prep Options");
         Web.PreInit();

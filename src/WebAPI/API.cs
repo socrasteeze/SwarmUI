@@ -48,10 +48,20 @@ public class API
     {
         Session session = null;
         WebSocket socket = null;
-        async Task Error(string message, string jsonErrorId = null, string jsonErrorMessage = null)
+        async Task Error(string message, string jsonErrorId = null, string jsonErrorMessage = null, bool quiet = false)
         {
             string forUser = session is null ? "" : $" for user '{session.User.UserID}'";
-            Logs.Error($"[WebAPI] Error handling API request '{context.Request.Path}'{forUser}: {message}");
+            // 'quiet' is for conditions that are the client's state rather than a fault here - a session id the
+            // server no longer knows (it restarted, or the session aged out) is answered correctly with a 401 and
+            // the client re-logs in; a hub reconnecting to a spoke does exactly this on every restart.
+            if (quiet)
+            {
+                Logs.Debug($"[WebAPI] Rejected API request '{context.Request.Path}'{forUser}: {message}");
+            }
+            else
+            {
+                Logs.Error($"[WebAPI] Error handling API request '{context.Request.Path}'{forUser}: {message}");
+            }
             if (jsonErrorId is not null || jsonErrorMessage is not null)
             {
                 JObject errResponse = [];
@@ -114,13 +124,13 @@ public class API
                     }
                     else
                     {
-                        await Error("Request input lacks required session id", "basic_api", "missing session id");
+                        await Error("Request input lacks required session id", "basic_api", "missing session id", quiet: true);
                         return;
                     }
                 }
                 if (!Program.Sessions.TryGetSession($"{session_id}", out session))
                 {
-                    await Error("Request input has unknown session id (if you're not writing API code you can ignore this message)");
+                    await Error("Request input has unknown session id", quiet: true);
                     await context.YieldJsonOutput(socket, 401, Utilities.ErrorObj("Invalid session ID. You may need to refresh the page.", "invalid_session_id"));
                     return;
                 }

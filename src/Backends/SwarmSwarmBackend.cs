@@ -116,6 +116,11 @@ public class SwarmSwarmBackend : AbstractT2IBackend
     /// <summary>How many seconds to wait between each re-try.</summary>
     public int FirstLoadRetryWaitSeconds = 5;
 
+    /// <summary>The remote's server id from the last successful login. A changed id means the remote restarted
+    /// and everything about it (workers, inventory) must be rebuilt; an unchanged id on a fresh login means only
+    /// the session expired.</summary>
+    public string RemoteServerID;
+
     /// <summary>Serializes full remote inventory refreshes for this control backend.</summary>
     private readonly SemaphoreSlim RemoteInventoryRefreshSemaphore = new(1, 1);
 
@@ -295,12 +300,33 @@ public class SwarmSwarmBackend : AbstractT2IBackend
             Logs.Error($"Swarm is connecting to itself as a backend. This is a bad idea. Check the address being used: {Address}");
             throw new Exception("Swarm connected to itself, backend load failed.");
         }
+        string previousServerID = RemoteServerID;
+        RemoteServerID = id;
         if (RemoteIsSpokeMode && IsAControlInstance)
         {
+            // Session-only re-login: the spoke did not restart (same server id) and this side still holds a
+            // complete inventory. Nothing about the spoke's models changed because a session timed out, so the
+            // full rescan-and-republish below would only buy minutes of 'loading' for no new information. Model
+            // changes reach a control instance through TriggerRefresh, never through a re-login.
+            if (RemoteInventoryReady && id is not null && id == previousServerID)
+            {
+                Logs.Debug($"{HandlerTypeData.Name} {BackendData.ID} re-logged in to {Address}; same server, inventory kept.");
+                return;
+            }
+            bool wasRunning = Status == BackendStatus.RUNNING;
+            HashSet<int> existingChildIDs = [.. ControlledNonrealBackends.Keys];
             string[] requiredSubtypes = [.. Program.T2IModelSets.Keys.Order(StringComparer.Ordinal)];
             InvalidateRemoteModelInventory(requiredSubtypes);
             await RequestRemoteModelRefresh();
             await ReviseRemoteDataListInternal(true);
+            // Invalidate moves a RUNNING instance to LOADING. On the first connect the init loop promotes it
+            // afterwards, but a re-login has no such loop, and the idle monitor only ever probes RUNNING or
+            // IDLE - so an instance left in LOADING here was never looked at again, with a complete inventory
+            // and every worker marked unavailable.
+            if (wasRunning)
+            {
+                SetRemoteInventoryStatus(BackendStatus.RUNNING, existingChildIDs);
+            }
             return;
         }
         await ReviseRemoteDataList(true);
@@ -368,13 +394,23 @@ public class SwarmSwarmBackend : AbstractT2IBackend
     private async Task RequestRemoteModelRefresh()
     {
         Logs.Verbose($"Trigger refresh on remote swarm {Address}");
-        JObject refreshData = await HttpClient.PostJson($"{Address}/API/TriggerRefresh", new()
+        JObject refreshData;
+        try
         {
-            ["session_id"] = Session,
-            ["strong"] = true,
-            ["force"] = true,
-            ["returnData"] = !RemoteIsSpokeMode
-        }, RequestAdapter());
+            refreshData = await HttpClient.PostJson($"{Address}/API/TriggerRefresh", new()
+            {
+                ["session_id"] = Session,
+                ["strong"] = true,
+                ["force"] = true,
+                ["returnData"] = !RemoteIsSpokeMode
+            }, RequestAdapter());
+        }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or TaskCanceledException or Newtonsoft.Json.JsonReaderException)
+        {
+            // No usable answer - the remote is down, restarting, or answered with an empty body mid-restart. The
+            // caller decides how loudly to report an offline remote; a parse stack trace tells it nothing useful.
+            throw new SwarmReadableErrorException($"Remote Swarm at {Address} did not answer a refresh request; it may be offline or restarting.");
+        }
         AutoThrowException(refreshData);
         if (RemoteIsSpokeMode && (!refreshData.TryGetValue("success", out JToken successToken)
             || successToken.Type != JTokenType.Boolean || !successToken.Value<bool>()

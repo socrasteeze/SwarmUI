@@ -284,6 +284,9 @@ public class Settings : AutoConfiguration
         [ValueIsSecret]
         public string RequiredAuthorization = "";
 
+        [ConfigComment("Spoke mode only: minutes an idle hub-controller session is kept before the spoke drops it.\nA hub re-logs in transparently when its session has expired, so this only sets how often that happens.\nDefaults to 10.")]
+        public int SpokeControllerSessionMinutes = 10;
+
         [ConfigComment("If true, special network forwarding logic will apply for developer modes.\nNotably, ComfyUI Frontend NPM Developer Mode requires significant special forwarding as it misroutes itself.\nDefaults to false.")]
         public bool EnableSpecialDevForwarding = false;
 

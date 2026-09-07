@@ -1216,7 +1216,14 @@ public static class T2IAPI
                 }
                 catch (Exception ex)
                 {
-                    Logs.Error($"Local model refresh completed, but remote model inventories failed to refresh: {ex.ReadableString()}");
+                    if (ex is SwarmReadableErrorException)
+                    {
+                        Logs.Info($"Local model refresh completed; a remote inventory was not refreshed: {ex.Message}");
+                    }
+                    else
+                    {
+                        Logs.Error($"Local model refresh completed, but remote model inventories failed to refresh: {ex.ReadableString()}");
+                    }
                     return new JObject()
                     {
                         ["error"] = "Local models refreshed. Refresh remote backends before remote generation.",

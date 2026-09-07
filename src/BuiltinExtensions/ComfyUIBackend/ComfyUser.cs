@@ -322,9 +322,18 @@ public class ComfyUser
         Socket.Dispose();
         await Utilities.RunCheckedTask(async () => await Task.WhenAll(Clients.Values.Select(async c =>
         {
-            if (!c.Socket.CloseStatus.HasValue)
+            try
             {
-                await c.Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Program.GlobalProgramCancel);
+                if (!c.Socket.CloseStatus.HasValue)
+                {
+                    await c.Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Program.GlobalProgramCancel);
+                }
+            }
+            catch (Exception ex) when (ex is System.Net.WebSockets.WebSocketException or ObjectDisposedException or OperationCanceledException)
+            {
+                // The other side is usually gone already by the time we close - a finished job, a client that
+                // navigated away. Not an error; it just means there was nobody left to handshake with.
+                Logs.Debug($"ComfyUI client socket was already closed by the peer: {ex.Message}");
             }
             c.Socket.Dispose();
         })));
