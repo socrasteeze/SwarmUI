@@ -1237,6 +1237,15 @@
    callout. contextmenu is already preventDefault'd in m_create.js, but that does NOT suppress the iOS callout
    or the selection magnifier - only these two properties do. Without them the long-press that opens the grid
    sheet also highlights the button label and can pop a system menu over it. */
+/* Generate + target caret as one split control. The wrapper carries the radius and clips the children so
+   the pair reads as a single button with a divider, rather than two buttons that happen to touch. */
+.m-gen-split {
+    flex: 1;
+    display: flex;
+    border-radius: 0.7rem;
+    overflow: hidden;
+    min-height: 50px;
+}
 .m-generate-button {
     flex: 1;
     background: var(--emphasis);
@@ -1244,11 +1253,51 @@
     font-size: 17px;
     font-weight: bold;
     border: none;
-    border-radius: 0.7rem;
+    border-radius: 0;
     min-height: 50px;
     -webkit-touch-callout: none;
     user-select: none;
     -webkit-user-select: none;
+}
+/* The caret names the target as well as opening the picker: on a hub/spoke setup "which GPU is this about
+   to use" is the question the control exists to answer, so the answer is on its face, not one tap away. */
+.m-gen-target {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--emphasis);
+    color: var(--emphasis-text, #fff);
+    border: none;
+    border-left: 1px solid rgba(255, 255, 255, 0.28);
+    padding: 0 0.7rem;
+    min-height: 50px;
+    max-width: 45%;
+    font-size: 13px;
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.m-gen-target-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-gen-target-caret {
+    font-size: 11px;
+    opacity: 0.85;
+    flex: 0 0 auto;
+}
+/* The pinned target is not currently usable. Struck through rather than recoloured alone, so it still reads
+   as "this one, but unavailable" on a screen where the accent colour is already the button's background. */
+.m-gen-target-down .m-gen-target-label {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+/* A picker row that cannot be chosen - a spoke that is down. Shown rather than hidden so a machine you know
+   exists does not appear to have vanished. */
+.m-row-disabled {
+    opacity: 0.45;
+    pointer-events: none;
 }
 .m-interrupt-button {
     background: var(--danger-button-background, #550000);

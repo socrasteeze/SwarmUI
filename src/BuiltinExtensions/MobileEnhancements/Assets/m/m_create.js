@@ -356,9 +356,20 @@ class MCreate {
             this.clearUnfinished();
         });
         genBar.appendChild(this.interruptButton);
+        // Generate and its target caret are one visual control (a split button), so they live in a wrapper
+        // that owns the rounded corners - otherwise the caret reads as a separate action sitting beside
+        // Generate, which is exactly the confusion the fused shape avoids.
+        let genSplit = mUI.el('div', 'm-gen-split');
         this.genButton = mUI.el('button', 'm-generate-button', 'Generate');
         this.wireGenerateButton();
-        genBar.appendChild(this.genButton);
+        genSplit.appendChild(this.genButton);
+        this.genTargetButton = mUI.el('button', 'm-gen-target');
+        this.genTargetLabel = mUI.el('span', 'm-gen-target-label', '');
+        this.genTargetButton.appendChild(this.genTargetLabel);
+        this.genTargetButton.appendChild(mUI.el('span', 'm-gen-target-caret', '\u25BE'));
+        this.genTargetButton.addEventListener('click', () => this.openGenTargetSheet());
+        genSplit.appendChild(this.genTargetButton);
+        genBar.appendChild(genSplit);
         panel.appendChild(genBar);
         // Prompt Coach entry point (m_coach.js): a slim, non-modal pill beside the heading. It never launches
         // a wizard on model/LoRA selection - tapping it is the only way its bottom sheet opens.
@@ -515,8 +526,123 @@ class MCreate {
         if (document.activeElement && document.activeElement.blur) {
             document.activeElement.blur();
         }
+        // Resolved here rather than in buildGenInput so the fallback notice fires once per generation and
+        // not on every readout that rebuilds the input dict - previewResolution does, on every render.
+        let target = mState.resolveGenTarget();
+        if (target.id == null) {
+            delete input['exactbackendid'];
+        }
+        else {
+            input['exactbackendid'] = target.id;
+        }
+        if (target.fellBack) {
+            mUI.warn(`${MCreate.genTargetName(mState.genTarget, mState.backendTargets)} is not available - running here instead.`);
+        }
         this.setPending(true);
         mGen.generate(input);
+    }
+
+    /** Short name for a target, used by the caret label and the fallback warning. Falls back to the stored
+     * parent id when the snapshot has no row for it, so a spoke that is down is still named rather than
+     * reading as a bare 'Remote'. */
+    static genTargetName(target, rows) {
+        target = MState.normalizeGenTarget(target);
+        if (target.kind == 'auto') {
+            return 'Auto';
+        }
+        if (target.kind == 'local') {
+            return 'Hub';
+        }
+        let row = (rows || []).find(r => r.kind == 'remote' && r.parent == `${target.parent}`);
+        return row ? row.label : `Backend ${target.parent}`;
+    }
+
+    /** Repaints the caret label from state, and marks it when the chosen target is known to be down. */
+    renderGenTarget() {
+        if (!this.genTargetButton) {
+            return;
+        }
+        let name = MCreate.genTargetName(mState.genTarget, mState.backendTargets);
+        this.genTargetLabel.textContent = name;
+        this.genTargetButton.title = `Generating on: ${name}. Tap to change.`;
+        let target = MState.normalizeGenTarget(mState.genTarget);
+        let down = target.kind != 'auto' && mState.backendTargets.length > 0
+            && !mState.backendTargets.some(row => row.usable && row.kind == target.kind
+                && (target.kind != 'remote' || row.parent == `${target.parent}`));
+        this.genTargetButton.classList.toggle('m-gen-target-down', down);
+    }
+
+    /** Backend picker for the Generate split button. The hub's own GPU comes first - it is the default and
+     * the common case - then each connected spoke, then Automatic.
+     *
+     * A spoke that is not up is shown greyed and unselectable rather than hidden: a row that vanishes looks
+     * like a bug when you know the machine exists, whereas a disabled row with its status underneath says
+     * plainly that the peer is down. */
+    openGenTargetSheet() {
+        let content = mUI.el('div', 'm-lora-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Generate on'));
+        let results = mUI.el('div', 'm-model-results');
+        content.appendChild(results);
+        let close = null;
+        let pick = (target) => {
+            mState.genTarget = MState.normalizeGenTarget(target);
+            mState.changed();
+            close();
+        };
+        let renderRows = () => {
+            results.innerHTML = '';
+            let rows = mState.backendTargets;
+            let add = (target, label, sub, usable) => {
+                let item = mUI.el('div', 'm-model-result');
+                let text = mUI.el('div', 'm-model-text');
+                text.appendChild(mUI.el('div', 'm-model-name', label));
+                if (sub) {
+                    text.appendChild(mUI.el('div', 'm-model-sub', sub));
+                }
+                item.appendChild(text);
+                if (MState.sameGenTarget(mState.genTarget, target)) {
+                    item.classList.add('m-selected');
+                }
+                if (usable) {
+                    item.addEventListener('click', () => pick(target));
+                }
+                else {
+                    item.classList.add('m-row-disabled');
+                }
+                results.appendChild(item);
+            };
+            let locals = rows.filter(row => row.kind == 'local');
+            let remotes = rows.filter(row => row.kind == 'remote');
+            // With no snapshot the hub is still offered: it is the default, it is where an unpinned request
+            // runs anyway, and refusing to draw a row would leave the sheet looking broken.
+            if (locals.length == 0) {
+                add({ 'kind': 'local' }, 'This machine (hub)', 'Default', true);
+            }
+            for (let row of locals) {
+                add({ 'kind': 'local' }, `${row.label} (hub)`, row.sub, row.usable);
+            }
+            // Deduped by parent: a spoke with several GPUs reports one child each, but the target names the
+            // spoke, and whichever of its workers is free resolves at generate time.
+            let seen = {};
+            for (let row of remotes) {
+                if (seen[row.parent]) {
+                    continue;
+                }
+                seen[row.parent] = true;
+                let usable = remotes.some(r => r.parent == row.parent && r.usable);
+                add({ 'kind': 'remote', 'parent': row.parent }, row.label, usable ? row.sub : 'Not available', usable);
+            }
+            if (remotes.length == 0) {
+                results.appendChild(mUI.el('div', 'm-strip-empty', 'No peer backends connected.'));
+            }
+            add({ 'kind': 'auto' }, 'Automatic', 'Let Swarm choose', true);
+        };
+        renderRows();
+        mState.refreshBackendTargets(() => {
+            renderRows();
+            this.renderGenTarget();
+        });
+        close = mUI.openSheet(content);
     }
 
     /** Re-renders every dynamic region from state. */
@@ -524,6 +650,7 @@ class MCreate {
         this.renderArch();
         this.renderPresets();
         this.renderModelButton();
+        this.renderGenTarget();
         if (document.activeElement != this.promptBox) {
             this.promptBox.value = mState.params['prompt'] || '';
             this.autoGrow(this.promptBox);
@@ -1582,87 +1709,11 @@ class MCreate {
         return shown;
     }
 
-    /** Backend picker sheet. `exactbackendid` pins every generation to one backend, which is the point on a
-     * multi-GPU box - but it is also a foot-gun, so 'Automatic' is the first row and deletes the param rather
-     * than setting a sentinel value (the server treats the key's presence as the choice).
-     *
-     * Rows come from ListBackends, not from the param's own `values`: that list is a snapshot taken when
-     * ListT2IParams was called at boot, so it goes stale the moment a backend is added or restarted, and it
-     * carries no status or loaded model. paramMeta is the fallback for a session that may set the parameter
-     * but lacks ViewBackendsList permission. */
+    /** Backward-compatible alias. The More menu used to own a separate backend picker that wrote
+     * `exactbackendid` into params directly; that param is now derived from mState.genTarget on every send,
+     * so a second writer would be silently overwritten. Both entry points open the one picker. */
     openBackendSheet() {
-        let content = mUI.el('div', 'm-lora-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'Backend'));
-        let results = mUI.el('div', 'm-model-results');
-        content.appendChild(results);
-        let close = null;
-        let pick = (value) => {
-            if (value == null) {
-                delete mState.params['exactbackendid'];
-            }
-            else {
-                mState.params['exactbackendid'] = value;
-            }
-            mState.changed();
-            close();
-        };
-        let renderRows = (backends) => {
-            results.innerHTML = '';
-            let auto = mUI.el('button', 'm-model-plain-row', 'Automatic (let Swarm choose)');
-            if (mState.params['exactbackendid'] == null) {
-                auto.classList.add('m-selected');
-            }
-            auto.addEventListener('click', () => pick(null));
-            results.appendChild(auto);
-            if (backends.length == 0) {
-                results.appendChild(mUI.el('div', 'm-strip-empty', 'No backends reported.'));
-                return;
-            }
-            for (let backend of backends) {
-                let item = mUI.el('div', 'm-model-result');
-                let text = mUI.el('div', 'm-model-text');
-                text.appendChild(mUI.el('div', 'm-model-name', backend.label));
-                if (backend.sub) {
-                    text.appendChild(mUI.el('div', 'm-model-sub', backend.sub));
-                }
-                item.appendChild(text);
-                if (`${mState.params['exactbackendid']}` == backend.id) {
-                    item.classList.add('m-selected');
-                }
-                item.addEventListener('click', () => pick(backend.id));
-                results.appendChild(item);
-            }
-        };
-        // Fallback list, shown immediately so the sheet is never empty, then replaced by live data.
-        let meta = mState.paramMeta['exactbackendid'];
-        let fallback = [];
-        for (let i = 0; i < ((meta && meta.values) || []).length; i++) {
-            fallback.push({ 'id': meta.values[i], 'label': (meta.value_names || [])[i] || meta.values[i], 'sub': '' });
-        }
-        renderRows(fallback);
-        genericRequest('ListBackends', { 'nonreal': false, 'full_data': true }, data => {
-            let live = [];
-            for (let key of Object.keys(data)) {
-                let backend = data[key];
-                // The response is keyed by backend id, but skip anything that is not a backend object in
-                // case a top-level field is ever added alongside them.
-                if (!backend || backend.id == null) {
-                    continue;
-                }
-                let sub = `${backend.status}${backend.enabled ? '' : ', disabled'}`;
-                if (backend.current_model) {
-                    sub += ` - ${mUI.modelName(backend.current_model)}`;
-                }
-                live.push({ 'id': `${backend.id}`, 'label': `${backend.id}: ${backend.title}`, 'sub': sub });
-            }
-            renderRows(live);
-        }, 0, () => {
-            // Enrichment only. A session allowed to set the parameter but not to view the backend list is a
-            // legitimate configuration, and the fallback rows above already work - so this stays silent
-            // rather than throwing a toast over a sheet that is functioning.
-            console.log('ListBackends unavailable - using the parameter list instead.');
-        });
-        close = mUI.openSheet(content);
+        this.openGenTargetSheet();
     }
 
     /** Inserts text into the prompt at the remembered caret (end of prompt if there isn't one), spacing it
