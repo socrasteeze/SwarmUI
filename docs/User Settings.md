@@ -41,4 +41,19 @@ It is inserted automatically, so it applies whatever format is in effect - inclu
 
 To place it somewhere other than the start, put a `[filenameprefix]` tag in your format instead; the automatic insertion is skipped whenever the format contains that tag.
 
-Slashes and square brackets are stripped from the prefix, leading/trailing dots and `..` runs are removed (interior dots such as `v1.0` are kept), and it is capped at 40 characters. A prefix that reduces to nothing is treated as unset. Note that for roles without `AllowUnsafeOutpaths`, SwarmUI's own final output-path clean still removes every dot, so `v1.0` reaches disk as `v10` unless that role setting is enabled.
+Slashes and square brackets are stripped from the prefix, leading/trailing dots and `..` runs are removed (interior dots such as `v1.0` are kept), and it is capped at 40 characters. A prefix that reduces to nothing is treated as unset. Interior dots survive to disk for every role, so a prefix of `v1.0` saves as `v1.0`.
+
+The number of folders a format may create is capped by the role's `MaxOutPathDepth` setting (default 5). A format nesting deeper than that has its extra folders joined into one, rather than being rejected — the filename itself is never altered.
+
+## Hiding Folders From Image History
+
+`User -> HiddenHistoryFolders` takes a comma separated list of folder names to leave out of the Image History browser, eg `_comfy0,VNCCS`. Use it for scratch or tool-owned folders that clutter the tree.
+
+Only folders sitting directly in your output directory are matched, and matching is case-insensitive. A hidden folder and everything under it disappears from the listing on both the Generate tab and `/simple`. Nothing is deleted or moved - clear the setting and the folders come back.
+
+This also covers folders a backend registers into the history, such as the ComfyUI scratch folders (`_comfy0` and friends), which are grafted into the listing rather than found by the directory walk.
+
+## Folder Order In Image History
+
+The `Starred` folder is pinned to the top of the Image History folder list on both the Generate tab and `/simple`; everything else stays A-Z. Its subfolders stay grouped underneath it.
+

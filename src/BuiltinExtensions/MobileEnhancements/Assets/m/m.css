@@ -999,6 +999,231 @@
     margin-right: -0.2rem;
 }
 
+/* Prompt Coach entry point (m_coach.js): a heading row with the "Prompt" label and the coach pill on the
+   same line, mirroring the plan's `Prompt: Anima Aesthetic · Tags   2 advisories ›` mock. */
+.m-prompt-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.m-prompt-head-label {
+    color: var(--text-soft);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+/* Non-modal by design - this only ever opens a bottom sheet, never a wizard. Text overflow is clipped rather
+   than wrapped: the pill sits on one line beside the label and must not push the row to a second line. */
+.m-coach-pill {
+    background: var(--background-panel);
+    color: var(--text-soft);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    padding: 0.25rem 0.7rem;
+    font-size: 12px;
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-height: 32px;
+}
+.m-coach-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    max-height: 75vh;
+    overflow-y: auto;
+}
+.m-coach-section-title {
+    font-weight: bold;
+    margin-bottom: 0.3rem;
+}
+.m-coach-checkpoint {
+    font-size: 15px;
+}
+.m-coach-confidence {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin-bottom: 0.4rem;
+}
+.m-coach-profile-choices, .m-coach-mode-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.m-coach-profile-choice, .m-coach-mode-choice {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    font-size: 13px;
+    min-height: 36px;
+}
+.m-coach-choice-active {
+    background: var(--emphasis);
+    color: var(--emphasis-text, #fff);
+    border-color: var(--emphasis);
+}
+.m-coach-tip {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin-top: 0.4rem;
+}
+.m-coach-empty {
+    color: var(--text-soft);
+    font-size: 13px;
+}
+.m-coach-advisory-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.m-coach-advisory-text {
+    flex: 1 1 auto;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+.m-coach-apply-button {
+    flex: 0 0 auto;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.3rem 0.6rem;
+    min-height: 36px;
+}
+.m-coach-undo-button {
+    width: 100%;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    border: 1px dashed var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 40px;
+    margin-top: 0.3rem;
+}
+.m-coach-lora-row {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.m-coach-lora-name {
+    font-size: 14px;
+}
+.m-coach-lora-sub {
+    color: var(--text-soft);
+    font-size: 12px;
+}
+.m-coach-lora-warning {
+    color: var(--emphasis);
+    font-size: 12px;
+}
+.m-coach-lora-insert {
+    margin-top: 0.3rem;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.6rem;
+    min-height: 36px;
+}
+/* Phase 3 residue: role chips, locked-row notice, prompt-syntax LoRA callout, and the two-action row that
+   holds "Insert exact trigger" alongside the new section-aware "Prompt" action. */
+.m-coach-role-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.3rem;
+}
+.m-coach-role-choice {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 12px;
+    min-height: 32px;
+}
+.m-coach-lora-locked {
+    color: var(--text-soft);
+    font-size: 12px;
+    font-style: italic;
+    margin-top: 0.2rem;
+}
+.m-coach-lora-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+}
+.m-coach-lora-prompt-syntax {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin-top: 0.4rem;
+    overflow-wrap: anywhere;
+}
+/* Phase 4: normalization/ordered-draft controls. */
+.m-coach-draft-preview {
+    background: var(--background-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+    margin-top: 0.4rem;
+}
+.m-coach-draft-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+/* Phase 5: custom profile chips and the inline "new profile" form. */
+.m-coach-profile-delete {
+    background: none;
+    color: var(--text-soft);
+    border: none;
+    padding: 0 0.3rem;
+    min-height: 36px;
+    font-size: 14px;
+}
+.m-coach-custom-toggle {
+    margin-top: 0.4rem;
+    background: none;
+    color: var(--emphasis);
+    border: none;
+    padding: 0.2rem 0;
+    font-size: 13px;
+    min-height: 36px;
+}
+.m-coach-custom-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+.m-coach-custom-input {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 16px;
+    min-height: 40px;
+}
+.m-coach-custom-save {
+    background: var(--emphasis);
+    color: var(--emphasis-text, #fff);
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    min-height: 40px;
+}
+
 /* Sits above the prompt box, in normal flow. It used to be sticky to the bottom of the panel, which put it
    underneath the on-screen keyboard exactly when it was wanted; see the build() comment in m_create.js. */
 .m-gen-bar {

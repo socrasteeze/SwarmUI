@@ -30,6 +30,17 @@
  */
 class MobileFullViewTouch {
 
+    /** Milliseconds the T9 chrome overlay stays visible with no interaction before it auto-hides. */
+    static OverlayAutoHideMs = 3500;
+
+    /** Multiplier applied to raw finger travel while swiping past the first/last image at fit zoom, so the
+     *  boundary is felt (the image visibly resists) instead of tracking the finger 1:1 like a real swipe. */
+    static SwipeResistance = 0.35;
+
+    /** Minimum px/ms of horizontal travel, measured at touchend, for a zoomed one-finger pan that started
+     *  already at its pan edge to be treated as an edge-fling navigation rather than an ordinary pan. */
+    static EdgeFlingVelocity = 0.5;
+
     /** Wire touch listeners onto the fullview modal content. */
     constructor() {
         this.moveThreshold = 10;       // px of travel before a one-finger gesture commits to a direction
@@ -49,6 +60,9 @@ class MobileFullViewTouch {
         this.preloadImg2 = null;
         // T7 (in-viewer Share button): the noClose backstop timer - see suppressModalClose().
         this.shareNoCloseTimer = null;
+        // T9 (chrome overlay): whether the top/bottom bars are currently shown, and the pending auto-hide.
+        this.overlayVisible = false;
+        this.overlayHideTimer = null;
         let content = imageFullView.content;
         content.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false, capture: true });
         content.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false, capture: true });
@@ -70,11 +84,26 @@ class MobileFullViewTouch {
         this.pinchPrevDist = 0;
         this.pinchPrevMidX = 0;
         this.pinchPrevMidY = 0;
+        // Edge-fling-while-zoomed (2b): captured once at the start of a single-finger touch, never mid-gesture.
+        this.wasZoomedAtStart = false;
+        this.panEdgeAtStart = null;
+        // Rubber-band (2b): per-gesture memo of atBoundary()'s answer per direction. onTouchMove asks on every
+        // frame of a swipe, and the answer cannot change mid-gesture, so resolving the whole block list each
+        // frame would be pure waste - and worse, would let the live swipe and finishSwipe disagree if the
+        // batch strip mutated (a generation finishing) halfway through the drag.
+        this.boundaryCache = null;
     }
 
     /** True only when the viewer is open on a touch device - the sole gate for all handling here. */
     isActive() {
         return imageFullView.isOpen() && window.matchMedia('(pointer: coarse)').matches;
+    }
+
+    /** True under Genpage's mobile layout (the phone-width class), as opposed to a coarse-pointer tablet
+     *  that still runs the desktop-width layout. Gates T9's tap-toggled chrome overlay: on a tablet the
+     *  single-tap metadata toggle from 2a is kept exactly as it always was. */
+    isSmallWindow() {
+        return document.body.classList.contains('small-window');
     }
 
     /** True if the touch should be left to the browser: native media controls, the scrollable metadata /
@@ -85,7 +114,8 @@ class MobileFullViewTouch {
     isOnControls(target) {
         return findParentOfClass(target, 'video-controls') || findParentOfClass(target, 'audio-controls')
             || findParentOfClass(target, 'audio-waveform-wrap') || findParentOfClass(target, 'imageview_popup_modal_undertext')
-            || findParentOfClass(target, 'mobile-fullview-share-btn');
+            || findParentOfClass(target, 'mobile-fullview-share-btn') || findParentOfClass(target, 'mobile-fullview-overlay-top')
+            || findParentOfClass(target, 'mobile-fullview-overlay-bottom');
     }
 
     /** True if the touch is on the image itself (vs the letterbox / outside area). */
@@ -156,6 +186,10 @@ class MobileFullViewTouch {
             this.lastY = t.clientY;
             this.startTime = Date.now();
             this.didMove = false;
+            // Edge-fling-while-zoomed (2b): captured BEFORE any movement, so a later fling can be judged
+            // against where the pan started, not where it ends up.
+            this.wasZoomedAtStart = this.isZoomed();
+            this.panEdgeAtStart = this.wasZoomedAtStart ? this.computePanEdges() : null;
             // Touches on the image are handled entirely here; preventDefault suppresses the synthetic mouse
             // events browsers fire after touch (which would otherwise trigger the core's mouse-pan handler).
             // Touches OUTSIDE the image are left alone so their synthetic click still closes the modal.
@@ -222,7 +256,10 @@ class MobileFullViewTouch {
         }
         else if (this.mode == 'swipe') {
             e.preventDefault();
-            this.setInnerTransform(`translateX(${dx}px)`, '');
+            // Rubber-band resistance (2b): once there is no image left in the direction of travel, the
+            // finger keeps moving but the image only tracks a fraction of it, so the boundary is felt.
+            let displayDx = this.atBoundary(dx < 0) ? dx * MobileFullViewTouch.SwipeResistance : dx;
+            this.setInnerTransform(`translateX(${displayDx}px)`, '');
         }
         else if (this.mode == 'dismiss') {
             e.preventDefault();
@@ -255,6 +292,9 @@ class MobileFullViewTouch {
         else if (this.mode == 'dismiss') {
             this.finishDismiss(e);
         }
+        else if (this.mode == 'pan' && e.touches.length == 0) {
+            this.maybeEdgeFlingNav();
+        }
         else if (!this.mode && e.touches.length == 0) {
             this.handleTap(e);
         }
@@ -270,9 +310,14 @@ class MobileFullViewTouch {
         this.reset();
     }
 
-    /** Commit or spring back a horizontal navigation swipe. */
+    /** Commit or spring back a horizontal navigation swipe. Rubber-band (2b): a swipe past the first/last
+     *  image always springs back, however far or fast it travelled - there is nothing to navigate to. */
     finishSwipe(e) {
         let dx = this.lastX - this.startX;
+        if (this.atBoundary(dx < 0)) {
+            this.animateInnerHome();
+            return;
+        }
         let elapsed = Math.max(1, Date.now() - this.startTime);
         let velocity = Math.abs(dx) / elapsed; // px/ms
         if (Math.abs(dx) > this.navThreshold || velocity > 0.5) {
@@ -288,6 +333,7 @@ class MobileFullViewTouch {
         let dy = this.lastY - this.startY;
         if (dy > this.dismissThreshold) {
             imageFullView.content.style.opacity = '';
+            this.haptic();
             imageFullView.close();
         }
         else {
@@ -296,7 +342,149 @@ class MobileFullViewTouch {
         }
     }
 
-    /** Handle a stationary tap: double-tap zooms, single tap toggles the metadata chrome. */
+    /**
+     * Edge-fling-while-zoomed (2b): at touchend of a one-finger pan that began already zoomed in, a fast
+     * horizontal fling that started with the image already panned to its edge in that direction advances to
+     * the prev/next image via the exact same `animateNav` -> `shiftToNextImagePreview` path the fit-zoom
+     * swipe drives. An ordinary pan (not fast enough, or not starting at the edge) has already just panned
+     * the image live in onTouchMove and this method does nothing further - the pan simply ends where it is.
+     */
+    maybeEdgeFlingNav() {
+        if (!this.wasZoomedAtStart || !this.panEdgeAtStart) {
+            return;
+        }
+        let dx = this.lastX - this.startX;
+        let elapsed = Math.max(1, Date.now() - this.startTime);
+        let velocity = Math.abs(dx) / elapsed; // px/ms
+        if (velocity < MobileFullViewTouch.EdgeFlingVelocity) {
+            return;
+        }
+        // Dragging right (dx > 0) with the image already pushed as far right as it can go (its left edge is
+        // fully exposed) has nowhere left to pan - that is the "previous image" direction. Dragging left
+        // with the image already pushed as far left as it can go (right edge exposed) is "next image".
+        if (dx > 0 && this.panEdgeAtStart.atMax) {
+            this.animateNav(false);
+        }
+        else if (dx < 0 && this.panEdgeAtStart.atMin) {
+            this.animateNav(true);
+        }
+    }
+
+    /**
+     * True when there is no image to navigate to in the given direction - either the sequence has no
+     * neighbour there (boundary, cycling off) or the sequence can't be resolved at all. Cycling on means
+     * there is always a neighbour (it wraps), so this is unconditionally false in that case.
+     */
+    atBoundary(next) {
+        if (!this.boundaryCache) {
+            this.boundaryCache = {};
+        }
+        let key = next ? 'next' : 'prev';
+        if (this.boundaryCache[key] === undefined) {
+            this.boundaryCache[key] = this.computeAtBoundary(next);
+        }
+        return this.boundaryCache[key];
+    }
+
+    /** The uncached body of atBoundary() above. */
+    computeAtBoundary(next) {
+        let resolved = this.resolveBlocks();
+        if (!resolved || resolved.index == -1 || !resolved.blocks || resolved.blocks.length == 0) {
+            return false;
+        }
+        if (this.navCycles()) {
+            return false;
+        }
+        return next ? resolved.index >= resolved.blocks.length - 1 : resolved.index <= 0;
+    }
+
+    /**
+     * Whether the navigation this file drives wraps around at the ends, decided exactly as core's own
+     * `shiftToNextImagePreview` decides it for THIS caller. That matters for the third setting value:
+     * `only_arrows` cycles only when `isArrows` is true, and every navigation from this file goes through
+     * `animateNav` -> `shiftToNextImagePreview(next, true, true)` - isArrows true - so core cycles for
+     * `only_arrows` as well as `true`. Reading it as a plain `== 'true'` would rubber-band the first/last
+     * image for a user on that setting while core would happily have wrapped, i.e. silently refuse a
+     * navigation the arrow keys still perform.
+     */
+    navCycles() {
+        let val = typeof getUserSetting == 'function' ? getUserSetting('ui.imageshiftingcycles', 'true') : 'true';
+        return val == 'true' || val == 'only_arrows';
+    }
+
+    /**
+     * The pan-edge state of the currently open image, used only by edge-fling-while-zoomed above. Mirrors
+     * the exact clamp `moveImg` (currentimagehandler.js) applies, read-only: `atMax` means the image is
+     * already pushed as far right as `moveImg` allows (no further positive/rightward pan possible), `atMin`
+     * the opposite. Returns null on any failure (element missing mid-gesture) - fails closed, never throws.
+     */
+    computePanEdges() {
+        try {
+            let img = imageFullView.getImgOrContainer();
+            let left = imageFullView.getImgLeft();
+            let overWidth = img.parentElement.offsetWidth / 2;
+            let minLeft = img.parentElement.offsetWidth - img.offsetWidth - overWidth;
+            let maxLeft = overWidth;
+            return { atMax: left >= maxLeft - 0.5, atMin: left <= minLeft + 0.5 };
+        }
+        catch (err) {
+            return null;
+        }
+    }
+
+    /**
+     * Resolves the ordered `.image-block` sequence the current image sits in, and its index within it -
+     * exactly the same DOM walk `shiftToNextImagePreview` (currentimagehandler.js, read-only reference)
+     * uses, so a boundary here is never a boundary shiftToNextImagePreview itself would disagree with.
+     * Shared by `atBoundary` above and `preloadAdjacent` below, so the two can never drift apart. Returns
+     * null when the current image (or the DOM it lives in) can't be resolved at all.
+     */
+    resolveBlocks() {
+        if (typeof currentImageHelper == 'undefined' || !currentImageHelper) {
+            return null;
+        }
+        let curImgElem = currentImageHelper.getCurrentImage();
+        if (!curImgElem) {
+            return null;
+        }
+        let blocks;
+        let index;
+        if (curImgElem.dataset.batch_id == 'history') {
+            if (typeof lastHistoryImageDiv == 'undefined' || !lastHistoryImageDiv || !lastHistoryImageDiv.parentElement) {
+                return null;
+            }
+            blocks = [...lastHistoryImageDiv.parentElement.children].filter(div => div.classList.contains('image-block'));
+            index = blocks.findIndex(div => div == lastHistoryImageDiv);
+        }
+        else {
+            let batchArea = document.getElementById('current_image_batch');
+            if (!batchArea) {
+                return null;
+            }
+            let imgs = [...batchArea.getElementsByClassName('image-block-img-inner')].filter(i => findParentOfClass(i, 'image-block-placeholder') == null);
+            function getSrc(elem) {
+                if (elem.tagName == 'VIDEO') {
+                    let source = elem.querySelector('source');
+                    return source ? source.src : '';
+                }
+                return elem.src;
+            }
+            let curSrc = getSrc(curImgElem);
+            let curRawSrc = curImgElem.dataset.src;
+            blocks = imgs.map(img => findParentOfClass(img, 'image-block'));
+            index = imgs.findIndex((img, i) => {
+                if (getSrc(img) == curSrc) {
+                    return true;
+                }
+                let block = blocks[i];
+                return block != null && curRawSrc != null && block.dataset.src == curRawSrc;
+            });
+        }
+        return { blocks, index };
+    }
+
+    /** Handle a stationary tap: double-tap zooms, single tap toggles the metadata chrome (or, under
+     *  body.small-window, the T9 chrome overlay - see the deferred callback below). */
     handleTap(e) {
         if (!this.isOnImage(e.target)) {
             return; // tap outside the image -> let the core click handler close the modal
@@ -326,7 +514,16 @@ class MobileFullViewTouch {
         }
         this.tapToggleTimer = setTimeout(() => {
             this.tapToggleTimer = null;
-            if (this.isPlainImage()) {
+            if (!this.isPlainImage()) {
+                return;
+            }
+            // T9 (mobile viewer chrome, docs/MobilePWA-Optimization-Plan.md section 2c): under Genpage's
+            // mobile layout, tap toggles the minimal top/bottom overlay instead of the metadata panel - a
+            // tablet with a coarse pointer but the desktop-width layout keeps the original 2a behavior.
+            if (this.isSmallWindow()) {
+                this.toggleOverlay();
+            }
+            else {
                 imageFullView.toggleMetadataVisibility(!imageFullView.showMetadata);
             }
         }, this.doubleTapMs);
@@ -480,62 +677,21 @@ class MobileFullViewTouch {
      * preview URL; `dataset.src` stays full-res regardless, so this stays correct either way). Warms each
      * with a throwaway `new Image()`. No-ops in a backgrounded tab (nothing to gain warming images the user
      * cannot currently see) or once the touch viewer itself is not open.
+     *
+     * The block/index resolution itself lives in `resolveBlocks()` above (shared with `atBoundary`, used by
+     * the 2b rubber-band and edge-fling code) so the two can never disagree about where the sequence ends.
      */
     preloadAdjacent() {
         if (document.hidden || !this.isActive()) {
             return;
         }
-        if (typeof currentImageHelper == 'undefined' || !currentImageHelper) {
+        let resolved = this.resolveBlocks();
+        if (!resolved || resolved.index == -1 || !resolved.blocks || resolved.blocks.length == 0) {
             return;
         }
-        let curImgElem = currentImageHelper.getCurrentImage();
-        if (!curImgElem) {
-            return;
-        }
-        let doCycle = typeof getUserSetting == 'function' ? getUserSetting('ui.imageshiftingcycles', 'true') == 'true' : true;
-        let blocks;
-        let index;
-        if (curImgElem.dataset.batch_id == 'history') {
-            if (typeof lastHistoryImageDiv == 'undefined' || !lastHistoryImageDiv || !lastHistoryImageDiv.parentElement) {
-                return;
-            }
-            blocks = [...lastHistoryImageDiv.parentElement.children].filter(div => div.classList.contains('image-block'));
-            index = blocks.findIndex(div => div == lastHistoryImageDiv);
-        }
-        else {
-            let batchArea = document.getElementById('current_image_batch');
-            if (!batchArea) {
-                return;
-            }
-            let imgs = [...batchArea.getElementsByClassName('image-block-img-inner')].filter(i => findParentOfClass(i, 'image-block-placeholder') == null);
-            function getSrc(elem) {
-                if (elem.tagName == 'VIDEO') {
-                    let source = elem.querySelector('source');
-                    return source ? source.src : '';
-                }
-                return elem.src;
-            }
-            let curSrc = getSrc(curImgElem);
-            // The batch strip's thumbnails may carry a `?preview=true` suffix on their own `img.src` that
-            // the main current image's src does not (see getThumbnailSrc / appendImage in
-            // currentimagehandler.js), so the resolved-URL compare alone matches nothing and this would
-            // silently never preload anything in batch mode. Fall back to comparing the raw unresolved srcs
-            // stashed in dataset, exactly as shiftToNextImagePreview does.
-            let curRawSrc = curImgElem.dataset.src;
-            blocks = imgs.map(img => findParentOfClass(img, 'image-block'));
-            index = imgs.findIndex((img, i) => {
-                if (getSrc(img) == curSrc) {
-                    return true;
-                }
-                let block = blocks[i];
-                return block != null && curRawSrc != null && block.dataset.src == curRawSrc;
-            });
-        }
-        if (index == -1 || !blocks || blocks.length == 0) {
-            return;
-        }
-        this.preloadImg1 = this.warmSrc(this.neighbourSrc(blocks, index - 1, doCycle));
-        this.preloadImg2 = this.warmSrc(this.neighbourSrc(blocks, index + 1, doCycle));
+        let doCycle = this.navCycles();
+        this.preloadImg1 = this.warmSrc(this.neighbourSrc(resolved.blocks, resolved.index - 1, doCycle));
+        this.preloadImg2 = this.warmSrc(this.neighbourSrc(resolved.blocks, resolved.index + 1, doCycle));
     }
 
     /**
@@ -605,6 +761,7 @@ class MobileFullViewTouch {
         }
         let observer = new MutationObserver(() => {
             this.ensureShareButton();
+            this.ensureOverlay();
             this.preloadAdjacent();
         });
         observer.observe(imageFullView.content, { childList: true });
@@ -727,6 +884,243 @@ class MobileFullViewTouch {
         }
         catch (err) {
             return null;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // T9: mobile viewer chrome overlay (docs/MobilePWA-Optimization-Plan.md section 2c)
+    // ---------------------------------------------------------------------------------------------------
+
+    /**
+     * (Re)build the top/bottom chrome bars into the currently open image, and keep them in sync - called
+     * from watchContent()'s MutationObserver on every open and every navigation, same reasoning as
+     * ensureShareButton() above (showImage() wipes imageFullView.content, so nothing appended as a child of
+     * it survives a navigation). Coarse-pointer gated like the Share button; unlike the Share button, the
+     * bars' own visibility (shown vs auto-hidden) is further gated to body.small-window by CSS, and to
+     * body.small-window in JS by handleTap() only ever calling toggleOverlay() there - so a tablet with a
+     * coarse pointer gets inert-but-present DOM here, never a visible overlay.
+     *
+     * When the viewer is closed (showImage()'s `this.content.innerHTML = ''` is itself a childList mutation
+     * that fires this same observer), `wrap` is null: this resets the overlay's visibility/timer state so
+     * the next open starts hidden, rather than reappearing pre-opened from whatever state a swipe-dismissed
+     * or tap-outside-closed session left behind.
+     */
+    ensureOverlay() {
+        if (!window.matchMedia('(pointer: coarse)').matches) {
+            return;
+        }
+        let wrap = imageFullView.content ? imageFullView.content.querySelector('.imageview_modal_imagewrap') : null;
+        if (!wrap) {
+            this.overlayVisible = false;
+            if (this.overlayHideTimer) {
+                clearTimeout(this.overlayHideTimer);
+                this.overlayHideTimer = null;
+            }
+            return;
+        }
+        if (!wrap.querySelector('.mobile-fullview-overlay-top')) {
+            this.buildOverlayBars(wrap);
+        }
+        this.updateOverlayIndex();
+        this.applyOverlayVisibility();
+    }
+
+    /** Build the top bar (close + index) and bottom bar (per-image actions) once per image-wrap element. */
+    buildOverlayBars(wrap) {
+        let top = document.createElement('div');
+        top.className = 'mobile-fullview-overlay-top';
+        let index = document.createElement('div');
+        index.className = 'mobile-fullview-overlay-index';
+        let closeBtn = document.createElement('div');
+        closeBtn.className = 'mobile-fullview-overlay-btn mobile-fullview-overlay-close';
+        closeBtn.textContent = '✕';
+        closeBtn.setAttribute('role', 'button');
+        closeBtn.setAttribute('tabindex', '0');
+        closeBtn.setAttribute('aria-label', 'Close');
+        this.wireOverlayButton(closeBtn, () => {
+            this.haptic();
+            this.hideOverlay();
+            imageFullView.close();
+        });
+        top.appendChild(index);
+        top.appendChild(closeBtn);
+
+        let bottom = document.createElement('div');
+        bottom.className = 'mobile-fullview-overlay-bottom';
+        bottom.appendChild(this.makeOverlayActionButton('Star', 'Star or unstar this image', () => this.runStarAction()));
+        bottom.appendChild(this.makeOverlayActionButton('Reuse', 'Reuse this image\'s generation parameters', () => this.runReuseAction()));
+        bottom.appendChild(this.makeOverlayActionButton('Delete', 'Delete this image', () => this.runDeleteAction()));
+        bottom.appendChild(this.makeOverlayActionButton('Download', 'Download this image', () => this.runDownloadAction()));
+        bottom.appendChild(this.makeOverlayActionButton('Share', 'Share this image', () => this.doShare()));
+
+        wrap.appendChild(top);
+        wrap.appendChild(bottom);
+    }
+
+    /** Build one bottom-bar action button, wired the same way the T7 Share button already is. */
+    makeOverlayActionButton(label, title, action) {
+        let btn = document.createElement('div');
+        btn.className = 'mobile-fullview-overlay-btn';
+        btn.textContent = label;
+        btn.title = title;
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('tabindex', '0');
+        btn.setAttribute('aria-label', title);
+        this.wireOverlayButton(btn, action);
+        return btn;
+    }
+
+    /**
+     * Wire one overlay button exactly like ensureShareButton() wires the Share button: touchend does the
+     * real work and preventDefault()s the synthetic click, suppressModalClose() backstops the case some
+     * browser lets the click through anyway, pointerdown pre-arms that backstop before the document-level
+     * capture-phase close listener can run, and a plain click covers non-touch activation (assistive tech).
+     * Also resets the overlay's own auto-hide timer, since a real interaction is exactly the "still in use"
+     * signal that timer exists to detect.
+     */
+    wireOverlayButton(btn, action) {
+        let activate = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.suppressModalClose();
+            this.resetOverlayAutoHide();
+            action();
+        };
+        btn.addEventListener('touchend', activate, { passive: false });
+        btn.addEventListener('pointerdown', () => this.suppressModalClose());
+        btn.addEventListener('click', activate);
+    }
+
+    /** Refresh the top bar's index text ("3 / 8") from the core's own permanent counter element
+     *  (#image_fullview_modal_counter, outside imageFullView.content so it survives every rebuild and is
+     *  already kept correct by showImage()'s own updateCounter() call) - reformatted, never recomputed, so
+     *  this can never disagree with what core itself displays. */
+    updateOverlayIndex() {
+        let wrap = imageFullView.content ? imageFullView.content.querySelector('.imageview_modal_imagewrap') : null;
+        let indexElem = wrap ? wrap.querySelector('.mobile-fullview-overlay-index') : null;
+        if (!indexElem) {
+            return;
+        }
+        let counterElem = document.getElementById('image_fullview_modal_counter');
+        let raw = counterElem ? counterElem.textContent.trim() : '';
+        let match = raw.match(/(\d+)\s*\/\s*(\d+)/);
+        indexElem.textContent = match ? `${match[1]} / ${match[2]}` : '';
+    }
+
+    /** Flip the overlay's shown/hidden state - the tap-to-toggle entry point from handleTap() above. */
+    toggleOverlay() {
+        if (this.overlayVisible) {
+            this.hideOverlay();
+        }
+        else {
+            this.showOverlay();
+        }
+    }
+
+    /** Show the overlay and (re)start its auto-hide countdown. */
+    showOverlay() {
+        this.overlayVisible = true;
+        this.applyOverlayVisibility();
+        this.resetOverlayAutoHide();
+    }
+
+    /** Hide the overlay and cancel any pending auto-hide - idempotent. */
+    hideOverlay() {
+        this.overlayVisible = false;
+        this.applyOverlayVisibility();
+        if (this.overlayHideTimer) {
+            clearTimeout(this.overlayHideTimer);
+            this.overlayHideTimer = null;
+        }
+    }
+
+    /** Push `this.overlayVisible` onto the actual bar elements, if they currently exist. */
+    applyOverlayVisibility() {
+        let wrap = imageFullView.content ? imageFullView.content.querySelector('.imageview_modal_imagewrap') : null;
+        if (!wrap) {
+            return;
+        }
+        let top = wrap.querySelector('.mobile-fullview-overlay-top');
+        let bottom = wrap.querySelector('.mobile-fullview-overlay-bottom');
+        for (let bar of [top, bottom]) {
+            if (bar) {
+                bar.classList.toggle('mobile-fullview-overlay-visible', this.overlayVisible);
+            }
+        }
+    }
+
+    /** (Re)start the "auto-hide after a few seconds of no interaction" countdown. */
+    resetOverlayAutoHide() {
+        if (this.overlayHideTimer) {
+            clearTimeout(this.overlayHideTimer);
+        }
+        this.overlayHideTimer = setTimeout(() => {
+            this.overlayHideTimer = null;
+            this.hideOverlay();
+        }, MobileFullViewTouch.OverlayAutoHideMs);
+    }
+
+    /** Bottom-bar Star action: the exact core handler, via runCoreImageAction() below. */
+    runStarAction() {
+        this.runCoreImageAction(['Star', 'Unstar']);
+    }
+
+    /** Bottom-bar Delete action: the exact core handler, via runCoreImageAction() below. */
+    runDeleteAction() {
+        this.runCoreImageAction(['Delete']);
+    }
+
+    /** Bottom-bar Download action: the exact core handler, via runCoreImageAction() below. */
+    runDownloadAction() {
+        this.runCoreImageAction(['Download']);
+    }
+
+    /**
+     * Bottom-bar Reuse Parameters action: calls the same global `copy_current_image_params()`
+     * (currentimagehandler.js, read-only reference - never edited) the core's own "Reuse Parameters" button
+     * calls. That function reads the page-global `currentMetadataVal` rather than anything scoped to the
+     * fullview modal, but the two always agree: every path that opens or navigates the fullview modal
+     * (clicking a thumbnail, shiftToNextImagePreview, this file's own animateNav) also calls core's
+     * setCurrentImage() for the same image, which is what sets that global.
+     */
+    runReuseAction() {
+        if (typeof copy_current_image_params == 'function') {
+            copy_current_image_params();
+        }
+    }
+
+    /**
+     * Finds the matching entry from the core's own `buttonsForImage()` (outputhistory.js, read-only
+     * reference - never edited; the exact factory showImage() itself calls to populate the fullview modal's
+     * own undertext buttons) by label, and invokes it exactly as a real click on that rendered button would:
+     * an `href` entry (Download) via a throwaway anchor, an `onclick` entry (Star/Unstar, Delete) called
+     * directly. This never reimplements star/delete/download logic - it is core's own handler, obtained from
+     * core's own factory, the same one the fullview modal's own buttons already run.
+     */
+    runCoreImageAction(labels) {
+        if (typeof buttonsForImage != 'function' || !imageFullView.currentSrc) {
+            return;
+        }
+        let src = imageFullView.currentSrc;
+        let fullSrc = typeof getImageFullSrc == 'function' ? getImageFullSrc(src) : src;
+        let items = buttonsForImage(fullSrc, src, imageFullView.currentMetadata, true);
+        let item = items.find(b => labels.includes(b.label));
+        if (!item) {
+            return;
+        }
+        if (item.href) {
+            let link = document.createElement('a');
+            link.href = item.href;
+            if (item.is_download) {
+                link.download = '';
+            }
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+        else if (typeof item.onclick == 'function') {
+            item.onclick(null);
         }
     }
 }

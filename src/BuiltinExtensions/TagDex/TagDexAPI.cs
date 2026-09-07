@@ -508,12 +508,10 @@ public partial class TagDexExtension
         {
             return null;
         }
-        // Datasets that ship their own images carry a pre-resolved relative path; everything else is looked up by
-        // sanitized name across the extensions we might have written.
-        if (entry.ThumbPath is not null)
-        {
-            return present.Contains(entry.ThumbPath) ? ThumbUrl(list.Source.ID, entry.ThumbPath) : null;
-        }
+        // A locally written or imported override always wins when one exists on disk, even for datasets that also
+        // carry a pre-resolved ThumbPath (anima_styles): TagDexSetThumbnail/TagDexGenerateThumbnail/
+        // TagDexImportThumbnails all write to the sanitized-name stem below, so a push (eg from AnimaDex) needs to
+        // resolve here or it is silently unservable despite having been accepted and written to disk.
         string stem = TagDexNames.SafeFileName(entry.Name);
         foreach (string ext in new[] { ".jpg", ".webp", ".png" })
         {
@@ -521,6 +519,12 @@ public partial class TagDexExtension
             {
                 return ThumbUrl(list.Source.ID, $"{stem}{ext}");
             }
+        }
+        // Datasets that ship their own images carry a pre-resolved relative path, used as the fallback when no
+        // override has been written for this entry yet.
+        if (entry.ThumbPath is not null)
+        {
+            return present.Contains(entry.ThumbPath) ? ThumbUrl(list.Source.ID, entry.ThumbPath) : null;
         }
         return null;
     }

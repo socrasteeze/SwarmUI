@@ -369,6 +369,88 @@ body.coarse-pointer .mobile-fullview-share-btn {
     user-select: none;
 }
 
+/* --- T9: mobile viewer chrome overlay (2c) --- */
+/* Created by mobile_fullview_touch.js's ensureOverlay()/buildOverlayBars() into every open image, on a
+   coarse pointer, but only ever shown by JS under body.small-window (handleTap() only calls toggleOverlay()
+   there - see isSmallWindow()). Scoping the actual show/hide here too means a coarse-pointer tablet running
+   the desktop-width layout can never show these bars even if a future code path forgot the JS gate: the
+   default state below is hidden, and only the body.small-window rule makes .mobile-fullview-overlay-visible
+   do anything. Zero change to the desktop viewer: none of this exists outside body.small-window, and the
+   pointer:coarse-only DOM injection means it's not even present on a real desktop browser at all.
+   Positioned fixed (like the T7 Share button) rather than relative to the swipe/dismiss-animated
+   inner div, top and bottom bars span the full viewport width, above the Share button and the standard
+   image counter/close control so a shown overlay is never partially hidden behind them. */
+/* The bars are INJECTED on any coarse pointer (ensureOverlay() only checks pointer:coarse, matching how the
+   T7 Share button is injected), but they are only ever a real, laid-out thing under body.small-window. This
+   default rule is deliberately unscoped so that a coarse-pointer tablet running the desktop-width layout -
+   which matches none of the body.small-window rules below - does not render them as bare unstyled block
+   divs ("✕", "Star Reuse Delete Download Share") stacked inside the image wrap. Hidden by default,
+   display:flex only under body.small-window (higher specificity, so it wins there). */
+.mobile-fullview-overlay-top,
+.mobile-fullview-overlay-bottom {
+    display: none;
+}
+body.small-window .mobile-fullview-overlay-top,
+body.small-window .mobile-fullview-overlay-bottom {
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    display: flex;
+    align-items: center;
+    background: linear-gradient(rgba(0, 0, 0, 0.65), transparent);
+    padding: 0.4rem 0.6rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-out;
+}
+body.small-window .mobile-fullview-overlay-top {
+    top: 0;
+    padding-top: calc(var(--safe-top, env(safe-area-inset-top)) + 0.4rem);
+    justify-content: space-between;
+}
+body.small-window .mobile-fullview-overlay-bottom {
+    bottom: 0;
+    padding-bottom: calc(var(--safe-bottom, 0px) + 0.4rem);
+    justify-content: space-evenly;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+}
+body.small-window .mobile-fullview-overlay-top.mobile-fullview-overlay-visible,
+body.small-window .mobile-fullview-overlay-bottom.mobile-fullview-overlay-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+/* Every overlay control is >=44px in both dimensions, per the same touch-target spec the rest of Phase 3
+   follows - the index text is not a control so it is exempt, but still sized to match the bar's height. */
+body.small-window .mobile-fullview-overlay-btn {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.7rem;
+    border-radius: 0.5rem;
+    background: var(--background-panel, #222);
+    color: var(--text, #eee);
+    border: 1px solid var(--border-color, #444);
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+}
+body.small-window .mobile-fullview-overlay-close {
+    min-width: 44px;
+    padding: 0.4rem 0.9rem;
+    font-size: 1rem;
+}
+body.small-window .mobile-fullview-overlay-index {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    color: #fff;
+    font-size: 0.95rem;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
 /* --- T8: first-run standalone layout tip toast --- */
 /* Created by mobile_core.js the first time the app is opened installed, small-window, and on Genpage (never
    on /simple - see MobileEnhancements.showFirstRunToast() for the exact gating). Same slide-down-from-top

@@ -76,7 +76,9 @@ function pickle2safetensor_run(type) {
     genericRequest('Pickle2SafeTensor', { type: type, fp16: fp16 }, data => {
         notif.innerText = "Done!";
         genericRequest('TriggerRefresh', {}, data => {
-            genericRequest('ListT2IParams', {}, data => {
+            // compact:true - this call only reads data.models, never the duplicate loras value list (see
+            // params.js's 'list' case and AGENTS.md's Fork Delta for the full compact-payload rationale).
+            genericRequest('ListT2IParams', { compact: true }, data => {
                 pickle2safetensor_load(data.models);
             });
         });

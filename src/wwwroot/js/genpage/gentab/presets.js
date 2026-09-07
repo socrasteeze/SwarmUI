@@ -222,6 +222,15 @@ function clearPresetView() {
             }
             else if (type.type == "list" && presetElem.tagName == "SELECT") {
                 let selected = [...elem.selectedOptions].map(o => o.value);
+                // The preset copy of a lazy multiselect carries no <option> list (makeMultiselectInput in
+                // site.js), so .val() alone would select nothing and the modal would open with the LoRA row
+                // blank while the real input has LoRAs picked. Append what is missing first, the same way
+                // setDirectParamValue() does.
+                for (let value of selected) {
+                    if (value && !$(presetElem).find(`option[value="${value}"]`).length) {
+                        $(presetElem).append(new Option(value, value, false, false));
+                    }
+                }
                 $(presetElem).val(selected);
                 $(presetElem).trigger('change');
             }

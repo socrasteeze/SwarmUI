@@ -44,7 +44,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[TOAST]', TOAST)
     .replaceAll('[VARY]', '1');
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_create.js', 'm_grid.js',
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js', 'm_grid.js',
     'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
@@ -235,9 +235,12 @@ const loraNames = await page.evaluate(() =>
 check('the LoRA axis loads the library even though the Create LoRA sheet was never opened',
     loraNames.length == 3, loraNames.join(','));
 await page.evaluate(() => {
+    // Picked by name, not by index: indexLoras sorts its corpus, so the fixture's declaration order is not
+    // the order the options render in.
     let options = [...__sheet().querySelectorAll('.m-grid-lora-options .m-grid-option')];
-    options[0].click();
-    options[1].click();
+    for (let want of ['style_a', 'style_b']) {
+        options.find(option => option.textContent.includes(want)).click();
+    }
 });
 const lorasPicked = await page.evaluate(() => mGrid.valuesFor('loras'));
 check('LoRA values are extension-stripped, as they are named everywhere else',

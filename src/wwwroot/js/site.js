@@ -980,6 +980,45 @@ function makeDropdownInput(featureid, id, paramid, name, description, values, de
  * installs keep the original eager behavior and only genuinely huge model libraries take the lazy path. */
 let multiselectLazyThreshold = 500;
 
+/** Page size for `buildLazyMultiselectAjaxSource`'s local (non-network) select2 `ajax` results. */
+let lazyMultiselectPageSize = 50;
+
+/**
+ * Builds a select2 `ajax`-shaped local data source over `valuesSource`, which is either an array or a
+ * function returning one. Prefer the function form whenever the backing list can be REPLACED rather than
+ * appended to - `coreModelMap` is rebuilt wholesale by `updateAllModels()`, so an array captured here would
+ * silently keep serving the pre-refresh library forever. The function is called per query, so a refresh is
+ * picked up with no re-init.
+ *
+ * select2's `ajax` option only requires a `transport` function shaped like a jQuery ajax call
+ * (`(params, success, failure) => ...`); nothing here does a real network request; the "transport" just
+ * filters the in-memory array and calls `success` synchronously.
+ *
+ * This is what makes an 18k+-entry dropdown usable: paired with an empty `<select>` (see makeMultiselectInput's
+ * lazy branch), select2 never builds an `<option>`/result row for anything but the current page of matches -
+ * opening the list or typing a query only ever touches `lazyMultiselectPageSize` (50) rows, never the full
+ * list. That is a different fix from `fillLazyMultiselectOnOpen` (params.js), which still eagerly fills and
+ * renders the whole list on first open; call sites choose one or the other, they are not layered together.
+ */
+function buildLazyMultiselectAjaxSource(valuesSource) {
+    return {
+        delay: 80,
+        transport: (params, success) => {
+            let values = (typeof valuesSource == 'function' ? valuesSource() : valuesSource) || [];
+            let term = (params.data.q || '').toLowerCase();
+            let page = params.data.page || 1;
+            let matches = term ? values.filter(v => v.toLowerCase().includes(term)) : values;
+            let start = (page - 1) * lazyMultiselectPageSize;
+            let slice = matches.slice(start, start + lazyMultiselectPageSize);
+            success({
+                results: slice.map(v => ({ id: v, text: v })),
+                pagination: { more: start + lazyMultiselectPageSize < matches.length }
+            });
+        },
+        processResults: (data) => data
+    };
+}
+
 function makeMultiselectInput(featureid, id, paramid, name, description, values, defaultVal, placeholder, toggles = false, popover_button = true) {
     name = escapeHtml(name);
     featureid = featureid ? ` data-feature-require="${featureid}"` : '';

@@ -1,6 +1,68 @@
 # `/simple` Prompt Coach Plan
 
-Backburner design for a mobile-first, profile-aware prompt assistant. No implementation has shipped yet.
+Backburner design for a mobile-first, profile-aware prompt assistant.
+
+**Status (2026-09-06):** Delivery phases 1-4 have shipped, plus a basic phase 5, all covered by
+`verify/verify-simple-coach.mjs` (55/55 checks passing). Shipped in `Assets/m/m_coach.js` (single file, not the
+two-file split this doc originally proposed - the profile table lives as `MCoach.PROFILES` in the same file
+rather than in a separate `m_prompt_profiles.js`):
+- **Phase 1** - the profile resolver (`MCoach.resolveProfile`, checkpoint override > official filename >
+  Anima-compat-with-no-variant > no match), the slim pill entry point beside the prompt heading, and the
+  Profile + Mode sheet sections, including "Remember for this checkpoint" and per-family mode persistence.
+- **Phase 2** - Add missing positive prefix / merge missing negative (every sheet tap opens the exact
+  before/after preview and writes only on confirmation, one-level undo, idempotent - a second Apply with
+  nothing left missing is a no-op), the preset guard (an active preset that REPLACES the field blocks the edit
+  with a reason instead of writing a patch generation would never see; a `{value}` preset merges, so the edit
+  runs), the Aesthetic score-tag warning (read-only, never strips), and the Turbo/Base/Aesthetic Steps-CFG
+  advisory (confirmed before it writes, and idempotent so a second tap cannot eat the undo).
+- **Phase 3** - role assignment (Character/Series/Artist/Style/General) persisted per LoRA
+  (`mState.promptGuide.loraRoles`, keyed by normalized LoRA name); lazy, bounded `DescribeModel` enrichment for
+  an active LoRA whose row `m_create.js` has not already cached (`MCoach.enrichActiveLoras`, one request per
+  uncached active name, in-flight/failed dedupe so a re-render never re-fires it, and the result is written
+  back into `mCreate.loraMap` for reuse) - never for the LoRA catalog/picker; the existing literal "Insert
+  exact trigger" plus a new section-aware "Prompt" action that splices the exact trigger into the tag section
+  the LoRA's role implies (falls back to the plain caret insertion outside Tags mode or on malformed syntax);
+  preset-owned LoRAs shown locked (no role selector, no insertion action); and `<trigger>`-covered reporting
+  plus a separate read-only listing of prompt-syntax `<lora:...>` activations found directly in the text.
+- **Phase 4** - a quote/escape-aware top-level tag tokenizer (`MCoach.tokenizeRaw`/`tokenize`/`tokenizeChecked`/
+  `tokenizeWithOffsets`: respects `()`/`[]`/`{}`/`<>` nesting, double-quoted runs, and backslash escapes, and
+  reports malformed/unbalanced input rather than guessing past it - single quotes are deliberately NOT a
+  quoting character, since an apostrophe in ordinary prose is far more common than a deliberate guard); tag-
+  section classification (`MCoach.classifyToken`: prefix/quality, subject count, character, series, artist,
+  style, LoRA trigger, `<lora:...>` prompt syntax as a separate "unknown" case, and General as the catch-all),
+  with a TagDex bridge that classifies a character/artist match ONLY when `tagDexCore.status == 'ready'` (the
+  data TagDex has already loaded on its own, never fetched by the coach) AND only when the matched record's own
+  name or trigger IS the token - `tagDexCore.match` is a substring search whose `strong` flag only means
+  "began at a word boundary", so accepting it would classify "miku" as a character and move ordinary General
+  text in the ordered draft; the bridge covers character and
+  artist only, not series - a TagDex shard's `kind` is only ever `character` or `artist`, and a character
+  record's `copyright` field names a different string than the matched token itself, so classifying a plain
+  General token as "series" from TagDex data would mean inventing a second string to insert, which the plan's
+  "never invent aliases" rule for exactly this kind of derived text argues against; a previewed/undoable/idempotent
+  normalization action (lowercase, underscores to spaces, with exact score tags, any active LoRA's literal
+  trigger text, Swarm `<...>` prompt syntax, `__wildcard__` names and path-like tokens all exempted); and
+  "Build ordered draft" (`MCoach.buildOrderedDraft`), which composes a NEW string
+  into an ephemeral preview - it never mutates the source prompt itself - following the plan's six-stage
+  section order, with General/unknown/style/LoRA-trigger tokens all sharing the General slot and keeping their
+  original relative order there. "Use draft" (replace) and "Insert at cursor" are both previewed via
+  `mUI.confirm` and undoable for one step; "Copy" is non-mutating.
+- **Cross-cutting** - the preset-replaces-field guard covers every mutating action, not only "Add missing":
+  the ordered draft ("Use draft"/"Insert at cursor"), the section-aware "Prompt" insertion and the literal
+  "Insert exact trigger" all block with a reason under a preset that overwrites the field. Analysis (missing
+  starter tags, score-tag warnings) reads the EFFECTIVE prompt from `buildGenInput`, so a `{value}` preset's
+  own contributed tags count as present and are never re-added, while accepted writes still target the raw
+  field. A closed sheet is inert: `refreshSheet` detects the detached element and drops out, so a late
+  `DescribeModel` response can never rebuild or re-enrich a sheet nobody is looking at.
+- **Phase 5 (basic)** - user-authored custom profiles (`MCoach.addCustomProfile`/`removeCustomProfile`),
+  persisted as `mState.promptGuide.customProfiles` (id -> the same profile shape as a built-in), reachable only
+  via an explicit "Remember for this checkpoint"-style override - never filename- or compat-class-suggested for
+  any checkpoint, matching the plan's requirement that a custom profile is proven manually before it applies
+  anywhere. The inline "+ New custom profile" form in the Profile sheet section takes a name plus comma-
+  separated positive/negative lists; deleting a custom profile clears any checkpoint override pointing at it.
+  Per-field parameter advice ranges and score-tag forbidding are not exposed in the form yet (a caller can still
+  set them via `addCustomProfile`'s `parameterAdvice`/`scoreForbidden` arguments; there is just no sheet UI for
+  them) - this is the "basic" qualifier on this phase.
+- On-device verification (the "On-device" gate list below) has not been run; only the static gates have.
 
 Primary doctrine source: [CircleStone Labs Anima model card](https://huggingface.co/circlestone-labs/Anima), checked 2026-08-12.
 
@@ -240,11 +302,11 @@ Keep the coach isolated from generation transport. It may read and explicitly ed
 
 ## Delivery phases
 
-1. **Profile and read-only coach.** Resolver, profile pill, mode selector, doctrine card, Steps/CFG advisories. No prompt mutation.
-2. **Safe setup actions.** Idempotent prefix/negative merge, Aesthetic score cleanup, exact preview, one-level undo.
-3. **LoRA prompt guidance.** Lazy model metadata, role assignments, compatibility warning, exact/editable trigger insertion.
-4. **Tag-aware lint and ordered draft.** Syntax-aware tokenizer, high-confidence sections, normalization preview, TagDex role bridge. Existing prompt order remains untouched.
-5. **Custom profiles.** User-authored templates and other checkpoint families only after the Anima workflow is proven on a phone.
+1. **Profile and read-only coach. SHIPPED.** Resolver, profile pill, mode selector, doctrine card, Steps/CFG advisories. No prompt mutation.
+2. **Safe setup actions. SHIPPED.** Idempotent prefix/negative merge, Aesthetic score cleanup, exact preview, one-level undo.
+3. **LoRA prompt guidance. SHIPPED.** Compatibility warning, exact trigger insertion, role assignment (Character/Series/Artist/Style/General, persisted), bounded lazy `DescribeModel` enrichment for uncached active rows only, the active-row "Prompt" section-aware insertion action, locked preset-owned rows, and separate `<lora:...>` prompt-syntax reporting.
+4. **Tag-aware lint and ordered draft. SHIPPED.** Quote/escape-aware tokenizer, tag-section classification with an optional TagDex bridge (used only when TagDex's own index is already loaded, and only on an exact record match), a previewed/undoable/idempotent normalization action, and "Build ordered draft" composing a new, never-auto-applied ordered prompt into a preview. Existing prompt order remains untouched until a draft is explicitly accepted.
+5. **Custom profiles. BASIC SHIPPED.** User-authored profiles (name, positive/negative lists) persist per device and resolve only as an explicit per-checkpoint override, never auto-suggested. Per-profile parameter-advice ranges and score-tag forbidding have no sheet form yet (API-only via `addCustomProfile`).
 
 Each phase must be independently useful. Do not make prompt generation depend on later phases.
 

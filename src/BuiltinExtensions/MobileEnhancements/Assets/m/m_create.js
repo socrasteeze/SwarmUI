@@ -295,17 +295,10 @@ class MCreate {
         this.presetRow.appendChild(this.archSelect);
         this.presetSelect = mUI.el('select', 'm-preset-select');
         this.presetSelect.addEventListener('change', () => {
+            // Single pick: the selection IS the active preset, so picking replaces rather than accumulates.
+            // See renderPresets for why this client does not offer the full UI's multi-preset merge.
             let title = this.presetSelect.value;
-            if (!title) {
-                return;
-            }
-            let idx = mState.activePresets.indexOf(title);
-            if (idx == -1) {
-                mState.activePresets.push(title);
-            }
-            else {
-                mState.activePresets.splice(idx, 1);
-            }
+            mState.activePresets = title ? [title] : [];
             mState.changed();
         });
         this.presetRow.appendChild(this.presetSelect);
@@ -367,6 +360,12 @@ class MCreate {
         this.wireGenerateButton();
         genBar.appendChild(this.genButton);
         panel.appendChild(genBar);
+        // Prompt Coach entry point (m_coach.js): a slim, non-modal pill beside the heading. It never launches
+        // a wizard on model/LoRA selection - tapping it is the only way its bottom sheet opens.
+        let promptHead = mUI.el('div', 'm-prompt-head');
+        promptHead.appendChild(mUI.el('span', 'm-prompt-head-label', 'Prompt'));
+        promptHead.appendChild(mCoach.buildPill());
+        panel.appendChild(promptHead);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
         this.promptBox = mUI.el('textarea', 'm-prompt-box');
         this.promptBox.placeholder = 'Type your prompt, or paste an image...';
@@ -532,9 +531,15 @@ class MCreate {
         if (document.activeElement != this.negBox) {
             this.negBox.value = mState.params['negativeprompt'] || '';
         }
-        if ((mState.params['negativeprompt'] || '') != '') {
+        // Opened when the negative prompt BECOMES non-empty - a reuse or a preset just put text in there -
+        // rather than on every render. Forcing it open unconditionally meant the section could not be
+        // collapsed again for as long as it held any text, and every re-open shoved the whole panel below it
+        // down by the height of the box.
+        let hasNeg = (mState.params['negativeprompt'] || '') != '';
+        if (hasNeg && !this.negWasFilled) {
             this.negWrap.open = true;
         }
+        this.negWasFilled = hasNeg;
         this.renderImageStrip();
         this.renderQuickParams();
         let loras = mState.getLoras();
@@ -555,59 +560,45 @@ class MCreate {
         if (mState.archFilter && !groups.includes(mState.archFilter)) {
             mState.archFilter = '';
         }
-        this.archSelect.innerHTML = '';
-        let all = document.createElement('option');
-        all.value = '';
-        all.textContent = 'All';
-        this.archSelect.appendChild(all);
-        for (let group of groups) {
-            let option = document.createElement('option');
-            option.value = group;
-            option.textContent = group;
-            this.archSelect.appendChild(option);
-        }
-        this.archSelect.value = mState.archFilter;
+        MCreate.syncOptions(this.archSelect, [['', 'All'], ...groups.map(group => [group, group])], mState.archFilter);
     }
 
-    /** Preset picklist: starred first, selecting an entry toggles it, selection order remains merge order. */
+    /** Preset picklist, starred first. Single pick on purpose: the full UI can merge several presets into one
+     * generation and this client deliberately cannot. The merge is an order-sensitive stack that nothing on
+     * screen could show, so what it produced on a phone was a list where each tap silently added one more
+     * invisible layer - and the fork owner never uses it. The selected option IS the active preset;
+     * "No preset" clears it. State stays an array so buildGenInput and the preset editor are untouched; it
+     * simply never holds more than one entry from here. */
     renderPresets() {
-        this.presetSelect.innerHTML = '';
-        let placeholder = document.createElement('option');
-        placeholder.value = '';
         if (mState.presets.length == 0) {
-            placeholder.textContent = 'No presets';
-            this.presetSelect.appendChild(placeholder);
+            MCreate.syncOptions(this.presetSelect, [['', 'No presets']], '');
             this.presetSelect.disabled = true;
             return;
         }
-        this.presetSelect.disabled = false;
-        placeholder.textContent = mState.activePresets.length == 0 ? 'Presets' : `Presets (${mState.activePresets.length})`;
-        this.presetSelect.appendChild(placeholder);
         // An ACTIVE preset always shows, even when the architecture filter would hide it. Filtering it out
         // of the list would not deactivate it - it would keep merging into every generation with no option
-        // left on screen to toggle off, which is a trap rather than a filter.
+        // left on screen to switch it off, which is a trap rather than a filter.
         let visible = mState.presets.filter(preset => !mState.archFilter
             || MState.presetGroup(preset.title) == mState.archFilter
             || mState.activePresets.includes(preset.title));
         if (visible.length == 0) {
-            placeholder.textContent = 'No presets';
+            MCreate.syncOptions(this.presetSelect, [['', 'No presets']], '');
             this.presetSelect.disabled = true;
             return;
         }
+        this.presetSelect.disabled = false;
         let sorted = [...visible].sort((a, b) => (b.is_starred ? 1 : 0) - (a.is_starred ? 1 : 0));
+        let entries = [['', 'No preset']];
         for (let preset of sorted) {
-            let option = document.createElement('option');
-            option.value = preset.title;
             // With a group selected the folder prefix is the same on every visible option, so it is spending
             // scarce picker width to say nothing. Under "all" it is the only architecture cue there is.
             let label = preset.title;
             if (mState.archFilter && label.startsWith(`${mState.archFilter}/`)) {
                 label = label.substring(mState.archFilter.length + 1);
             }
-            option.textContent = `${mState.activePresets.includes(preset.title) ? '✓ ' : ''}${label}`;
-            this.presetSelect.appendChild(option);
+            entries.push([preset.title, label]);
         }
-        this.presetSelect.value = '';
+        MCreate.syncOptions(this.presetSelect, entries, mState.activePresets[0] || '');
     }
 
     /** Model button label. Hidden entirely when the user lacks the model parameter permission, since
@@ -643,6 +634,33 @@ class MCreate {
             return;
         }
         this.modelButton.textContent = `${mUI.modelName(effective)} (preset)`;
+    }
+
+    /** Rebuilds a `<select>`'s options only when the list it should show actually changed.
+     *
+     * render() runs on every state change, and an unconditional `select.innerHTML = ''` destroys the very
+     * option the user is looking at - including while that select still holds focus from the tap that just
+     * changed it. Chrome hides what that costs behind scroll anchoring; iOS Safari has no scroll anchoring,
+     * so a rebuild above the fold shifts the panel under the finger. That is the "changing the aspect ratio
+     * jumps the page" report, and it was never about the aspect ratio - every control goes through the same
+     * render. Comparing a signature first makes the common case (nothing changed but the selected value) a
+     * pure value assignment with no DOM churn at all.
+     * `entries` is an array of [value, label] pairs. */
+    static syncOptions(select, entries, value) {
+        let signature = JSON.stringify(entries);
+        if (select.mOptionSignature != signature) {
+            select.mOptionSignature = signature;
+            select.innerHTML = '';
+            for (let entry of entries) {
+                let option = document.createElement('option');
+                option.value = entry[0];
+                option.textContent = entry[1];
+                select.appendChild(option);
+            }
+        }
+        if (select.value != value) {
+            select.value = value;
+        }
     }
 
     /** How deep the picker listings recurse. The pickers are flat searchable lists, not folder browsers, so
@@ -709,6 +727,29 @@ class MCreate {
         row.textContent = state.showAll
             ? `Showing all - tap to limit to ${mState.archFilter}`
             : `Limited to ${mState.archFilter}, ${list.length - narrowed.length} hidden - tap to show all`;
+        row.addEventListener('click', () => {
+            state.showAll = !state.showAll;
+            rerender();
+        });
+        return { 'list': state.showAll ? list : narrowed, 'row': row };
+    }
+
+    /** Narrows a LoRA list to what the selected checkpoint can load, and builds the row that explains what
+     * happened. Same contract and same escape hatch as applyArchFilter: returns {list, row}, row is null when
+     * there is nothing worth saying (no checkpoint compat class to go on, or a filter that hid nothing), and
+     * the row toggles the filter off. The hatch matters more here than for the arch picker because this
+     * filter is never asked for - it follows the checkpoint - so it has to be visible and reversible when a
+     * model's metadata turns out to be wrong. */
+    applyModelFilter(list, subtype, state, rerender) {
+        let narrowed = mState.filterByModelCompat(list, subtype);
+        if (narrowed.length == list.length) {
+            return { 'list': list, 'row': null };
+        }
+        let row = mUI.el('button', 'm-arch-note');
+        let compat = mState.activeModelCompat();
+        row.textContent = state.showAll
+            ? `Showing all - tap to limit to what ${compat} can load`
+            : `Limited to ${compat}, ${list.length - narrowed.length} hidden - tap to show all`;
         row.addEventListener('click', () => {
             state.showAll = !state.showAll;
             rerender();
@@ -799,6 +840,14 @@ class MCreate {
 
     /** Prompt-image strip: thumbs, remove, add tile, long-press drag reorder (DOM order == request order). */
     renderImageStrip() {
+        // Same reason as syncOptions: rebuilding unconditionally re-creates every <img> on every state
+        // change, which re-decodes the thumbnails and, on a browser with no scroll anchoring, shifts the
+        // panel under the finger.
+        let signature = JSON.stringify(mState.promptImages);
+        if (this.imageStripSignature == signature) {
+            return;
+        }
+        this.imageStripSignature = signature;
         this.imageStrip.innerHTML = '';
         for (let i = 0; i < mState.promptImages.length; i++) {
             let entry = mState.promptImages[i];
@@ -1468,16 +1517,10 @@ class MCreate {
             mState.params['sidelength'] = rungs.includes('1024') ? '1024' : rungs[0];
             stateChanged = true;
         }
-        this.aspectSelect.innerHTML = '';
-        for (let aspect of aspects) {
-            let opt = document.createElement('option');
-            opt.value = aspect;
-            // Custom is two different things depending on whether a prompt image supplied a ratio, and the
-            // label has to say which - one sends matched pixels, the other defers to the full UI.
-            opt.textContent = aspect != 'Custom' ? aspect : (mState.customRatio ? 'Custom · matched' : 'Custom · full UI');
-            this.aspectSelect.appendChild(opt);
-        }
-        this.aspectSelect.value = mState.params['aspectratio'];
+        // Custom is two different things depending on whether a prompt image supplied a ratio, and the label
+        // has to say which - one sends matched pixels, the other defers to the full UI.
+        MCreate.syncOptions(this.aspectSelect, aspects.map(aspect => [aspect, aspect != 'Custom' ? aspect
+            : (mState.customRatio ? 'Custom · matched' : 'Custom · full UI')]), mState.params['aspectratio']);
         let side = `${mState.params['sidelength'] ?? ''}`;
         this.sizeValue.textContent = side == '' ? 'Auto' : side;
         // Read from previewResolution, not from a local recomputation: it derives from a real buildGenInput,
@@ -1491,15 +1534,21 @@ class MCreate {
 
     /** Advanced chips: every param set by preset/reuse without a dedicated control, X-clearable. */
     renderAdvChips() {
-        this.advChips.innerHTML = '';
         let keys = Object.keys(mState.params).filter(k => !this.coveredParams.includes(k));
-        for (let key of keys) {
-            let val = mState.params[key];
-            let text = `${MCreate.paramLabel(key)}: ${MCreate.paramValueLabel(key, val)}`;
-            if (text.length > 40) {
-                text = text.substring(0, 38) + '…';
-            }
-            let chip = mUI.el('span', 'm-adv-chip', text);
+        let labels = keys.map(key => {
+            let text = `${MCreate.paramLabel(key)}: ${MCreate.paramValueLabel(key, mState.params[key])}`;
+            return text.length > 40 ? `${text.substring(0, 38)}…` : text;
+        });
+        // Rebuilt only when the chips actually differ - see syncOptions for why churn here moves the panel.
+        let signature = JSON.stringify([keys, labels]);
+        if (this.advChipsSignature == signature) {
+            return;
+        }
+        this.advChipsSignature = signature;
+        this.advChips.innerHTML = '';
+        for (let i = 0; i < keys.length; i++) {
+            let key = keys[i];
+            let chip = mUI.el('span', 'm-adv-chip', labels[i]);
             let x = mUI.el('span', 'm-adv-chip-x', '×');
             x.addEventListener('click', () => {
                 delete mState.params[key];
@@ -1650,14 +1699,32 @@ class MCreate {
         mUI.note('Added <trigger> to the prompt.');
     }
 
-    /** Indexes a ListModels LoRA list by both the full name and the extension-stripped form. Presets and
-     * starred_models store `ill/foo`; ListModels reports `ill/foo.safetensors`. Looking up only the full
-     * name left every active row as a bare stem with no title or thumbnail. */
+    /** Builds the LoRA picker's corpus, indexed by both the full name and the extension-stripped form.
+     * Presets and starred_models store `ill/foo`; ListModels reports `ill/foo.safetensors`, and looking up
+     * only the full name left every active row as a bare stem with no title or thumbnail.
+     *
+     * The corpus is NOT the ListModels result. ListModels truncates at the server's
+     * Performance.ModelListSanityCap (5000 by default), and it truncates BEFORE it sorts - so past that cap
+     * what comes back is an arbitrary slice of the model dictionary rather than the first 5000 by name. A
+     * 19.6k-LoRA library was answered with 9 of its 48 `qwen/` files, with nothing on screen saying anything
+     * was missing and no search term that could reach the rest: the reported "I'm on a Qwen model but no
+     * Qwen LoRAs appear". ListT2IParams already ships every LoRA name and class id at boot, uncapped and
+     * cheap, so that is the corpus and the ListModels rows are a metadata overlay on top of it. A LoRA
+     * outside the overlay is still searchable, selectable and generatable - it shows as a plain name until
+     * its metadata is in. */
     indexLoras(list) {
-        this.loraList = list || [];
+        let rich = new Map();
+        for (let model of (list || [])) {
+            rich.set(model.name, model);
+        }
+        let names = new Set((mState.models['LoRA'] || []).map(entry => entry[0]));
+        // Anything ListModels reported that the boot list did not (a remote model, say) still belongs here.
+        for (let name of rich.keys()) {
+            names.add(name);
+        }
+        this.loraList = [...names].sort().map(name => rich.get(name) || { 'name': name });
         this.loraMap = new Map();
-        for (let i = 0; i < this.loraList.length; i++) {
-            let model = this.loraList[i];
+        for (let model of this.loraList) {
             this.loraMap.set(model.name, model);
             this.loraMap.set(MState.stripModelExt(model.name), model);
         }
@@ -1746,6 +1813,7 @@ class MCreate {
         let results = mUI.el('div', 'm-lora-results');
         addWrap.appendChild(results);
         let archState = { 'showAll': false };
+        let compatState = { 'showAll': false };
         let renderResults = () => {
             results.innerHTML = '';
             if (!this.loraList) {
@@ -1754,18 +1822,26 @@ class MCreate {
                     : mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
-            // LoRAs are filtered by the same compat classes as checkpoints, which is what compat classes are
-            // for - an SDXL LoRA on a Flux checkpoint is not a near miss, it simply does not load.
+            // Two gates, in order, each with its own escape hatch. The architecture picker is the manual one
+            // and runs first; the checkpoint's own compat class runs second and needs no picking at all -
+            // selecting a Qwen checkpoint should not leave 17k SDXL LoRAs in the list it can never load.
+            // In practice only one of the two ever has anything to say, since an arch filter that is set
+            // usually already covers what the checkpoint rules out, and a gate that hides nothing shows
+            // no row.
             let arch = this.applyArchFilter(this.loraList, 'LoRA', archState, renderResults);
             if (arch.row) {
                 results.appendChild(arch.row);
+            }
+            let compat = this.applyModelFilter(arch.list, 'LoRA', compatState, renderResults);
+            if (compat.row) {
+                results.appendChild(compat.row);
             }
             let active = new Set();
             let curLoras = mState.getLoras();
             for (let i = 0; i < curLoras.length; i++) {
                 active.add(MState.stripModelExt(curLoras[i].name));
             }
-            let matches = mState.starredFirst(MCreate.filterModels(arch.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name))), 'LoRA');
+            let matches = mState.starredFirst(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name))), 'LoRA');
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
@@ -1840,6 +1916,15 @@ class MCreate {
         if (box.offsetParent === null) {
             return;
         }
+        // Measuring costs a reflow at height:auto, during which the panel is momentarily shorter - long
+        // enough for a browser without scroll anchoring to clamp the scroll position and never give it back.
+        // render() calls this on every state change, so the measurement is skipped unless the text (or the
+        // width it has to wrap into) actually moved since the last one.
+        let key = `${box.clientWidth}|${box.value}`;
+        if (box.mGrownFor === key) {
+            return;
+        }
+        box.mGrownFor = key;
         box.style.height = 'auto';
         box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
     }

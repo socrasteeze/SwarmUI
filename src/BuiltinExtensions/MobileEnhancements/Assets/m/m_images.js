@@ -146,7 +146,15 @@ class MImages {
         // tuned for date-prefixed file names, where Z-A means newest-first), which on a folder strip is just
         // backwards. Matches the genpage history tree, which sorts the same way for the same reason. A copy,
         // because the caller's array is the raw response and this must not depend on render history.
-        folders = [...folders].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+        // 'Starred' is pinned first, matching the genpage history tree - it is the hand-curated folder, so it is
+        // the one worth reaching without scrolling the strip.
+        folders = [...folders].sort((a, b) => {
+            let pinA = a.toLowerCase() == 'starred', pinB = b.toLowerCase() == 'starred';
+            if (pinA != pinB) {
+                return pinA ? -1 : 1;
+            }
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+        });
         if (this.folder != '') {
             let up = mUI.el('button', 'm-folder-chip m-folder-up', '←');
             up.addEventListener('click', () => {
