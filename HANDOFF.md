@@ -38,6 +38,7 @@ Upstream sync plus a spoke-config fix; no fork source work. Merged upstream `519
 
 ## Traps
 - Hub and spoke must run the identical commit. `src/Backends/SwarmSwarmBackend.cs:287` compares the remote version against `Utilities.VaryID` and refuses a negotiated spoke on any other build, so the backend sits in `loading` forever rather than erroring. Update one machine and you must update the other.
+- Redeploy `src/bin/extensions` to the spoke whenever an extension repo changes, and never expect the spoke to build them: `ExtensionsManager.cs:250` refuses in spoke mode. Before this fix the launcher also wiped that folder on every commit change (`launch-windows.bat` `must_rebuild` block), which is why the spoke came up with zero extensions after each update; the wipe is now skipped under `SWARM_SPOKE_LAUNCH`. A `dotnet build` over SSH on the spoke is redundant - the launcher rebuilds `live_release` itself when HEAD differs from `src/bin/last_build`.
 - `LaunchMode` values: `webinstall` is a historical alias for `web`, `electron` is gone. Valid are `none`, `web`, `install`, `app`.
 - An empty `src/bin/live_release` breaks every `src/Extensions` build; their csproj resolves SwarmUI through `../../bin/live_release/SwarmUI.dll`
 - Release caches extension assets in memory and `VaryID` only moves on commit — commit, restart, hard refresh before judging an asset edit failed
