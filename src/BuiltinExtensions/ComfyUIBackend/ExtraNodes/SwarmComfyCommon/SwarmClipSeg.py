@@ -7,8 +7,15 @@ import os, requests
 
 def get_path():
     if "clipseg" in folder_paths.folder_names_and_paths:
-        paths = folder_paths.folder_names_and_paths["clipseg"]
-        return paths[0][0]
+        paths = folder_paths.folder_names_and_paths["clipseg"][0]
+        # Fork change: prefer a configured folder that already holds the weights over blindly taking the first
+        # one. With several model roots (a spoke's local cache listed ahead of the shared tree, say) the first
+        # folder can be empty while a later one has the model, and taking paths[0] here meant "download it" -
+        # which a spoke refuses, turning an installed model into a hard error.
+        for candidate in paths:
+            if os.path.isdir(candidate + "/clipseg-rd64-refined-fp16-safetensors"):
+                return candidate
+        return paths[0]
     else:
         # Jank backup path if you're not running properly in Swarm
         path = os.path.dirname(os.path.realpath(__file__)) + "/models"
