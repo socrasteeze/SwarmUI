@@ -220,7 +220,10 @@ public class BackendHandler
         }
         SwarmSwarmBackend[] backends = [.. AllBackends.Values.Select(data => data.AbstractBackend as SwarmSwarmBackend)
             .Where(backend => backend is not null && backend.IsAControlInstance && backend.IsEnabled && !backend.ShutDownReserve
-                && backend.Status != BackendStatus.DISABLED && backend.Status != BackendStatus.WAITING)];
+                && backend.Status != BackendStatus.DISABLED && backend.Status != BackendStatus.WAITING
+                // An idle remote is unreachable right now; asking it to refresh can only fail. It runs a full
+                // refresh on its own when the idle monitor sees it come back (ValidateIdleConnection).
+                && backend.Status != BackendStatus.IDLE)];
         await Task.WhenAll(backends.Select(backend => backend.TriggerRefresh()));
     }
 
