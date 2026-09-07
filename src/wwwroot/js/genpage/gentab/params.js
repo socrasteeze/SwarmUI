@@ -227,11 +227,42 @@ function getHtmlForParam(param, prefix, isPreset = false) {
                 return {html: makeDropdownInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.values, param.default, param.toggleable, !param.no_popover, param['value_names']) + pop,
                         runnable: () => autoSelectWidth(getRequiredElementById(`${prefix}${param.id}`))};
             case 'list':
-                if (param.values) {
-                    return {html: makeMultiselectInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.values, param.default, "Select...", param.toggleable, !param.no_popover) + pop,
+                // 'loras' ships its value list separately from `models.LoRA` on genpage's non-compact
+                // ListT2IParams call, duplicating up to ~1MB of names that already arrived in the models map
+                // (see AGENTS.md Fork Delta). `param.values` can therefore be absent here for 'loras' even
+                // though the control still needs a value source - fall back to the model list already loaded
+                // by updateAllModels(), which main.js populates before buildParameterList() runs.
+                // Resolved per call, never captured: `coreModelMap` is REPLACED wholesale by updateAllModels()
+                // on every refresh, and refreshParameterValues() reassigns `param.values`, so a snapshot taken
+                // at build time would keep serving the library as it stood at page load.
+                let getListValues = () => {
+                    let values = param.values;
+                    if ((!values || values.length == 0) && param.id == 'loras' && typeof coreModelMap != 'undefined' && coreModelMap && coreModelMap['LoRA']) {
+                        values = coreModelMap['LoRA'];
+                    }
+                    return values;
+                };
+                let listValues = getListValues();
+                if (listValues) {
+                    return {html: makeMultiselectInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, listValues, param.default, "Select...", param.toggleable, !param.no_popover) + pop,
                         runnable: () => {
-                            $(`#${prefix}${param.id}`).select2({ theme: "bootstrap-5", width: 'style', placeholder: $(this).data('placeholder'), closeOnSelect: false });
-                            fillLazyMultiselectOnOpen(`${prefix}${param.id}`, param.values);
+                            let elem = getRequiredElementById(`${prefix}${param.id}`);
+                            let select2Opts = { theme: "bootstrap-5", width: 'style', placeholder: $(this).data('placeholder'), closeOnSelect: false };
+                            if (elem.dataset.lazyOptions) {
+                                // A genuinely huge list (see multiselectLazyThreshold in site.js): a local
+                                // select2 `ajax` data source means select2 only ever builds the current page
+                                // of matches, never the full list - this replaces both the ~16s DOM-materialize
+                                // and the ~13s unpaginated select2 render that fillLazyMultiselectOnOpen's
+                                // eager-fill-on-first-open still pays once at that scale (see AGENTS.md Fork
+                                // Delta). fillLazyMultiselectOnOpen itself is untouched and still used below for
+                                // any lazy control that doesn't go through this runnable.
+                                select2Opts.ajax = buildLazyMultiselectAjaxSource(getListValues);
+                                select2Opts.minimumInputLength = 0;
+                            }
+                            $(elem).select2(select2Opts);
+                            if (!elem.dataset.lazyOptions) {
+                                fillLazyMultiselectOnOpen(`${prefix}${param.id}`, listValues);
+                            }
                         }
                     };
                 }
@@ -1188,17 +1219,30 @@ function refreshParameterValues(strong = true, refreshType = null, callback = nu
                     }
                     elem.innerHTML = html;
                     elem.value = val;
-                    presetElem.innerHTML = html;
+                    // May legitimately not exist: initial load builds the parameter panel with
+                    // genInputs(false, false), so the New-Preset modal's duplicate inputs do not exist until
+                    // ensurePresetInputsBuilt() runs (see AGENTS.md Fork Delta). Refreshing models before ever
+                    // opening that modal used to throw here and abort the whole refresh loop.
+                    if (presetElem) {
+                        presetElem.innerHTML = html;
+                    }
                     if (triggerChange) {
                         triggerChangeFor(elem);
                     }
                 }
-                else if (param.type == "list" && values) {
+                else if (param.type == "list" && values && !elem.dataset.lazyOptions) {
+                    // Skipped for a lazy control on purpose: its <option> list is deliberately never
+                    // materialized (see makeMultiselectInput in site.js and the select2 ajax source wired in
+                    // getHtmlForParam), so appending the whole refreshed list here would re-pay the
+                    // multi-second DOM cost the lazy path exists to avoid - and would achieve nothing, because
+                    // the ajax source re-reads the value list per query and already sees the refresh.
                     let listOpts = [...elem.options].map(o => o.value);
                     let newVals = values.filter(v => !listOpts.includes(v));
                     for (let val of newVals) {
                         $(elem).append(new Option(val, val, false, false));
-                        $(presetElem).append(new Option(val, val, false, false));
+                        if (presetElem) {
+                            $(presetElem).append(new Option(val, val, false, false));
+                        }
                     }
                 }
             }

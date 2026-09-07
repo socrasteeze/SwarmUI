@@ -8,6 +8,15 @@ function registerMediaButton(name, action, title = '', mediaTypes = null, isDefa
     registeredMediaButtons.push({ name, action, title, mediaTypes, isDefault, showInHistory, href, is_download, can_multi, multi_only, max_selected });
 }
 
+/** Folder names that sort above everything else in the Image History tree, lowercase. */
+let imageHistoryPinnedFolders = ['starred'];
+
+/** Whether a history folder path is pinned to the top of the list. Matches on the first path segment, so a
+ * pinned folder's own subfolders stay grouped underneath it rather than scattering into the date folders. */
+function isPinnedFolder(folder) {
+    return imageHistoryPinnedFolders.includes(folder.split('/')[0].toLowerCase());
+}
+
 function listOutputHistoryFolderAndFiles(path, isRefresh, callback, depth, filter = null) {
     let sortBy = localStorage.getItem('image_history_sort_by') ?? 'Name';
     let reverse = localStorage.getItem('image_history_sort_reverse') == 'true';
@@ -49,7 +58,16 @@ function listOutputHistoryFolderAndFiles(path, isRefresh, callback, depth, filte
         // list - there is no "newest" folder - so sharing the direction just rendered the tree backwards.
         // Ascending here also overrides the server's own OrderDescending, which is fine: the server sorts for
         // the file case and this is the only consumer that shows folders as a tree.
-        let folders = data.folders.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+        // 'Starred' is pinned above the date folders rather than left to fall wherever S lands alphabetically:
+        // it is the one folder the user curates by hand, so it is the one they reach for most. Its children sort
+        // normally, and ride along with it because the whole 'Starred/...' prefix shares the pin.
+        let folders = data.folders.sort((a, b) => {
+            let pinA = isPinnedFolder(a), pinB = isPinnedFolder(b);
+            if (pinA != pinB) {
+                return pinA ? -1 : 1;
+            }
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+        });
         function isPreSortFile(f) {
             return f.src == 'index.html'; // Grid index files
         }

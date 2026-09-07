@@ -79,6 +79,10 @@ public class MobileEnhancementsExtension : Extension
         OtherAssets.Add("Assets/m/m_gen.js");
         OtherAssets.Add("Assets/m/m_ui.js");
         OtherAssets.Add("Assets/m/m_autocomplete.js");
+        // Prompt Coach (docs/SimplePromptCoach-Plan.md). Registered here so it is fetchable at
+        // /ExtensionFile/MobileEnhancementsExtension/Assets/m/m_coach.js; index.html is what actually orders
+        // it into the page (after TagDex, before m_create.js).
+        OtherAssets.Add("Assets/m/m_coach.js");
         OtherAssets.Add("Assets/m/m_image_edit.js");
         OtherAssets.Add("Assets/m/m_create.js");
         OtherAssets.Add("Assets/m/m_presets.js");

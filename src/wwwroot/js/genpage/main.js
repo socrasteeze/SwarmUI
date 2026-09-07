@@ -960,7 +960,10 @@ function genpageLoad() {
     getSession(() => {
         imageHistoryBrowser.navigate('');
         initialModelListLoad();
-        genericRequest('ListT2IParams', {}, data => {
+        // compact:true drops the 'loras' parameter's duplicate value list (~1MB at 18.5k LoRAs) - the names
+        // still arrive in data.models.LoRA, which updateAllModels() below stores before buildParameterList()
+        // runs, so params.js's 'list' case can source the loras control's value list from there instead.
+        genericRequest('ListT2IParams', { compact: true }, data => {
             modelsHelpers.loadClassesFromServer(data.models, data.model_compat_classes, data.model_classes);
             updateAllModels(data.models);
             wildcardHelpers.newWildcardList(data.wildcards);
