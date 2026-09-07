@@ -58,7 +58,12 @@ class MImages {
         panel.appendChild(this.grid);
         this.sentinel = mUI.el('div', 'm-scroll-sentinel');
         panel.appendChild(this.sentinel);
-        let observer = new IntersectionObserver(() => this.renderMore(), { root: panel });
+        // rootMargin, not a bare intersection: without it the sentinel only crosses the viewport once the user
+        // has ALREADY scrolled to the end of what is rendered, so the next 40 tiles are built and their image
+        // requests fired at the exact moment the finger is still moving - the list stops dead at every chunk
+        // boundary. One viewport of lead time means the chunk lands while there is still content to scroll
+        // through, which is the difference between a pause and no pause.
+        let observer = new IntersectionObserver(() => this.renderMore(), { root: panel, rootMargin: '100% 0px' });
         observer.observe(this.sentinel);
     }
 

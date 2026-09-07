@@ -1839,12 +1839,19 @@
 .m-live-grid:empty {
     display: none;
 }
+/* content-visibility lets the engine skip layout, style and paint for tiles scrolled out of view, so the cost
+   of the grid stops growing with how far down the history the user has scrolled. Safe here specifically because
+   the cell's size does not depend on its contents: the width comes from the grid track and the height from
+   aspect-ratio, both of which still resolve under the size containment content-visibility applies off-screen -
+   so no contain-intrinsic-size is needed and nothing can collapse. Engines without it (iOS before 18) just
+   ignore the declaration and get the previous behaviour. */
 .m-image-tile-cell {
     position: relative;
     aspect-ratio: 1;
     background: var(--background-panel);
     border-radius: 0.4rem;
     overflow: hidden;
+    content-visibility: auto;
 }
 .m-image-tile-cell img {
     width: 100%;
