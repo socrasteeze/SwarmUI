@@ -40,6 +40,7 @@ public static class ModelsAPI
         API.RegisterAPICall(DoModelDownloadWS, true, Permissions.DownloadModels);
         API.RegisterAPICall(GetModelHash, true, Permissions.EditModelMetadata);
         API.RegisterAPICall(ForwardMetadataRequest, false, Permissions.EditModelMetadata);
+        API.RegisterAPICall(ForwardImageRequest, false, Permissions.EditModelMetadata);
         API.RegisterAPICall(DeleteModel, false, Permissions.DeleteModels);
         API.RegisterAPICall(RenameModel, false, Permissions.DeleteModels);
     }
@@ -1245,6 +1246,28 @@ public static class ModelsAPI
             Logs.Warning($"While parsing JSON response from '{url}', got exception: {ex.ReadableString()}");
             return new JObject() { ["error"] = $"{ex.GetType().Name}: {ex.Message}" };
         }
+    }
+
+    [API.APIDescription("Forwards an image file request, eg to civitai image CDN.", "\"image\": \"data:image/jpeg;base64,...\"")]
+    public static async Task<JObject> ForwardImageRequest(Session session, string url)
+    {
+        if (!url.StartsWithFast("https://image.civitai.com/"))
+        {
+            return new JObject() { ["error"] = "Invalid URL." };
+        }
+        byte[] data;
+        try
+        {
+            data = await Utilities.UtilWebClient.GetByteArrayAsync(url);
+        }
+        catch (Exception ex)
+        {
+            Logs.Warning($"While making image request to '{url}', got exception: {ex.ReadableString()}");
+            return new JObject() { ["error"] = $"{ex.GetType().Name}: {ex.Message}" };
+        }
+        string ext = url.Before('?').AfterLast('.');
+        MediaType type = MediaType.GetByExtension(ext) ?? MediaType.ImageJpg;
+        return new JObject() { ["image"] = new Image(data, type).AsDataString() };
     }
 
     /// <summary>Internal call for model/image delete to clean up folders recursively.</summary>

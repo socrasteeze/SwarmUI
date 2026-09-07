@@ -405,7 +405,17 @@ def wrap_in_shell(empty_batches, probe_batches, content):
     probe = probe_batches[0]
     idx = 0
     n = min(len(empty), len(probe))
-    while idx < n and empty[idx][0] == probe[idx][0]:
+    while idx < n:
+        a = empty[idx][0]
+        b = probe[idx][0]
+        if isinstance(a, int) and isinstance(b, int):
+            matched = a == b
+        elif isinstance(a, dict) and isinstance(b, dict):
+            matched = a.get("data") is b.get("data")
+        else:
+            matched = a is b
+        if not matched:
+            break
         idx += 1
     return [empty[:idx] + content + empty[idx:]]
 

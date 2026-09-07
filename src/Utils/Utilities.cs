@@ -902,14 +902,28 @@ public static class Utilities
         return null;
     }
 
+    public static string[] ParallelDownloadSupportedUrls = ["https://huggingface.co/", "https://civitai.com/", "https://civitai.red/"];
+
     /// <summary>Downloads a file from a given URL and saves it to a given filepath. Auth errors (401/403) get a hint appended to the error message to tell the user how to fix it.</summary>
     public static async Task DownloadFile(string url, string filepath, Action<long, long, long> progressUpdate, CancellationTokenSource cancel = null, string altUrl = null, string verifyHash = null, Dictionary<string, string> headers = null, Session session = null, bool allowParallel = true)
     {
         altUrl ??= url;
         cancel ??= new();
         headers ??= [];
-        bool doParallel = allowParallel && url.StartsWith("https://huggingface.co/");
-        int chunkSize = (doParallel ? 16 : 64) * 1024 * 1024;
+        bool doParallel = allowParallel && ParallelDownloadSupportedUrls.Any(supported => url.StartsWith(supported));
+        int maxParallel = 1;
+        if (doParallel)
+        {
+            if (url.StartsWith("https://huggingface.co/"))
+            {
+                maxParallel = Program.ServerSettings.Network.HuggingFaceDownloadParallelism;
+            }
+            else if (url.StartsWith("https://civitai.com/") || url.StartsWith("https://civitai.red/"))
+            {
+                maxParallel = Program.ServerSettings.Network.CivitaiDownloadParallelism;
+            }
+            doParallel = maxParallel > 1;
+        }
         string authHint = ApplyDownloadAPIKey(ref url, headers, session) ?? "This may be gated or private content that requires an API key. You can set API keys in the User Settings page.";
         using CancellationTokenSource combinedCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, cancel.Token);
         Directory.CreateDirectory(Path.GetDirectoryName(filepath));
@@ -941,8 +955,10 @@ public static class Utilities
         {
             length = response.Content.Headers.ContentLength ?? 0;
             doParallel = false;
+            maxParallel = 1;
         }
-        int maxParallel = doParallel ? 16 : 1;
+        int chunkSize = (doParallel ? 16 : 64) * 1024 * 1024;
+        Logs.Verbose($"Download ContentRange: {response.Content.Headers.ContentRange?.ToString() ?? "none"}, ContentLength {response.Content.Headers.ContentLength}, final length: {length}, parallel: {doParallel}, maxParallel: {maxParallel}");
         ConcurrentQueue<(int, byte[])> chunks = new();
         ConcurrentQueue<(long, long, long, bool)> progUpdates = new();
         if (response.StatusCode != HttpStatusCode.OK && response.StatusCode != HttpStatusCode.PartialContent)
