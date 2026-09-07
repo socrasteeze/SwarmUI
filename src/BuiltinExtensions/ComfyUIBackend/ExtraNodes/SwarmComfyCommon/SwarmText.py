@@ -391,6 +391,8 @@ def pack_batches(sd, groups):
 def calc_leaf(sd, leaf):
     if leaf.embed is not None:
         embed, _, _ = sd._try_get_embedding(leaf.embed)
+        if embed is None and not leaf.embed.endswith('.safetensors'):
+            embed, _, _ = sd._try_get_embedding(leaf.embed + '.safetensors')
         return embed_token_items(embed, leaf.weight)
     if not leaf.text:
         return []
