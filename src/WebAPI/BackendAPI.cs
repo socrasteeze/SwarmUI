@@ -65,6 +65,13 @@ public class BackendAPI
             ["enabled"] = backend.AbstractBackend.IsEnabled,
             ["title"] = backend.AbstractBackend.Title,
             ["max_usages"] = backend.AbstractBackend.MaxUsages,
+            // Parent link for 'nonreal' children (the per-GPU workers a Swarm-API backend spawns for its
+            // remote's backends). Their own IDs come from a decrementing counter (BackendHandler.cs
+            // 'LastNonrealBackendID--'), so they are reassigned on every reconnect and cannot be stored by a
+            // client that wants to remember "run on the spoke". The parent's ID is stable - it is the entry
+            // in Backends.fds - so exposing it lets a client name a target once and re-resolve the live
+            // child ID at request time. Null for real backends.
+            ["parent"] = backend.AbstractParent?.ID,
             ["seconds_since_used"] = timeSinceUsed,
             ["time_since_used"] = timeLastRelease == 0 ? "Never" : TimeSpan.FromSeconds(-timeSinceUsed).SimpleFormat(true, false)
         };

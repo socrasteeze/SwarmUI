@@ -22,6 +22,10 @@ class MApp {
                 });
                 mAutoComplete.loadSettings();
                 mGen.pollStatus();
+                // Populates the Generate caret with the real target name (and whether a peer is even up)
+                // before the picker is ever opened - otherwise a saved spoke target reads by its bare id
+                // until the first tap, and a spoke that went away overnight still looks selected.
+                mState.refreshBackendTargets(() => mState.changed());
             });
             mUI.registerTab('create', p => mCreate.build(p), () => mCreate.onShow());
             mUI.registerTab('images', p => mImages.build(p), () => mImages.onShow());
@@ -96,8 +100,7 @@ class MApp {
             // Absent from paramMeta means the session lacks permission to set it - ListT2IParams only reports
             // parameters the session may actually use.
             backend.style.display = mState.paramMeta['exactbackendid'] ? '' : 'none';
-            let current = mState.params['exactbackendid'];
-            backend.textContent = `Backend: ${current == null ? 'Automatic' : MCreate.paramValueLabel('exactbackendid', current)}`;
+            backend.textContent = `Backend: ${MCreate.genTargetName(mState.genTarget, mState.backendTargets)}`;
         };
         renderBackend();
         mState.onChange(renderBackend);

@@ -43,6 +43,20 @@ class MState {
          * metadata - the visible prompt in `params` is the only prompt source of truth, and a second cached
          * copy here would drift from it. See MState.defaultPromptGuide for the shape. */
         this.promptGuide = MState.defaultPromptGuide();
+        /** Which backend the next generation is pinned to, as an INTENT rather than a backend ID.
+         * {kind:'local'} runs on this machine (the hub) and is the default; {kind:'remote', parent:<id>}
+         * runs on the worker behind that Swarm-API backend (a spoke); {kind:'auto'} lets the server pick.
+         *
+         * Deliberately not the `exactbackendid` param itself. A spoke's worker is a 'nonreal' child whose ID
+         * comes from a decrementing counter (BackendHandler 'LastNonrealBackendID--'), so it is -1 on the
+         * first connect, -2 after the spoke restarts, and so on. Storing that number would silently pin a
+         * later generation to a backend that no longer exists - or worse, to a different one. The parent's
+         * ID is the stable half (it is the Backends.fds entry), so the target is stored against that and the
+         * live child ID is resolved at generate time by resolveGenTarget(). */
+        this.genTarget = { 'kind': 'local' };
+        /** Latest ListBackends snapshot, normalized by MState.readBackendTargets. Refreshed when the picker
+         * opens and before each generate; never trusted as current beyond that. */
+        this.backendTargets = [];
         /** Callbacks fired after any state change that should re-render the Create surface. */
         this.changeListeners = [];
         /** Whether a state-change notification is already booked for the next animation frame. */
@@ -179,6 +193,122 @@ class MState {
             return [parseInt(input['width']), parseInt(input['height'])];
         }
         return MState.resolutionFor(input['aspectratio'], parseInt(input['sidelength']));
+    }
+
+    /** Coerces a stored/unknown target blob to a valid one. Unknown kinds, and a remote target with no
+     * parent id, degrade to the hub rather than to 'auto': an unusable pin should not silently turn into
+     * "anywhere", because the whole point of the control is knowing which GPU is about to run. */
+    static normalizeGenTarget(target) {
+        if (!target || typeof target != 'object') {
+            return { 'kind': 'local' };
+        }
+        if (target.kind == 'auto') {
+            return { 'kind': 'auto' };
+        }
+        if (target.kind == 'remote' && target.parent != null) {
+            return { 'kind': 'remote', 'parent': `${target.parent}` };
+        }
+        return { 'kind': 'local' };
+    }
+
+    /** True when two targets name the same thing. */
+    static sameGenTarget(a, b) {
+        a = MState.normalizeGenTarget(a);
+        b = MState.normalizeGenTarget(b);
+        return a.kind == b.kind && `${a.parent}` == `${b.parent}`;
+    }
+
+    /** Turns a raw ListBackends response into the rows the picker offers.
+     *
+     * Three shapes come back and only two are usable. Real local backends (id >= 0, not a Swarm-API backend)
+     * are this machine. A Swarm-API backend is a PROXY - it reports can_load_models false and cannot run a
+     * generation itself - so it is never offered directly; it contributes only its title, used to name the
+     * spoke. Its nonreal children (id < 0, `parent` pointing back at it) are the actual remote GPUs, and are
+     * what a remote target resolves to.
+     *
+     * `parent` is read from the API rather than parsed out of the child's "[Remote from 18: G18-API]" title,
+     * because that string is display text and would be a fragile contract. */
+    static readBackendTargets(data) {
+        let proxies = {};
+        let rows = [];
+        for (let key of Object.keys(data || {})) {
+            let backend = data[key];
+            if (!backend || backend.id == null) {
+                continue;
+            }
+            if (backend.type == 'swarmswarmbackend' && backend.parent == null) {
+                proxies[`${backend.id}`] = backend;
+            }
+        }
+        for (let key of Object.keys(data || {})) {
+            let backend = data[key];
+            if (!backend || backend.id == null || backend.can_load_models === false) {
+                continue;
+            }
+            let usable = backend.enabled !== false && backend.status == 'running';
+            if (backend.parent != null) {
+                let proxy = proxies[`${backend.parent}`];
+                rows.push({
+                    'kind': 'remote',
+                    'parent': `${backend.parent}`,
+                    'id': `${backend.id}`,
+                    'label': proxy ? proxy.title : `Remote ${backend.parent}`,
+                    'sub': backend.current_model ? mUI.modelName(backend.current_model) : backend.status,
+                    'usable': usable
+                });
+            }
+            else if (backend.type != 'swarmswarmbackend') {
+                rows.push({
+                    'kind': 'local',
+                    'parent': null,
+                    'id': `${backend.id}`,
+                    'label': backend.title,
+                    'sub': backend.current_model ? mUI.modelName(backend.current_model) : backend.status,
+                    'usable': usable
+                });
+            }
+        }
+        return rows;
+    }
+
+    /** Refreshes `backendTargets`. Always resolves - a session that may generate but lacks
+     * ViewBackendsList permission is a legitimate configuration, and it should still be able to generate on
+     * the hub, so a failure yields an empty list rather than an error. */
+    refreshBackendTargets(callback) {
+        genericRequest('ListBackends', { 'nonreal': true, 'full_data': true }, data => {
+            this.backendTargets = MState.readBackendTargets(data);
+            if (callback) {
+                callback(this.backendTargets);
+            }
+        }, 0, () => {
+            this.backendTargets = [];
+            if (callback) {
+                callback(this.backendTargets);
+            }
+        });
+    }
+
+    /** Resolves `genTarget` against the latest snapshot to a live backend id, or null for "don't pin".
+     * Returns {id, row, fellBack} - fellBack is true when the chosen target is not currently usable and the
+     * caller should say so rather than silently running somewhere else. */
+    resolveGenTarget() {
+        let target = MState.normalizeGenTarget(this.genTarget);
+        if (target.kind == 'auto') {
+            return { 'id': null, 'row': null, 'fellBack': false };
+        }
+        let match = this.backendTargets.find(row => row.usable && row.kind == target.kind
+            && (target.kind != 'remote' || row.parent == `${target.parent}`));
+        if (match) {
+            return { 'id': match.id, 'row': match, 'fellBack': false };
+        }
+        // Nothing matched. With no snapshot at all (no permission, or the request failed) pinning would be a
+        // guess, so send nothing and let the server route - that is the pre-existing behavior. With a
+        // snapshot, the target really is down, so fall back to a usable local backend and report it.
+        if (this.backendTargets.length == 0) {
+            return { 'id': null, 'row': null, 'fellBack': false };
+        }
+        let local = this.backendTargets.find(row => row.usable && row.kind == 'local');
+        return { 'id': local ? local.id : null, 'row': local || null, 'fellBack': true };
     }
 
     /** Normalizes a list-ish param value (JS array, or comma/pipe-joined string) to a real array. */
@@ -685,6 +815,7 @@ class MState {
                 'archFilter': this.archFilter,
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
                 'promptGuide': this.promptGuide,
+                'genTarget': this.genTarget,
             };
             localStorage.setItem('m_client_state', JSON.stringify(data));
             this.saveFailed = false;
@@ -725,6 +856,13 @@ class MState {
             // not recognize.
             this.promptGuide = (data.promptGuide && data.promptGuide.schemaVersion == 1)
                 ? Object.assign(MState.defaultPromptGuide(), data.promptGuide) : MState.defaultPromptGuide();
+            // Anything unrecognized falls back to the hub rather than being trusted: a stored target can name
+            // a backend that has since been deleted, and "run here" is the safe reading of a bad value.
+            this.genTarget = MState.normalizeGenTarget(data.genTarget);
+            // A state file written before the target existed can carry a hand-pinned backend id. It is dead
+            // now (doGenerate rewrites the key from genTarget on every send) but would still show up in the
+            // params readout as a pin that does nothing, so it is dropped on read.
+            delete this.params['exactbackendid'];
         }
         catch (e) {
             console.error('state load failed', e);
