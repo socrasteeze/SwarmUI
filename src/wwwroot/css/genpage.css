@@ -2558,6 +2558,12 @@ body.small-window > .tab-content.tab-hundred {
 .ext-danger-license {
     background-color: rgba(255, 0, 0, 0.2);
 }
+.extension-hidden-row {
+    display: none;
+}
+.extensions-show-hidden .extension-hidden-row {
+    display: table-row;
+}
 .input_filter_container {
     display: flex;
     position: relative;

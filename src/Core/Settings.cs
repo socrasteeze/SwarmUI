@@ -304,6 +304,9 @@ public class Settings : AutoConfiguration
 
         [ConfigComment("How many parallel requests to make at the same time when downloading from HuggingFace.\nIncreasing this number will use more RAM while downloading, but also download faster.\nDepending on your network speed, 16, 32, or 64 are reasonable values.")]
         public int HuggingFaceDownloadParallelism = 32;
+
+        [ConfigComment("How many parallel requests to make at the same time when downloading from Civitai.\n1 means disabled, civitai may run download faster on fast network connections when setting this to 4.")]
+        public int CivitaiDownloadParallelism = 1;
     }
 
     /// <summary>Settings related to file paths.</summary>
