@@ -535,8 +535,15 @@
 /* Aspect and size share one row rather than stacking: this panel already overflows its viewport, and a
    second row pushes Generate further below the fold for no information the row cannot hold. nowrap keeps
    them side by side instead of letting the stepper drop under the select at narrow widths. */
-.m-res-row {
+.m-res-row,
+.m-sampler-row {
     flex-wrap: nowrap;
+}
+.m-choice-select {
+    min-height: 44px;
+    padding: 0 0.4rem;
+    flex: 1 1 0;
+    min-width: 0;
 }
 .m-aspect-select {
     min-height: 44px;

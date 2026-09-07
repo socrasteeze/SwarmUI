@@ -360,16 +360,18 @@ check('unfavoriting inside the filter removes the row', await page.evaluate(() =
 
 await page.click('.m-tagdex-favorite-filter');
 await page.click('.m-tagdex-card-main');
-check('TagDex browse inserts the selected trigger into the prompt', await page.evaluate(() => mState.params.prompt == 'hatsune_miku, vocaloid'));
+// The trigger alone is only half the record. core_tags is what makes an unfamiliar character render as
+// themselves, so the card tap inserts the trigger plus every core tag, as a card click on the desktop tab
+// does. The name-only case is the secondary control, and it must not appear on a row with no core_tags,
+// where the tap already inserts the bare trigger.
+const tapPrompt = await page.evaluate(() => mState.params.prompt);
+check('TagDex browse tap inserts the trigger plus every core tag',
+    tapPrompt == 'hatsune_miku, vocaloid, twintails, aqua hair, aqua eyes, long hair', tapPrompt);
 await page.evaluate(() => {
     mState.params.prompt = '';
     mState.changed();
 });
-// The trigger alone is only half the record. core_tags is what makes an unfamiliar character render as
-// themselves, and the browse sheet used to offer no way to get it - the card's tap was the only action, so
-// every insertion was the bare name. Both must be reachable in one tap each, and the all-tags control must
-// not appear on a row that has no core_tags to add.
-const allTagsControl = await page.evaluate(() => {
+const triggerOnlyControl = await page.evaluate(() => {
     let cards = document.querySelectorAll('.m-tagdex-card');
     let button = cards[0].querySelector('.m-tagdex-alltags-button');
     let box = button.getBoundingClientRect();
@@ -380,13 +382,12 @@ const allTagsControl = await page.evaluate(() => {
         onArtistRow: cards[1].querySelectorAll('.m-tagdex-alltags-button').length
     };
 });
-check('TagDex all-tags control is a 44px target, and absent where there are no core tags',
-    allTagsControl.label == 'Add Hatsune Miku with all 4 tags' && allTagsControl.width == 44
-    && allTagsControl.height == 44 && allTagsControl.onArtistRow == 0, JSON.stringify(allTagsControl));
+check('TagDex trigger-only control is a 44px target, and absent where there are no core tags',
+    triggerOnlyControl.label == 'Add Hatsune Miku trigger only, without its 4 tags' && triggerOnlyControl.width == 44
+    && triggerOnlyControl.height == 44 && triggerOnlyControl.onArtistRow == 0, JSON.stringify(triggerOnlyControl));
 await page.click('.m-tagdex-card .m-tagdex-alltags-button');
-const allTagsPrompt = await page.evaluate(() => mState.params.prompt);
-check('TagDex all-tags inserts the trigger plus every core tag',
-    allTagsPrompt == 'hatsune_miku, vocaloid, twintails, aqua hair, aqua eyes, long hair', allTagsPrompt);
+const triggerOnlyPrompt = await page.evaluate(() => mState.params.prompt);
+check('TagDex trigger-only control inserts just the trigger', triggerOnlyPrompt == 'hatsune_miku, vocaloid', triggerOnlyPrompt);
 await page.evaluate(() => {
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
@@ -687,6 +688,45 @@ await page.evaluate(() => {
     mState.starredModels = {};
     mState.loadParamMeta({ list: [], models: {}, model_classes: {} });
 });
+
+// Sampler and Scheduler picklists: hidden until the session advertises the params with a value list, then
+// one option per server value behind a leading "default" option. Picking writes the raw value into state;
+// picking the default deletes the key, so an untouched session sends nothing. Both live in coveredParams, so
+// a preset's sampler no longer surfaces as an Advanced chip.
+const samplerHidden = await page.evaluate(() => {
+    mCreate.renderQuickParams();
+    return getComputedStyle(document.querySelector('.m-sampler-row')).display;
+});
+check('sampler row is hidden when the backend offers no sampler param', samplerHidden == 'none', samplerHidden);
+const sampler = await page.evaluate(async () => {
+    mState.paramMeta['sampler'] = { id: 'sampler', name: 'Sampler', type: 'dropdown', default: 'euler',
+        values: ['euler', 'dpmpp_2m'], value_names: ['Euler', 'DPM++ 2M'] };
+    mState.paramMeta['scheduler'] = { id: 'scheduler', name: 'Scheduler', type: 'dropdown', default: 'normal',
+        values: ['normal', 'karras'], value_names: ['Normal', 'Karras'] };
+    mCreate.renderQuickParams();
+    let selects = document.querySelectorAll('.m-sampler-row .m-choice-select');
+    let out = { rowDisplay: getComputedStyle(document.querySelector('.m-sampler-row')).display, count: selects.length };
+    out.samplerOptions = [...selects[0].options].map(o => `${o.value}=${o.textContent}`).join('|');
+    selects[0].value = 'dpmpp_2m';
+    selects[0].dispatchEvent(new Event('change'));
+    selects[1].value = 'karras';
+    selects[1].dispatchEvent(new Event('change'));
+    out.picked = `${mState.params['sampler']},${mState.params['scheduler']}`;
+    out.chips = [...document.querySelectorAll('.m-adv-chip, .m-adv-chips *')].map(c => c.textContent).filter(t => /ampler|cheduler/.test(t)).length;
+    selects[0].value = '';
+    selects[0].dispatchEvent(new Event('change'));
+    out.afterDefault = 'sampler' in mState.params;
+    delete mState.params['scheduler'];
+    delete mState.paramMeta['sampler'];
+    delete mState.paramMeta['scheduler'];
+    mCreate.renderQuickParams();
+    return out;
+});
+check('sampler and scheduler picklists appear once the params are advertised', sampler.rowDisplay != 'none' && sampler.count == 2, JSON.stringify(sampler));
+check('sampler options are the server values with a leading default', sampler.samplerOptions == '=Sampler: Euler|euler=Euler|dpmpp_2m=DPM++ 2M', sampler.samplerOptions);
+check('picking a sampler and scheduler writes the raw values into state', sampler.picked == 'dpmpp_2m,karras', sampler.picked);
+check('a picked sampler is not also shown as an Advanced chip', sampler.chips == 0, `${sampler.chips}`);
+check('picking the default option clears the param from state', sampler.afterDefault == false, `${sampler.afterDefault}`);
 
 // The Prefix row is hidden unless the session advertises the `filenameprefix` param - renderQuickParams
 // recomputes `prefixRow.style.display` from `mState.paramMeta` on every render (m_create.js). This harness

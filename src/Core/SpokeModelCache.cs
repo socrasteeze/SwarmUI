@@ -8,16 +8,20 @@ using System.Runtime.InteropServices;
 
 namespace SwarmUI.Core;
 
-/// <summary>Spoke-only local read-through cache for model files.
+/// <summary>Spoke-only local cache for model files, filled in the background after a job.
 /// <para>A spoke reads the hub's model tree over the network. The tree is the inventory of record and stays
 /// read-only, but pulling a multi-GB checkpoint across the link on every cold load is the dominant cost of a
-/// remote generation. When <see cref="Settings.PathsData.SpokeModelCache"/> is set, the first use of a model
-/// copies its file to the same relative path under that root, and ComfyUI is given the root as its first
-/// model path, so every later load is local. The inventory is never pointed at the cache: names come from the
-/// shared tree, so the hub/spoke inventory contract is unaffected and a cache that is missing or empty only
-/// costs speed, never correctness.</para>
-/// <para>The cache is an accelerator, not a dependency. Any failure to fill it is logged and swallowed, and the
-/// generation proceeds reading the shared tree as it always did.</para></summary>
+/// remote generation. When <see cref="Settings.PathsData.SpokeModelCache"/> is set, each job queues a copy of
+/// every model file it named to the same relative path under that root, and ComfyUI is given the root as its
+/// first model path, so every later cold load is local. The inventory is never pointed at the cache: names come
+/// from the shared tree, so the hub/spoke inventory contract is unaffected and a cache that is missing or empty
+/// only costs speed, never correctness.</para>
+/// <para>Copies never run in the request path. An earlier version copied before submitting the workflow, which
+/// held the spoke silent for the length of the copy; the hub's claim on the job timed out and the generation
+/// was reported as interrupted. The copy is now queued when the job finishes, runs on a background task, and is
+/// serialized so at most one stream competes with live generations for the link. The first cold load of a
+/// model therefore still crosses the network exactly as before; the second does not.</para>
+/// <para>The cache is an accelerator, not a dependency. Any failure to fill it is logged and swallowed.</para></summary>
 public static class SpokeModelCache
 {
     /// <summary>True when this process is a spoke with a configured cache root.</summary>
@@ -43,9 +47,13 @@ public static class SpokeModelCache
         ["embed_name"] = ["Embedding"],
     };
 
-    /// <summary>One lock per cache target, so two generations that need the same uncached model wait for one copy
-    /// rather than racing to write the same file.</summary>
+    /// <summary>One lock per cache target, so two jobs that name the same uncached model produce one copy rather
+    /// than racing to write the same file.</summary>
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> TargetLocks = new();
+
+    /// <summary>Serializes background copies. The link to the shared tree is the bottleneck a live generation is
+    /// also using, so one copy at a time bounds the contention.</summary>
+    private static readonly SemaphoreSlim CopyQueue = new(1, 1);
 
     private static readonly StringComparison PathComparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
@@ -174,16 +182,52 @@ public static class SpokeModelCache
         }
     }
 
-    /// <summary>Finds every model a generated ComfyUI workflow names and ensures each is cached before the workflow
-    /// is submitted. Values are ComfyUI filenames (a model's <see cref="T2IModel.Name"/> with the backend's folder
-    /// separator), so they are normalised back to '/' before lookup. Names that match no known model - a raw path a
-    /// custom node emitted, say - are left alone and resolve from the shared tree as they always did.</summary>
-    public static async Task EnsureWorkflowCached(JObject workflow, CancellationToken cancel = default)
+    /// <summary>Queues a background cache fill for every model a ComfyUI workflow names. Returns immediately; the
+    /// copies run one at a time on a checked task and never surface an exception to the caller. Safe to call from
+    /// a finally block: a job that failed or was interrupted still named real models worth caching.</summary>
+    public static void QueueWorkflowCache(JObject workflow)
     {
         if (!Enabled || workflow is null)
         {
             return;
         }
+        HashSet<T2IModel> models;
+        try
+        {
+            models = CollectWorkflowModels(workflow);
+        }
+        catch (Exception ex)
+        {
+            Logs.Warning($"[SpokeCache] Could not read models from workflow: {ex.ReadableString()}");
+            return;
+        }
+        if (models.Count == 0)
+        {
+            return;
+        }
+        _ = Utilities.RunCheckedTask(async () =>
+        {
+            foreach (T2IModel model in models)
+            {
+                await CopyQueue.WaitAsync(Program.GlobalProgramCancel);
+                try
+                {
+                    await EnsureCached(model, Program.GlobalProgramCancel);
+                }
+                finally
+                {
+                    CopyQueue.Release();
+                }
+            }
+        });
+    }
+
+    /// <summary>Finds every known model a generated ComfyUI workflow names. Values are ComfyUI filenames (a model's
+    /// <see cref="T2IModel.Name"/> with the backend's folder separator), so they are normalised back to '/' before
+    /// lookup. Names that match no known model - a raw path a custom node emitted, say - are skipped and resolve
+    /// from the shared tree as they always did.</summary>
+    public static HashSet<T2IModel> CollectWorkflowModels(JObject workflow)
+    {
         HashSet<T2IModel> models = [];
         foreach (JProperty node in workflow.Properties())
         {
@@ -208,11 +252,7 @@ public static class SpokeModelCache
                 }
             }
         }
-        foreach (T2IModel model in models)
-        {
-            cancel.ThrowIfCancellationRequested();
-            await EnsureCached(model, cancel);
-        }
+        return models;
     }
 
     /// <summary>Looks a ComfyUI filename up across the model sets, preferring the set the input's loader type

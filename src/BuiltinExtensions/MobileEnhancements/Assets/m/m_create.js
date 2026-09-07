@@ -24,7 +24,9 @@ class MCreate {
         this.lastCompleted = [];
         /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip).
          * width/height are covered because the resolution controls own them - see mState.buildGenInput. */
-        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'steps', 'cfgscale', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix'];
+        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'steps', 'cfgscale', 'sampler', 'scheduler', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix'];
+        /** Quick picklists keyed by parameter id (sampler, scheduler): {select, label}. */
+        this.choiceSelects = {};
         /** Quick numeric steppers keyed by parameter id. */
         this.numberSteppers = {};
         /** Whether the user has manually collapsed the preview. */
@@ -550,20 +552,26 @@ class MCreate {
         if (document.activeElement && document.activeElement.blur) {
             document.activeElement.blur();
         }
-        // Resolved here rather than in buildGenInput so the fallback notice fires once per generation and
-        // not on every readout that rebuilds the input dict - previewResolution does, on every render.
-        let target = mState.resolveGenTarget();
-        if (target.id == null) {
-            delete input['exactbackendid'];
-        }
-        else {
-            input['exactbackendid'] = target.id;
-        }
-        if (target.fellBack) {
-            mUI.warn(`${MCreate.genTargetName(mState.genTarget, mState.backendTargets)} is not available - running here instead.`);
-        }
         this.setPending(true);
-        mGen.generate(input);
+        // The snapshot is re-read on every send, not just when the picker opens. A spoke's worker id changes
+        // whenever the spoke restarts (see mState.genTarget), so a snapshot taken before that restart would pin
+        // the request to a backend that no longer exists and the server refuses it outright. The round trip is
+        // one local ListBackends call. Resolved here rather than in buildGenInput so the fallback notice fires
+        // once per generation and not on every readout that rebuilds the input dict.
+        mState.refreshBackendTargets(() => {
+            this.renderGenTarget();
+            let target = mState.resolveGenTarget();
+            if (target.id == null) {
+                delete input['exactbackendid'];
+            }
+            else {
+                input['exactbackendid'] = target.id;
+            }
+            if (target.fellBack) {
+                mUI.warn(`${MCreate.genTargetName(mState.genTarget, mState.backendTargets)} is not available - running here instead.`);
+            }
+            mGen.generate(input);
+        });
     }
 
     /** Short name for a target, used by the caret label and the fallback warning. Falls back to the stored
@@ -1495,6 +1503,13 @@ class MCreate {
         tuneRow.appendChild(this.buildNumberStepper('steps', 'Steps', { 'default': 20, 'min': 0, 'max': 500, 'step': 1 }));
         tuneRow.appendChild(this.buildNumberStepper('cfgscale', 'CFG', { 'default': 7, 'min': 0, 'max': 100, 'step': 0.5 }));
         wrap.appendChild(tuneRow);
+        // Sampler and scheduler sit under Steps/CFG: they are the other half of the same tuning decision, and
+        // without a control here the only way to change them from /simple was a preset. Unset means the
+        // server default, shown as the first option, so a session that never touches them sends nothing.
+        this.samplerRow = mUI.el('div', 'm-quick-row m-sampler-row');
+        this.samplerRow.appendChild(this.buildChoiceSelect('sampler', 'Sampler'));
+        this.samplerRow.appendChild(this.buildChoiceSelect('scheduler', 'Scheduler'));
+        wrap.appendChild(this.samplerRow);
         // Aspect and size are two controls, not one fused list. The ratio is a framing decision that changes
         // rarely; the size is a cost decision nudged constantly. Fusing them turned every size nudge into a
         // scroll past every other ratio's rungs, which is what the one-picker version cost in practice.
@@ -1590,6 +1605,50 @@ class MCreate {
         return wrap;
     }
 
+    /** Builds one labelled picklist for a string param with server-supplied values. Options come from
+     * paramMeta in renderQuickParams, so the control is a bare label until ListT2IParams lands. */
+    buildChoiceSelect(paramId, label) {
+        let select = document.createElement('select');
+        select.className = 'm-choice-select';
+        select.setAttribute('aria-label', label);
+        select.addEventListener('change', () => {
+            if (select.value == '') {
+                delete mState.params[paramId];
+            }
+            else {
+                mState.params[paramId] = select.value;
+            }
+            mState.changed();
+        });
+        this.choiceSelects[paramId] = { 'select': select, 'label': label };
+        return select;
+    }
+
+    /** Syncs one quick picklist from state: the server's value list plus a leading default option, and
+     * whatever the state holds that the list does not (a preset's value on a backend that lacks it). */
+    renderChoiceSelect(paramId) {
+        let control = this.choiceSelects[paramId];
+        let meta = mState.paramMeta[paramId];
+        if (!meta || !meta.values || meta.values.length == 0) {
+            control.select.style.display = 'none';
+            return false;
+        }
+        control.select.style.display = '';
+        // Effective rather than raw state, so a preset's sampler reads on the control the way its steps do.
+        let current = `${mState.buildGenInput()[paramId] ?? ''}`;
+        let names = meta.value_names && meta.value_names.length == meta.values.length ? meta.value_names : meta.values;
+        let defaultName = MCreate.paramValueLabel(paramId, meta.default);
+        let entries = [['', `${control.label}: ${defaultName || 'default'}`]];
+        for (let i = 0; i < meta.values.length; i++) {
+            entries.push([meta.values[i], names[i]]);
+        }
+        if (current != '' && !meta.values.includes(current)) {
+            entries.push([current, current]);
+        }
+        MCreate.syncOptions(control.select, entries, current);
+        return true;
+    }
+
     /** Moves a quick numeric parameter by its declared increment and clamps it to the server range. */
     adjustQuickNumber(paramId, direction) {
         let control = this.numberSteppers[paramId];
@@ -1640,6 +1699,12 @@ class MCreate {
             }
             control.value.textContent = `${shown}`;
         }
+        let anyChoice = false;
+        for (let paramId in this.choiceSelects) {
+            anyChoice = this.renderChoiceSelect(paramId) || anyChoice;
+        }
+        // Hidden outright rather than left as an empty row when the backend offers neither (no ComfyUI).
+        this.samplerRow.style.display = anyChoice ? '' : 'none';
         this.renderResolutionControls();
     }
 
