@@ -12,10 +12,11 @@ rem   2. It writes a real .lnk rather than a .url, so the shortcut can be pinned
 rem      carries an explicit working directory.
 rem   3. It resolves the Desktop and Start Menu via the shell, so a OneDrive-redirected Desktop still works.
 rem
-rem Usage:  Create_Shortcut.bat [/desktop] [/startmenu] [/both] [/remove] [/force] [/launcher]
+rem Usage:  Create_Shortcut.bat [/desktop] [/startmenu] [/both] [/remove] [/force] [/launcher] [/spoke]
 rem With no arguments it prompts.
 rem   /force     overwrite a same-named shortcut that points somewhere else
 rem   /launcher  target the plain launcher (skips Start_SwarmUI.bat's idempotency check; keeps its console visible)
+rem   /spoke     target launch-spoke.bat, for a GPU-worker machine that serves a hub rather than running standalone
 
 rem Default target is Start_SwarmUI.bat, which starts the server if it isn't already running (idempotent, safe to
 rem click twice). It does NOT open a browser or the installed PWA - the fork owner does not want a browser window
@@ -62,14 +63,34 @@ if /I "%~1"=="/both"      ( set "DO_DESKTOP=1" & set "DO_STARTMENU=1" )
 if /I "%~1"=="/remove"    set "DO_REMOVE=1"
 if /I "%~1"=="/force"     set "SC_FORCE=1"
 if /I "%~1"=="/launcher"  set "SC_RAW=1"
+if /I "%~1"=="/spoke"     set "SC_SPOKE=1"
 shift
 goto parseargs
 :argsdone
 
+rem /spoke: target the spoke launcher. Takes priority over /launcher - a spoke has no standalone mode to fall
+rem back to. The shortcut gets its own name so it never collides with a "Launch SwarmUI" shortcut on a machine
+rem that has been both, and so /remove only ever takes back the one it made.
+if defined SC_SPOKE (
+    if not exist "!SC_ROOT!\launch-spoke.bat" (
+        echo.
+        echo ERROR: /spoke was given but launch-spoke.bat is not in:
+        echo   !SC_ROOT!
+        echo.
+        pause
+        exit /b 1
+    )
+    set "SC_LAUNCHER=launch-spoke.bat"
+    set "SC_TARGET=!SC_ROOT!\launch-spoke.bat"
+    set "SC_NAME=Launch SwarmUI Spoke"
+    set "SC_DESC=Start SwarmUI as a GPU worker for the hub (spoke mode)"
+    set "SC_RAW="
+)
+
 rem /launcher: target the plain launcher instead of the start-and-open wrapper.
-if defined SC_RAW (
+if not defined SC_SPOKE if defined SC_RAW (
     set "SC_LAUNCHER=launch-fork.bat"
-    if not exist "%~dp0launch-fork.bat" set "SC_LAUNCHER=launch-windows.bat"
+    if not exist "!SC_ROOT!\launch-fork.bat" set "SC_LAUNCHER=launch-windows.bat"
     set "SC_TARGET=!SC_ROOT!\!SC_LAUNCHER!"
     set "SC_DESC=Start the SwarmUI server (console only)"
 )

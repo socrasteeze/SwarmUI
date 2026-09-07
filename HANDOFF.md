@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-09-06 · **Branch:** main · **Base:** e802a9eb (= origin/main before this push) · **Tree:** clean
+**Updated:** 2026-09-07 · **Branch:** main · **Base:** e802a9eb (= origin/main before this push) · **Tree:** clean
 
 ## State
 Upstream sync plus a spoke-config fix; no fork source work. Merged upstream `519ba0f4` — 6 commits, 7 files,
@@ -27,7 +27,7 @@ Upstream sync plus a spoke-config fix; no fork source work. Merged upstream `519
 10. Seeds are sectionalizable and SeedVR's derived default moved from `Seed + 500` to `Seed + 9` — still untested on real generations.
 11. `Data/Autocompletions/gelbooru_anima_2026-06-11.csv` is superseded and can be deleted — user data, user's call.
 12. The `@artist` autocomplete convention has never been A/B checked on the Anima checkpoints.
-13. **Spoke is configured but never started.** The hub's `swarmswarmbackend` entry is already `enabled: true`, and all eight of this machine's Paths settings now match the hub's, so it resolves ~173 checkpoints and ~19.5k LoRAs off the shared drive. Nothing has been exercised: start Swarm here via `launch-fork.bat`, confirm the hub leaves idle, then queue enough work to reach the second backend in list order. Expect a slow first model scan — ~20k small files plus sidecars over SMB is the access pattern that share is worst at.
+13. **Spoke profile is live.** Verified 2026-09-07: the spoke reports `spoke_mode: true` and `spoke_controller: true`, the hub backend `RequireSpokeMode` is `true`, and both hub backends read `running` with zero errors in the hub log. `can_load_models` is `false` on the spoke backend, which is the profile working as intended. Controller authorization is set on both sides in untracked config (`Data/Settings.fds` on the spoke, `Data/Backends.fds` on the hub), so it is not in this delivery. The inventory is names only and arrives whole: a negotiated spoke throws rather than accept a partial list, so the `ModelListSanityCap` truncation that applied to the old generic-remote link is gone. Still unexercised: an actual generation routed to the second backend in list order.
 14. Dropping `diffusion_models` from this machine's `SDModelFolder` was deliberate — it matches the hub, which never listed that folder — but it costs the local ComfyUI those 8 unet files. Reverse only if something here needs them directly.
 15. Addresses, machine names, and share names live in the gitignored `docs/Hub-Spoke-Setup.md`, deliberately never committed.
 
@@ -37,6 +37,7 @@ Upstream sync plus a spoke-config fix; no fork source work. Merged upstream `519
 - No pull requests from this fork on any remote, ever — upstream is fetch-only and its push URL is disabled in `.git/config`
 
 ## Traps
+- Hub and spoke must run the identical commit. `src/Backends/SwarmSwarmBackend.cs:287` compares the remote version against `Utilities.VaryID` and refuses a negotiated spoke on any other build, so the backend sits in `loading` forever rather than erroring. Update one machine and you must update the other.
 - `LaunchMode` values: `webinstall` is a historical alias for `web`, `electron` is gone. Valid are `none`, `web`, `install`, `app`.
 - An empty `src/bin/live_release` breaks every `src/Extensions` build; their csproj resolves SwarmUI through `../../bin/live_release/SwarmUI.dll`
 - Release caches extension assets in memory and `VaryID` only moves on commit — commit, restart, hard refresh before judging an asset edit failed
