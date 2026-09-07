@@ -41,7 +41,6 @@ Upstream sync plus a spoke-config fix; no fork source work. Merged upstream `519
 - An empty `src/bin/live_release` breaks every `src/Extensions` build; their csproj resolves SwarmUI through `../../bin/live_release/SwarmUI.dll`
 - Release caches extension assets in memory and `VaryID` only moves on commit — commit, restart, hard refresh before judging an asset edit failed
 - A `JObject` API parameter receives the whole request payload with `session_id` stripped, not the field sharing its name
-- **`.fds` escapes a literal backslash as `\s`.** `ModelRoot: E:\smodels` means `E:\models`, and `DataPath: E:\sSwarmUI\sData` means `E:\SwarmUI\Data`. Never "correct" one of these to a bare backslash — that is what the value already is.
 - The permission classifier blocks most writes to the network share and `git commit` there; hand restart and commit to the user
 - `git diff HEAD..upstream/master` is misleading here — the fork is hundreds of commits ahead, so fork features render as deletions. Always diff from the merge base.
 
