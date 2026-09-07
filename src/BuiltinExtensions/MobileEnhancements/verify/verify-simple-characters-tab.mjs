@@ -7,7 +7,7 @@
  *    offset, the pager clamps at both ends, and a narrowed result set clamps a stale offset back to a real
  *    page instead of showing an empty one.
  * 3. Search resets to page one; favorites filter round-trips through TagDexToggleFavorite.
- * 4. Tapping a card inserts the trigger into the Create prompt at the remembered caret.
+ * 4. Tapping a card inserts the trigger and its core tags into the Create prompt at the remembered caret.
  *
  * Runs the REAL shipped source, same scheme as verify-simple-create-panel.mjs: index.html with tokens
  * substituted, real m_*.js and TagDex assets, server stubbed at genericRequest. m_app.js is absent, so the
@@ -247,11 +247,19 @@ await page.evaluate(async () => {
     document.querySelector('.m-panel[data-mtab="characters"]').classList.add('m-tab-active');
     mState.params['prompt'] = '';
     mState.changed();
-    document.querySelector('.m-tagdex-tab .m-tagdex-alltags-button').click();
+    document.querySelector('.m-tagdex-tab .m-tagdex-card-main').click();
 });
 const allTagsPrompt = await page.evaluate(() => mState.params['prompt']);
-check('the all-tags control adds the trigger plus the core tags',
+check('tapping a card adds the trigger plus the core tags',
     `${allTagsPrompt}`.includes('char_000, series, long hair, blue eyes'), `${allTagsPrompt}`);
+const triggerOnlyPrompt = await page.evaluate(() => {
+    mState.params['prompt'] = '';
+    mState.changed();
+    document.querySelector('.m-tagdex-tab .m-tagdex-alltags-button').click();
+    return mState.params['prompt'];
+});
+check('the trigger-only control adds just the trigger',
+    `${triggerOnlyPrompt}`.includes('char_000, series') && !`${triggerOnlyPrompt}`.includes('long hair'), `${triggerOnlyPrompt}`);
 // Inserting from here runs mCreate.render() against a Create panel that is display:none, where the prompt
 // box reports scrollHeight 0. That measurement used to be applied as an inline height:0px and stayed, so the
 // box came back a sliver with the prompt spilling out of it. Switching the panel back on directly rather

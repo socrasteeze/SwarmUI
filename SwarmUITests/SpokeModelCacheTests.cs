@@ -118,6 +118,42 @@ public class SpokeModelCacheTests : SwarmUITest
         Assert.That(new FileInfo(target).Length, Is.EqualTo(4096));
     }
 
+    /// <summary>The workflow scan finds models by the filenames ComfyUI sees, in either slash style, and ignores names
+    /// it does not know rather than guessing at a path for them.</summary>
+    [Test]
+    public void TestWorkflowScanFindsKnownModelsOnly()
+    {
+        T2IModel known = MakeModel(Path.Combine("checkpoints", "sub", "e.safetensors"), 32);
+        T2IModelHandler handler = new() { ModelType = "Stable-Diffusion", FolderPaths = [Path.Combine(ShareRoot, "checkpoints")] };
+        handler.Models[known.Name] = known;
+        bool had = Program.T2IModelSets.TryGetValue("Stable-Diffusion", out T2IModelHandler saved);
+        Program.T2IModelSets["Stable-Diffusion"] = handler;
+        try
+        {
+            Newtonsoft.Json.Linq.JObject workflow = Newtonsoft.Json.Linq.JObject.Parse("""
+                {
+                    "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "sub\\e.safetensors" } },
+                    "5": { "class_type": "LoraLoader", "inputs": { "lora_name": "nobody/has/this.safetensors", "strength_model": 1 } },
+                    "6": { "class_type": "KSampler", "inputs": { "seed": 1, "model": ["4", 0] } }
+                }
+                """);
+            var found = SpokeModelCache.CollectWorkflowModels(workflow);
+            Assert.That(found, Has.Count.EqualTo(1));
+            Assert.That(found, Does.Contain(known));
+        }
+        finally
+        {
+            if (had)
+            {
+                Program.T2IModelSets["Stable-Diffusion"] = saved;
+            }
+            else
+            {
+                Program.T2IModelSets.Remove("Stable-Diffusion");
+            }
+        }
+    }
+
     /// <summary>Off a spoke, or with no cache root, the cache does nothing at all.</summary>
     [Test]
     public void TestDisabledWhenNotSpokeOrUnconfigured()

@@ -54,8 +54,9 @@ class MState {
          * ID is the stable half (it is the Backends.fds entry), so the target is stored against that and the
          * live child ID is resolved at generate time by resolveGenTarget(). */
         this.genTarget = { 'kind': 'local' };
-        /** Latest ListBackends snapshot, normalized by MState.readBackendTargets. Refreshed when the picker
-         * opens and before each generate; never trusted as current beyond that. */
+        /** Latest ListBackends snapshot, normalized by MState.readBackendTargets. Refreshed at boot, when the
+         * picker opens, and immediately before each generate (MCreate.doGenerate) - the last one is what keeps a
+         * saved spoke target valid across the spoke's restarts. Never trusted as current beyond that. */
         this.backendTargets = [];
         /** Callbacks fired after any state change that should re-render the Create surface. */
         this.changeListeners = [];

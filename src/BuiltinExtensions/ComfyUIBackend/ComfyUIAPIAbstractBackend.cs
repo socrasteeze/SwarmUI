@@ -238,15 +238,6 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
         Logs.Verbose("Will await a job, do parse...");
         JObject workflowJson = Utilities.ParseToJson(workflow);
         Logs.Verbose("JSON parsed.");
-        // Spoke read-through cache. Done here, on the parsed workflow, because this is the one point that sees
-        // every model file the job will touch - checkpoint, LoRAs, VAE, encoders - regardless of which code path
-        // built the workflow. Copies happen before submission so ComfyUI's very first read of the file is local;
-        // the network is crossed exactly once per model per spoke. A failed copy is logged inside and the job
-        // proceeds against the shared tree, so this can slow a generation down but never stop one.
-        if (SpokeModelCache.Enabled)
-        {
-            await SpokeModelCache.EnsureWorkflowCached(workflowJson, interrupt);
-        }
         JObject metadataObj = user_input.GenParameterMetadata();
         metadataObj.Remove("donotsave");
         metadataObj.Remove("exactbackendid");
@@ -595,6 +586,13 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
             {
                 ReusableSockets.Enqueue(new() { ID = id, Socket = socket });
             }
+            // Spoke model cache. Queued here, after the job, because this is the one point that has seen every
+            // model file the job touched - checkpoint, LoRAs, VAE, encoders - whichever code path built the
+            // workflow, and because it must never sit in the request path: copying before submission held the
+            // spoke silent for the length of the copy and the hub's claim on the job timed out. The copy runs in
+            // the background once ComfyUI already holds the model, so it competes with nothing that is loading.
+            // Fire-and-forget by design: nothing about this job depends on it.
+            SpokeModelCache.QueueWorkflowCache(workflowJson);
         }
     }
 

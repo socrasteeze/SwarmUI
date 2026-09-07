@@ -550,8 +550,8 @@ class MTagDexClass {
         return button;
     }
 
-    /** Builds one browse result. The main action inserts the trigger at the Create prompt's remembered caret;
-     * the separate star keeps favorite changes from also modifying the prompt. */
+    /** Builds one browse result. The main action inserts the trigger plus every core tag at the Create prompt's
+     * remembered caret; the separate star keeps favorite changes from also modifying the prompt. */
     buildBrowseRow(record, source, onFavoriteRemoved) {
         let row = mUI.el('div', 'm-tagdex-card');
         let main = mUI.el('button', 'm-tagdex-card-main');
@@ -580,26 +580,32 @@ class MTagDexClass {
             mCreate.insertIntoPrompt(text);
             mUI.note(note);
         };
-        main.addEventListener('click', () => {
-            insert(record.trigger, `Added ${record.display || record.name}.`);
-        });
-        row.appendChild(main);
         // The trigger alone is a character's name, not their appearance: on most checkpoints it produces the
         // right person only where the base model already knows them well. core_tags is the descriptive set the
         // dataset ships alongside it (hair, eyes, outfit), and it is what makes an unfamiliar character render
-        // as themselves. Both are one tap, because which one is wanted depends on the model - this mirrors the
-        // desktop tab, where the card inserts the trigger and its menu offers "Insert All Tags".
+        // as themselves. So the tap inserts the full set, the same as a card click on the desktop tab, and the
+        // secondary button is the name-only case (the desktop menu's "Insert Trigger"). It used to be the other
+        // way round, and "adding a character only adds the main tag" was the result.
         let coreTags = record.core_tags || [];
+        let name = record.display || record.name;
+        main.addEventListener('click', () => {
+            if (coreTags.length > 0) {
+                insert([record.trigger].concat(coreTags).join(', '), `Added ${name} + ${coreTags.length} tags.`);
+            }
+            else {
+                insert(record.trigger, `Added ${name}.`);
+            }
+        });
+        row.appendChild(main);
         if (coreTags.length > 0) {
-            let all = mUI.el('button', 'm-tagdex-alltags-button', '+');
-            let allLabel = `Add ${record.display || record.name} with all ${coreTags.length} tags`;
-            all.setAttribute('aria-label', allLabel);
-            all.title = allLabel;
-            all.addEventListener('click', () => {
-                insert([record.trigger].concat(coreTags).join(', '),
-                    `Added ${record.display || record.name} + ${coreTags.length} tags.`);
+            let triggerOnly = mUI.el('button', 'm-tagdex-alltags-button', 'T');
+            let triggerLabel = `Add ${name} trigger only, without its ${coreTags.length} tags`;
+            triggerOnly.setAttribute('aria-label', triggerLabel);
+            triggerOnly.title = triggerLabel;
+            triggerOnly.addEventListener('click', () => {
+                insert(record.trigger, `Added ${name} (trigger only).`);
             });
-            row.appendChild(all);
+            row.appendChild(triggerOnly);
         }
         let favoriteLabel = record.favorited ? 'Remove Favorite' : 'Add Favorite';
         let favorite = mUI.el('button', `m-tagdex-favorite-button${record.favorited ? ' m-tagdex-favorite-active' : ''}`, record.favorited ? '★' : '☆');
