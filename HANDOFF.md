@@ -1,48 +1,53 @@
 # HANDOFF
 
-**Updated:** 2026-09-06 · **Branch:** main · **Base:** b72f14ee · **Tree:** this sweep's work, committed on top
+**Updated:** 2026-09-06 · **Branch:** main · **Base:** 180a5f6a (merge; + AGENTS log commit) · **Tree:** clean
 
 ## State
-A six-group agent sweep implemented the open fork backlog that needed no operator decision. Every group was written by one
-agent and then verified by a second reading the diff rather than the report; the verifiers found and fixed 19 defects the
-implementers had missed, several of them behaviour-breaking. Details per group are in `AGENTS.md`'s Fork Delta under the
-2026-09-06 heading. Nothing is pushed.
+Upstream sync only; no fork feature work. Merged upstream `519ba0f4` — 6 commits, 7 files, +32/-9 — as `180a5f6a`
+with zero conflicts and no fork file needing resolution. All gates green including a clean `--ci_test` boot.
+Nothing needs a restart. Held for the user's push authorization.
 
 ## Done this session
-- `/simple` Prompt Coach shipped — `Assets/m/m_coach.js`, phases 1-4 plus a basic phase 5 of `docs/SimplePromptCoach-Plan.md`
-- Mobile viewer §2b/§2c — rubber-band at the ends, edge-fling while zoomed, tap-toggled chrome overlay
-- Output paths — `MaxOutPathDepth` is now enforced, and a `v1.0` prefix no longer saves as `v10`
-- TagDex — an `anima_styles` thumbnail push is now actually served instead of silently discarded
-- Genpage — LoRA dropdown opens in ~50ms instead of ~10.6s; boot payload 749KB → 292KB on the wire
-- `/simple` — single-select presets, signature-gated re-renders (the iOS page-jump), checkpoint-compat LoRA filtering
+- Merged upstream's embed-naming trio, H3 embedding detection, `Frames` default 25→24, and the metadata panel work
+- Verified the fork's spoke guard, Civitai LoRA-class mapping, and `ToNet` overload all survived intact
+- Confirmed `src/Extensions/SwarmUI-VideoStages` is gone, which is why the boot finally exits 0
 
 ## Open
-1. Every device- and GPU-dependent item is untouched and still owed — the physical phone passes, the four by-eye generation checks, and the live-server actions. They are on the tracker, unchanged. **Nothing further here can be done without you**; the automatable backlog is empty.
-2. Nothing in this sweep has been seen in a browser against the live server. The harnesses stub core or drive a throwaway instance, so a restart-and-look pass is the first thing worth doing.
-3. The gitignored `src/Extensions/SwarmUI-VideoStages` still fails to build on `RunSeedVR2Stage`. Update it from its own upstream; never patch it here.
-4. Two tracker items are closer to done than they look: `qwenEdit2511FP8_v10`'s architecture is a one-field edit in the Models tab with no code behind it, and the TagDex/AnimaDex favorites idea is complete except for phone acceptance, which the device checklist already owns.
+1. **Embed resolution changed shape** — `<embed:...>` no longer gets its `/` rewritten to the backend separator, and the name is `CleanModelName`'d before the `\0swarmembed:` token. The Comfy node retries with `.safetensors` appended. Untested against a real subfolder embed on either backend.
+2. **`Text2Video Frames` and `Video Frames` now default to 24, not 25** — `src/Text2Image/T2IParamTypes.cs:461` and `:650`. Only bites a generation that leaves the toggle off. The SVD path still hardcodes 25 at `src/BuiltinExtensions/ComfyUIBackend/ComfyUIWebAPI.cs:458` and `:483`; that is upstream's own inconsistency, left alone.
+3. **`/simple` never got the original-vs-interpreted prompt split.** `m_state.js:331` substitutes `extra.original_prompt` unconditionally; genpage now shows both rows when the original does not round-trip. Deliberate — see the sync log.
+4. The desktop app has still never been launched; the Avalonia Wayland backend is Linux-only and compile-verified only — `src/Core/Program.cs:465`
+5. `launchtools/install-windows.bat:35` still passes `--launch_mode webinstall`, now only a historical alias to `web`, so a fresh Windows install lands on the normal page, not the install page. Identical in upstream; left alone deliberately.
+6. AnimaDex: after the cache drain, restart the `animadex` container, verify read-only that favourites search returns total 3 and the sidebar shows the star toggle, then commit the staged change in that checkout.
+7. Restart SwarmUI and confirm: Analyze pose completes a WD14 round trip; batch toggles survive a browser close; `/simple` Characters sort and layout work on real data.
+8. Florence-2 caption index unverified — `ListInterrogateBackends` reports `florence2` `available: false`, so install the node pack first.
+9. H3 baseline and sheet prompt wording remain untuned against real output — `src/BuiltinExtensions/CharacterSheet/SheetPlan.cs`, GPU session, by eye. Upstream now detects H3 *embeddings* as their own class, which may change what shows in the model browser.
+10. Seeds are sectionalizable and SeedVR's derived default moved from `Seed + 500` to `Seed + 9` — still untested on real generations.
+11. `Data/Autocompletions/gelbooru_anima_2026-06-11.csv` is superseded and can be deleted — user data, user's call.
+12. The `@artist` autocomplete convention has never been A/B checked on the Anima checkpoints.
+13. The spoke is still not wired up: its `swarmswarmbackend` entry stays `enabled: false` on the hub, and the two machines' `SDModelFolder`/`SDLoraFolder`/`SDVAEFolder` still disagree, which would silently filter the spoke out of `lycoris` jobs. Addresses and machine names are in the gitignored `docs/Hub-Spoke-Setup.md`, deliberately never committed.
 
 ## Decisions
-- Verifiers were told to fix what they found rather than report it back, and to mark a task landed only on their own evidence. That is what caught the LoRA-browser click doing nothing, and a depth clamp that a backslash walked straight past.
-- `Utilities.StrictFilenameClean` was left alone; the dot bug was one call site in `BuildImageOutputPath`, and the shared helper has ten-plus other callers with pinned tests.
-- Genpage perf landed as core edits rather than in a fork extension: select2 init wiring and the boot `ListT2IParams` call site have no hook. Kept minimal and recorded.
-- The `compact: true` flag already existed server-side, so the payload cut needed no C# change.
-- A `tagdex_sync.py` named in one ticket does not exist in this repo, its history, or its tree. That half of the report points somewhere else.
+- Did not port the round-trip prompt check into `/simple` — it reduces metadata on purpose and the port would duplicate `promptCidMatcher` into the mobile bundle
+- Kept every upstream commit byte-identical; no rebase, no reset-author, per the fork's merge rules
+- No pull requests from this fork on any remote, ever — upstream is fetch-only and its push URL is disabled in `.git/config`
 
 ## Traps
-- **A lazy multiselect carries no `<option>` list.** Any code that assigns a value it did not first append selects nothing, silently. That single mistake produced four separate defects this session. Ask the question on every edit near one.
-- The viewer's boundary logic mirrors core's `shiftToNextImagePreview`, including the `only_arrows` value of `ui.imageshiftingcycles`. An upstream merge touching `currentimagehandler.js` or `outputhistory.js` can desync it; re-run `verify-mobile-viewer.mjs`.
-- Release caches extension assets in memory and `VaryID` only moves on commit — commit, restart, hard refresh before judging an asset edit failed.
-- An empty `src/bin/live_release` breaks every `src/Extensions` build. Never build into `src/bin/live_release` while the server holds it.
-- The `--ci_test` boot exits 1 on the VideoStages extension error alone; read the log rather than the exit code.
+- `LaunchMode` values: `webinstall` is a historical alias for `web`, `electron` is gone. Valid are `none`, `web`, `install`, `app`.
+- An empty `src/bin/live_release` breaks every `src/Extensions` build; their csproj resolves SwarmUI through `../../bin/live_release/SwarmUI.dll`
+- Release caches extension assets in memory and `VaryID` only moves on commit — commit, restart, hard refresh before judging an asset edit failed
+- A `JObject` API parameter receives the whole request payload with `session_id` stripped, not the field sharing its name
+- The permission classifier blocks most writes to the network share and `git commit` there; hand restart and commit to the user
+- `git diff HEAD..upstream/master` is misleading here — the fork is hundreds of commits ahead, so fork features render as deletions. Always diff from the merge base.
 
 ## Verify
 ```powershell
 dotnet build SwarmUI.sln --configuration Release
-dotnet test SwarmUITests/SwarmUITests.csproj --configuration Release   # 72 passing
+dotnet test SwarmUITests/SwarmUITests.csproj --configuration Release
 dotnet format SwarmUI.sln --verify-no-changes
+dotnet format style --verify-no-changes
+dotnet build Desktop/Desktop.csproj --configuration Release
 dotnet src/bin/Release/net8.0/SwarmUI.dll --ci_test true --launch_mode none --loglevel debug --data_dir "$env:TEMP\swarm-ci\data" --port 7899
-# Playwright harnesses are opt-in and boot no server; 440 checks across thirteen suites.
-node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-coach.mjs
-# verify-genpage-clipboard.mjs needs a throwaway server with IsInstalled:true in its Settings.fds.
+# Live server, read-only. Port comes from Data/Settings.fds, never assume 7801.
+node tools/swarm_api.mjs GetCurrentStatus
 ```
