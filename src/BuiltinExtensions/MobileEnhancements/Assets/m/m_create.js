@@ -185,6 +185,30 @@ class MCreate {
         }
     }
 
+    /** Drops a deleted image from the preview, and from the snapshot an interrupt would restore. The Images
+     * tab owns deletion and refreshes its own grid, but the preview here is a separate copy of the same file -
+     * so without this a deleted image stayed on screen until the next batch replaced it, which is exactly the
+     * stale-thumbnail behaviour the genpage avoids with removeImageBlockFromBatch (outputhistory.js). */
+    forgetImage(fullsrc) {
+        if (!fullsrc) {
+            return;
+        }
+        let removed = false;
+        for (let key in this.liveTiles) {
+            let tile = this.liveTiles[key];
+            let tilePath = tile.dataset.fullsrc || mImages.urlToPath(tile.dataset.url || '');
+            if (tilePath == fullsrc) {
+                tile.remove();
+                delete this.liveTiles[key];
+                removed = true;
+            }
+        }
+        this.lastCompleted = this.lastCompleted.filter(entry => (entry.fullsrc || mImages.urlToPath(entry.url || '')) != fullsrc);
+        if (removed) {
+            this.renderPreviewState();
+        }
+    }
+
     /** Empties the preview grid. */
     clearTiles() {
         this.previewGrid.innerHTML = '';

@@ -277,6 +277,9 @@ class MImages {
             mUI.confirm('Delete this image?', () => {
                 serverAction(deleteButton, 'Delete', 'DeleteImage', { 'path': entry.fullsrc }, () => {
                     this.dirty = true;
+                    // The Create tab's preview holds its own tile for this file; tell it, or the image lingers
+                    // there after it is gone from disk and from this grid.
+                    mCreate.forgetImage(entry.fullsrc);
                     close();
                     this.refresh();
                 });

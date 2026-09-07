@@ -44,6 +44,34 @@ public class SpokeModePolicyTests : SwarmUITest
         Assert.DoesNotThrow(() => SpokeModePolicy.AssertModelTreeWriteAllowed("test write"));
     }
 
+    /// <summary>Confirms the cache carve-out permits writes only inside the configured cache root, and nothing at all
+    /// when no root is configured - the shared tree denial above is unchanged by it.</summary>
+    [Test]
+    public static void TestSpokeCacheWriteIsConfinedToCacheRoot()
+    {
+        string saved = Program.ServerSettings.Paths.SpokeModelCache;
+        string cache = Path.Combine(Path.GetTempPath(), $"swarm-spoke-cache-policy-{Guid.NewGuid():N}");
+        try
+        {
+            SetSpokeMode(true);
+            Program.ServerSettings.Paths.SpokeModelCache = "";
+            Assert.Throws<SpokeModeWriteException>(() => SpokeModePolicy.AssertSpokeCacheWriteAllowed(Path.Combine(cache, "a.safetensors"), "test"));
+            Program.ServerSettings.Paths.SpokeModelCache = cache;
+            Assert.DoesNotThrow(() => SpokeModePolicy.AssertSpokeCacheWriteAllowed(Path.Combine(cache, "checkpoints", "a.safetensors"), "test"));
+            Assert.Throws<SpokeModeWriteException>(() => SpokeModePolicy.AssertSpokeCacheWriteAllowed(Path.Combine(Path.GetTempPath(), "elsewhere.safetensors"), "test"));
+            Assert.Throws<SpokeModeWriteException>(() => SpokeModePolicy.AssertSpokeCacheWriteAllowed($"{cache}2{Path.DirectorySeparatorChar}a.safetensors", "test"), "a sibling folder sharing the cache root as a prefix is outside it");
+            Assert.Throws<SpokeModeWriteException>(() => SpokeModePolicy.AssertSpokeCacheWriteAllowed(Path.Combine(cache, "..", "escape.safetensors"), "test"));
+            Assert.Throws<SpokeModeWriteException>(() => SpokeModePolicy.AssertModelTreeWriteAllowed("test write"), "the cache must not loosen the shared-tree denial");
+            SetSpokeMode(false);
+            Assert.DoesNotThrow(() => SpokeModePolicy.AssertSpokeCacheWriteAllowed(Path.Combine(Path.GetTempPath(), "elsewhere.safetensors"), "test"));
+        }
+        finally
+        {
+            SetSpokeMode(false);
+            Program.ServerSettings.Paths.SpokeModelCache = saved;
+        }
+    }
+
     /// <summary>Confirms missing spoke folders are neither created nor reported as a complete refresh.</summary>
     [Test]
     public static void TestMissingSpokeModelFolderFailsRefreshClosed()

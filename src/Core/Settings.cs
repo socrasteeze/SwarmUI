@@ -322,6 +322,9 @@ public class Settings : AutoConfiguration
 
         public IEnumerable<string> ActualModelRoots => ModelRoot.Split(';').Select(r => Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, r));
 
+        [ConfigComment("Spoke mode only: a local folder that caches model files read from 'ModelRoot'.\nThe first generation to use a model copies its file here (same relative path), and ComfyUI is given this folder as its first model path, so every later load on this spoke is local instead of crossing the network.\nThe model inventory still comes from 'ModelRoot', so this changes speed only, never which models exist.\nLeave empty to disable. Ignored when not running as a spoke.")]
+        public string SpokeModelCache = "";
+
         [ConfigComment("The model folder to use within 'ModelRoot'.\nDefaults to 'Stable-Diffusion'.\n'checkpoints' should be used for matching pre-existing ComfyUI model directories.\nAbsolute paths work too (usually do not use an absolute path, use just a folder name).\nUse a semicolon ';' to split multiple paths.")]
         public string SDModelFolder = "Stable-Diffusion";
 
