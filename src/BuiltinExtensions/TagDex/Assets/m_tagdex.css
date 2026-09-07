@@ -53,7 +53,13 @@
     opacity: 0.5;
 }
 
+/* The results list is the only thing giving this sheet its height, so toggling Favorites - which can take 2,013
+   matches down to one - used to collapse the sheet to a stub mid-gesture, sliding every control up under the
+   user's thumb. Hold the browsing surface open instead. This is a floor on the sheet's *content*: `.m-sheet`
+   keeps its own `max-height` and `overflow-y`, so the sheet still never exceeds 75dvh and still shrinks when the
+   keyboard is up - a short result list now leaves empty space rather than resizing the sheet under the user. */
 .m-tagdex-browse-sheet {
+    min-height: 70dvh;
     padding-bottom: 0.4rem;
 }
 
@@ -277,19 +283,29 @@
 .m-tagdex-grid {
     display: grid;
     gap: 0.4rem;
+    justify-content: center;
 }
 
+/* `minmax(0, 13rem)` rather than `1fr`, for two separate reasons. The `0` floor is the important half: a bare
+   `1fr` track carries an automatic minimum of the item's min-content width, and the tile's image transfers a
+   minimum through its own aspect-ratio, so one track would demand more than its share and the two columns came
+   out visibly different widths (148px against 224px on a 390px phone) while overflowing the panel. The `13rem`
+   ceiling is what used to be the image's `max-height`: capping the track keeps a two-column desktop from
+   rendering one character as a 600px square, and does it without distorting the tile's own proportions. Tracks
+   shrink below the cap whenever the viewport is narrower, which is every phone. */
 .m-tagdex-grid-2 {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 13rem));
 }
 
 .m-tagdex-grid-3 {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 13rem));
 }
 
 .m-tagdex-grid .m-tagdex-card {
     position: relative;
+    min-width: 0;
     min-height: 0;
+    box-sizing: border-box;
     padding-bottom: 0.4rem;
     border-bottom: 0;
     border: 1px solid color-mix(in srgb, var(--border-color) 45%, transparent);
@@ -304,15 +320,18 @@
 }
 
 /* The tile's image leads, so it gets the width; the 1/1 ratio keeps every row of tiles the same height even
-   when a thumbnail is missing and the placeholder stands in. */
-/* Square by default so a row of tiles lines up even where a thumbnail is missing, but capped in height: at two
-   columns on a wide desktop a true square would be a 900px portrait of one character. `cover` crops instead of
-   distorting once the cap bites. */
+   when a thumbnail is missing and the placeholder stands in.
+   The height cap that used to live here has moved onto the grid track. Held together with `width: 100%` it did
+   not cap a square - it overrode the aspect-ratio and left a 466x208 letterbox, so `cover` threw away most of a
+   portrait thumbnail. Capping the track instead keeps the same ceiling on tile size and lets the ratio hold.
+   `object-position` biases the crop upward because these are character portraits: a centered crop of a 2:3
+   source takes the head off, which is the one part of the image that identifies the tag. */
 .m-tagdex-grid .m-tagdex-card-image {
     width: 100%;
     height: auto;
-    max-height: 13rem;
+    min-width: 0;
     aspect-ratio: 1 / 1;
+    object-position: 50% 15%;
 }
 
 /* Floated over the image rather than beside it: a 44px button in the tile's own flow would cost more vertical
