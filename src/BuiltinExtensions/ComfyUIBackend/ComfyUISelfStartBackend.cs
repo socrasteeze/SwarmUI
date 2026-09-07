@@ -264,6 +264,14 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
             }
             AddLoadStatus($"Will emit comfy model paths file...");
             string[] roots = Program.ServerSettings.Paths.ModelRoot.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            // The spoke's local cache is listed FIRST. ComfyUI resolves a filename by walking its paths in order and
+            // taking the first file that exists, so a cached copy is picked up ahead of the shared one without any
+            // change to the filenames Swarm emits. The cache is not a model root for Swarm's own inventory - that
+            // still scans the shared tree only - it is purely where ComfyUI looks first.
+            if (SpokeModelCache.Enabled)
+            {
+                roots = [SpokeModePolicy.CacheRoot, .. roots];
+            }
             string yaml = "";
             int count = 0;
             static string buildSection(string root, string path)
