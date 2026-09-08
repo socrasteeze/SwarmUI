@@ -138,6 +138,16 @@ public partial class TagDexExtension
         }
         if (string.IsNullOrWhiteSpace(name) || !list.ByName.ContainsKey(name))
         {
+            // An inbound relay (syncBack=false) is AnimaDex mirroring a favorite it holds. Its catalogue is the
+            // full booru; this dataset is min-count filtered, so entries it has and we do not are routine -
+            // costume variants like 'pekomama_(1st_costume)' when we hold only 'pekomama'. The favorite lives on
+            // its side regardless. Answering with an 'error' key made the API layer log every one as [Error];
+            // a relay that cannot land here is a skip, not a failure. Interactive use keeps the error.
+            if (!syncBack)
+            {
+                Logs.Debug($"[TagDex] Relay skipped: '{name}' is not in dataset '{source}'.");
+                return new JObject() { ["success"] = false, ["skipped"] = "unknown_entry", ["name"] = name ?? "", ["dataset"] = source };
+            }
             return new JObject() { ["error"] = $"Unknown entry '{name}' in dataset '{source}'." };
         }
         bool finalState;
