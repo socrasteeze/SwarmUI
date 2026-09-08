@@ -46,7 +46,8 @@ is no in-app downloader for it — see Gotchas below.
   name-only case, and clicking the same card again removes that whole tag set from the prompt.
 - **The `/simple` Characters sheet.** A separate implementation (`MTagDexClass` in `Assets/m_tagdex.js`) registered
   as its own bottom-nav tab and mirrored as a picker sheet next to the Create panel's model/LoRA pickers, since
-  `/simple` shares no code with the genpage.
+  `/simple` shares no code with the genpage. Tapping a card inserts the trigger plus every core tag, the same
+  as a genpage card click; the small `T` button beside it is the name-only insert.
 
 ## Prompt autocomplete splice
 
