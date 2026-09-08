@@ -480,6 +480,9 @@ public class Settings : AutoConfiguration
             [ConfigComment("If enabled, metadata will be hidden in the image Full View by default.\nIf disabled, metadata will be shown by default.\nYou zoom still zoom in or out to show or hide the metadata at any time as usual.")]
             public bool DefaultHideMetadataInFullview = false;
 
+            [ConfigComment("If enabled, the Interpreted Prompt is shown above the Original Prompt in image metadata.\nIf disabled, Original Prompt is shown first.\nOnly does anything if the prompt was interpreted (eg a wildcard is used).")]
+            public bool InterpretedPromptOnTop = false;
+
             [ConfigComment("How much to increase or decrease prompt weight when you hold Control and press the up/down arrow keys on selected text in a prompt box.\nDefault is 0.1.")]
             public double WeightStep = 0.1;
         }
