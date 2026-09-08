@@ -814,7 +814,7 @@ public static class T2IAPI
                     {
                         continue;
                     }
-                    addDirs(specialFolder[rawRefPath.Length..], 1);
+                    addDirs(specialFolder[rawRefPath.Length..], depth);
                 }
             }
             while (tasks.Any(t => !t.Value.IsCompleted))
