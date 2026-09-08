@@ -318,30 +318,42 @@ class MTagDexClass {
         more.style.display = 'none';
         content.appendChild(more);
         mUI.openSheet(content);
-        let ctx = { 'sources': [], 'source': '', 'limit': 50, 'token': 0, 'timer': null, 'total': 0, 'favoritesOnly': false, 'sortBy': this.sortMode() };
-        let runSearch = () => {
+        // `shown` is how many rows are already on screen, and it is the offset the next request asks for.
+        // Load More used to instead re-ask from offset 0 with a bigger limit, which the server caps at 250 - so
+        // the sheet ran out after five taps and looked like the end of a 45,000-row dataset.
+        let ctx = { 'sources': [], 'source': '', 'pageSize': 50, 'shown': 0, 'token': 0, 'timer': null, 'total': 0, 'favoritesOnly': false, 'sortBy': this.sortMode() };
+        let runSearch = (append) => {
             if (!ctx.source) {
                 results.innerHTML = '';
                 status.textContent = 'No datasets. Download one from More.';
                 more.style.display = 'none';
                 return;
             }
+            if (!append) {
+                ctx.shown = 0;
+            }
             let token = ++ctx.token;
+            let offset = ctx.shown;
             status.textContent = 'Searching...';
+            more.disabled = true;
             genericRequest('TagDexSearchEntries', {
                 'source': ctx.source,
                 'search': search.value.trim(),
                 'sortBy': ctx.sortBy || 'relevance',
-                'offset': 0,
-                'limit': ctx.limit,
+                'offset': offset,
+                'limit': ctx.pageSize,
                 'withFolders': false,
                 'favoritesOnly': ctx.favoritesOnly
             }, data => {
                 if (token != ctx.token) {
                     return;
                 }
-                results.innerHTML = '';
+                more.disabled = false;
+                if (offset == 0) {
+                    results.innerHTML = '';
+                }
                 if (data.missing_data) {
+                    results.innerHTML = '';
                     status.textContent = 'Dataset not downloaded.';
                     more.style.display = 'none';
                     return;
@@ -349,54 +361,53 @@ class MTagDexClass {
                 let records = data.results || [];
                 ctx.total = data.total || 0;
                 for (let i = 0; i < records.length; i++) {
-                    results.appendChild(this.buildBrowseRow(records[i], ctx.source, () => runSearch()));
+                    // A favorite change reloads from the top rather than appending: the row that changed may no
+                    // longer belong in the list at all, and appending onto a stale page would duplicate rows.
+                    results.appendChild(this.buildBrowseRow(records[i], ctx.source, () => runSearch(false)));
                 }
-                if (records.length == 0) {
+                ctx.shown = offset + records.length;
+                if (ctx.shown == 0) {
                     results.appendChild(mUI.el('div', 'm-strip-empty', 'No matches.'));
                 }
-                status.textContent = records.length < ctx.total
-                    ? `${records.length.toLocaleString()} of ${ctx.total.toLocaleString()}`
+                status.textContent = ctx.shown < ctx.total
+                    ? `${ctx.shown.toLocaleString()} of ${ctx.total.toLocaleString()}`
                     : `${ctx.total.toLocaleString()} match${ctx.total == 1 ? '' : 'es'}`;
-                more.style.display = records.length < ctx.total && ctx.limit < 250 ? '' : 'none';
+                // No 250 ceiling: the only thing that ends the list is running out of matches. A short page
+                // ends it too, so a total that shrank under the sheet cannot leave a button that fetches nothing.
+                more.style.display = ctx.shown < ctx.total && records.length > 0 ? '' : 'none';
             }, 0, error => {
                 if (token != ctx.token) {
                     return;
                 }
-                results.innerHTML = '';
+                more.disabled = false;
+                if (offset == 0) {
+                    results.innerHTML = '';
+                    more.style.display = 'none';
+                }
                 status.textContent = 'Search failed.';
-                more.style.display = 'none';
                 mUI.warn(`TagDex: ${error}`);
             });
         };
         source.addEventListener('change', () => {
             ctx.source = source.value;
-            ctx.limit = 50;
             this.syncSortOptions(sortSelect, ctx);
-            runSearch();
+            runSearch(false);
         });
         sortSelect.addEventListener('change', () => {
             ctx.sortBy = sortSelect.value;
             this.saveSortMode(ctx.sortBy);
-            ctx.limit = 50;
-            runSearch();
+            runSearch(false);
         });
         search.addEventListener('input', () => {
             clearTimeout(ctx.timer);
-            ctx.timer = setTimeout(() => {
-                ctx.limit = 50;
-                runSearch();
-            }, 180);
+            ctx.timer = setTimeout(() => runSearch(false), 180);
         });
         favorites.addEventListener('click', () => {
             ctx.favoritesOnly = !ctx.favoritesOnly;
-            ctx.limit = 50;
             favorites.setAttribute('aria-pressed', `${ctx.favoritesOnly}`);
-            runSearch();
+            runSearch(false);
         });
-        more.addEventListener('click', () => {
-            ctx.limit = Math.min(250, ctx.limit + 50);
-            runSearch();
-        });
+        more.addEventListener('click', () => runSearch(true));
         this.fetchSources((sources, prefs) => {
             ctx.sources = sources.filter(item => item.present);
             source.innerHTML = '';
@@ -410,7 +421,7 @@ class MTagDexClass {
             ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : '');
             source.value = ctx.source;
             this.syncSortOptions(sortSelect, ctx);
-            runSearch();
+            runSearch(false);
         });
     }
 
