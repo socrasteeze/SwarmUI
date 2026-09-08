@@ -326,7 +326,7 @@ function getFormattedMetadataEntries(metadata) {
                     if (key == 'parser_warnings') {
                         added += ' param_view_block_parser_warnings';
                     }
-                    if (key.includes('prompt')) {
+                    if (key.toLowerCase().includes('prompt')) {
                         extras = `<button title="Click to copy" class="basic-button prompt-copy-button" onclick="copyText('${escapeHtmlNoBr(escapeJsString(`${val}`))}');doNoticePopover('Copied!', 'notice-pop-green');">&#x29C9;</button>`;
                     }
                     if (key == 'unused_parameters' && Array.isArray(val)) {
@@ -394,8 +394,14 @@ function getFormattedMetadataEntries(metadata) {
                 prompt = originalPrompt;
             }
             else {
-                appendEntries(appendObject({ 'Original Prompt': originalPrompt }), true);
-                appendEntries(appendObject({ 'Interpreted Prompt': prompt }), true);
+                if (getUserSetting('ui.interpretedpromptontop', false)) {
+                    appendEntries(appendObject({ 'Interpreted Prompt': prompt }), true);
+                    appendEntries(appendObject({ 'Original Prompt': originalPrompt }), true);
+                }
+                else {
+                    appendEntries(appendObject({ 'Original Prompt': originalPrompt }), true);
+                    appendEntries(appendObject({ 'Interpreted Prompt': prompt }), true);
+                }
                 prompt = null;
             }
         }
