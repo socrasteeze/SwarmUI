@@ -116,6 +116,19 @@ await page.addInitScript(() => {
             });
         }
         else if (route == 'TagDexSearchEntries') {
+            // Big-list mode: a synthetic dataset that honours offset/limit, so the Load More path can be walked
+            // past the server's 250-row per-request cap the way a real 45,000-row dataset would be.
+            if (window.__tagDexBigList) {
+                let total = window.__tagDexBigList;
+                let offset = args.offset || 0;
+                let limit = Math.min(args.limit || 50, 250);
+                let page = [];
+                for (let i = offset; i < Math.min(total, offset + limit); i++) {
+                    page.push({ name: `char_${i}`, display: `Char ${i}`, trigger: `char_${i}`, count: total - i, kind: 'character' });
+                }
+                callback({ total: total, offset: offset, limit: limit, results: page });
+                return;
+            }
             let results = [
                 { name: 'hatsune_miku', display: 'Hatsune Miku', trigger: 'hatsune_miku, vocaloid', count: 123456,
                     copyright_display: 'Vocaloid', kind: 'character', favorited: window.__tagDexFavorite,
@@ -687,6 +700,50 @@ check('checkpoint compat: no checkpoint picked means no filtering at all',
 await page.evaluate(() => {
     mState.starredModels = {};
     mState.loadParamMeta({ list: [], models: {}, model_classes: {} });
+});
+
+// Load More must be able to reach the whole dataset. It used to re-ask from offset 0 with a growing limit,
+// which the server caps at 250 (TagDexSearch.MaxPageSize), so the sheet went dead after five taps and read as
+// the end of the list on a dataset with 44,874 characters in it. Paging by offset is what makes the sixth tap
+// fetch rows 251-300 rather than the same 250 again.
+const loadMore = await page.evaluate(async () => {
+    window.__tagDexBigList = 400;
+    let sheet = document.querySelector('.m-tagdex-browse-sheet');
+    let out = { reopened: false };
+    if (!sheet) {
+        mTagDex.openBrowseSheet();
+        out.reopened = true;
+    }
+    let settle = () => new Promise(resolve => setTimeout(resolve, 30));
+    await settle();
+    let more = document.querySelector('.m-tagdex-browse-sheet .m-tagdex-more');
+    let taps = 0;
+    while (more && getComputedStyle(more).display != 'none' && taps < 20) {
+        more.click();
+        await settle();
+        taps++;
+    }
+    let rows = document.querySelectorAll('.m-tagdex-browse-sheet .m-tagdex-card').length;
+    let names = [...document.querySelectorAll('.m-tagdex-browse-sheet .m-tagdex-card-name')].map(n => n.textContent);
+    out.taps = taps;
+    out.rows = rows;
+    out.unique = new Set(names).size;
+    out.last = names[names.length - 1];
+    out.status = document.querySelector('.m-tagdex-browse-sheet .m-tagdex-browse-status').textContent;
+    out.moreHidden = !more || getComputedStyle(more).display == 'none';
+    window.__tagDexBigList = 0;
+    return out;
+});
+check('Load More walks past the 250-row request cap to the end of the dataset',
+    loadMore.rows == 400 && loadMore.unique == 400 && loadMore.last == 'Char 399', JSON.stringify(loadMore));
+check('Load More appends distinct pages rather than re-fetching the first rows',
+    loadMore.taps == 7, JSON.stringify(loadMore));
+check('the sheet status counts what is loaded against the real total, and Load More hides at the end',
+    loadMore.status == '400 matches' && loadMore.moreHidden, JSON.stringify(loadMore));
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
 });
 
 // Sampler and Scheduler picklists: hidden until the session advertises the params with a value list, then
