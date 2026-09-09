@@ -425,9 +425,10 @@ public static class BasicAPIFeatures
         [API.APIParameter("If false, omit the configured autocomplete word list from this response.")] bool includeAutocompletions = true)
     {
         Settings.User.AutoCompleteData settings = session.User.Settings.AutoComplete;
+        // TODO: Paren escaping is model-specific now, so maybe the escape should be handled elsewhere?
         string[] autocompletions = !includeAutocompletions || string.IsNullOrWhiteSpace(settings.Source)
             ? null
-            : AutoCompleteListHelper.GetData(settings.Source, settings.EscapeParens && !session.User.Settings.ParamParsing.ParseAlternativePromptSyntaxes, settings.Suffix, settings.SpacingMode);
+            : AutoCompleteListHelper.GetData(settings.Source, settings.EscapeParens && session.User.Settings.ParamParsing.ParseAlternativePromptSyntaxes, settings.Suffix, settings.SpacingMode);
         return new JObject()
         {
             ["user_name"] = session.User.UserID,
