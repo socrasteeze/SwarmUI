@@ -19,7 +19,8 @@ The result is read from the `T2IParamInput` this extension owns, which is why it
 | Method | Output | Notes |
 | --- | --- | --- |
 | WD14 Tagger | Comma-separated booru tags | Small ONNX models, fast, no meaningful VRAM cost. Good for prompt reuse and dataset captioning. |
-| Florence-2 Caption | Natural-language description | Heavier, downloads a multi-GB model on first use. Prefers a PromptGen fine-tune when one is installed, since those were tuned to emit prompt-shaped text rather than dataset-style captions. Never held resident in VRAM — this is a one-shot utility sharing a GPU with image generation. |
+
+WD14 is the only method this extension ships. A Florence-2 captioner was built and then removed on 2026-09-11: this fork's checkpoints are danbooru-tag-trained, so tags are the native prompt language here and the prose caption had no consumer worth a multi-GB download. The `prose` output kind and the registration API below are still supported for anything that wants to add one back.
 
 Tag output is also rendered as chips below the text box. Any tag TagDex recognises as a character or artist picks up the same coloring the prompt autocomplete uses, and clicking a chip drops that tag from the result.
 

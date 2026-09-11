@@ -127,7 +127,7 @@ The API layer serializes a `SpokeModeWriteException` as HTTP 409 with
 - common-model and workflow-required downloads;
 - model-directory creation during refresh or Comfy startup;
 - TensorRT output and LoRA extraction;
-- known download-on-use Comfy, Florence-2, WD14, SAM2, GIMM-VFI, and CLIPSeg paths.
+- known download-on-use Comfy, WD14, SAM2, GIMM-VFI, and CLIPSeg paths.
 
 Hashing may still run in memory, but spoke mode never follows it with `ResaveModel`.
 Missing or unreadable required model directories are not created. Their model-subtype
