@@ -48,8 +48,7 @@
     margin-bottom: 0.4rem;
 }
 
-.interrogate-tagger-options,
-.interrogate-caption-options {
+.interrogate-tagger-options {
     display: flex;
     flex-direction: column;
     gap: 0.2rem;

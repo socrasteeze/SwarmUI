@@ -34,8 +34,7 @@ public static class InterrogateAPI
                 "install_feature": "wd14tagger"
             }
         ],
-        "wd14_models": ["wd-v1-4-moat-tagger-v2.onnx"],
-        "florence2_models": ["microsoft/Florence-2-base"]
+        "wd14_models": ["wd-v1-4-moat-tagger-v2.onnx"]
         """)]
     public static async Task<JObject> ListInterrogateBackends(Session session)
     {
@@ -56,8 +55,7 @@ public static class InterrogateAPI
         return new JObject()
         {
             ["backends"] = backends,
-            ["wd14_models"] = new JArray(InterrogateBackends.WD14Models),
-            ["florence2_models"] = new JArray(InterrogateBackends.Florence2Models)
+            ["wd14_models"] = new JArray(InterrogateBackends.WD14Models)
         };
     }
 

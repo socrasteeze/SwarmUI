@@ -48,18 +48,6 @@ public static class InterrogateBackends
     /// <summary>Feature flag mapped to <see cref="WD14NodeID"/>.</summary>
     public const string WD14Feature = "wd14tagger";
 
-    /// <summary>Model names offered by the Florence-2 loader node on the connected backend.</summary>
-    public static volatile string[] Florence2Models = [];
-
-    /// <summary>ComfyUI node class ID for the Florence-2 runner.</summary>
-    public const string Florence2NodeID = "Florence2Run";
-
-    /// <summary>ComfyUI node class ID for the Florence-2 model downloader/loader.</summary>
-    public const string Florence2LoaderID = "DownloadAndLoadFlorence2Model";
-
-    /// <summary>Feature flag mapped to the Florence-2 nodes.</summary>
-    public const string Florence2Feature = "florence2";
-
     /// <summary>Registers the built-in backends, the node-to-feature mapping, and the installable node packs.
     /// <para>Everything here mutates public static collections that the Comfy extension exposes for exactly this
     /// purpose, so no core file needs editing.</para></summary>
@@ -75,89 +63,6 @@ public static class InterrogateBackends
             }
         });
         Register(new(WD14Feature, "WD14 Tagger", "Booru-style comma-separated tags. Fast, small, ideal for prompt reuse and dataset captioning.", WD14Feature, WD14Feature, "tags", BuildWD14Workflow));
-        ComfyUIBackendExtension.NodeToFeatureMap[Florence2NodeID] = Florence2Feature;
-        InstallableFeatures.RegisterInstallableFeature(new("Florence-2", Florence2Feature, "https://github.com/kijai/ComfyUI-Florence2", "kijai"));
-        ComfyUIBackendExtension.RawObjectInfoParsers.Add(rawObjectInfo =>
-        {
-            if (ComfyUIBackendExtension.TryGetRequiredInputs(rawObjectInfo, Florence2LoaderID, "model", out JToken models))
-            {
-                Florence2Models = [.. models.Select(m => $"{m}")];
-            }
-        });
-        Register(new(Florence2Feature, "Florence-2 Caption", "Natural-language description of the image. Heavier than the tagger and downloads a multi-GB model on first use, but reads like a prompt.", Florence2Feature, Florence2Feature, "prose", BuildFlorence2Workflow));
-    }
-
-    /// <summary>Picks the Florence-2 model to run.
-    /// <para>Prefers a PromptGen fine-tune when one is present: the stock Microsoft weights describe an image the
-    /// way a caption dataset does, while the PromptGen variants were tuned to emit text shaped like a generation
-    /// prompt, which is what this feature is actually for.</para></summary>
-    public static string ResolveFlorence2Model(string requested)
-    {
-        string[] available = Florence2Models;
-        if (!string.IsNullOrWhiteSpace(requested) && available.Contains(requested))
-        {
-            return requested;
-        }
-        string promptGen = available.FirstOrDefault(m => m.Contains("PromptGen"));
-        string large = available.FirstOrDefault(m => m.Contains("large"));
-        return promptGen ?? large ?? available.FirstOrDefault() ?? "microsoft/Florence-2-base";
-    }
-
-    /// <summary>Builds the Florence-2 captioning workflow.</summary>
-    public static JObject BuildFlorence2Workflow(string imageB64, JObject options)
-    {
-        SpokeModePolicy.AssertModelTreeWriteAllowed("run an auto-downloading Florence-2 model loader");
-        string task = $"{options?["task"]}";
-        if (string.IsNullOrWhiteSpace(task))
-        {
-            task = "more_detailed_caption";
-        }
-        return new JObject()
-        {
-            ["1"] = new JObject()
-            {
-                ["class_type"] = "SwarmLoadImageB64",
-                ["inputs"] = new JObject() { ["image_base64"] = imageB64 }
-            },
-            ["2"] = new JObject()
-            {
-                ["class_type"] = Florence2LoaderID,
-                ["inputs"] = new JObject()
-                {
-                    ["model"] = ResolveFlorence2Model($"{options?["model"]}"),
-                    ["precision"] = "fp16"
-                }
-            },
-            ["3"] = new JObject()
-            {
-                ["class_type"] = Florence2NodeID,
-                ["inputs"] = new JObject()
-                {
-                    ["image"] = new JArray() { "1", 0 },
-                    ["florence2_model"] = new JArray() { "2", 0 },
-                    ["text_input"] = "",
-                    ["task"] = task,
-                    ["fill_mask"] = false,
-                    // Do not hold the model in VRAM. This is a one-shot utility call sharing a GPU with image
-                    // generation, and a resident multi-GB VLM would quietly cost the user their next batch size.
-                    ["keep_model_loaded"] = false,
-                    ["max_new_tokens"] = options?["max_new_tokens"]?.Value<int>() ?? 1024,
-                    ["num_beams"] = options?["num_beams"]?.Value<int>() ?? 3,
-                    ["do_sample"] = false,
-                    ["seed"] = 1
-                }
-            },
-            ["4"] = new JObject()
-            {
-                ["class_type"] = "SwarmAddSaveMetadataWS",
-                ["inputs"] = new JObject()
-                {
-                    ["key"] = ResultKey,
-                    // Florence2Run returns (image, mask, caption, data); the caption is index 2.
-                    ["value"] = new JArray() { "3", 2 }
-                }
-            }
-        };
     }
 
     /// <summary>Picks the WD14 model to run: the user's choice when it is actually available on the backend,

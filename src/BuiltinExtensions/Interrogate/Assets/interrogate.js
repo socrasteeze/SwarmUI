@@ -15,17 +15,12 @@ class InterrogateHelperClass {
         this.backends = null;
         /** WD14 model names reported by the connected ComfyUI backend. */
         this.wd14Models = [];
-        /** Florence-2 model names reported by the connected ComfyUI backend. */
-        this.florence2Models = [];
         /** The modal element, built lazily on first use. */
         this.modal = null;
         /** Source of the image currently loaded in the modal. */
         this.currentSrc = null;
         /** True while a request is in flight, to keep the Interrogate button from double-firing. */
         this.running = false;
-        /** Florence-2 tasks worth offering. The node accepts more, but the rest are detection and segmentation
-         * modes whose output is coordinates rather than text. */
-        this.captionTasks = ['more_detailed_caption', 'detailed_caption', 'caption', 'prompt_gen_mixed_caption', 'prompt_gen_mixed_caption_plus', 'prompt_gen_tags', 'prompt_gen_analyze', 'ocr'];
     }
 
     /** Adds the media button. Called once at script load. */
@@ -86,12 +81,6 @@ class InterrogateHelperClass {
                                     <label class="translate" for="interrogate_exclude">Exclude tags</label>
                                     <input type="text" class="auto-text interrogate-text" id="interrogate_exclude" placeholder="comma, separated">
                                 </div>
-                                <div class="interrogate-caption-options" id="interrogate_caption_options">
-                                    <label class="translate" for="interrogate_caption_model">Caption model</label>
-                                    <select class="auto-dropdown interrogate-select" id="interrogate_caption_model"></select>
-                                    <label class="translate" for="interrogate_task">Caption style</label>
-                                    <select class="auto-dropdown interrogate-select" id="interrogate_task"></select>
-                                </div>
                                 <div class="interrogate-install" id="interrogate_install"></div>
                             </div>
                         </div>
@@ -121,13 +110,6 @@ class InterrogateHelperClass {
             this.syncBackendUI();
         });
         getRequiredElementById('interrogate_result').addEventListener('change', () => this.renderChips());
-        let taskSelect = getRequiredElementById('interrogate_task');
-        for (let task of this.captionTasks) {
-            let option = document.createElement('option');
-            option.value = task;
-            option.innerText = task.replaceAll('_', ' ');
-            taskSelect.appendChild(option);
-        }
     }
 
     /** Opens the modal for one image. */
@@ -146,15 +128,14 @@ class InterrogateHelperClass {
         this.refreshBackends();
     }
 
-    /** Resets the tagger/caption option fields (threshold, character threshold, exclude tags, caption task) to
-     * their stored preferences. Split out of open() so a headless caller that built the modal DOM itself (eg
-     * Character Sheet's "Analyze pose" button, via buildModal()) can get the same defaults without opening the
-     * modal UI. */
+    /** Resets the tagger option fields (threshold, character threshold, exclude tags) to their stored
+     * preferences. Split out of open() so a headless caller that built the modal DOM itself (eg Character
+     * Sheet's "Analyze pose" button, via buildModal()) can get the same defaults without opening the modal
+     * UI. */
     fillOptionDefaults() {
         getRequiredElementById('interrogate_threshold').value = this.pref('threshold', '0.35');
         getRequiredElementById('interrogate_char_threshold').value = this.pref('char_threshold', '0.85');
         getRequiredElementById('interrogate_exclude').value = this.pref('exclude', '');
-        getRequiredElementById('interrogate_task').value = this.pref('task', 'more_detailed_caption');
     }
 
     /** Fills a select with options, preserving a stored choice when it is still offered. */
@@ -183,7 +164,6 @@ class InterrogateHelperClass {
         genericRequest('ListInterrogateBackends', {}, data => {
             this.backends = data.backends;
             this.wd14Models = data.wd14_models || [];
-            this.florence2Models = data.florence2_models || [];
             let select = getRequiredElementById('interrogate_backend');
             let preferred = this.pref('backend', null);
             select.innerHTML = '';
@@ -196,7 +176,6 @@ class InterrogateHelperClass {
             let available = this.backends.filter(b => b.available);
             select.value = preferred && this.backends.some(b => b.id == preferred) ? preferred : (available.length > 0 ? available[0].id : (this.backends.length > 0 ? this.backends[0].id : ''));
             this.fillSelect('interrogate_model', this.wd14Models, 'model');
-            this.fillSelect('interrogate_caption_model', this.florence2Models, 'caption_model');
             this.syncBackendUI();
             if (callback) {
                 callback();
@@ -219,19 +198,16 @@ class InterrogateHelperClass {
         let desc = getRequiredElementById('interrogate_backend_desc');
         let install = getRequiredElementById('interrogate_install');
         let taggerOptions = getRequiredElementById('interrogate_tagger_options');
-        let captionOptions = getRequiredElementById('interrogate_caption_options');
         let runButton = getRequiredElementById('interrogate_run');
         install.innerHTML = '';
         if (!backend) {
             desc.innerText = 'No interrogation methods are registered.';
             taggerOptions.style.display = 'none';
-            captionOptions.style.display = 'none';
             runButton.disabled = true;
             return;
         }
         desc.innerText = backend.description;
         taggerOptions.style.display = backend.output_kind == 'tags' ? '' : 'none';
-        captionOptions.style.display = backend.output_kind == 'prose' ? '' : 'none';
         runButton.disabled = !backend.available;
         if (!backend.available) {
             if (backend.install_feature) {
@@ -248,16 +224,12 @@ class InterrogateHelperClass {
         getRequiredElementById('interrogate_status').innerText = text;
     }
 
-    /** Collects the options blob for the selected backend. */
+    /** Collects the options blob for the selected backend.
+     * Only the built-in tagger has options UI. A backend registered by another extension with a different
+     * output_kind gets an empty blob and is expected to carry its own defaults in BuildWorkflow. */
     gatherOptions(backend) {
-        if (backend.output_kind == 'prose') {
-            let options = {
-                'model': getRequiredElementById('interrogate_caption_model').value,
-                'task': getRequiredElementById('interrogate_task').value
-            };
-            this.setPref('caption_model', options.model);
-            this.setPref('task', options.task);
-            return options;
+        if (backend.output_kind != 'tags') {
+            return {};
         }
         let options = {
             'model': getRequiredElementById('interrogate_model').value,
