@@ -189,6 +189,24 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-11 (second sync) — merged 1 commit: "patch var seed with video-audio" (`194b879`).
+  Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep findings 0.
+  Merge is `dc3e777`; merge base was `2119891`, the tip of the previous sync, so the window was
+  exactly this one commit.
+  Incoming scope was 1 file, +32/-7, and it is not a fork touchpoint (`SwarmKSampler.py` is
+  untouched by the fork relative to the merge base). Adds `slerp_flat` (a whole-tensor slerp,
+  used when a latent's frame dim is exactly 2 — the video+audio nested-latent case) alongside the
+  existing per-frame `slerp`, and threads an explicit `torch.Generator` per batch index through
+  `swarm_partial_noise`/`swarm_fixed_noise_inner` instead of reseeding the global RNG with
+  `torch.manual_seed` each call, so var-seed noise for nested (video+audio) latents no longer
+  depends on batch-iteration order.
+  Gates: no `dotnet` SDK in this container (same recurring gap as the previous sync and several
+  before it — outbound install blocked by the environment's proxy policy), so `dotnet
+  build`/`format`/`test SwarmUITests`/the ci-test boot could not run here; this is an environment
+  gap, not a merge finding. Substitute check run instead: `python3 -m py_compile` on the touched
+  file (PASS). No live/GPU/Playwright gate available in this environment either. Recommend a full
+  `dotnet build` + `dotnet test SwarmUITests` pass on a box with the SDK before relying on this
+  merge in production.
 - 2026-09-11 — merged 1 commit: "FromTo/Alternate hook lora support" (`2119891`, for #876). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep findings 0. Merge is `467b3c4`; merge base was `a16cbe85`, the tip of the previous sync, so the window was exactly this one commit.
   Incoming scope was 7 files, +169/-16: `PromptRegion.cs`, `T2IPromptHandling.cs`, `SwarmText.py`, `PromptHandlerTests.cs`, and `docs/Features/Prompt Syntax.md` are byte-identical to upstream after the merge (not fork touchpoints); `WorkflowGenerator.cs` and `T2IParamInput.cs` are fork touchpoints and both auto-merged clean. Re-verified rather than assumed: `WorkflowGenerator.cs`'s two `SpokeModePolicy.AssertModelTreeWriteAllowed(...)` gates (`CreateNode`'s auto-download node check and the workflow-required-model download check) are still present and untouched by the incoming lora-hook code, which lands in a disjoint region of the same file; `T2IParamInput.cs`'s fork-added `["3:4"] = (448, 576)` aspect-ratio entry is still present, disjoint from upstream's new FromTo/Alternate param additions.
   Gates: no `dotnet` SDK in this container (outbound install blocked by the environment's proxy policy — `builds.dotnet.microsoft.com` denied), so `dotnet build`/`dotnet format`/`dotnet test SwarmUITests`/the ci-test boot could not run here; this is an environment gap, not a merge finding. Substitute checks run instead: brace-balance count on all 5 touched `.cs` files (592/592, 150/150, 234/234, 46/46, 6/6 — all balanced), `python3 -m py_compile` on `SwarmText.py` (PASS), and a repo-wide conflict-marker sweep (none). No live/GPU/Playwright gate available in this environment either. Recommend a full `dotnet build` + `dotnet test SwarmUITests` pass on a box with the SDK before relying on this merge in production.
