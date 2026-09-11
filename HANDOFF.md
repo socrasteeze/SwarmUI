@@ -1,10 +1,16 @@
 # HANDOFF
 
-**Updated:** 2026-09-10 · **Branch:** main · **Base:** a52f3ea1 (= origin/main) · **Tree:** clean
+**Updated:** 2026-09-11 · **Branch:** main · **Base:** f3a5570 (= origin/main) · **Tree:** clean
 
 ## State
-No source changes this session — the work was tracker reconciliation only, so `git log` is unchanged by it.
-Two upstream syncs landed today (`a0d69b5b`, `a52f3ea1` are their AGENTS log entries); tree is clean and level with origin/main.
+Routine scheduled upstream sync only — no fork feature work this session. Merged 1 upstream commit
+("FromTo/Alternate hook lora support", `2119891`) with zero conflicts; see the 2026-09-11 entry in
+`AGENTS.md`'s Upstream Sync Log for the merge details and the touchpoint re-verification. This ran in a
+Linux cloud container with no `dotnet` SDK available (outbound install blocked by the environment's proxy
+policy), so the usual `dotnet build`/`dotnet test`/`dotnet format` gates did not run here — brace-balance
+and `py_compile` substitute checks passed instead. **Recommend a full `dotnet build` + `dotnet test
+SwarmUITests` pass on a machine with the SDK before relying on this merge.** All items below are carried
+forward unchanged from the prior session; none were touched by this sync.
 
 ## Done this session
 - Reconciled the tracker against `1a6d8adc..HEAD`: filed and closed **SWR.77–84**, covering the spoke model cache, the spoke launcher/shortcut fixes, the session re-login wedge, the `/simple` GPU caret picker, the mobile scroll-perf sweep, the TagDex grid tiles, full-tag insert + `HiddenHistoryFolders` + pinned Starred, and the favorite-relay skip
