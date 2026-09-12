@@ -41,6 +41,21 @@ const source = readFileSync(SOURCE_PATH, 'utf8');
 // behavior reassign these (no `let`) rather than redeclaring them.
 let document = { getElementById: () => null };
 let triggerChangeFor = () => {};
+// Read by runAutoEnhance (getRequiredElementById('current_model').value) and by the generate-click tests
+// (makeWSRequest, MouseEvent) - reassigned per test the same way document/triggerChangeFor are above.
+let getRequiredElementById = () => ({ value: '' });
+let makeWSRequest = () => null;
+let MouseEvent = function(type, init) {
+    this.type = type;
+    Object.assign(this, init || {});
+};
+// Read by pref()/setPref() (mode and profile-override persistence). A plain in-memory stand-in for the
+// browser's localStorage, keyed the same way.
+let localStorage = {
+    store: {},
+    getItem(key) { return Object.prototype.hasOwnProperty.call(this.store, key) ? this.store[key] : null; },
+    setItem(key, value) { this.store[key] = String(value); }
+};
 
 /** Pulls one class method (by name) out of `src` by brace-matching, starting from its "\n    name(" signature
  * line through the end of its body (inclusive). Returns text usable as an object-literal shorthand method,
@@ -98,8 +113,54 @@ function makeFakeElement() {
         style: { display: '' },
         classList: makeFakeClassList(),
         addEventListener: () => {},
-        removeEventListener: () => {}
+        removeEventListener: () => {},
+        dispatched: [],
+        dispatchEvent(evt) { this.dispatched.push(evt); }
     };
+}
+
+/** A fake click event carrying only what onGenerateClick reads/calls: 'altKey', and counters for whether
+ * stopPropagation/preventDefault were invoked. */
+function makeFakeClickEvent(altKey) {
+    return {
+        altKey: altKey || false,
+        stoppedCount: 0,
+        preventedCount: 0,
+        stopPropagation() { this.stoppedCount++; },
+        preventDefault() { this.preventedCount++; }
+    };
+}
+
+/** Builds a host exercising the generate-click interceptor and the auto-enhance path behind it
+ * (onGenerateClick -> runAutoEnhance -> applyResult/showConflict/showPassthrough -> dispatchGenerateClick),
+ * with sensible fakes for every property those methods touch. `overrides` replaces individual defaults. */
+function buildAutoEnhanceHost(overrides) {
+    let defaults = {
+        mode: 'auto',
+        buttonEnabled: true,
+        reentryGuard: false,
+        autoRunning: false,
+        profileOverride: '',
+        appliedEnhancedText: null,
+        lastResult: null,
+        applyEnabled: false,
+        generateButtonOriginalText: null,
+        clearProvenanceListener: null,
+        promptBox: makeFakeElement(),
+        generateButton: makeFakeElement(),
+        panel: { classList: makeFakeClassList() },
+        previewArea: makeFakeElement(),
+        notesBlock: makeFakeElement(),
+        conflictBlock: makeFakeElement(),
+        passthroughBlock: makeFakeElement(),
+        applyButton: makeFakeElement(),
+        statusLine: makeFakeElement()
+    };
+    return buildHost(
+        ['onGenerateClick', 'runAutoEnhance', 'setGenerateButtonBusy', 'dispatchGenerateClick', 'applyResult',
+            'recordProvenance', 'armProvenanceClearOnEdit', 'resetPanel', 'showPanel', 'showConflict',
+            'showPassthrough', 'setApplyEnabled', 'setStatus'],
+        Object.assign(defaults, overrides));
 }
 
 const results = [];
@@ -248,8 +309,9 @@ function check(name, pass, detail) {
     triggerChangeFor = (elem) => { triggerChangeForCalls.push(elem); };
     document = { getElementById: (id) => fakeElementsById[id] || null };
 
-    let host = buildHost(['apply', 'recordProvenance', 'armProvenanceClearOnEdit', 'close'], {
+    let host = buildHost(['apply', 'applyResult', 'recordProvenance', 'armProvenanceClearOnEdit', 'close'], {
         applyEnabled: true,
+        appliedEnhancedText: null,
         lastResult: {
             result: 'a photograph of a cat sitting on a garden wall, soft morning light',
             original: 'cat on a wall',
@@ -282,11 +344,13 @@ function check(name, pass, detail) {
         JSON.stringify(provenance));
     check('...and triggers a change notification on the provenance element too', triggerChangeForCalls.includes(provenanceElem), `calls=${triggerChangeForCalls.length}`);
     check('apply() closes the panel afterward', !host.panel.classList.contains('prompt-enhance-panel-open'), `open=${host.panel.classList.contains('prompt-enhance-panel-open')}`);
+    check('apply() remembers the applied text, so a later generate click is not re-enhanced against it', host.appliedEnhancedText == 'a photograph of a cat sitting on a garden wall, soft morning light', `appliedEnhancedText="${host.appliedEnhancedText}"`);
 
     // Contrast: apply() must be a no-op when Apply is not enabled (eg still mid-stream, or after a conflict).
     let triggerChangeForCalls2 = [];
-    let host2 = buildHost(['apply', 'recordProvenance', 'armProvenanceClearOnEdit', 'close'], {
+    let host2 = buildHost(['apply', 'applyResult', 'recordProvenance', 'armProvenanceClearOnEdit', 'close'], {
         applyEnabled: false,
+        appliedEnhancedText: null,
         lastResult: { result: 'should not be used' },
         promptBox: makeFakeElement(),
         panel: { classList: makeFakeClassList(['prompt-enhance-panel-open']) },
@@ -347,6 +411,158 @@ function check(name, pass, detail) {
     });
     check('a resolved profile with no healthy endpoint still enables the button (fail-open + cache contract)', host3.buttonEnabled === true, `buttonEnabled=${host3.buttonEnabled}`);
     check('...and the title explains the endpoint is not reachable', host3.button.title.includes('pass through unchanged'), `title="${host3.button.title}"`);
+}
+
+// ====================================================================================================
+// Part 7: mode 'off' hides the Enhance button; the mode select itself is never hidden
+// ====================================================================================================
+{
+    let host = buildHost(['setMode', 'applyModeToButtonVisibility', 'setPref'], {
+        mode: 'review',
+        button: makeFakeElement()
+    });
+    host.setMode('off');
+    check('mode "off" hides the Enhance button', host.button.style.display == 'none', `display="${host.button.style.display}"`);
+    check('...and the mode is persisted (localStorage, prefixed like interrogate.js\'s prefs)', localStorage.getItem('promptenhance_mode') == 'off', `stored="${localStorage.getItem('promptenhance_mode')}"`);
+    host.setMode('auto');
+    check('switching back to "auto" shows the button again', host.button.style.display == '', `display="${host.button.style.display}"`);
+}
+
+// ====================================================================================================
+// Part 8: mode 'auto' intercepts the generate click exactly once and re-dispatches on result
+// ====================================================================================================
+{
+    let promptBox = makeFakeElement();
+    promptBox.value = 'a cat';
+    let host = buildAutoEnhanceHost({ promptBox: promptBox });
+    let reentryDuringDispatch = null;
+    host.generateButton.innerText = 'Generate';
+    host.generateButton.dispatchEvent = function(evt) {
+        reentryDuringDispatch = host.reentryGuard;
+        this.dispatched.push(evt);
+    };
+    let capturedInData = null;
+    let capturedOnFrame = null;
+    makeWSRequest = (url, inData, onFrame) => {
+        capturedInData = inData;
+        capturedOnFrame = onFrame;
+        return { fake: true };
+    };
+    getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+
+    let event = makeFakeClickEvent(false);
+    host.onGenerateClick(event);
+    check('the click is intercepted exactly once (stopPropagation and preventDefault each called once)', event.stoppedCount == 1 && event.preventedCount == 1, `stopped=${event.stoppedCount} prevented=${event.preventedCount}`);
+    check('exactly one EnhancePrompt request is sent, carrying the current prompt', capturedInData != null && capturedInData.prompt == 'a cat', `inData=${JSON.stringify(capturedInData)}`);
+    check('the generate button is not re-clicked while the request is still in flight', host.generateButton.dispatched.length == 0, `dispatched=${host.generateButton.dispatched.length}`);
+    check('the generate button shows an "Enhancing..." busy state while it runs', host.generateButton.innerText == 'Enhancing...', `innerText="${host.generateButton.innerText}"`);
+
+    capturedOnFrame({ result: 'a photograph of a cat', original: 'a cat', profile: 'anima', pack_version: '1.0.0', writer_model: 'm', endpoint: 'writer', cached: false });
+    check('on result: the prompt box is written with the enhanced text (the existing apply path)', host.promptBox.value == 'a photograph of a cat', `promptBox.value="${host.promptBox.value}"`);
+    check('on result: the generate click is re-dispatched exactly once', host.generateButton.dispatched.length == 1, `dispatched=${host.generateButton.dispatched.length}`);
+    check('...under the re-entry guard (true during the synthetic dispatch)', reentryDuringDispatch === true, `reentryGuard during dispatch=${reentryDuringDispatch}`);
+    check('...and the guard is back off once the synthetic dispatch returns', host.reentryGuard === false, `reentryGuard=${host.reentryGuard}`);
+    check('the busy state is cleared again once the result arrives', host.generateButton.innerText == 'Generate', `innerText="${host.generateButton.innerText}"`);
+
+    let secondClick = makeFakeClickEvent(false);
+    host.onGenerateClick(secondClick);
+    check('a second click on the now-applied prompt is left completely untouched - never re-enhanced against its own output', secondClick.stoppedCount == 0 && secondClick.preventedCount == 0 && host.generateButton.dispatched.length == 1, `stopped=${secondClick.stoppedCount}, dispatched=${host.generateButton.dispatched.length}`);
+}
+
+// ====================================================================================================
+// Part 9: a conflict in auto mode blocks generation entirely
+// ====================================================================================================
+{
+    let promptBox = makeFakeElement();
+    promptBox.value = 'two mutually exclusive subjects';
+    let host = buildAutoEnhanceHost({ promptBox: promptBox });
+    let capturedOnFrame = null;
+    makeWSRequest = (url, inData, onFrame) => {
+        capturedOnFrame = onFrame;
+        return { fake: true };
+    };
+    getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+
+    host.onGenerateClick(makeFakeClickEvent(false));
+    capturedOnFrame({ conflict: 'CONFLICT: too many subjects for one image.' });
+    check('a conflict in auto mode never re-dispatches the generate click - generation is blocked', host.generateButton.dispatched.length == 0, `dispatched=${host.generateButton.dispatched.length}`);
+    check('...and shows the existing red block with the conflict line', host.conflictBlock.innerText == 'CONFLICT: too many subjects for one image.', `conflictBlock="${host.conflictBlock.innerText}"`);
+    check('...with the panel actually shown so the user sees it', host.panel.classList.contains('prompt-enhance-panel-open'), `open=${host.panel.classList.contains('prompt-enhance-panel-open')}`);
+    check('the original prompt is left untouched (nothing was applied)', host.promptBox.value == 'two mutually exclusive subjects', `promptBox.value="${host.promptBox.value}"`);
+}
+
+// ====================================================================================================
+// Part 10: passthrough (and a transport error) in auto mode generates anyway, fail-open
+// ====================================================================================================
+{
+    let promptBox = makeFakeElement();
+    promptBox.value = 'a cat';
+    let host = buildAutoEnhanceHost({ promptBox: promptBox });
+    let capturedOnFrame = null;
+    makeWSRequest = (url, inData, onFrame) => {
+        capturedOnFrame = onFrame;
+        return { fake: true };
+    };
+    getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+
+    host.onGenerateClick(makeFakeClickEvent(false));
+    capturedOnFrame({ passthrough: true, reason: 'No writer endpoint is reachable' });
+    check('a passthrough in auto mode still generates, with the original prompt untouched', host.generateButton.dispatched.length == 1 && host.promptBox.value == 'a cat', `dispatched=${host.generateButton.dispatched.length}, promptBox.value="${host.promptBox.value}"`);
+    check('...and shows the existing "Not enhanced" marker', host.passthroughBlock.innerText == 'Not enhanced: No writer endpoint is reachable', `passthroughBlock="${host.passthroughBlock.innerText}"`);
+
+    let promptBox2 = makeFakeElement();
+    promptBox2.value = 'a dog';
+    let host2 = buildAutoEnhanceHost({ promptBox: promptBox2 });
+    makeWSRequest = (url, inData, onFrame, depth, onError) => {
+        onError('connection refused');
+        return { fake: true };
+    };
+    host2.onGenerateClick(makeFakeClickEvent(false));
+    check('a transport error in auto mode also fails open: generates anyway with the original prompt', host2.generateButton.dispatched.length == 1 && host2.promptBox.value == 'a dog', `dispatched=${host2.generateButton.dispatched.length}, promptBox.value="${host2.promptBox.value}"`);
+    check('...and shows the "Not enhanced" marker carrying the error text', host2.passthroughBlock.innerText == 'Not enhanced: connection refused', `passthroughBlock="${host2.passthroughBlock.innerText}"`);
+}
+
+// ====================================================================================================
+// Part 11: the profile-override dropdown enables the button when automatic resolution returned null
+// ====================================================================================================
+{
+    let host = buildHost(['applyStatusToButton', 'setButtonEnabled'], {
+        button: makeFakeElement(),
+        buttonEnabled: true
+    });
+    // Automatic resolution finds nothing - eg one of the plain-SDXL or qwen-image checkpoints outside any
+    // folder/class map.
+    host.applyStatusToButton({
+        profiles: [{ id: 'illustriousxl', display: 'IllustriousXL', target_model: 'IllustriousXL' }],
+        endpoints: [{ id: 'writer', kind: 'ollama', model: 'm', enabled: true, healthy: true }],
+        resolved: { profile: null, reason: "No writer profile for model class 'stable-diffusion-xl-v1'" }
+    });
+    check('(setup) automatic resolution finding nothing disables the button', host.buttonEnabled === false, `buttonEnabled=${host.buttonEnabled}`);
+    // The user picks a profile in the panel's override <select>; the resulting status re-check (now carrying
+    // profile_override) resolves and re-enables the button - the escape hatch for unmapped models.
+    host.applyStatusToButton({
+        profiles: [{ id: 'illustriousxl', display: 'IllustriousXL', target_model: 'IllustriousXL' }],
+        endpoints: [{ id: 'writer', kind: 'ollama', model: 'm', enabled: true, healthy: true }],
+        resolved: { profile: 'illustriousxl', reason: null }
+    });
+    check('selecting a profile override re-enables the button that automatic resolution had disabled', host.buttonEnabled === true, `buttonEnabled=${host.buttonEnabled}`);
+}
+
+// ====================================================================================================
+// Part 12: the profile-override <select> is filled with 'Automatic' plus every registered profile, once
+// ====================================================================================================
+{
+    document = { createElement: () => ({}) };
+    let select = { children: [], dataset: {}, appendChild(opt) { this.children.push(opt); } };
+    let host = buildHost(['populateProfileOptions'], {
+        profileSelect: select,
+        profileOverride: ''
+    });
+    host.populateProfileOptions([{ id: 'anima', display: 'Anima', target_model: 'Anima' }, { id: 'illustriousxl', display: 'IllustriousXL', target_model: 'IllustriousXL' }]);
+    check('the "Automatic" default option is added first', select.children[0].value == '' && select.children[0].innerText == 'Automatic', JSON.stringify(select.children[0]));
+    check('every registered profile is added as an option', select.children.length == 3 && select.children[1].value == 'anima' && select.children[2].value == 'illustriousxl', `count=${select.children.length}`);
+    host.populateProfileOptions([{ id: 'anima', display: 'Anima', target_model: 'Anima' }]);
+    check('a repeated call does not re-add options (the registry does not change at runtime)', select.children.length == 3, `count=${select.children.length}`);
 }
 
 const failed = results.filter(r => !r.pass);

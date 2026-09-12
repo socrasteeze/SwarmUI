@@ -24,7 +24,7 @@ public static class PromptEnhanceAPI
         API.RegisterAPICall(EnhancePrompt, true, PromptEnhanceExtension.PermUsePromptEnhance);
     }
 
-    [API.APIDescription("Lists Prompt Enhance status for the given model: known writer profiles, configured endpoints and their live health, and which profile (if any) resolves automatically for this model.",
+    [API.APIDescription("Lists Prompt Enhance status for the given model: known writer profiles, configured endpoints and their live health, and which profile (if any) resolves for this model (automatically, or forced via profile_override).",
         """
         "pack_version": "1.1.0+7ff564b9",
         "profiles": [{"id": "anima", "display": "Anima", "target_model": "Anima"}],
@@ -32,10 +32,11 @@ public static class PromptEnhanceAPI
         "resolved": {"profile": "anima", "reason": null}
         """)]
     public static async Task<JObject> ListPromptEnhanceStatus(Session session,
-        [API.APIParameter("Name of the currently loaded model, used to resolve a writer profile.")] string model)
+        [API.APIParameter("Name of the currently loaded model, used to resolve a writer profile.")] string model,
+        [API.APIParameter("Optional profile ID to force, overriding automatic resolution - same semantics as EnhancePrompt's own profile_override.")] string profile_override = "")
     {
         T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
-        PromptEnhanceProfile profile = PromptEnhanceProfiles.Resolve(t2iModel, null, out string reason);
+        PromptEnhanceProfile profile = PromptEnhanceProfiles.Resolve(t2iModel, profile_override, out string reason);
         JArray profiles = [];
         foreach (PromptEnhanceProfile entry in PromptEnhanceProfiles.Profiles.Values)
         {

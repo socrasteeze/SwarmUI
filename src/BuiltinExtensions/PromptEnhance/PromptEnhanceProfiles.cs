@@ -1,4 +1,6 @@
 using FreneticUtilities.FreneticExtensions;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using SwarmUI.Core;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
@@ -53,16 +55,25 @@ public static class PromptEnhanceProfiles
         ["qwen-image-edit-2511"] = "Qwen-Image-Edit-2511"
     };
 
-    /// <summary>Filename-fragment regex overrides, consulted before any model-class map. Handles model
-    /// families that a checkpoint's class ID cannot disambiguate on its own (eg Illustrious/NoobAI checkpoints,
-    /// which sort under the shared <c>stable-diffusion-xl-v1</c> class). Checked against the model's
-    /// lowercased <see cref="T2IModel.Name"/>. Anchored on a word-ish boundary (start of string, or a path/word
-    /// separator) rather than a bare substring match, so eg "illustrious" does not also match inside an
-    /// unrelated longer name.</summary>
+    /// <summary>Built-in filename-fragment regex fallback, consulted after <see cref="ConfiguredFilenameOverrides"/>
+    /// and before any model-class map. Handles model families that a checkpoint's class ID cannot disambiguate
+    /// on its own (eg Illustrious/NoobAI checkpoints outside a configured folder, which sort under the shared
+    /// <c>stable-diffusion-xl-v1</c> class). Checked against the model's lowercased <see cref="T2IModel.Name"/>.
+    /// Anchored on a word-ish boundary (start of string, or a path/word separator) rather than a bare substring
+    /// match, so eg "illustrious" does not also match inside an unrelated longer name.</summary>
     private static readonly (string Pattern, string ProfileID)[] FilenameOverrides =
     [
         (@"(^|[\/_ -])(illustrious|noob)", "illustriousxl")
     ];
+
+    /// <summary>User-editable folder/filename override rules, loaded from <see cref="OverridesConfigPath"/> and
+    /// consulted before <see cref="FilenameOverrides"/> in <see cref="Resolve"/> - a checkpoint library
+    /// organised by folder (eg <c>ill/</c>, <c>anima/</c>) can map an entire folder to a profile without
+    /// depending on any filename convention within it. Populated by <see cref="LoadOverrides"/>.</summary>
+    private static readonly List<(Regex Pattern, string ProfileID)> ConfiguredFilenameOverrides = [];
+
+    /// <summary>Full path to the user-editable filename/folder override config file.</summary>
+    public static string OverridesConfigPath => $"{Program.DataDir}/PromptEnhance/overrides.json";
 
     /// <summary>Maps a loaded model's <see cref="T2IModelClass.ID"/> directly to a profile, for classes that
     /// unambiguously identify one writer target on their own.</summary>
@@ -126,14 +137,80 @@ public static class PromptEnhanceProfiles
             }
         }
         Logs.Init($"[PromptEnhance] Loaded {loaded} writer profile(s), pack version {PackVersion}");
+        LoadOverrides();
+    }
+
+    /// <summary>Loads <see cref="ConfiguredFilenameOverrides"/> from <see cref="OverridesConfigPath"/>, writing
+    /// a default config file (the shipped folder-based Illustrious/Anima mapping) on first run. Never throws:
+    /// a missing or malformed file leaves the list empty, and a single malformed regex pattern within an
+    /// otherwise-valid file is logged and skipped rather than discarding every other entry. Public (like
+    /// <see cref="PromptEnhanceEndpoints.Init"/>) so it can be re-run against a redirected config path.</summary>
+    public static void LoadOverrides()
+    {
+        ConfiguredFilenameOverrides.Clear();
+        try
+        {
+            string path = OverridesConfigPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            if (!File.Exists(path))
+            {
+                File.WriteAllText(path, BuildDefaultOverridesConfig().ToString(Formatting.Indented));
+            }
+            JObject data = JObject.Parse(File.ReadAllText(path));
+            if (data["overrides"] is JArray array)
+            {
+                foreach (JToken token in array)
+                {
+                    if (token is not JObject entry)
+                    {
+                        continue;
+                    }
+                    string pattern = entry.Value<string>("pattern");
+                    string profileId = entry.Value<string>("profile");
+                    if (string.IsNullOrWhiteSpace(pattern) || string.IsNullOrWhiteSpace(profileId))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        Regex regex = new(pattern);
+                        ConfiguredFilenameOverrides.Add((regex, profileId));
+                    }
+                    catch (Exception ex)
+                    {
+                        Logs.Error($"[PromptEnhance] Override config has an invalid regex pattern '{pattern}': {ex.ReadableString()} - skipping it.");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"[PromptEnhance] Could not load override config '{OverridesConfigPath}': {ex.ReadableString()}");
+        }
+    }
+
+    /// <summary>Builds the default override config written on first run: the shipped folder-based mapping for
+    /// the fork owner's IllustriousXL and Anima checkpoint folders.</summary>
+    private static JObject BuildDefaultOverridesConfig()
+    {
+        return new JObject()
+        {
+            ["_comment"] = "User-editable folder/filename overrides, consulted before the built-in Illustrious/NoobAI filename fallback. 'pattern' is a regex matched against the model's lowercased, subfolder-relative name (eg 'ill/Auralis_v3.safetensors' starts with 'ill/'). A malformed pattern is logged and skipped rather than disabling the rest of the file.",
+            ["overrides"] = new JArray()
+            {
+                new JObject() { ["pattern"] = "^ill/", ["profile"] = "illustriousxl" },
+                new JObject() { ["pattern"] = "^anima/", ["profile"] = "anima" }
+            }
+        };
     }
 
     /// <summary>Picks the profile to use for the given loaded model.
     /// <para>Resolution order: an explicit <paramref name="manualOverride"/> naming a known profile wins over
-    /// everything; then a filename-fragment override on the model's name (for classes a checkpoint's own class
-    /// ID cannot disambiguate); then the model's own class ID; then its compat class ID; then no profile at
-    /// all, with a human-readable reason. A non-empty <paramref name="manualOverride"/> that names no known
-    /// profile is a hard miss - it does not fall through to automatic selection.</para></summary>
+    /// everything; then the user-editable <see cref="ConfiguredFilenameOverrides"/> folder/filename map; then
+    /// the built-in <see cref="FilenameOverrides"/> filename fallback (for classes a checkpoint's own class ID
+    /// cannot disambiguate); then the model's own class ID; then its compat class ID; then no profile at all,
+    /// with a human-readable reason. A non-empty <paramref name="manualOverride"/> that names no known profile
+    /// is a hard miss - it does not fall through to automatic selection.</para></summary>
     /// <param name="model">The currently loaded T2I model, or null if none is loaded.</param>
     /// <param name="manualOverride">A user-specified profile ID to force, or null/empty for automatic
     /// selection.</param>
@@ -157,6 +234,14 @@ public static class PromptEnhanceProfiles
             return null;
         }
         string lowerName = (model.Name ?? "").ToLowerFast();
+        for (int i = 0; i < ConfiguredFilenameOverrides.Count; i++)
+        {
+            (Regex pattern, string profileId) = ConfiguredFilenameOverrides[i];
+            if (pattern.IsMatch(lowerName) && Profiles.TryGetValue(profileId, out PromptEnhanceProfile byConfig))
+            {
+                return byConfig;
+            }
+        }
         for (int i = 0; i < FilenameOverrides.Length; i++)
         {
             (string pattern, string profileId) = FilenameOverrides[i];

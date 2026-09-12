@@ -149,6 +149,121 @@ public class PromptEnhanceTests : SwarmUITest
 
     #endregion
 
+    #region PromptEnhanceProfiles filename/folder override config
+
+    /// <summary>A '^ill/' folder-pattern override (loaded from the user-editable overrides config) resolves
+    /// checkpoints under 'ill/' to the IllustriousXL profile even when the filename itself carries no
+    /// "illustrious" substring at all - the escape hatch for a library where most Illustrious derivatives
+    /// don't name themselves that.</summary>
+    [Test]
+    public void Resolve_ConfiguredFolderOverride_IllFolderResolvesIllustriousXL()
+    {
+        PromptEnhanceProfiles.Register(new("illustriousxl", "IllustriousXL", "IllustriousXL", "ixl system text"));
+        WithTempOverridesConfig("""{"overrides":[{"pattern":"^ill/","profile":"illustriousxl"}]}""", () =>
+        {
+            T2IModel model = MakeModel("ill/Auralis_v3.safetensors", "stable-diffusion-xl-v1", "stable-diffusion-xl-v1");
+            PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+            Assert.That(resolved?.ID, Is.EqualTo("illustriousxl"));
+            Assert.That(reason, Is.Null);
+        });
+    }
+
+    /// <summary>A plain SDXL checkpoint living outside any configured folder override still resolves to null
+    /// with a reason - the folder map must not accidentally widen to unrelated models.</summary>
+    [Test]
+    public void Resolve_PlainSdxlOutsideOverrideFolders_StillReturnsNullWithReason()
+    {
+        WithTempOverridesConfig("""{"overrides":[{"pattern":"^ill/","profile":"illustriousxl"},{"pattern":"^anima/","profile":"anima"}]}""", () =>
+        {
+            T2IModel model = MakeModel("sdxl/foo.safetensors", "stable-diffusion-xl-v1", "stable-diffusion-xl-v1");
+            PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+            Assert.That(resolved, Is.Null);
+            Assert.That(reason, Is.EqualTo("No writer profile for model class 'stable-diffusion-xl-v1'"));
+        });
+    }
+
+    /// <summary>A malformed regex pattern in the override config is logged and skipped, never thrown - and a
+    /// valid sibling entry in the same file still loads and resolves normally.</summary>
+    [Test]
+    public void LoadOverrides_MalformedRegex_IsSkippedNotThrown()
+    {
+        PromptEnhanceProfiles.Register(new("anima", "Anima", "Anima", "anima system text"));
+        Assert.DoesNotThrow(() => WithTempOverridesConfig(
+            """{"overrides":[{"pattern":"(unterminated","profile":"anima"},{"pattern":"^anima/","profile":"anima"}]}""",
+            () =>
+            {
+                T2IModel model = MakeModel("anima/Foo.safetensors", "stable-diffusion-xl-v1", "stable-diffusion-xl-v1");
+                PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+                Assert.That(resolved?.ID, Is.EqualTo("anima"));
+                Assert.That(reason, Is.Null);
+            }));
+    }
+
+    /// <summary>Precedence still holds with the folder override map in play: a manual override wins over a
+    /// configured folder pattern that would otherwise match.</summary>
+    [Test]
+    public void Resolve_ManualOverride_StillWinsOverConfiguredFolderOverride()
+    {
+        PromptEnhanceProfiles.Register(new("pe-test-manual-wins", "Test Manual", "TestModel", "system text"));
+        PromptEnhanceProfiles.Register(new("illustriousxl", "IllustriousXL", "IllustriousXL", "ixl system text"));
+        WithTempOverridesConfig("""{"overrides":[{"pattern":"^ill/","profile":"illustriousxl"}]}""", () =>
+        {
+            T2IModel model = MakeModel("ill/Auralis_v3.safetensors", "stable-diffusion-xl-v1", "stable-diffusion-xl-v1");
+            PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, "pe-test-manual-wins", out string reason);
+            Assert.That(resolved?.ID, Is.EqualTo("pe-test-manual-wins"));
+            Assert.That(reason, Is.Null);
+        });
+    }
+
+    /// <summary>Precedence still holds with the folder override map in play: it wins over the model-class and
+    /// compat-class maps too, for a model whose folder is configured but whose class would otherwise resolve
+    /// to a different profile entirely.</summary>
+    [Test]
+    public void Resolve_ConfiguredFolderOverride_WinsOverModelClassMap()
+    {
+        PromptEnhanceProfiles.Register(new("anima", "Anima", "Anima", "anima system text"));
+        PromptEnhanceProfiles.Register(new("flux2-klein-4b", "FLUX.2 klein 4B", "FLUX.2-klein-4B", "klein4b system text"));
+        WithTempOverridesConfig("""{"overrides":[{"pattern":"^anima/","profile":"anima"}]}""", () =>
+        {
+            T2IModel model = MakeModel("anima/Foo.safetensors", "flux-2-klein-4b", "flux-2-klein-4b");
+            PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+            Assert.That(resolved?.ID, Is.EqualTo("anima"));
+            Assert.That(reason, Is.Null);
+        });
+    }
+
+    /// <summary>Runs <paramref name="body"/> with <see cref="PromptEnhanceProfiles"/>'s override config
+    /// redirected to a throwaway data directory holding exactly <paramref name="json"/>, then restores
+    /// <see cref="Program.DataDir"/> afterward - mirrors <c>CachePutTryGet_RoundTrips</c>'s isolation pattern so
+    /// this never touches the real <c>Data/PromptEnhance/overrides.json</c>.</summary>
+    private static void WithTempOverridesConfig(string json, Action body)
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"swarmui-promptenhance-overrides-{Guid.NewGuid():N}");
+        string previousDataDir = Program.DataDir;
+        Program.DataDir = tempDir;
+        try
+        {
+            Directory.CreateDirectory($"{tempDir}/PromptEnhance");
+            File.WriteAllText($"{tempDir}/PromptEnhance/overrides.json", json);
+            PromptEnhanceProfiles.LoadOverrides();
+            body();
+        }
+        finally
+        {
+            Program.DataDir = previousDataDir;
+            try
+            {
+                Directory.Delete(tempDir, true);
+            }
+            catch (Exception)
+            {
+                // Best-effort - a stray open handle on a throwaway temp dir is not worth failing the test over.
+            }
+        }
+    }
+
+    #endregion
+
     #region PromptEnhanceCache.Key
 
     /// <summary>The cache key is stable for identical inputs, and changes whenever the pack version differs -
