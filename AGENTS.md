@@ -198,6 +198,40 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-12 — merged 2 commits: "patch RenameModel api check" (`a56ba95`, for #1538) and "some
+  additional api corrections" (`903da81`). Adopted 2 as-is; rejected 0; divergence work 2;
+  conflicts 3 across 2 files. Merge is `1a41909`; merge base was `194b879`, the tip of the
+  previous sync, so the window was exactly these two commits.
+  Incoming scope was 4 files, +18/-10: `AdminAPI.cs` (a config-key rename,
+  `authorizationrequired` → `userauthorization.authorizationrequired`) and `BasicAPIFeatures.cs`
+  (two new `AllowRegistration`/`SimplePasswordRegistration`/`OAuthRegistration` gates on the
+  register-account and OAuth-register routes) auto-merged clean — neither touches this fork's
+  `includeAutocompletions` gate in the same file. `ComfyUIWebAPI.cs` and `ModelsAPI.cs` are both
+  fork touchpoints and both conflicted, in the pattern this log has hit before (2026-09-11's
+  `WorkflowGenerator.cs`/`T2IParamInput.cs` entry): upstream reordered or inserted validation
+  ahead of this fork's `SpokeModePolicy.AssertModelTreeWriteAllowed(...)` write gates. Resolved
+  by keeping every fork gate first (unconditionally, before any model-name resolution or
+  mutation), then applying upstream's fix or reorder after it — two hunks in
+  `DoTensorRTCreateWS`/`DoLoraExtractionWS` (`ComfyUIWebAPI.cs`) and one in `RenameModel`
+  (`ModelsAPI.cs`, where the two sides' structural difference — this fork's `WriteClaim`-wrapped
+  block and braces vs. upstream's brace-less `ReadClaim` line — made git present a much larger
+  diff than the actual change; extracted both sides' full method bodies via `git show :2:`/`:3:`
+  to isolate it to upstream's one real fix, `!session.User.IsAllowedModel(oldName)` →
+  `!session.User.IsAllowedModel(newName)` in the new-name validity check, which is exactly what
+  `a56ba95`'s commit message describes). Verified rather than assumed: all six of this file
+  pair's `SpokeModePolicy.AssertModelTreeWriteAllowed` call sites (`ComfyUIWebAPI.cs`'s two plus
+  `ModelsAPI.cs`'s edit-metadata/download/delete/rename four) are present and unchanged after
+  the merge; zero conflict markers tree-wide after resolution.
+  Gates: **no working dotnet SDK in this environment** (same recurring gap as 2026-09-09 and
+  earlier) — Release build, `dotnet format --verify-no-changes`, and `dotnet test SwarmUITests`
+  could not run. Verified textually per this log's established fallback: brace/paren balance on
+  all four changed files, all balanced (`ComfyUIWebAPI.cs` 224/224 braces 387/387 parens,
+  `AdminAPI.cs` 421/421 braces 774/774 parens, `BasicAPIFeatures.cs` 290/290 braces 509/509
+  parens, `ModelsAPI.cs` 387/387 braces 853/853 parens). Author/committer scan on the merge
+  range showed only the two upstream commits' own author/committer (Alex "mcmonkey" Goodwin);
+  this session's merge commit carries `socrasteeze <socradeez@gmail.com>`. This entry is written
+  before the merge is pushed and held for a human (or a later session with a working SDK) to run
+  the real gates.
 - 2026-09-11 (second sync) — merged 1 commit: "patch var seed with video-audio" (`194b879`).
   Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep findings 0.
   Merge is `dc3e777`; merge base was `2119891`, the tip of the previous sync, so the window was
