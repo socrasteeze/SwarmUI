@@ -42,6 +42,7 @@ public static class PromptEnhanceProfiles
         ["flux2-klein-4b"] = "FLUX.2 klein 4B",
         ["flux2-klein-9b"] = "FLUX.2 klein 9B",
         ["illustriousxl"] = "IllustriousXL",
+        ["krea-2"] = "Krea 2",
         ["qwen-image-edit-2511"] = "Qwen Image Edit 2511"
     };
 
@@ -52,6 +53,7 @@ public static class PromptEnhanceProfiles
         ["flux2-klein-4b"] = "FLUX.2-klein-4B",
         ["flux2-klein-9b"] = "FLUX.2-klein-9B",
         ["illustriousxl"] = "IllustriousXL",
+        ["krea-2"] = "Krea-2",
         ["qwen-image-edit-2511"] = "Qwen-Image-Edit-2511"
     };
 
@@ -87,13 +89,15 @@ public static class PromptEnhanceProfiles
     /// classes that are exactly one architecture wide. Never map <c>qwen-image</c> (spans both edit and non-edit
     /// classes, already covered by <see cref="ModelClassMap"/>) or <c>stable-diffusion-xl-v1</c> (spans
     /// IllustriousXL and vanilla SDXL - the filename override map handles IllustriousXL, and vanilla SDXL has
-    /// no profile at all). Anima has its own distinct compat class (<c>anima</c>, see
-    /// <c>T2IModelClassSorter.cs</c>) and so is mapped here directly rather than via a filename guess.</summary>
+    /// no profile at all). Anima and Krea 2 each have their own distinct compat class (<c>anima</c>,
+    /// <c>krea-2</c>, see <c>T2IModelClassSorter.cs</c>) and so are mapped here directly rather than via a
+    /// filename guess.</summary>
     private static readonly Dictionary<string, string> CompatClassMap = new()
     {
         ["flux-2-klein-4b"] = "flux2-klein-4b",
         ["flux-2-klein-9b"] = "flux2-klein-9b",
-        ["anima"] = "anima"
+        ["anima"] = "anima",
+        ["krea-2"] = "krea-2"
     };
 
     /// <summary>Registers a profile. Safe to call from another extension's <c>OnInit</c>.</summary>

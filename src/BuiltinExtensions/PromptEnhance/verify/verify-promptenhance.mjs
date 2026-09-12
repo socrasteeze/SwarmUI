@@ -23,6 +23,11 @@
  * an unhealthy-but-resolved status no longer disables the button, only explains health in its title
  * (applyStatusToButton).
  *
+ * Further extended: refreshStatus()'s request-sequence guard against out-of-order ListPromptEnhanceStatus
+ * replies - two overlapping requests resolving out of order leave the button in the state of the
+ * later-dispatched request, not the later-resolving one, and a stale error reply does not clobber a newer
+ * successful reply either.
+ *
  * Run with: node src/BuiltinExtensions/PromptEnhance/verify/verify-promptenhance.mjs
  * Exits non-zero if any check fails.
  */
@@ -45,6 +50,10 @@ let triggerChangeFor = () => {};
 // (makeWSRequest, MouseEvent) - reassigned per test the same way document/triggerChangeFor are above.
 let getRequiredElementById = () => ({ value: '' });
 let makeWSRequest = () => null;
+// Read by refreshStatus() (genericRequest('ListPromptEnhanceStatus', ...)). Reassigned per test the same way
+// makeWSRequest is above, so a test can capture the dispatched callbacks and invoke them in whatever order it
+// wants to exercise.
+let genericRequest = () => {};
 let MouseEvent = function(type, init) {
     this.type = type;
     Object.assign(this, init || {});
@@ -563,6 +572,73 @@ function check(name, pass, detail) {
     check('every registered profile is added as an option', select.children.length == 3 && select.children[1].value == 'anima' && select.children[2].value == 'illustriousxl', `count=${select.children.length}`);
     host.populateProfileOptions([{ id: 'anima', display: 'Anima', target_model: 'Anima' }]);
     check('a repeated call does not re-add options (the registry does not change at runtime)', select.children.length == 3, `count=${select.children.length}`);
+}
+
+// ====================================================================================================
+// Part 13: refreshStatus()'s request-sequence guard against an out-of-order (or stale-error) reply
+// ====================================================================================================
+{
+    document = { createElement: () => ({}) };
+    let fakeProfileSelect = () => ({ children: [], dataset: {}, appendChild(opt) { this.children.push(opt); } });
+    let capturedCalls = [];
+    genericRequest = (route, data, onSuccess, priority, onError) => {
+        capturedCalls.push({ onSuccess, onError });
+    };
+    getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+
+    let host = buildHost(['refreshStatus', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions'], {
+        button: makeFakeElement(),
+        buttonEnabled: false,
+        profileOverride: '',
+        statusRequestSeq: 0,
+        profileSelect: fakeProfileSelect()
+    });
+    host.button.classList.add('prompt-enhance-disabled');
+
+    // Two overlapping requests dispatched back to back (eg a model change followed almost immediately by a
+    // profile-override change, both landing inside the debounce window) - index 1 is the later-dispatched one.
+    host.refreshStatus();
+    host.refreshStatus();
+    check('(setup) two overlapping ListPromptEnhanceStatus requests were dispatched', capturedCalls.length == 2, `count=${capturedCalls.length}`);
+
+    // They resolve OUT OF ORDER: the later-dispatched request answers first (disabling the button), and the
+    // earlier-dispatched request answers last - which, unguarded, would re-enable the button on top of it.
+    capturedCalls[1].onSuccess({
+        profiles: [],
+        endpoints: [{ id: 'writer', kind: 'ollama', model: 'm', enabled: true, healthy: true }],
+        resolved: { profile: null, reason: "No writer profile for model class 'stable-diffusion-xl-v1'" }
+    });
+    check('the later-dispatched request (resolving first) disables the button', host.buttonEnabled === false, `buttonEnabled=${host.buttonEnabled}`);
+    capturedCalls[0].onSuccess({
+        profiles: [],
+        endpoints: [{ id: 'writer', kind: 'ollama', model: 'm', enabled: true, healthy: true }],
+        resolved: { profile: 'illustriousxl', reason: null }
+    });
+    check('the earlier-dispatched request (resolving last) is stale and does not clobber the newer state', host.buttonEnabled === false, `buttonEnabled=${host.buttonEnabled}`);
+    check('...the button is left in the state of the later-dispatched request, not the later-resolving one', host.button.title == "No writer profile for model class 'stable-diffusion-xl-v1'", `title="${host.button.title}"`);
+
+    // The same guard applies to the error callback: a stale error reply must not clobber a newer, already-
+    // successful reply.
+    capturedCalls = [];
+    let host2 = buildHost(['refreshStatus', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions'], {
+        button: makeFakeElement(),
+        buttonEnabled: false,
+        profileOverride: '',
+        statusRequestSeq: 0,
+        profileSelect: fakeProfileSelect()
+    });
+    host2.refreshStatus();
+    host2.refreshStatus();
+    // The later-dispatched request resolves successfully first...
+    capturedCalls[1].onSuccess({
+        profiles: [],
+        endpoints: [{ id: 'writer', kind: 'ollama', model: 'm', enabled: true, healthy: true }],
+        resolved: { profile: 'anima', reason: null }
+    });
+    check('(setup) the later-dispatched request enables the button', host2.buttonEnabled === true, `buttonEnabled=${host2.buttonEnabled}`);
+    // ...then the earlier-dispatched request's stale connection failure arrives afterward.
+    capturedCalls[0].onError('connection refused');
+    check('a stale error reply does not clobber a newer successful reply', host2.buttonEnabled === true, `buttonEnabled=${host2.buttonEnabled}`);
 }
 
 const failed = results.filter(r => !r.pass);

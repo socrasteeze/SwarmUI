@@ -136,6 +136,18 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(reason, Is.Null);
     }
 
+    /// <summary>Krea 2 has its own distinct compat class (like Anima), so it resolves through
+    /// <c>CompatClassMap</c> directly - no filename guess needed.</summary>
+    [Test]
+    public void Resolve_CompatClassMap_Krea2Resolves()
+    {
+        PromptEnhanceProfiles.Register(new("krea-2", "Krea 2", "Krea-2", "krea-2 system text"));
+        T2IModel model = MakeModel("krea2_raw_bf16.safetensors", "krea-2", "krea-2");
+        PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+        Assert.That(resolved?.ID, Is.EqualTo("krea-2"));
+        Assert.That(reason, Is.Null);
+    }
+
     /// <summary>A model that matches no filename override, class, or compat class resolves to null with a
     /// reason naming the unresolved class.</summary>
     [Test]
