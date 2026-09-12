@@ -3,7 +3,7 @@
 **Updated:** 2026-09-12 · **Branch:** `prompt-enhance-phase1` · **Base:** f5bb8c8b (= origin/main) · **Tree:** clean
 
 ## State
-Prompt Enhance Phase 1 is built and gated on `prompt-enhance-phase1`: Release build 0 warnings, `dotnet test` 114/114, both `dotnet format` checks clean, node harness 33/33, zero core files touched. Not yet deployed to the live server or exercised against the writer host.
+Prompt Enhance Phase 1 is built, gated, deployed to the live hub (`last_build` = branch HEAD) and live-checked against the writer host: disabled-with-reason on no model and on an unmapped class, streamed rewrite with the `<lora:…>` tag shielded and re-appended, cache hit on repeat, `CONFLICT:` hard stop, Apply → provenance present in the generated PNG's metadata, provenance cleared on edit. Ready to merge.
 
 ## Done this session
 - Landed the design branch on main, then built `src/BuiltinExtensions/PromptEnhance/` (six C# files, JS/CSS, five verbatim non-interactive profiles + `VERSION`, node harness) and `SwarmUITests/PromptEnhanceTests.cs` — one Sonnet builder per file group, one wiring agent
@@ -14,8 +14,8 @@ Prompt Enhance Phase 1 is built and gated on `prompt-enhance-phase1`: Release bu
 ## Open
 Ordered. Everything else is on the tracker.
 
-1. **Deploy and live-check.** `Data/PromptEnhance/endpoints.json` already points at the writer host (gitignored). Commit is on `prompt-enhance-phase1`; `restart.bat` rebuilds `live_release` when HEAD != `src/bin/last_build`. Then run the live checks in the extension `README.md` against port 8085 with an Anima checkpoint: disabled state on an unmapped class, streamed rewrite + Apply + provenance in the image metadata, `CONFLICT:` on the case-6 text, cache hit with the writer host asleep
-2. Merge `prompt-enhance-phase1` into main via `/clean` and push — fork owner only
+1. **Merge `prompt-enhance-phase1` into main via `/clean` and push** — fork owner only. `Data/PromptEnhance/endpoints.json` on the hub already points at the writer host (gitignored)
+2. **Phase 2 first item:** Illustrious derivatives stored under `ill/` (e.g. `ill/Auralis_v3`, class `stable-diffusion-xl-v0_9-base`) resolve to no profile — the filename override matches only `illustrious|noob`. Add a folder/`ModelClass` aware override map (`docs/PromptEnhance-Design.md` Phase 2) before the manual override UI
 3. **SWR.86 — open the Interrogate modal once.** WD14 only in the Method dropdown, tagger options render, a WD14 round trip returns tags. Also exercise Character Sheet's "Analyze pose"
 4. **SWR.59 — set `qwenEdit2511FP8_v10.safetensors` to `qwen-image-edit`** in the Models tab
 5. **Route one generation to the spoke** — pick `G18-API` from the `/simple` Generate caret and confirm it completes
