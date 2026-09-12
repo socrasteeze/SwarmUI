@@ -1,0 +1,153 @@
+/* Prompt Enhance - styling for the Enhance button and its result panel.
+   Class selectors only, per the repo CSS convention. Colors come from the existing theme variables so the
+   panel tracks whichever theme the user has selected rather than pinning its own palette. */
+
+/* '.alt-text-add-button-wrapper' (see genpage.css) is a zero-size (width/height: 0) positioning box - the
+   '+' button inside it is 'position: relative; left: -5px' with a 29px width, so it visually overhangs to
+   about 24px past that zero point without contributing any width to the flex layout. This wrapper is
+   inserted as the next flex sibling of that zero-size box, so a small margin-left here would still render
+   underneath the overhanging '+' button; the margin has to clear its right edge. '.alt_prompt_textboxes'
+   (also genpage.css) uses the same 2rem clearance for the same reason. */
+.prompt-enhance-button-wrapper {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 2rem;
+}
+
+.prompt-enhance-button {
+    white-space: nowrap;
+    font-size: 0.85rem;
+    padding: 0.25rem 0.5rem !important;
+}
+
+.prompt-enhance-disabled {
+    /* No 'pointer-events: none' here - that would stop the element receiving hover at all, which kills the
+       'title' tooltip that carries the disabled reason. The click handlers already gate on the enabled flag
+       in JS, so this class only needs to carry the visual disabled look. */
+    cursor: default;
+    background-color: color-mix(in srgb, var(--button-background) 40%, transparent);
+    color: color-mix(in srgb, var(--button-text) 60%, transparent);
+}
+
+/* The result panel is rooted at document.body (see the class docstring in promptenhance.js for why), so it
+   is positioned fixed relative to the viewport rather than to any part of the prompt region. */
+.prompt-enhance-panel {
+    display: none;
+    position: fixed;
+    z-index: 100000;
+    top: 10vh;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(32rem, 92vw);
+    max-height: 80vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background-color: var(--background);
+    color: var(--text);
+    border: 1px solid var(--light-border);
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, transparent 40%, black);
+    padding: 0.75rem;
+    box-sizing: border-box;
+}
+
+.prompt-enhance-panel.prompt-enhance-panel-open {
+    display: block;
+}
+
+.prompt-enhance-panel-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.prompt-enhance-status {
+    font-size: 0.85em;
+    color: var(--text-soft);
+    min-height: 1.2em;
+    word-break: break-word;
+}
+
+.prompt-enhance-preview {
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--background-soft);
+    color: var(--text);
+    border: 1px solid var(--shadow);
+    border-radius: 4px;
+    padding: 0.4rem;
+    resize: vertical;
+}
+
+.prompt-enhance-notes {
+    font-size: 0.85em;
+    font-style: italic;
+    color: var(--text-soft);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.prompt-enhance-conflict {
+    background-color: color-mix(in srgb, transparent 80%, var(--danger-button-background));
+    color: var(--danger-button-foreground);
+    border: 1px solid var(--danger-button-border);
+    border-radius: 4px;
+    padding: 0.4rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.prompt-enhance-passthrough {
+    background-color: var(--background-soft);
+    color: var(--text-soft);
+    border: 1px dashed var(--light-border);
+    border-radius: 4px;
+    padding: 0.4rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    cursor: pointer;
+}
+
+.prompt-enhance-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    justify-content: flex-end;
+}
+
+/* '.alt_prompt_main_line' switches to a CSS grid on mobile with named areas "add"/"buttons"/"boxes" (see
+   genpage.css), which this wrapper is not one of - it is intentionally left unassigned so it auto-places
+   into a new implicit row below those, then told to span both columns so it reads as its own full-width row
+   rather than being squeezed into the narrow first column. */
+.small-window .prompt-enhance-button-wrapper {
+    grid-column: 1 / -1;
+    width: 100%;
+    height: auto;
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.35rem;
+    /* The desktop-only 2rem clearance (see the base rule above) is not needed here - on mobile this wrapper is
+       its own full-width grid row below the '+' button, not a flex sibling squeezed in beside it, and the
+       'width: 100%' here would overflow the grid column if the left margin were not reset. */
+    margin-left: 0;
+}
+
+.small-window .prompt-enhance-button {
+    position: static;
+    left: 0;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.small-window .prompt-enhance-buttons .basic-button {
+    min-height: 44px;
+    box-sizing: border-box;
+}
+
+.small-window .prompt-enhance-panel {
+    width: 94vw;
+    max-height: 85vh;
+}

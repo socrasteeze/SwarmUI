@@ -151,6 +151,7 @@ Adapted from Andrej Karpathy's `CLAUDE.md` guidelines. They bias toward caution 
 - **Simplicity first.** Minimum code that solves the problem. No features beyond what was asked, no abstractions for single-use code, no configurability that was not requested, no error handling for impossible scenarios. If 200 lines could be 50, rewrite. Test: would a senior engineer call it overcomplicated?
 - **Surgical changes.** Touch only what you must. Do not improve adjacent code, comments, or formatting; do not refactor what is not broken; match existing style. Remove only the imports, variables, and functions *your* change orphaned. Mention pre-existing dead code, do not delete it. Every changed line should trace directly to the request.
 - **Goal-driven execution.** Turn tasks into verifiable goals ("add validation" becomes "write tests for invalid inputs, then make them pass"). For multi-step work, state a short plan of `step -> verify: check` lines and loop until each check passes.
+- **Optimize token usage; dispatch grunt coding work to lower-tier agents.** The main session plans, reviews the diff, and runs the gates. Sonnet-class agents write the code, tests, and docs — one agent per job. No adversarial refutation fan-outs, no multi-lens review panels, no background babysitter agents, and no fan-out larger than a handful of agents without asking first. "Prioritize/maximize token usage" from the fork owner means spend *fewer* tokens, never more. Added 2026-09-12 after a workflow spawned 243 review-refutation agents.
 ### Skill files
 
 Task-specific techniques learned during development go in `.agents/skills/(skill-name)/SKILL.md`, with YAML frontmatter (`name`, `description`) followed by `# Skill Name`, `## When to Use`, and `## Instructions`. Create the file directly; no `mkdir` needed. Keep them general — a skill about adding API routes covers the pattern, not one specific route. Update a skill file when the system it describes changes, and check for relevant skill files when starting a task.
@@ -927,6 +928,26 @@ Files this fork adds or changes relative to upstream:
   No extension hook can reach this: the node is registered by SwarmUI's own `ExtraNodes` tree, which AGENTS.md names as the only Python this repo manages directly.
   **Runtime-verified** in the backend's embedded Python (`dlbackend/comfy/python_embeded`), five cases. An iPhone-shaped MPO (4032×3024 primary, quarter-res gain map, thumbnail) raised the exact log error before and now returns `image (1, 3024, 4032, 3)`. An MPO whose gain map is full resolution returns one frame, not two. A 3-frame GIF with a smaller first frame returns `(2, 24, 32, 3)` with the odd frame skipped. A uniform 2-frame GIF keeps both frames. A plain JPEG is unchanged.
   The file was byte-identical to `upstream/master` before this. After the next upstream merge, check that `git diff upstream/master -- <this file>` is exactly this one function plus the constant above it, and nothing else. Newer ComfyUI `LoadImage` versions carry an `excluded_formats = ['MPO']` rule of their own; if a merge brings that in, the two should still agree.
+- `src/BuiltinExtensions/PromptEnhance/**` — **fork-owned, zero core-file edits.** Rewrites a typed idea into a prompt shaped for the currently loaded image model, via a local writer LLM reached from the hub over plain HTTP. Design and the rejected alternatives are in `docs/PromptEnhance-Design.md`; full behavior detail is in the extension's own `README.md`.
+
+  One hidden T2I param, `Prompt Enhance Provenance` (id `promptenhanceprovenance`), records what enhancement (if any) produced a generation's prompt, as JSON (`original`, `profile`, `pack_version`, `writer_model`, `endpoint`, `cached`). It carries `IntentionalUnused: true` because nothing server-side ever reads it back with `Get()` — JS writes it directly — and without that flag `T2IParamInput.GenFullMetadataObject` would strip it back out of the metadata it exists to populate, as an "unused parameter".
+
+  | Trap | Why |
+  |---|---|
+  | Never route this over the spoke protocol | `SwarmSwarmBackend.cs:989`'s `HasRoutableModelCapacity` would mirror any registered LLM backend as a phantom image backend and offer it image jobs, because `AbstractBackend.CanLoadModels` defaults `true` and neither LLM backend overrides it (`AbstractBackend.cs:108`) — the gap is even flagged in-tree (`SwarmSwarmBackend.cs:1002`, `// TODO: support remote non-T2I Backends`). A direct hub-to-writer-host HTTP call needs none of that. |
+  | The result panel roots at `document.body`, not under `.alt_prompt_region` | Same trap `prompttools.js`'s popovers document: that region carries a `transform` while the mobile keyboard is lifted, and a transformed ancestor becomes the containing block for any `position: fixed` descendant — rooting there would resolve the panel against the prompt region instead of the viewport. |
+  | The shield strips balanced `<...>` tag blocks and `__wildcard__` tokens only — there is no separate bare `embedding:` shield | SwarmUI's own embedding syntax is already the angle-tag form `<embed:...>`, so the tag shield already covers it. LoRA/protected-token handling is the shipped 8B writer's one systematic grading failure and this fork's real workload — it's the whole reason the shield exists. |
+  | Cache lookup happens **before** endpoint health is checked, on purpose | The endpoint used to build the cache key is the first healthy one, or — if none answer their health probe — simply the first enabled entry in config (its model name is known either way). Checking the cache first is what lets a repeat prompt answer instantly while the writer host (a laptop that sleeps) is unreachable, instead of failing open on something already known. |
+
+  Coupling watchlist — re-check these after any upstream merge that touches them:
+
+  | File | What couples |
+  |---|---|
+  | `src/wwwroot/js/genpage/gentab/prompttools.js` | The Enhance button attaches as a sibling of `PromptPlusButton`'s wrapper — `#alt_text_add_button`'s parent (`.alt-text-add-button-wrapper`), inside `.alt_prompt_main_line`. |
+  | `src/wwwroot/js/genpage/gentab/models.js` | `#current_model`'s value is the model name Prompt Enhance resolves a profile against, on both status refresh and the Enhance request itself. |
+  | `src/Text2Image/T2IModelClassSorter.cs` | Source of the class/compat-class IDs (`qwen-image-edit(-plus)`, `flux-2-klein-4b`/`9b`, `anima`, `stable-diffusion-xl-v1`) the profile-selection maps key off. |
+  | `src/BuiltinExtensions/Interrogate/InterrogateAPI.cs` | The websocket streaming pattern this extension copies (`API.RunWebsocketHandlerCallWS`): status → chunk → terminal frame. |
+  | `src/Text2Image/T2IParamTypes.cs` (`T2IParamInput` metadata rules) | `VisibleNormally`/`HideFromMetadata`/`IntentionalUnused` semantics the hidden provenance param depends on. |
 
 ### 2026-09-06 sweep — six groups, agent-implemented and diff-verified
 
