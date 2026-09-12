@@ -386,12 +386,12 @@ public static class ComfyUIWebAPI
             await ws.SendJson(new JObject() { ["error"] = ex.Message }, API.WebsocketTimeout);
             return null;
         }
+        model = T2IParamTypes.GetBestModelInList(model, Program.MainSDModels.Models.Keys);
         if (ModelsAPI.TryGetRefusalForModel(session, model, out JObject refusal))
         {
             await ws.SendJson(refusal, API.WebsocketTimeout);
             return null;
         }
-        model = T2IParamTypes.GetBestModelInList(model, Program.MainSDModels.Models.Keys);
         T2IModel modelData = Program.MainSDModels.Models.GetValueOrDefault(model);
         if (modelData is null)
         {
@@ -560,6 +560,13 @@ public static class ComfyUIWebAPI
             await ws.SendJson(new JObject() { ["error"] = ex.Message }, API.WebsocketTimeout);
             return null;
         }
+        if (rank < 1 || rank > 320)
+        {
+            await ws.SendJson(new JObject() { ["error"] = "Rank must be between 1 and 320." }, API.WebsocketTimeout);
+            return null;
+        }
+        baseModel = T2IParamTypes.GetBestModelInList(baseModel, Program.MainSDModels.Models.Keys);
+        otherModel = T2IParamTypes.GetBestModelInList(otherModel, Program.MainSDModels.Models.Keys);
         outName = Utilities.StrictFilenameClean(outName);
         if (ModelsAPI.TryGetRefusalForModel(session, baseModel, out JObject refusal)
             || ModelsAPI.TryGetRefusalForModel(session, otherModel, out refusal)
@@ -568,13 +575,6 @@ public static class ComfyUIWebAPI
             await ws.SendJson(refusal, API.WebsocketTimeout);
             return null;
         }
-        if (rank < 1 || rank > 320)
-        {
-            await ws.SendJson(new JObject() { ["error"] = "Rank must be between 1 and 320." }, API.WebsocketTimeout);
-            return null;
-        }
-        baseModel = T2IParamTypes.GetBestModelInList(baseModel, Program.MainSDModels.Models.Keys);
-        otherModel = T2IParamTypes.GetBestModelInList(otherModel, Program.MainSDModels.Models.Keys);
         T2IModel baseModelData = Program.MainSDModels.Models.GetValueOrDefault(baseModel);
         T2IModel otherModelData = Program.MainSDModels.Models.GetValueOrDefault(otherModel);
         if (baseModelData is null || otherModelData is null)
