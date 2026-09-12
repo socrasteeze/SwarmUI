@@ -11,6 +11,14 @@
  * 'position: fixed' descendant - which would resolve the panel's fixed positioning against the prompt region
  * instead of the viewport. PromptTabCompleteClass's popover in prompttools.js documents the same trap and
  * roots at document.body for the same reason.
+ *
+ * A tri-state mode control ('off'/'review'/'auto') sits beside the button. In 'auto' mode, a single
+ * capture-phase click listener on 'alt_generate_button' - the one element every generate path clicks through
+ * ('generate_button', Ctrl+Enter, Enter-in-prompt-box, tool overrides) - intercepts the click, runs one
+ * EnhancePrompt request, applies the result, then re-dispatches the click under a re-entry guard so the
+ * interceptor passes its own synthetic click straight through instead of looping. "Generate Forever" calls
+ * 'mainGenHandler.doGenerate()' directly and never touches that button, so it is not and cannot be
+ * intercepted here - it always generates un-enhanced regardless of mode.
  */
 class PromptEnhanceHelperClass {
 
@@ -53,32 +61,97 @@ class PromptEnhanceHelperClass {
         /** Pending 'input' listener on the prompt box that clears provenance once its value diverges from the
          * applied prompt, or null when none is armed. */
         this.clearProvenanceListener = null;
+        /** Tri-state mode: 'off' (no enhancement, button hidden), 'review' (default - today's behavior, the
+         * button opens the panel for the user to review), or 'auto' (generate enhances silently first). Persisted
+         * per user the same way interrogate.js persists its prefs. */
+        this.mode = this.pref('mode', 'review');
+        /** The mode <select> beside the Enhance button. */
+        this.modeSelect = null;
+        /** Manual profile override id, or '' for automatic resolution. Persisted per user. Sent as
+         * 'profile_override' on every status check and every EnhancePrompt request. */
+        this.profileOverride = this.pref('profile_override', '');
+        /** The profile-override <select> inside the panel. */
+        this.profileSelect = null;
+        /** The prompt text this feature most recently wrote into the prompt box (via manual Apply or the
+         * auto-enhance path), so a second generate click is never re-enhanced against its own output. Cleared
+         * alongside provenance whenever the prompt box's value diverges from it. */
+        this.appliedEnhancedText = null;
+        /** The 'alt_generate_button' element - the single funnel every generate path clicks through. */
+        this.generateButton = null;
+        /** True only for the instant this feature re-dispatches its own synthetic click on
+         * 'generateButton', so the capture-phase interceptor below lets that one click pass straight through
+         * instead of intercepting its own re-entry. */
+        this.reentryGuard = false;
+        /** True while an auto-enhance request (triggered by intercepting a generate click) is in flight. */
+        this.autoRunning = false;
+        /** The generate button's own text, saved while 'Enhancing...' is shown over it, or null when not busy. */
+        this.generateButtonOriginalText = null;
+    }
+
+    /** Reads a stored preference, falling back to a default. */
+    pref(key, fallback) {
+        let stored = localStorage.getItem(`promptenhance_${key}`);
+        return stored == null ? fallback : stored;
+    }
+
+    /** Stores a preference so the next page load starts where this one left off. */
+    setPref(key, value) {
+        localStorage.setItem(`promptenhance_${key}`, value);
     }
 
     /** Builds the button and panel, and wires the enabled-state hooks. Called once at script load. */
     install() {
         this.promptBox = getRequiredElementById('alt_prompt_textbox');
+        this.generateButton = getRequiredElementById('alt_generate_button');
         this.buildButton();
         this.buildPanel();
+        this.generateButton.addEventListener('click', e => this.onGenerateClick(e), true);
         getRequiredElementById('current_model').addEventListener('change', () => this.scheduleStatusRefresh());
         featureSetChangedCallbacks.push(() => this.scheduleStatusRefresh());
         this.scheduleStatusRefresh();
     }
 
-    /** Inserts the Enhance button as a sibling of the '+' button's wrapper, inside '.alt_prompt_main_line'. */
+    /** Inserts the mode control and the Enhance button as a sibling of the '+' button's wrapper, inside
+     * '.alt_prompt_main_line'. */
     buildButton() {
         let addButton = getRequiredElementById('alt_text_add_button');
         let addWrapper = addButton.parentElement;
         let wrapper = createSpan(null, 'prompt-enhance-button-wrapper');
+        let modeLabel = createSpan(null, 'prompt-enhance-mode-label translate', 'Enhance:');
+        this.modeSelect = document.createElement('select');
+        this.modeSelect.className = 'auto-dropdown prompt-enhance-mode-select';
+        for (let entry of [['off', 'Off'], ['review', 'Review'], ['auto', 'Auto']]) {
+            let option = document.createElement('option');
+            option.value = entry[0];
+            option.innerText = entry[1];
+            this.modeSelect.appendChild(option);
+        }
+        this.modeSelect.value = this.mode;
+        this.modeSelect.addEventListener('change', () => this.setMode(this.modeSelect.value));
+        wrapper.appendChild(modeLabel);
+        wrapper.appendChild(this.modeSelect);
         this.button = createSpan(null, 'basic-button prompt-enhance-button prompt-enhance-disabled translate', 'Enhance');
         this.button.title = 'Loading Prompt Enhance status...';
         wrapper.appendChild(this.button);
         addWrapper.insertAdjacentElement('afterend', wrapper);
-        this.button.addEventListener('click', () => {
-            if (this.buttonEnabled) {
-                this.open();
-            }
-        });
+        // Always opens the panel, even while the button reads as disabled - a model with no automatic
+        // resolution still needs the panel reachable, since the manual profile-override dropdown that can
+        // fix that lives inside it (see the panel's own profile <select>).
+        this.button.addEventListener('click', () => this.open());
+        this.applyModeToButtonVisibility();
+    }
+
+    /** Sets the enhancement mode, persists it, and shows/hides the Enhance button accordingly. */
+    setMode(mode) {
+        this.mode = mode;
+        this.setPref('mode', mode);
+        this.applyModeToButtonVisibility();
+    }
+
+    /** Hides the Enhance button entirely in 'off' mode; shows it otherwise. The mode <select> itself is
+     * never hidden, so the user can always switch back. */
+    applyModeToButtonVisibility() {
+        this.button.style.display = this.mode == 'off' ? 'none' : '';
     }
 
     /** Builds the result panel and appends it to document.body. */
@@ -87,6 +160,10 @@ class PromptEnhanceHelperClass {
         panel.innerHTML = `
             <div class="prompt-enhance-panel-inner">
                 <div class="prompt-enhance-status"></div>
+                <div class="prompt-enhance-profile-row">
+                    <label class="prompt-enhance-profile-label translate">Profile</label>
+                    <select class="auto-dropdown prompt-enhance-profile-select"></select>
+                </div>
                 <textarea class="prompt-enhance-preview" rows="6" readonly></textarea>
                 <div class="prompt-enhance-notes" style="display:none"></div>
                 <div class="prompt-enhance-conflict" style="display:none"></div>
@@ -100,6 +177,7 @@ class PromptEnhanceHelperClass {
         document.body.appendChild(panel);
         this.panel = panel;
         this.statusLine = panel.querySelector('.prompt-enhance-status');
+        this.profileSelect = panel.querySelector('.prompt-enhance-profile-select');
         this.previewArea = panel.querySelector('.prompt-enhance-preview');
         this.notesBlock = panel.querySelector('.prompt-enhance-notes');
         this.conflictBlock = panel.querySelector('.prompt-enhance-conflict');
@@ -115,6 +193,38 @@ class PromptEnhanceHelperClass {
         });
         closeButton.addEventListener('click', () => this.close());
         this.passthroughBlock.addEventListener('click', () => this.close());
+        this.profileSelect.addEventListener('change', () => {
+            this.profileOverride = this.profileSelect.value;
+            this.setPref('profile_override', this.profileOverride);
+            this.refreshStatus();
+            if (this.panel.classList.contains('prompt-enhance-panel-open')) {
+                // Re-send with the newly forced override rather than leaving a stale rewrite (or a stale
+                // 'not enhanced' marker from before the override was picked) on screen.
+                this.close();
+                this.open();
+            }
+        });
+    }
+
+    /** Fills the profile-override <select> with every registered profile plus an 'Automatic' default, once -
+     * the profile registry does not change at runtime, so repeated status refreshes must not keep re-adding
+     * the same options. Restores the persisted override as the selected value. */
+    populateProfileOptions(profiles) {
+        if (this.profileSelect.dataset.populated == 'true') {
+            return;
+        }
+        let auto = document.createElement('option');
+        auto.value = '';
+        auto.innerText = 'Automatic';
+        this.profileSelect.appendChild(auto);
+        for (let i = 0; i < profiles.length; i++) {
+            let option = document.createElement('option');
+            option.value = profiles[i].id;
+            option.innerText = profiles[i].display;
+            this.profileSelect.appendChild(option);
+        }
+        this.profileSelect.value = this.profileOverride;
+        this.profileSelect.dataset.populated = 'true';
     }
 
     /** Writes a line into the status area. */
@@ -238,7 +348,7 @@ class PromptEnhanceHelperClass {
 
     /** Opens the panel and starts an EnhancePrompt request for the current prompt box and selected model. */
     open() {
-        if (this.running) {
+        if (this.running || this.autoRunning) {
             return;
         }
         let model = getRequiredElementById('current_model').value;
@@ -248,7 +358,7 @@ class PromptEnhanceHelperClass {
         this.running = true;
         this.setStatus('Starting...');
         this.settled = false;
-        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': '', 'endpoint_override': '' }, data => {
+        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '' }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
                 this.settled = true;
             }
@@ -275,7 +385,15 @@ class PromptEnhanceHelperClass {
         if (!this.applyEnabled || !this.lastResult) {
             return;
         }
-        let data = this.lastResult;
+        this.applyResult(this.lastResult);
+        this.close();
+    }
+
+    /** The shared write-prompt-and-record-provenance step behind both manual Apply and the silent auto-enhance
+     * path: writes the result into the prompt box, records provenance in the hidden T2I param, arms the
+     * clear-on-edit listener, and remembers the applied text so a later generate click is never re-enhanced
+     * against its own output. */
+    applyResult(data) {
         this.promptBox.value = data.result;
         triggerChangeFor(this.promptBox);
         this.recordProvenance({
@@ -287,7 +405,7 @@ class PromptEnhanceHelperClass {
             'cached': data.cached
         });
         this.armProvenanceClearOnEdit(data.result);
-        this.close();
+        this.appliedEnhancedText = data.result;
     }
 
     /** Records provenance into the hidden 'Prompt Enhance Provenance' T2I param (id 'promptenhanceprovenance').
@@ -310,6 +428,7 @@ class PromptEnhanceHelperClass {
     /** Clears the hidden provenance param, eg because the applied prompt was edited or discarded, so it never
      * sticks to a later, unrelated generation. */
     clearProvenance() {
+        this.appliedEnhancedText = null;
         let elem = document.getElementById('input_promptenhanceprovenance');
         if (!elem) {
             return;
@@ -352,8 +471,9 @@ class PromptEnhanceHelperClass {
     /** Fetches current status for the selected model and updates the button's enabled state. */
     refreshStatus() {
         let model = getRequiredElementById('current_model').value;
-        genericRequest('ListPromptEnhanceStatus', { 'model': model }, data => {
+        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride }, data => {
             this.applyStatusToButton(data);
+            this.populateProfileOptions(data.profiles || []);
         }, 0, error => {
             console.warn(`Prompt Enhance: status check failed: ${error}`);
             this.setButtonEnabled(false, `${error}`);
@@ -375,6 +495,113 @@ class PromptEnhanceHelperClass {
         let reason = anyHealthy ? 'Rewrite this prompt with a local writer LLM for the currently loaded model.'
             : 'No Prompt Enhance writer endpoint is currently reachable - the prompt will pass through unchanged.';
         this.setButtonEnabled(true, reason);
+    }
+
+    /** Capture-phase interceptor on 'alt_generate_button' - the single funnel every generate path clicks
+     * through ('generate_button', Ctrl+Enter, Enter-in-prompt-box, and the tool-override buttons all call
+     * '.click()' on this same element). Runs at most once per real user click; the re-entry guard lets this
+     * feature's own re-dispatched click pass straight through instead of looping back into itself. Only
+     * 'auto' mode with a resolved profile and a prompt that is not already the applied-enhanced text
+     * intercepts anything - 'off' and 'review' leave every generate click completely untouched. */
+    onGenerateClick(e) {
+        if (this.reentryGuard) {
+            return;
+        }
+        if (this.autoRunning) {
+            // A request is already in flight for this click - swallow the extra click rather than queue a
+            // second overlapping enhance-then-generate.
+            e.stopPropagation();
+            e.preventDefault();
+            return;
+        }
+        if (this.mode != 'auto' || !this.buttonEnabled) {
+            return;
+        }
+        let prompt = this.promptBox.value;
+        if (prompt.trim() == '' || prompt == this.appliedEnhancedText) {
+            return;
+        }
+        e.stopPropagation();
+        e.preventDefault();
+        this.runAutoEnhance(prompt, e.altKey);
+    }
+
+    /** Runs one EnhancePrompt request ahead of generating, for the 'auto' mode interceptor above.
+     * <p>On a successful result: applies it (prompt box + provenance, same as manual Apply) and re-dispatches
+     * the generate click. On conflict/needs_input: shows the existing red block and does not generate at
+     * all. On passthrough/error/an empty result: shows the existing 'Not enhanced' marker and generates
+     * anyway with the original, un-enhanced prompt (fail open).</p>
+     */
+    runAutoEnhance(prompt, altKey) {
+        let model = getRequiredElementById('current_model').value;
+        this.autoRunning = true;
+        this.setGenerateButtonBusy(true);
+        let failOpen = reason => {
+            this.autoRunning = false;
+            this.setGenerateButtonBusy(false);
+            this.resetPanel();
+            this.showPanel();
+            this.showPassthrough(reason);
+            this.dispatchGenerateClick(altKey);
+        };
+        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '' }, data => {
+            if (data.status != null || data.chunk != null) {
+                return;
+            }
+            if (data.result != null) {
+                if (data.result.trim() == '') {
+                    // An empty result is not a success - fail open exactly like a passthrough.
+                    failOpen('The writer returned an empty reply');
+                    return;
+                }
+                this.autoRunning = false;
+                this.setGenerateButtonBusy(false);
+                this.applyResult(data);
+                this.dispatchGenerateClick(altKey);
+                return;
+            }
+            if (data.conflict != null || data.needs_input != null) {
+                this.autoRunning = false;
+                this.setGenerateButtonBusy(false);
+                this.resetPanel();
+                this.showPanel();
+                this.showConflict(data.conflict != null ? data.conflict : data.needs_input, data.needs_input != null);
+                return;
+            }
+            if (data.passthrough != null) {
+                failOpen(data.reason);
+            }
+        }, 0, error => failOpen(`${error}`));
+        if (!socket) {
+            failOpen('Failed to open the Prompt Enhance connection.');
+        }
+    }
+
+    /** Shows/clears the 'Enhancing...' state on the generate button while an auto-enhance request runs, so
+     * the UI is not silently frozen during the writer host's cold-start latency. */
+    setGenerateButtonBusy(busy) {
+        if (busy) {
+            this.generateButtonOriginalText = this.generateButton.innerText;
+            this.generateButton.innerText = 'Enhancing...';
+            this.generateButton.classList.add('prompt-enhance-generating');
+        }
+        else {
+            if (this.generateButtonOriginalText != null) {
+                this.generateButton.innerText = this.generateButtonOriginalText;
+                this.generateButtonOriginalText = null;
+            }
+            this.generateButton.classList.remove('prompt-enhance-generating');
+        }
+    }
+
+    /** Re-dispatches a click on the generate button under the re-entry guard, so the capture-phase
+     * interceptor above passes it straight through to the real generate handler instead of intercepting it
+     * again. Preserves 'altKey' so an alt-click ("interrupt and regenerate") is not silently downgraded to a
+     * plain generate. */
+    dispatchGenerateClick(altKey) {
+        this.reentryGuard = true;
+        this.generateButton.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, altKey: altKey }));
+        this.reentryGuard = false;
     }
 }
 

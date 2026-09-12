@@ -11,13 +11,31 @@
 .prompt-enhance-button-wrapper {
     display: inline-flex;
     align-items: center;
+    gap: 0.4rem;
     margin-left: 2rem;
+}
+
+.prompt-enhance-mode-label {
+    font-size: 0.85em;
+    color: var(--text-soft);
+    white-space: nowrap;
+}
+
+.prompt-enhance-mode-select {
+    font-size: 0.85rem;
 }
 
 .prompt-enhance-button {
     white-space: nowrap;
     font-size: 0.85rem;
     padding: 0.25rem 0.5rem !important;
+}
+
+/* Shown on the core 'alt_generate_button' element itself while an auto-enhance request runs ahead of
+   generating - a runtime class toggle from promptenhance.js, not a core-file edit. */
+.prompt-enhance-generating {
+    cursor: wait;
+    opacity: 0.75;
 }
 
 .prompt-enhance-disabled {
@@ -67,6 +85,23 @@
     color: var(--text-soft);
     min-height: 1.2em;
     word-break: break-word;
+}
+
+.prompt-enhance-profile-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85em;
+}
+
+.prompt-enhance-profile-label {
+    color: var(--text-soft);
+    white-space: nowrap;
+}
+
+.prompt-enhance-profile-select {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .prompt-enhance-preview {
@@ -140,6 +175,11 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+.small-window .prompt-enhance-mode-select {
+    min-height: 44px;
+    box-sizing: border-box;
 }
 
 .small-window .prompt-enhance-buttons .basic-button {

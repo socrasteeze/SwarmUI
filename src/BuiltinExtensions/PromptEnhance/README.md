@@ -5,7 +5,12 @@ writer LLM reached from the hub over plain HTTP.
 
 Adds an **Enhance** button beside the prompt textbox on the genpage. Clicking it opens a panel that streams
 a rewritten prompt from the writer model, shows any advisory notes underneath, and offers Apply, Keep
-original, or Close. Nothing is sent anywhere on generate; the user always reviews the rewrite first.
+original, or Close.
+
+A mode control next to the button (**Off / Review / Auto**, see below) decides whether generate is touched
+at all. In its default **Review** mode nothing is sent anywhere on generate; the user always reviews the
+rewrite first. **Auto** mode enhances silently ahead of generating instead - see "Mode control and
+auto-enhance" below.
 
 ## How it works
 
@@ -20,11 +25,12 @@ owned here.
 
    | Order | Source | Notes |
    |---|---|---|
-   | 1 | Manual override | Wins over everything. An override naming an unknown profile ID is a hard miss - disabled, with the bad ID in the reason, not a silent fall-through. |
-   | 2 | Filename override | A regex over the model's lowercased name, anchored on a name segment (`(^|[\/_ -])(illustrious\|noob)`). Handles checkpoints that share a class ID but need different writer targets. |
-   | 3 | Model class ID map | `qwen-image-edit` and `qwen-image-edit-plus` both map to `qwen-image-edit-2511`. Plain `qwen-image` T2I is deliberately left unmapped - it has no profile written for it. |
-   | 4 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the filename override handles IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (already covered by the class map). |
-   | 5 | None | The Enhance button is disabled, with the reason shown in its tooltip. |
+   | 1 | Manual override | Wins over everything. Set from the panel's profile dropdown (see "Manual profile override" below), or an override naming an unknown profile ID is a hard miss - disabled, with the bad ID in the reason, not a silent fall-through. |
+   | 2 | Configured folder/filename override | A user-editable list of regexes over the model's lowercased, subfolder-relative name, loaded from `Data/PromptEnhance/overrides.json` (see "Folder/filename override config" below). Ships with `^ill/` → `illustriousxl` and `^anima/` → `anima`. |
+   | 3 | Built-in filename override | The original single fallback regex, anchored on a name segment (`(^|[\/_ -])(illustrious\|noob)`). Catches Illustrious/NoobAI checkpoints outside a configured folder. |
+   | 4 | Model class ID map | `qwen-image-edit` and `qwen-image-edit-plus` both map to `qwen-image-edit-2511`. Plain `qwen-image` T2I is deliberately left unmapped - it has no profile written for it. |
+   | 5 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the override map/filename fallback handle IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (already covered by the class map). |
+   | 6 | None | The Enhance button is disabled, with the reason shown in its tooltip. The panel's manual override dropdown (row 1) is always reachable from here regardless - see "Manual profile override" below. |
 
 2. **Shielding.** Before the prompt is sent to the writer, `PromptEnhanceClient.Shield` extracts every
    balanced angle-tag block (`<lora:...>`, `<embed:...>`, `<random:<lora:a>|<lora:b>>`, etc - tracked by
@@ -71,6 +77,50 @@ owned here.
 | Reply is empty or whitespace-only after `NOTES:` lines are split off | Treated as passthrough, not cached. |
 | Panel closed mid-stream | Silent. The in-flight socket is closed without raising an error. |
 
+## Mode control and auto-enhance
+
+A tri-state control sits beside the Enhance button, labeled **Enhance: Off / Review / Auto**. It persists
+per user the same way `interrogate.js` persists its own preferences (a prefixed `localStorage` key, read on
+load and written on change - see `PromptEnhanceHelperClass.pref`/`setPref`).
+
+- **Off** - no enhancement at all. The Enhance button is hidden (the mode control itself stays visible, so
+  switching back is always possible) and every generate path is completely untouched.
+- **Review** - the default, and exactly the behavior described above: the button opens the panel, the user
+  reviews the rewrite, and Apply writes the prompt. Generate is never touched.
+- **Auto** - generate enhances silently first. The button still works for manual review at any time.
+
+**Auto mode's mechanism.** `alt_generate_button` is the one element every generate path clicks through -
+the main `generate_button` (`onclick="getRequiredElementById('alt_generate_button').click()"`), the
+Ctrl+Enter handler in `currentimagehandler.js`, and the Enter-in-prompt-box handlers in `layout.js` all call
+`.click()` on it. `promptenhance.js` registers a single **capture-phase** click listener on that element.
+Capture-phase listeners always run before an element's own bubble/target-phase listeners (its `onclick=`
+attribute included), *regardless of which was registered first* - verified directly against a live browser
+before relying on it, since this extension's script loads after `GenerateTab.cshtml`'s markup has already
+set the button's `onclick` attribute. When mode is `auto` and a profile resolves (`buttonEnabled`) and the
+current prompt is not already the applied-enhanced text, the interceptor calls `stopPropagation()` and
+`preventDefault()`, then runs one `EnhancePrompt` request:
+
+- On `result`: writes the prompt box and records provenance (the same `applyResult` step manual Apply uses),
+  then re-dispatches a synthetic click on the generate button under a **re-entry guard** flag
+  (`this.reentryGuard`). The interceptor's first line is `if (this.reentryGuard) { return; }`, so that one
+  synthetic click passes straight through to the real generate handler instead of being intercepted again.
+- On `conflict` or `needs_input`: shows the existing red block and does **not** generate - a conflict blocks
+  generation entirely, per the failure posture above.
+- On `passthrough`, a transport `error`, or an empty result: shows the existing "Not enhanced" marker and
+  generates anyway with the original, unmodified prompt (fail open).
+- The generate button shows a brief "Enhancing..." busy state for the duration (cold start on the writer
+  host is roughly 7-8 seconds), restored to its original text once the request settles.
+
+This resolves exactly once per real click, never per image in a batch or grid - the interception happens at
+the button itself, not inside `T2IEngine`/`PreGenerateEvent`, neither of which this extension touches.
+
+**"Generate Forever" is not intercepted, on purpose.** `doGenForeverOnce()` (`generatecontrols.js`) calls
+`mainGenHandler.doGenerate()` directly - it never touches `alt_generate_button` at all, so there is no click
+for the capture-phase listener to see. In `auto` mode, Generate Forever therefore always generates
+un-enhanced; enhancing on every tick of a forever-loop would mean a writer-host round trip ahead of every
+single image, which is a different feature than this one. Switch to `review` mode (or apply an enhancement
+once manually before starting Generate Forever) if you want a forever run to use an enhanced prompt.
+
 ## Endpoints
 
 Configured writer hosts live in `Data/PromptEnhance/endpoints.json` (gitignored - a writer-host address is
@@ -103,6 +153,50 @@ always has a stable value to key health results and API overrides on. The health
 (ollama) or `GET /v1/models` (openai), status code only, 5 second timeout, and the result is cached 5 seconds
 per endpoint so a resolve-then-dispatch pair of calls doesn't double the probe cost. `ListPromptEnhanceStatus`
 never exposes endpoint URLs to the client - only `id`, `kind`, `model`, `enabled`, `healthy`.
+
+## Folder/filename override config
+
+A checkpoint library organised by folder can map an entire folder to a profile without depending on any
+filename convention within it. This is a **user-editable** sibling of `endpoints.json`, at
+`Data/PromptEnhance/overrides.json` (gitignored, same config area). A default file is written on first run:
+
+```json
+{
+  "_comment": "User-editable folder/filename overrides, consulted before the built-in Illustrious/NoobAI filename fallback. 'pattern' is a regex matched against the model's lowercased, subfolder-relative name (eg 'ill/Auralis_v3.safetensors' starts with 'ill/'). A malformed pattern is logged and skipped rather than disabling the rest of the file.",
+  "overrides": [
+    { "pattern": "^ill/", "profile": "illustriousxl" },
+    { "pattern": "^anima/", "profile": "anima" }
+  ]
+}
+```
+
+Each entry's `pattern` is a regex checked against the model's lowercased `T2IModel.Name`, which is
+subfolder-relative - `ill/Auralis_v3.safetensors` starts with `ill/` regardless of what the filename itself
+contains. Entries are checked in file order, before the built-in `(^|[\/_ -])(illustrious|noob)` filename
+fallback (which stays in place for Illustrious/NoobAI checkpoints outside a configured folder) and before
+the model-class and compat-class maps. A malformed regex pattern is logged (`Logs.Error`) and skipped -
+never thrown - so one bad line never disables every other override. `PromptEnhanceProfiles.LoadOverrides()`
+reloads this file; it runs once from `OnInit`, same as `PromptEnhanceEndpoints.Init()`.
+
+The shipped defaults route a folder of IllustriousXL derivatives (`ill/`) and Anima checkpoints outside the
+`anima` compat class (`anima/`) to their profiles even when the filenames carry no recognizable substring at
+all - add a line per folder for any other convention your library uses.
+
+## Manual profile override
+
+The panel includes a profile dropdown (**Profile**, above the preview) listing every registered profile plus
+an **Automatic** default. Selecting one persists the choice per user (same `localStorage` mechanism as the
+mode control) and is sent as `profile_override` on every subsequent status check and `EnhancePrompt`
+request - both from the panel and from the auto-enhance path in `auto` mode.
+
+This is the escape hatch for a model with no automatic resolution at all (eg a plain SDXL checkpoint, or a
+plain `qwen-image` T2I model, both deliberately left unmapped): the Enhance button always opens the panel
+regardless of its enabled state, so the dropdown is reachable even when automatic resolution found nothing.
+Picking a profile there re-checks status with the override included, which resolves and re-enables the
+button; if the panel was already open, it also re-sends the request immediately with the new override.
+`PromptEnhanceProfiles.Resolve` already returns null with a reason (`Unknown profile override '<id>'`) for
+an override naming no known profile - that reason surfaces the same way any other disabled-button reason
+does, in the button's tooltip.
 
 ## Caller contract
 
@@ -149,15 +243,11 @@ Failing pairs for the shipped 8B default: `10/illustrious` INVENTED-SUBJECT; `11
 The `9 runtime/lora` case (LoRA/protected-token handling) is the 8B's systematic failure mode and this
 fork's real workload - it's the reason the syntax shield above exists.
 
-## Phase 2 (not built)
+## Not built
 
-Deliberately out of scope for this build:
+Deliberately out of scope:
 
-- Auto-enhance on generate (resolving and rewriting automatically at request intake, with no review step).
 - A Prompt Enhance entry on the `/simple` mobile client.
-- A manual profile-override control in the UI (the API already accepts `profile_override`; nothing today
-  sends one).
-- A wider SDXL-derivative filename map beyond `illustrious`/`noob`.
 - A spoke-side route (rejected for the same reasons recorded in `docs/PromptEnhance-Design.md`: it would
   mint a phantom image backend and impose `VaryID` lockstep deploys for no benefit here).
 
