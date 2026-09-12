@@ -3,19 +3,21 @@
 **Updated:** 2026-09-12 · **Branch:** `prompt-enhance-phase1` · **Base:** f5bb8c8b (= origin/main) · **Tree:** clean
 
 ## State
-Prompt Enhance Phase 1 is built, gated, deployed to the live hub (`last_build` = branch HEAD) and live-checked against the writer host: disabled-with-reason on no model and on an unmapped class, streamed rewrite with the `<lora:…>` tag shielded and re-appended, cache hit on repeat, `CONFLICT:` hard stop, Apply → provenance present in the generated PNG's metadata, provenance cleared on edit. Ready to merge.
+Prompt Enhance Phases 1 and 2 are built, gated and live-verified on the hub (`last_build` = branch HEAD). Six writer profiles, pack 1.2.0+0d2a1cd9. Gates: Release build 0 warnings, 120 tests, both format checks clean, node harness 66/66, zero core-file edits.
+Nothing is pushed. The ComfyUI pack work sits on its own local branch `prompt-guides-1.2.0` in that checkout.
 
 ## Done this session
-- Landed the design branch on main, then built `src/BuiltinExtensions/PromptEnhance/` (six C# files, JS/CSS, five verbatim non-interactive profiles + `VERSION`, node harness) and `SwarmUITests/PromptEnhanceTests.cs` — one Sonnet builder per file group, one wiring agent
-- One review pass, triaged in the main session to 26 concrete fixes, applied by one Sonnet fixer (streaming loop, caps, cache-before-health, NOTES split, provenance `IntentionalUnused`, compat-class `anima`, klein class IDs, endpoint normalisation, disabled-button tooltip, provenance clearing, desktop layout) and re-gated here
-- Measured the 8B writer on the writer host with the ComfyUI harness: 58/68, cold 7.8 s, resident 0.23 s at ~103 tok/s — numbers in the extension README
-- Wrote the extension README, one AGENTS.md Fork Delta entry, and the AGENTS.md token-economy rule the fork owner asked for
+- Built the extension end to end: profile registry, writer transport (Ollama NDJSON + OpenAI SSE), syntax shield, endpoint registry with health probe, cache, websocket API, genpage UI, provenance param, 120 NUnit tests and a 66-check node harness
+- Phase 2: tri-state mode control (off/review/auto), auto-enhance intercepting the single generate funnel in capture phase, config-driven folder override map, manual profile picker, stale-status-reply sequence guard
+- Authored and graded a sixth profile (Krea 2) in the ComfyUI pack; 11 Krea checkpoints now resolve. `^ill/` folder rule recovered ~100 Illustrious derivatives whose filenames carry no family name
+- Settled the writer model: 8B and 12B both score 68/79, but the 12B emits invalid JSON in /json mode on 5 of 6 profiles and contradicts itself between identical calls. 8B ships
+- Live-verified against the writer host: streamed rewrite, LoRA tag shielded and restored, cache hit, CONFLICT blocking generation in auto mode, provenance in the generated PNG, provenance cleared on edit
 
 ## Open
 Ordered. Everything else is on the tracker.
 
-1. **Merge `prompt-enhance-phase1` into main via `/clean` and push** — fork owner only. `Data/PromptEnhance/endpoints.json` on the hub already points at the writer host (gitignored)
-2. **Phase 2 first item:** Illustrious derivatives stored under `ill/` (e.g. `ill/Auralis_v3`, class `stable-diffusion-xl-v0_9-base`) resolve to no profile — the filename override matches only `illustrious|noob`. Add a folder/`ModelClass` aware override map (`docs/PromptEnhance-Design.md` Phase 2) before the manual override UI
+1. **Merge and push** — `prompt-enhance-phase1` in this repo and `prompt-guides-1.2.0` in the ComfyUI checkout, both via `/clean`. Fork owner only
+2. **MiniMax H3 profile** — deferred by decision. Its 5 checkpoints resolve to no profile and show the disabled reason; the manual picker can force one. Video prompt doctrine is much thinner than the image profiles, so this needs real generations to validate, not desk research
 3. **SWR.86 — open the Interrogate modal once.** WD14 only in the Method dropdown, tagger options render, a WD14 round trip returns tags. Also exercise Character Sheet's "Analyze pose"
 4. **SWR.59 — set `qwenEdit2511FP8_v10.safetensors` to `qwen-image-edit`** in the Models tab
 5. **Route one generation to the spoke** — pick `G18-API` from the `/simple` Generate caret and confirm it completes
