@@ -58,6 +58,13 @@ class PromptEnhanceHelperClass {
         this.statusTimer = null;
         /** Timestamp (ms) of the last refreshStatus() call actually made, for the one-call-per-second debounce. */
         this.lastStatusCall = 0;
+        /** Monotonically increasing sequence number, incremented once per dispatched ListPromptEnhanceStatus
+         * request. Two requests can be in flight at once (eg a model change and a profile-override change both
+         * landing inside the debounce window), and whichever happens to resolve last would otherwise win even
+         * if it was dispatched first - a stale reply clobbering a newer one's button state. Each request's
+         * callbacks capture the sequence value current at dispatch time and compare it against this field when
+         * they run, so only the most-recently-dispatched request is ever allowed to touch the button. */
+        this.statusRequestSeq = 0;
         /** Pending 'input' listener on the prompt box that clears provenance once its value diverges from the
          * applied prompt, or null when none is armed. */
         this.clearProvenanceListener = null;
@@ -468,13 +475,26 @@ class PromptEnhanceHelperClass {
         }, wait);
     }
 
-    /** Fetches current status for the selected model and updates the button's enabled state. */
+    /** Fetches current status for the selected model and updates the button's enabled state.
+     * <p>Guarded against out-of-order replies: this dispatch's sequence number is captured in the closure, and
+     * both callbacks return early if it is no longer the current one, so a reply from an older, superseded
+     * request can never overwrite a newer request's button state - whichever resolves last is otherwise not
+     * necessarily whichever was dispatched last.</p>
+     */
     refreshStatus() {
         let model = getRequiredElementById('current_model').value;
+        this.statusRequestSeq += 1;
+        let requestSeq = this.statusRequestSeq;
         genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride }, data => {
+            if (requestSeq != this.statusRequestSeq) {
+                return;
+            }
             this.applyStatusToButton(data);
             this.populateProfileOptions(data.profiles || []);
         }, 0, error => {
+            if (requestSeq != this.statusRequestSeq) {
+                return;
+            }
             console.warn(`Prompt Enhance: status check failed: ${error}`);
             this.setButtonEnabled(false, `${error}`);
         });

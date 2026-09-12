@@ -29,7 +29,7 @@ owned here.
    | 2 | Configured folder/filename override | A user-editable list of regexes over the model's lowercased, subfolder-relative name, loaded from `Data/PromptEnhance/overrides.json` (see "Folder/filename override config" below). Ships with `^ill/` → `illustriousxl` and `^anima/` → `anima`. |
    | 3 | Built-in filename override | The original single fallback regex, anchored on a name segment (`(^|[\/_ -])(illustrious\|noob)`). Catches Illustrious/NoobAI checkpoints outside a configured folder. |
    | 4 | Model class ID map | `qwen-image-edit` and `qwen-image-edit-plus` both map to `qwen-image-edit-2511`. Plain `qwen-image` T2I is deliberately left unmapped - it has no profile written for it. |
-   | 5 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the override map/filename fallback handle IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (already covered by the class map). |
+   | 5 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`, `krea-2`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the override map/filename fallback handle IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (already covered by the class map). |
    | 6 | None | The Enhance button is disabled, with the reason shown in its tooltip. The panel's manual override dropdown (row 1) is always reachable from here regardless - see "Manual profile override" below. |
 
 2. **Shielding.** Before the prompt is sent to the writer, `PromptEnhanceClient.Shield` extracts every
@@ -214,7 +214,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.1.0+7ff564b9`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.2.0+0d2a1cd9`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 
@@ -229,19 +229,21 @@ machine - the copy plus the recorded version is the whole point.
 ### Writer models measured
 
 Harness: ComfyUI fork `fork_tools/prompt_guides/harness/dryrun.py` + `grade.py`, run against
-`profiles-noninteractive`, 68 validation cases.
+`profiles-noninteractive`, 79 validation cases across the 6-profile 1.2.0 pack.
 
 | Writer model | Grade | Notes |
 |---|---|---|
-| `huihui_ai/qwen3-vl-abliterated:8b-instruct` | 58/68 mechanically clean | Measured on the writer host (RTX 5080 Laptop, 16 GB, Ollama), 2026-09-12. Cold first call 7.8s wall; resident call 0.23s wall at ~103 tok/s; full 68-run dry-run 63s. Shipped default. |
-| `gemma-4-26B-A4B` Q4_K_M v3 | 66/68 | Graded 2026-09-10 on the hub. 18 GB on disk - spills on the writer host's 16 GB card, so it's kept as an opt-in `endpoints.json` entry rather than the default. |
-| `gemma-4-abliterated:12b` | Not measured | Grading run was interrupted; no numbers recorded. |
+| `huihui_ai/qwen3-vl-abliterated:8b-instruct` | 68/79 mechanically clean | Measured on the writer host (RTX 5080 Laptop, 16 GB, Ollama). Cold first call 7.8s wall; resident call 0.23s wall at ~103 tok/s. Shipped default. |
+| `huihui_ai/gemma-4-abliterated:12b` | 68/79 | Same grading pass, same score as the shipped 8B - but not shipped as the default: it emitted invalid JSON in `/json` mode on 5 of the 6 profiles, and its output was unstable, self-contradicting between otherwise-identical calls. |
+| `gemma-4-26B-A4B` Q4_K_M v3 | 66/68 (pre-1.2.0, 5-profile pack; not yet re-graded against Krea-2) | Graded 2026-09-10 on the hub. 18 GB on disk - spills on the writer host's 16 GB card, so it's kept as an opt-in `endpoints.json` entry rather than the default. |
 
 Failing pairs for the shipped 8B default: `10/illustrious` INVENTED-SUBJECT; `11/anima` EXAMPLE-LEAK;
 `5a/qwenedit` SPURIOUS-CONFLICT; `5a/anima` INVENTED-SUBJECT + EXAMPLE-LEAK; `5a/illustrious` and
-`5b/illustrious` INVENTED-SUBJECT; `9 runtime/lora` NO-NOTES on klein9b, qwenedit, anima, and illustrious.
-The `9 runtime/lora` case (LoRA/protected-token handling) is the 8B's systematic failure mode and this
-fork's real workload - it's the reason the syntax shield above exists.
+`5b/illustrious` INVENTED-SUBJECT; `9 runtime/lora` NO-NOTES on klein9b, qwenedit, anima, illustrious, and
+krea-2. The `9 runtime/lora` case (LoRA/protected-token handling) is the 8B's systematic failure mode and
+this fork's real workload - it's the reason the syntax shield above exists. Krea-2's only systematic failure
+is that same `9 runtime/lora` NO-NOTES case, which 4 of the other 5 profiles fail identically - a writer-model
+weakness, not a defect in the Krea-2 profile.
 
 ## Not built
 
