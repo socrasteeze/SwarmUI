@@ -1,24 +1,21 @@
 # HANDOFF
 
-**Updated:** 2026-09-12 · **Branch:** main · **Base:** 94e13d75 (= origin/main after this push) · **Tree:** clean
+**Updated:** 2026-09-12 · **Branch:** `prompt-enhance-phase1` · **Base:** f5bb8c8b (= origin/main) · **Tree:** clean
 
 ## State
-Design landed on main; Prompt Enhance Phase 1 build is starting. Builders are Sonnet subagents; this session
-orchestrates and gates. Nothing under `src/BuiltinExtensions/PromptEnhance/` exists yet.
+Prompt Enhance Phase 1 is built and gated on `prompt-enhance-phase1`: Release build 0 warnings, `dotnet test` 114/114, both `dotnet format` checks clean, node harness 33/33, zero core files touched. Not yet deployed to the live server or exercised against the writer host.
 
 ## Done this session
-- Verified the repo was not mid-merge from the earlier sync session — that merge had landed elsewhere and this checkout only fast-forwarded
-- Reviewed `docs/PromptEnhance-Design.md` and the ComfyUI fork's `fork_tools/prompt_guides/` pack end to end; every code reference in the design checks out against the tree
-- Fast-forwarded the docs-only design branch onto main and deleted it on origin
-- Verified the writer host live: Ollama bound on all interfaces, four writer models pulled, LM Studio not running, no Open WebUI. Phase 1 needs Ollama only
-- Re-ran the pack grader read-only: gemma-4-26B v3 66/68, qwen3-vl-8B v2 57/68; the 8B fails every `9 runtime/lora` case (`NO-NOTES`)
-- Folded the Karpathy behavioral guidelines into `AGENTS.md` Code conventions
+- Landed the design branch on main, then built `src/BuiltinExtensions/PromptEnhance/` (six C# files, JS/CSS, five verbatim non-interactive profiles + `VERSION`, node harness) and `SwarmUITests/PromptEnhanceTests.cs` — one Sonnet builder per file group, one wiring agent
+- One review pass, triaged in the main session to 26 concrete fixes, applied by one Sonnet fixer (streaming loop, caps, cache-before-health, NOTES split, provenance `IntentionalUnused`, compat-class `anima`, klein class IDs, endpoint normalisation, disabled-button tooltip, provenance clearing, desktop layout) and re-gated here
+- Measured the 8B writer on the writer host with the ComfyUI harness: 58/68, cold 7.8 s, resident 0.23 s at ~103 tok/s — numbers in the extension README
+- Wrote the extension README, one AGENTS.md Fork Delta entry, and the AGENTS.md token-economy rule the fork owner asked for
 
 ## Open
 Ordered. Everything else is on the tracker.
 
-1. **Build Prompt Enhance Phase 1** per `docs/PromptEnhance-Design.md` — new `src/BuiltinExtensions/PromptEnhance/`, zero core-file edits, Interrogate is the skeleton. Ship default writer `huihui_ai/qwen3-vl-abliterated:8b-instruct`; the 26B is 18 GB on disk and spills on the writer host's 16 GB card. Add a pre-send syntax shield for `<lora:…>` / `__wildcard__` / `embedding:` markers — that is the 8B's graded failure and this fork's real workload
-2. **Grade the 12B gemma and time cold vs resident** with the existing harness (`PROMPT_GUIDES_OLLAMA=http://<writer-host>:11434 python <comfy>/fork_tools/prompt_guides/harness/dryrun.py <model> <profiles-noninteractive> <out>.json`, then `grade.py`). Only the shipped default depends on it
+1. **Deploy and live-check.** `Data/PromptEnhance/endpoints.json` already points at the writer host (gitignored). Commit is on `prompt-enhance-phase1`; `restart.bat` rebuilds `live_release` when HEAD != `src/bin/last_build`. Then run the live checks in the extension `README.md` against port 8085 with an Anima checkpoint: disabled state on an unmapped class, streamed rewrite + Apply + provenance in the image metadata, `CONFLICT:` on the case-6 text, cache hit with the writer host asleep
+2. Merge `prompt-enhance-phase1` into main via `/clean` and push — fork owner only
 3. **SWR.86 — open the Interrogate modal once.** WD14 only in the Method dropdown, tagger options render, a WD14 round trip returns tags. Also exercise Character Sheet's "Analyze pose"
 4. **SWR.59 — set `qwenEdit2511FP8_v10.safetensors` to `qwen-image-edit`** in the Models tab
 5. **Route one generation to the spoke** — pick `G18-API` from the `/simple` Generate caret and confirm it completes
@@ -32,7 +29,7 @@ Ordered. Everything else is on the tracker.
 - Only the non-interactive profile set ships — the interactive set asks questions that would reach the text encoder
 - Explicit Enhance button with a preview and Apply, not auto-enhance on generate — user reviews first, no generation-path risk, reproducible
 - Provenance rides one hidden registered T2I param — lands in image metadata with no core edit; presets never capture it
-- Builders are Sonnet subagents; this session reviews diffs and runs gates, writes no implementation code
+- Builders are Sonnet agents, one per job, no review fan-outs or adversarial panels — the fork owner's rule, now codified in AGENTS.md Code conventions; this session plans, reviews diffs, and runs gates, writing no implementation code itself
 - Kept every upstream commit byte-identical; no PRs from this fork on any remote, ever
 
 ## Traps
@@ -41,7 +38,7 @@ Ordered. Everything else is on the tracker.
 - Release builds cache extension assets in memory — restart the server to see JS/CSS edits
 - **Never write `.fds` with PowerShell `Set-Content -Encoding UTF8`** — BOM+CRLF kills SwarmUI before it opens its log and the launcher hangs at `pause`. Use `UTF8Encoding($false)`, keep LF
 - **Hub and spoke must run the identical commit** (`SwarmSwarmBackend.cs:287`). Deploy the spoke by hand: stop, pull, `dotnet build src/SwarmUI.csproj -c Release -o src/bin/live_release`, write HEAD to `src/bin/last_build`, restart
-- The `--ci_test` gate exits 1 on this machine for the untracked `SwarmUI-VideoStages` extension — read the log, not the exit code. Tracker keys (`SWR.n`) never go in commit messages
+- **Cache is checked before endpoint health on purpose** (`PromptEnhanceAPI.EnhancePrompt_Internal`) — the endpoint used for the cache key is the first healthy one, or else simply the first enabled entry; that ordering is what lets a repeat prompt hit the cache while the writer host is asleep. Do not "fix" it into a health-first order
 
 ## Verify
 ```powershell
