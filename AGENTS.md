@@ -143,6 +143,14 @@ Retained from upstream's `AGENTS.md` because the rules are sound and matching up
 
 Make the minimum change that achieves the goal. SwarmUI is complex and every change has side effects, so contain edits to as small an area as possible. Prefer new files under `src/BuiltinExtensions/<FeatureName>/` over core edits — see fork law above.
 
+### Behavioral guardrails (folded in 2026-09-12)
+
+Adapted from Andrej Karpathy's `CLAUDE.md` guidelines. They bias toward caution over speed; for trivial tasks, use judgment.
+
+- **Think before coding.** State assumptions explicitly; if uncertain, ask. If multiple interpretations exist, present them rather than picking silently. If a simpler approach exists, say so and push back. If something is unclear, stop, name it, ask.
+- **Simplicity first.** Minimum code that solves the problem. No features beyond what was asked, no abstractions for single-use code, no configurability that was not requested, no error handling for impossible scenarios. If 200 lines could be 50, rewrite. Test: would a senior engineer call it overcomplicated?
+- **Surgical changes.** Touch only what you must. Do not improve adjacent code, comments, or formatting; do not refactor what is not broken; match existing style. Remove only the imports, variables, and functions *your* change orphaned. Mention pre-existing dead code, do not delete it. Every changed line should trace directly to the request.
+- **Goal-driven execution.** Turn tasks into verifiable goals ("add validation" becomes "write tests for invalid inputs, then make them pass"). For multi-step work, state a short plan of `step -> verify: check` lines and loop until each check passes.
 ### Skill files
 
 Task-specific techniques learned during development go in `.agents/skills/(skill-name)/SKILL.md`, with YAML frontmatter (`name`, `description`) followed by `# Skill Name`, `## When to Use`, and `## Instructions`. Create the file directly; no `mkdir` needed. Keep them general — a skill about adding API routes covers the pattern, not one specific route. Update a skill file when the system it describes changes, and check for relevant skill files when starting a task.
