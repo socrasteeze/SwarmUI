@@ -3,11 +3,12 @@
 Rewrites the user's typed idea into a prompt shaped for the currently loaded image model, using a local
 writer LLM reached from the hub over plain HTTP.
 
-Adds an **Enhance** button beside the prompt textbox on the genpage. Clicking it opens a panel that streams
-a rewritten prompt from the writer model, shows any advisory notes underneath, and offers Apply, Keep
-original, or Close.
+Adds an **Enhance Prompt** entry to the Generate caret menu on the genpage (the `⮟` button beside Generate,
+`#popover_generate_center`). Clicking it opens a panel that streams a rewritten prompt from the writer model,
+shows any advisory notes underneath, and offers Apply, Keep original, or Close. It lives in that menu rather
+than loose in the prompt row so it lines up with the rest of the layout instead of sitting proud of it.
 
-A mode control next to the button (**Off / Review / Auto**, see below) decides whether generate is touched
+A mode control in the same menu (**Off / Review / Auto**, see below) decides whether generate is touched
 at all. In its default **Review** mode nothing is sent anywhere on generate; the user always reviews the
 rewrite first. **Auto** mode enhances silently ahead of generating instead - see "Mode control and
 auto-enhance" below.
@@ -79,11 +80,13 @@ owned here.
 
 ## Mode control and auto-enhance
 
-A tri-state control sits beside the Enhance button, labeled **Enhance: Off / Review / Auto**. It persists
+A tri-state control sits directly under the Enhance Prompt entry in the Generate caret menu, labeled
+**Enhance: Off / Review / Auto**. Unlike the entry above it, changing the mode does not dismiss the menu.
+It persists
 per user the same way `interrogate.js` persists its own preferences (a prefixed `localStorage` key, read on
 load and written on change - see `PromptEnhanceHelperClass.pref`/`setPref`).
 
-- **Off** - no enhancement at all. The Enhance button is hidden (the mode control itself stays visible, so
+- **Off** - no enhancement at all. The Enhance Prompt entry is hidden (the mode control itself stays visible, so
   switching back is always possible) and every generate path is completely untouched.
 - **Review** - the default, and exactly the behavior described above: the button opens the panel, the user
   reviews the rewrite, and Apply writes the prompt. Generate is never touched.

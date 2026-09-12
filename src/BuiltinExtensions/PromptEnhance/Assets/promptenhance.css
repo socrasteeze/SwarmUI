@@ -2,17 +2,29 @@
    Class selectors only, per the repo CSS convention. Colors come from the existing theme variables so the
    panel tracks whichever theme the user has selected rather than pinning its own palette. */
 
-/* '.alt-text-add-button-wrapper' (see genpage.css) is a zero-size (width/height: 0) positioning box - the
-   '+' button inside it is 'position: relative; left: -5px' with a 29px width, so it visually overhangs to
-   about 24px past that zero point without contributing any width to the flex layout. This wrapper is
-   inserted as the next flex sibling of that zero-size box, so a small margin-left here would still render
-   underneath the overhanging '+' button; the margin has to clear its right edge. '.alt_prompt_textboxes'
-   (also genpage.css) uses the same 2rem clearance for the same reason. */
-.prompt-enhance-button-wrapper {
-    display: inline-flex;
+/* The Enhance entry and its mode picker live in the Generate caret menu ('#popover_generate_center'), so the
+   entry itself needs no geometry of its own - 'sui_popover_model_button' (genpage.css) already sizes every
+   row in that menu, and matching it is the point. Only the bits that rule does not cover belong here. */
+.prompt-enhance-popover-button {
+    white-space: nowrap;
+}
+
+/* The shared disabled look below paints a button background, which reads as a filled block against the menu's
+   flat rows. Inside the menu, dim the text instead and leave the row's own hover styling intact. */
+.prompt-enhance-popover-button.prompt-enhance-disabled {
+    background-color: transparent;
+    color: color-mix(in srgb, var(--text) 55%, transparent);
+}
+
+/* Not a 'sui_popover_model_button' on purpose: that class is what marks a row as dismissing the menu when
+   clicked (doPopHideCleanup in ui_improvements.js), and the menu has to stay open while the mode is changed. */
+.prompt-enhance-mode-row {
+    display: flex;
     align-items: center;
     gap: 0.4rem;
-    margin-left: 2rem;
+    padding: 0.15rem 3px 0;
+    margin-top: 0.15rem;
+    border-top: 1px solid var(--light-border);
 }
 
 .prompt-enhance-mode-label {
@@ -23,6 +35,18 @@
 
 .prompt-enhance-mode-select {
     font-size: 0.85rem;
+    flex-grow: 1;
+}
+
+/* Fallback placement only - used when the page has the prompt row but no Generate caret menu to host the
+   entry (see buildButton). '.alt-text-add-button-wrapper' (genpage.css) is a zero-size positioning box whose
+   '+' button overhangs it by about 24px without contributing width, so this sibling wrapper needs a margin
+   that clears that overhang; '.alt_prompt_textboxes' uses the same 2rem clearance for the same reason. */
+.prompt-enhance-button-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: 2rem;
 }
 
 .prompt-enhance-button {
@@ -151,7 +175,15 @@
     justify-content: flex-end;
 }
 
-/* '.alt_prompt_main_line' switches to a CSS grid on mobile with named areas "add"/"buttons"/"boxes" (see
+/* Touch target for the menu entry, matching the 44px floor used by the rest of this extension's mobile rules.
+   The other rows of the Generate caret menu keep their own sizing; only this one is ours to set. */
+.small-window .prompt-enhance-popover-button {
+    min-height: 44px;
+    line-height: 44px;
+}
+
+/* Fallback placement only (see the base '.prompt-enhance-button-wrapper' rule above).
+   '.alt_prompt_main_line' switches to a CSS grid on mobile with named areas "add"/"buttons"/"boxes" (see
    genpage.css), which this wrapper is not one of - it is intentionally left unassigned so it auto-places
    into a new implicit row below those, then told to span both columns so it reads as its own full-width row
    rather than being squeezed into the narrow first column. */

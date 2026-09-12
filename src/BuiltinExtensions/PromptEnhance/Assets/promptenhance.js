@@ -118,12 +118,13 @@ class PromptEnhanceHelperClass {
         this.scheduleStatusRefresh();
     }
 
-    /** Inserts the mode control and the Enhance button as a sibling of the '+' button's wrapper, inside
-     * '.alt_prompt_main_line'. */
+    /** Builds the mode control and the Enhance entry, and puts them in the Generate caret menu
+     * ('#popover_generate_center'). They used to sit loose in '.alt_prompt_main_line', which left the button
+     * vertically unaligned with the '+' button, the token count and the Generate row on the classic layout.
+     * If that popover is absent (a page that has the prompt row but not the caret menu), falls back to the
+     * old placement beside the '+' button so the feature stays reachable. */
     buildButton() {
-        let addButton = getRequiredElementById('alt_text_add_button');
-        let addWrapper = addButton.parentElement;
-        let wrapper = createSpan(null, 'prompt-enhance-button-wrapper');
+        let modeRow = createDiv(null, 'prompt-enhance-mode-row');
         let modeLabel = createSpan(null, 'prompt-enhance-mode-label translate', 'Enhance:');
         this.modeSelect = document.createElement('select');
         this.modeSelect.className = 'auto-dropdown prompt-enhance-mode-select';
@@ -135,12 +136,26 @@ class PromptEnhanceHelperClass {
         }
         this.modeSelect.value = this.mode;
         this.modeSelect.addEventListener('change', () => this.setMode(this.modeSelect.value));
-        wrapper.appendChild(modeLabel);
-        wrapper.appendChild(this.modeSelect);
-        this.button = createSpan(null, 'basic-button prompt-enhance-button prompt-enhance-disabled translate', 'Enhance');
+        modeRow.appendChild(modeLabel);
+        modeRow.appendChild(this.modeSelect);
+        let popover = document.getElementById('popover_generate_center');
+        if (popover) {
+            // 'sui_popover_model_button' both styles the entry like the menu's other rows and marks it as a
+            // row that dismisses the menu when clicked (see doPopHideCleanup in ui_improvements.js). The mode
+            // row deliberately does not carry that class, so changing the mode leaves the menu open.
+            this.button = createDiv(null, 'sui_popover_model_button prompt-enhance-popover-button prompt-enhance-disabled translate', 'Enhance Prompt');
+            popover.appendChild(this.button);
+            popover.appendChild(modeRow);
+        }
+        else {
+            let addWrapper = getRequiredElementById('alt_text_add_button').parentElement;
+            let wrapper = createSpan(null, 'prompt-enhance-button-wrapper');
+            this.button = createSpan(null, 'basic-button prompt-enhance-button prompt-enhance-disabled translate', 'Enhance');
+            wrapper.appendChild(modeRow);
+            wrapper.appendChild(this.button);
+            addWrapper.insertAdjacentElement('afterend', wrapper);
+        }
         this.button.title = 'Loading Prompt Enhance status...';
-        wrapper.appendChild(this.button);
-        addWrapper.insertAdjacentElement('afterend', wrapper);
         // Always opens the panel, even while the button reads as disabled - a model with no automatic
         // resolution still needs the panel reachable, since the manual profile-override dropdown that can
         // fix that lives inside it (see the panel's own profile <select>).
