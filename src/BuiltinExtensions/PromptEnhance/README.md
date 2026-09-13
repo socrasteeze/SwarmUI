@@ -91,7 +91,7 @@ the profile files themselves are never modified:
 |---|---|
 | `faithful` | Sends the shielded prompt unchanged - exactly the pre-Strength behavior. |
 | `expand` | Prepends `Mode: expand\n\n` - the profile pack's own "restrained visual additions" switch. |
-| `full` | **Default.** Prepends an explicit instruction to build out setting, lighting, camera framing, mood, and material detail while keeping every detail and art style the user gave unchanged. |
+| `full` | **Default.** Prepends an explicit instruction to build out setting, lighting, camera framing, mood, and material detail while keeping every detail the user gave unchanged. It also tells the writer not to name an art style the user did not ask for and not to repeat the instruction in the prompt - without that, Krea 2 echoed "the art style remains consistent..." into its output and the tag profiles added "anime style". |
 
 Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
 

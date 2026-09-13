@@ -617,7 +617,7 @@ public class PromptEnhanceTests : SwarmUITest
     {
         string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "full", false, out string effective, out string note);
         Assert.That(result, Is.EqualTo(
-            "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged, and keep the art style I asked for; do not introduce a different style.\n\na cat"));
+            "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged. Do not name an art style or medium I did not ask for, and do not mention these instructions in the prompt.\n\na cat"));
         Assert.That(effective, Is.EqualTo("full"));
         Assert.That(note, Is.Null);
     }
