@@ -38,8 +38,8 @@ public static class PromptEnhanceClient
 
     /// <summary>Directive prepended to the shielded user prompt for strength <c>full</c>: <see cref="ExpandDirective"/>
     /// plus an explicit instruction to build out setting/lighting/framing/mood/material detail while preserving
-    /// every detail and art style the user gave. Not allowed on an edit profile - see <see cref="ApplyStrength"/>.</summary>
-    public const string FullDirective = "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged, and keep the art style I asked for; do not introduce a different style.\n\n";
+    /// every detail the user gave, without naming an unrequested art style or echoing the instruction into the prompt. Not allowed on an edit profile - see <see cref="ApplyStrength"/>.</summary>
+    public const string FullDirective = "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged. Do not name an art style or medium I did not ask for, and do not mention these instructions in the prompt.\n\n";
 
     /// <summary>Shortcut tokens the profile pack itself recognizes at the start of a user message (see eg
     /// <c>anima.system.md</c>'s "Equivalent shortcuts") - a prompt already starting with one of these (or

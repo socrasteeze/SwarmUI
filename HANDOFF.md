@@ -35,11 +35,11 @@ Work in this order. The review contains implementation evidence and remaining ac
 6. Continue the planned search/history package: filter with cached search text before full descriptors, reuse parsed metadata, and preserve refresh/scroll/action semantics.
 7. Keep mobile drag, progress/preview coalescing, and polling changes separate. Collect appropriate live interaction traces before changing generation-display behavior.
 
-### Prompt Enhance Strength (approved 2026-09-12, building)
+### Prompt Enhance Strength (shipped 2026-09-12, live-verified)
 
-The writer profiles default to a faithful rewrite, so "Enhance" rarely adds anything. Adding a **Strength** control (Faithful / Expand / Full scene, default Full scene) that prepends a directive to the user message; the six profile assets stay byte-identical to the pack.
+The writer profiles default to a faithful rewrite, so "Enhance" rarely added anything. A **Strength** control (Faithful / Expand / Full scene, default Full scene) prepends a directive to the user message; the six profile assets stay byte-identical to the pack.
 
-- Faithful = nothing; Expand = `Mode: expand`; Full scene = `Mode: expand` + a build-a-complete-scene instruction that also says to keep the requested art style (Illustrious/Anima otherwise invent "anime style").
+- Faithful = nothing; Expand = `Mode: expand`; Full scene = `Mode: expand` + a build-a-complete-scene instruction that forbids naming an unrequested art style and echoing the instruction. The first wording ("keep the art style I asked for") was echoed into Krea 2 prompts verbatim; do not reintroduce it.
 - Edit profiles (`qwen-image-edit-2511`) cap at Expand: live test showed Full scene invents a new setting and contradicts the edit.
 - A user-typed `/rewrite`, `/expand` or `Mode:` prefix wins; no directive is added.
 - Directive is applied after `Shield`; strength joins the cache key and the provenance JSON; `ListPromptEnhanceStatus` reports allowed strengths.
