@@ -72,11 +72,14 @@
 }
 
 /* The result panel is rooted at document.body (see the class docstring in promptenhance.js for why), so it
-   is positioned fixed relative to the viewport rather than to any part of the prompt region. */
+   is positioned fixed relative to the viewport rather than to any part of the prompt region.
+   z-index sits just under '.sui-popover' (10000, site.css): the panel's '.auto-dropdown' selects open core's
+   searchable option list as a separate body-level popover (ui_improvements.js onSelectClicked), and a panel
+   stacked above it hid that list entirely, so Profile and Strength could not be changed. */
 .prompt-enhance-panel {
     display: none;
     position: fixed;
-    z-index: 100000;
+    z-index: 9999;
     top: 10vh;
     left: 50%;
     transform: translateX(-50%);

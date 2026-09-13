@@ -192,11 +192,11 @@ class PromptEnhanceHelperClass {
                 <div class="prompt-enhance-status"></div>
                 <div class="prompt-enhance-profile-row">
                     <label class="prompt-enhance-profile-label translate">Profile</label>
-                    <select class="auto-dropdown prompt-enhance-profile-select"></select>
+                    <select id="prompt_enhance_profile_select" class="auto-dropdown prompt-enhance-profile-select"></select>
                 </div>
                 <div class="prompt-enhance-profile-row prompt-enhance-strength-row">
                     <label class="prompt-enhance-profile-label translate">Strength</label>
-                    <select class="auto-dropdown prompt-enhance-strength-select"></select>
+                    <select id="prompt_enhance_strength_select" class="auto-dropdown prompt-enhance-strength-select"></select>
                 </div>
                 <textarea class="prompt-enhance-preview" rows="6" readonly></textarea>
                 <div class="prompt-enhance-notes" style="display:none"></div>
