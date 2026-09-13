@@ -51,3 +51,6 @@ package-lock.json
 # Private local notes (contains LAN/Tailscale addresses - never push)
 /Hub-Spoke-Setup.md
 /docs/Hub-Spoke-Setup.md
+
+# Local agent tracker scratch (logs, prompt dumps, screenshots)
+/.nimbalyst/
