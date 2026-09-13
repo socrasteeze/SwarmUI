@@ -236,15 +236,6 @@ class MImages {
                 mUI.warn(`${label} failed: ${error}`);
             });
         };
-        addAction('Reuse Params', () => {
-            if (entry.metadata && mState.applyMetadata(entry.metadata)) {
-                close();
-                location.hash = 'create';
-            }
-            else {
-                mUI.warn('No readable parameters on this image.');
-            }
-        });
         addAction('Prompt Img', () => {
             let attached = this.promptPathEntry(entry.fullsrc || entry.url);
             if (attached) {
@@ -285,7 +276,6 @@ class MImages {
                 });
             });
         });
-        addAction('Raw', () => window.open(entry.url, '_blank'));
         addAction('Close', close);
         overlay.appendChild(actions);
         let startX = -1;

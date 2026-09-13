@@ -552,7 +552,7 @@ class MAutoComplete {
     }
 
     /** Empties every box's strip. Used when a prompt is cleared/replaced out from under the boxes (Reset
-     * Params, Reuse Params) without the box itself ever firing an 'input' event. */
+     * Params) without the box itself ever firing an 'input' event. */
     hide() {
         for (let strip of this.slots.values()) {
             strip.innerHTML = '';

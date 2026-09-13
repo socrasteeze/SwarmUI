@@ -571,42 +571,18 @@
     min-height: 40px;
     padding: 0 0.4rem;
 }
-/* --- Live preview (sticky top of the Create panel, so it stays visible while the params scroll under it.
-       The generate bar is NOT sticky - it rides just above the prompt box instead)
+/* --- Live preview (top of the Create panel, in normal flow: it scrolls away with everything else rather
+       than staying pinned over the params)
 
    The canvas height is RESERVED, not grown into: --m-preview-h is the height of the block in every state it
    has - empty, queued, generating, done - so a generation cannot push the model row, the Generate button and
    the prompt box down the screen as it progresses. That was the old behaviour: the block was display: none
-   until the first tile, then ~40dvh of it appeared at the top of the panel, under the user's thumb.
-   The cost is real and deliberate - a phone gives this space up permanently - so the collapse toggle
-   (persisted in localStorage) is the way to take it back, and a collapsed preview reserves nothing. --- */
+   until the first tile, then ~40dvh of it appeared at the top of the panel, under the user's thumb. --- */
 .m-create-preview {
     --m-preview-h: 38dvh;
-    position: sticky;
-    top: 0;
-    z-index: 2;
     background: var(--background);
     padding-bottom: 0.4rem;
     margin-bottom: 0.2rem;
-}
-/* Idle (nothing generating) is the one state that isn't pinned: an empty placeholder riding down the panel
-   while you edit params is not worth the top of the screen. Sticky and static occupy identical flow space, so
-   this changes nothing about the layout - only whether the empty box follows the scroll. */
-.m-create-preview.m-preview-idle {
-    position: static;
-}
-.m-preview-head {
-    display: flex;
-    align-items: center;
-    padding: 0.15rem 0;
-}
-.m-preview-toggle {
-    background: none;
-    border: none;
-    color: var(--text-soft);
-    padding: 0.2rem 0.6rem;
-    /* 44px HIG minimum. It sits alone on the preview header row, so there is room and no reason to be under it. */
-    min-height: 44px;
 }
 /* --m-preview-cell-h is set by renderPreviewState from the tile count, so a 1-up, a 2-up and a 2x2 all fill
    the reserved canvas instead of each batch size being its own height. */
@@ -614,13 +590,12 @@
     display: grid;
     gap: 0.3rem;
     /* Fixed, not max-height: this box IS the reserved canvas. 1-up, 2-up and 2x2 fit exactly; anything larger
-       (a big preset batch, or grid-gen cells streaming in) scrolls inside it rather than growing the sticky
-       header down over the prompt. */
+       (a big preset batch, or grid-gen cells streaming in) scrolls inside it rather than growing the block
+       down over the prompt. */
     height: var(--m-preview-h);
     overflow-y: auto;
     overscroll-behavior: contain;
 }
-.m-create-preview.m-preview-collapsed .m-preview-grid,
 /* No tiles: the canvas placeholder is holding the same space, so an empty grid would double it. */
 .m-create-preview.m-preview-empty .m-preview-grid {
     display: none;
@@ -665,15 +640,13 @@
     from { background-position: -60% 0; }
     to { background-position: 160% 0; }
 }
-/* Collapsed and keyboard-open are the two states that deliberately give the space back, so the canvas goes
-   with the grid in both - the reservation exists to stop generation moving things, not to defend an empty
-   box against the user's own collapse or against the keyboard. */
-.m-create-preview.m-preview-collapsed .m-preview-canvas,
+/* Keyboard-open deliberately gives the space back, so the canvas goes with the grid - the reservation exists
+   to stop generation moving things, not to defend an empty box against the keyboard. */
 .m-body.m-kb-open .m-preview-canvas {
     display: none;
 }
 
-/* --- Resolved-prompt readout (below the preview, NOT inside its sticky header - see m_create.js) --- */
+/* --- Resolved-prompt readout (below the preview, NOT inside it - see m_create.js) --- */
 .m-resolved-prompt {
     border: 1px solid var(--border-color);
     border-radius: 0.4rem;

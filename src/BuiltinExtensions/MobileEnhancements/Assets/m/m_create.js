@@ -29,8 +29,6 @@ class MCreate {
         this.choiceSelects = {};
         /** Quick numeric steppers keyed by parameter id. */
         this.numberSteppers = {};
-        /** Whether the user has manually collapsed the preview. */
-        this.previewCollapsed = localStorage.getItem('m_client_preview_collapsed') == 'yes';
         // The preview is built here, detached, rather than in build(). Generation frames can arrive before
         // the Create panel has ever been built (deep-link to #models, then generate), and a tile handler
         // that assumed its container existed is exactly the crash this ordering avoids.
@@ -42,15 +40,6 @@ class MCreate {
     /** Builds the (initially detached) live preview block. */
     buildPreview() {
         this.previewWrap = mUI.el('div', 'm-create-preview m-preview-empty');
-        let head = mUI.el('div', 'm-preview-head');
-        this.previewToggle = mUI.el('button', 'm-preview-toggle');
-        this.previewToggle.addEventListener('click', () => {
-            this.previewCollapsed = !this.previewCollapsed;
-            localStorage.setItem('m_client_preview_collapsed', this.previewCollapsed ? 'yes' : 'no');
-            this.renderPreviewState();
-        });
-        head.appendChild(this.previewToggle);
-        this.previewWrap.appendChild(head);
         this.previewGrid = mUI.el('div', 'm-preview-grid');
         this.previewWrap.appendChild(this.previewGrid);
         // The empty canvas: what stands in for the images before any exist. It is exactly as tall as the grid
@@ -69,11 +58,8 @@ class MCreate {
         this.renderPreviewState();
     }
 
-    /** Builds the (initially detached, empty) resolved-prompt readout shown below the preview. Not part of
-     * previewWrap on purpose: previewWrap is a sticky header (position: sticky; top: 0), so anything added
-     * inside it eats permanent screen space at the top of the panel at every scroll position. This sits
-     * after it in normal flow instead, so it appears once, below the images, and scrolls away like anything
-     * else - matching "below the preview", not "pinned under the preview". */
+    /** Builds the (initially detached, empty) resolved-prompt readout shown below the preview. Kept out of
+     * previewWrap so it is its own block in normal flow, appearing once below the images. */
     buildResolvedPrompt() {
         this.resolvedWrap = mUI.el('div', 'm-resolved-prompt m-resolved-empty');
         this.resolvedWrap.appendChild(mUI.el('div', 'm-resolved-label', 'Resolved prompt'));
@@ -115,21 +101,15 @@ class MCreate {
         this.renderPreviewState();
     }
 
-    /** Syncs the preview's collapsed/idle/pending classes, the canvas label, and the toggle glyph.
+    /** Syncs the preview's empty/pending classes and the canvas label.
      *
      * The block occupies the same height in every one of these states - idle, queued, generating, done - so
-     * none of the transitions between them moves anything below it. `m-preview-idle` (no tiles, nothing
-     * queued) is the one state that is not pinned: an empty placeholder following you down the panel while
-     * you edit params is not worth the top 40% of the screen, and dropping the sticky costs no layout because
-     * a sticky element occupies its flow space either way. */
+     * none of the transitions between them moves anything below it. */
     renderPreviewState() {
         let count = Object.keys(this.liveTiles).length;
-        this.previewWrap.classList.toggle('m-preview-idle', count == 0 && !this.pending);
         this.previewWrap.classList.toggle('m-preview-empty', count == 0);
         this.previewCanvas.classList.toggle('m-preview-canvas-pending', this.pending);
         this.previewCanvasLabel.textContent = this.pending ? 'Queued...' : 'No preview yet';
-        this.previewWrap.classList.toggle('m-preview-collapsed', this.previewCollapsed);
-        this.previewToggle.textContent = this.previewCollapsed ? '▾ Preview' : '▴ Preview';
         let columns = count > 1 ? 2 : 1;
         // Cells are sized to fill the reserved canvas rather than to a fixed dvh, so a 1-up, a 2-up and a 2x2
         // all come out the same total height instead of each batch size being its own layout.
@@ -544,11 +524,6 @@ class MCreate {
         // rejected input (the guard above) still leaves the reason it was rejected on screen.
         mUI.clearError();
         mAutoComplete.hide();
-        if (this.previewCollapsed) {
-            this.previewCollapsed = false;
-            localStorage.setItem('m_client_preview_collapsed', 'no');
-            this.renderPreviewState();
-        }
         if (document.activeElement && document.activeElement.blur) {
             document.activeElement.blur();
         }
