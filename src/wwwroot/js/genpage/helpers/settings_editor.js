@@ -27,6 +27,7 @@ function isSettingWrongLooking(id, value) {
 function buildSettingsMenu(container, data, prefix, tracker) {
     let content = '';
     let runnables = [];
+    let widthEntries = [];
     let keys = [];
     function addBlock(block, blockPrefix = '') {
         let groups = Object.keys(block).filter(x => block[x].type == 'group');
@@ -40,7 +41,7 @@ function buildSettingsMenu(container, data, prefix, tracker) {
                 viewType = 'secret';
             }
             let fakeParam = { feature_flag: null, type: data.type, id: settingFull, name: data.name, description: data.description, default: data.value, min: null, max: null, step: null, toggleable: false, view_type: viewType, values: data.values, visible: visible, value_names: data.value_names };
-            let result = getHtmlForParam(fakeParam, prefix);
+            let result = getHtmlForParam(fakeParam, prefix, false, widthEntries);
             content += result.html;
             keys.push(settingFull);
             tracker.known[settingFull] = data;
@@ -68,6 +69,9 @@ function buildSettingsMenu(container, data, prefix, tracker) {
     }
     for (let runnable of runnables) {
         runnable();
+    }
+    if (widthEntries.length > 0) {
+        autoWidthBatchHelper.measure(widthEntries);
     }
     let confirmer = getRequiredElementById(`${prefix}confirmer`);
     for (let key of keys) {
@@ -188,8 +192,9 @@ function applyThemeSetting(theme_info) {
     }, 1);
 }
 
-function loadUserSettings(callback = null) {
+function loadUserSettings(callback = null, errorCallback = null) {
     genericRequest('GetUserSettings', {}, data => {
+        genpageAutoCompletions.noteAppliedSettings(data.settings);
         if (coreModelMap['VAE'] != null) {
             for (let setting of Object.keys(data.settings.vaes.value).filter(x => x.startsWith('default') && x.endsWith('vae'))) {
                 data.settings.vaes.value[setting].values = ['None'].concat(coreModelMap['VAE']);
@@ -203,7 +208,7 @@ function loadUserSettings(callback = null) {
         if (callback) {
             callback();
         }
-    });
+    }, 0, errorCallback, errorCallback ? 15000 : 0);
 }
 
 function loadServerSettings() {
@@ -213,28 +218,38 @@ function loadServerSettings() {
     });
 }
 
-function loadSettingsEditor() {
-    if (permissions.hasPermission('read_server_settings')) {
+/** Loads settings before the initial parameter build, or rebuilds existing controls on a later reload. */
+function loadSettingsEditor(initialLoad = false, callback = null) {
+    // The Server Settings tab already loads its own form on activation.
+    if (!initialLoad && permissions.hasPermission('read_server_settings')) {
         loadServerSettings();
     }
-    loadUserSettings(() => {
-        let inputBatchSize = document.getElementById('input_batchsize');
-        let shouldResetBatch = getUserSetting('resetbatchsizetoone', false);
-        if (inputBatchSize && shouldResetBatch) {
-            inputBatchSize.value = 1;
-            triggerChangeFor(inputBatchSize);
+    let finished = false;
+    let finish = () => {
+        if (finished) {
+            return;
         }
-        genInputs(true);
-    });
+        finished = true;
+        let presetArea = getRequiredElementById('new_preset_modal_inputs');
+        // genInputs applies resetbatchsizetoone after creating the controls. Keep unused preset controls
+        // deferred, including on later settings reloads, while rebuilding copies that already exist.
+        genInputs(!initialLoad, !initialLoad && presetArea.innerHTML.trim() != '');
+        if (callback) {
+            callback();
+        }
+    };
+    loadUserSettings(finish, initialLoad ? error => {
+        showError(error);
+        finish();
+    } : null);
 }
 
 document.getElementById('serverconfigtabbutton').addEventListener('click', loadServerSettings);
 document.getElementById('usersettingstabbutton').addEventListener('click', () => loadUserSettings());
 
-sessionReadyCallbacks.push(loadSettingsEditor);
-
 function save_user_settings() {
     genericRequest('ChangeUserSettings', { settings: userSettingsData.altered }, data => {
+        genpageAutoCompletions.invalidateAppliedSettings();
         getRequiredElementById(`usersettings_confirmer`).style.display = 'none';
         loadUserSettings();
         loadUserData();

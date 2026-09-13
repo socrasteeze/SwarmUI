@@ -98,21 +98,28 @@ public class MobileEnhancementsExtension : Extension
     /// configured source is <c>character_tags</c> and a sibling <c>all_tags</c> source exists, the general list is
     /// used instead: TagDex already owns character lookup and the <c>&lt;character:</c> prefix, so this gives the
     /// user both systems without manually swapping the setting.</summary>
-    public async Task<JObject> GetSimpleAutocompletions(HttpContext context, Session session)
+    public async Task<JObject> GetSimpleAutocompletions(HttpContext context, Session session,
+        [API.APIParameter("If true, do not substitute a sibling source for the configured source.")] bool exactSource = false)
     {
         if (!SimpleAutocompleteRateLimiter.TryUseOne(session.User.UserID))
         {
             return new JObject() { ["error"] = "Autocomplete request rate limit reached.", ["error_id"] = "ratelimit" };
         }
         Settings.User.AutoCompleteData settings = session.User.Settings.AutoComplete;
+        bool escapeParens = exactSource
+            ? settings.EscapeParens && session.User.Settings.ParamParsing.ParseAlternativePromptSyntaxes
+            : settings.EscapeParens;
         CancellationToken cancellationToken = context.RequestAborted;
         (string Source, string[] Entries) result;
         try
         {
             result = string.IsNullOrWhiteSpace(settings.Source)
                 ? (settings.Source, null)
-                : await AutoCompleteListHelper.GetDataWithSiblingFallbackAsync(settings.Source, "character_tags", "all_tags",
-                    settings.EscapeParens, settings.Suffix, settings.SpacingMode, cancellationToken);
+                : exactSource
+                    ? (settings.Source, await AutoCompleteListHelper.GetDataAsync(settings.Source, escapeParens,
+                        settings.Suffix, settings.SpacingMode, cancellationToken))
+                    : await AutoCompleteListHelper.GetDataWithSiblingFallbackAsync(settings.Source, "character_tags", "all_tags",
+                        escapeParens, settings.Suffix, settings.SpacingMode, cancellationToken);
         }
         catch (InvalidDataException)
         {

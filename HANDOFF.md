@@ -1,45 +1,49 @@
 # HANDOFF
 
-**Updated:** 2026-09-12 | **Branch:** `main` | **Base:** `ee7869a4` (`origin/main` at review) | **Tree:** documentation pending commit
+**Updated:** 2026-09-12 | **Branch:** `main` | **Base:** `ee7869a4` (`origin/main` at review) | **Tree:** clean-delivery snapshot; verify current Git status
 
 ## State
 
-WebUI/mobile performance review is complete. Commit this handoff and the review before starting the first implementation tranche.
-The user authorized implementation after that commit and explicitly waived the handoff line cap. No push or live restart is authorized by this request.
+The review and initial handoff were committed as `251db0ec`. The first WebUI performance tranche is implemented and validated; this handoff accompanies its clean delivery commit.
+The user waived the handoff line cap. Commit, tracker reconciliation, and push to `origin/main` are authorized. The tracked-source boot passes; the live server was not restarted and its separate user-extension failure remains open.
 
 ## Done this session
 
-- Created [WebUI-Performance-Review.md](docs/WebUI-Performance-Review.md) with measured findings, ordered work packages, estimated effort, and acceptance checks.
-- Confirmed a duplicate startup build: [main.js:980](src/wwwroot/js/genpage/main.js:980) calls `genInputs(false, false)`; [settings_editor.js:227](src/wwwroot/js/genpage/helpers/settings_editor.js:227) then calls `genInputs(true)` and restores the preset copy.
-- Profiled real startup paths in isolated Chromium contexts. The live server advertised `a19f6c55`; three checked assets matched the checkout.
-- Measured a 3,364 ms mobile Genpage long task under 4x CPU slowdown. The separate `/simple` sample peaked at 104 ms. These are diagnostic samples, not phone benchmarks.
-- Observed 118,250 Genpage DOM elements, 20,421 options, a 7.55 MB decoded user-data response, and a desktop model-list response of 17 MB.
-- Existing mobile-performance harness: 50/50 passed. Genpage LoRA harness: 27/27 passed. No application code changed during review.
-- Fetched `origin` before the documentation commit. `main` was two commits ahead and zero behind: `7140f5e9` and `a19f6c55`. Both have the required author and committer identity.
-- Confirmed a working .NET SDK is available now. Earlier claims that no SDK was available do not describe this environment.
+- Committed the initial review and handoff as `251db0ec`, with the required author and committer. No push was performed.
+- Applied user settings before the initial form build. Startup now builds once, keeps preset inputs deferred, and does not build hidden server settings. Settings failure falls back to one default build.
+- Batched parameter/settings width measurements in separate read, append, measure, write, and cleanup phases. Isolated wrappers preserve long-label wrapping at phone and desktop widths.
+- Deferred model browsers through SwarmUI's movable-tab click handler. Relocated selected tabs work; loaded catalogs retain refresh behavior. Model wrappers use a prebuild threshold of 50 with progressive sections.
+- Added bounded individual LoRA metadata loads for selected-LoRA details before catalog activation. Added timeout, shared pending requests, canonical caching, and shared stale-popup intent guards.
+- Corrected deferred section offsets so progressive cards keep unique menu IDs and action ownership across multiple chunks.
+- Deferred Genpage autocomplete. Boot user data is 30 KB instead of 7.55 MB decoded. Exact-source loading preserves Genpage escaping while retaining standalone defaults; formatting yields, publishes atomically, and rejects stale responses.
+- Recorded two matched baseline and candidate runs in [the review](docs/WebUI-Performance-Review.md). Largest-task mean fell 46.8%; diagnostic blocking-work sum fell 75.7%; startup DOM count fell 73.7%. These are local Chromium diagnostics, not phone benchmarks.
+- Release build passed with zero warnings/errors. Full NUnit: 122 passed. Both format checks passed. Existing browser harnesses: 50/50 mobile performance, 27/27 LoRAs, 11/11 mobile layout, 91/91 standalone Create. Three new focused harnesses pass.
+- Root-checkout boot reached running but exited 1 because ignored `SwarmUI-VideoStages` still references removed `RunSeedVR2Stage`. A detached tracked-source worktree with all 16 publishable overlay files passed Release build and isolated boot with exit 0; source hashes matched. The temporary worktree was removed without changing user extensions.
+- Rechecked the supplied behavioral guardrails. Root guidance already contained all four; added explicit final-diff/acceptance checks, removed unused autocomplete bookkeeping and response metadata, and strengthened settings-invalidation tests. Autocomplete checks and all 122 NUnit tests still pass.
+
+- Reconciled the local tracker: first-tranche source delivery, remaining performance work, the VideoStages bug, and the existing device checklist. Local descriptions were read back successfully; collaborative body storage remains unavailable after retry.
 
 ## Open
 
-Work in this order. The review contains detailed scope and verification criteria.
+Work in this order. The review contains implementation evidence and remaining acceptance criteria.
 
-1. Commit this handoff and [the review](docs/WebUI-Performance-Review.md) after documentation scrub and link/whitespace checks. Use the editor's atomic commit proposal tool. Verify the resulting commit before implementation.
-2. Begin the first tranche: preserve lazy preset construction through settings initialization; batch control sizing; defer unnecessary hidden UI construction. Preserve defaults, settings application, and custom-workflow rebuild behavior.
-3. Load model browsers on first activation while preserving refresh, favorites, current selection, folder navigation, and first-open responsiveness.
-4. Defer Genpage autocomplete transfer and indexing using the established bounded loader contract. Preserve aliases, source/user invalidation, syntax completion, and TagDex integration.
-5. Compare repeated startup and interaction measurements with the same library and viewport. A successful load flag is insufficient: follow-on work continued after `swarmHasLoaded` became true.
-6. Run relevant browser regressions and repository build, formatting, NUnit, and isolated boot gates. Inspect the final diff and update the Fork Delta for core edits.
-7. Keep search/history optimization as the next measured package. Cache lightweight search text before building full card descriptions; do not implement full virtualization without evidence.
-8. Keep mobile drag, preview/progress updates, and fallback polling separate. Collect interaction traces before changing generation-display behavior.
-9. Actual installed-PWA cold/warm loads, keyboard behavior, orientation, gesture reversal, and app resume on Android/iOS remain open. Emulation does not close these checks.
+1. Confirm the delivery state from Git before resuming: the first-tranche source delivery is distinct from production deployment and physical-device acceptance.
+2. Resolve the existing `SwarmUI-VideoStages` compatibility failure separately before treating the full boot gate as passed.
+3. When deployment is authorized, run the new compiled runtime, then bypass browser caches and verify exact-source autocomplete with the live server. Hub/spoke compatibility must be respected. Current browser measurements used JavaScript response overrides; the new endpoint has compiled NUnit coverage.
+4. Complete actual installed-PWA and physical Android/iOS checks: cold/warm load, keyboard, orientation, gesture reversal, app resume, and final-image behavior.
+5. Investigate remaining startup tasks around 1.5 seconds and first catalog opens above the interaction target. Rich LoRA metadata is still approximately 17 MB decoded; API paging and more selective hidden-form construction need a separate measured pass.
+6. Continue the planned search/history package: filter with cached search text before full descriptors, reuse parsed metadata, and preserve refresh/scroll/action semantics.
+7. Keep mobile drag, progress/preview coalescing, and polling changes separate. Collect appropriate live interaction traces before changing generation-display behavior.
 
 Prior unrelated open items remain separate from performance work. Their live status was not rechecked during this review:
 
-- Prompt Enhance publication and the external prompt-guide repository's publication. The old local-branch description is stale because Prompt Enhance is on current `main`; verify remote parity before later delivery.
+- Publication of the external prompt-guide repository remains unverified. Prompt Enhance source is already part of this repository's main history.
 - MiniMax H3 prompt doctrine remains deferred pending real generations. Do not infer quality from static review.
 - Interrogate modal: verify the WD14-only method list, options, a returned-tag round trip, and Character Sheet's Analyze Pose action.
 - Confirm the intended Qwen Image Edit model architecture assignment in the Models tab.
 - Route one generation through the configured spoke and verify completion.
 - Prior physical-device acceptance, spoke backup-file cleanup, a preview-decode warning, and the companion service restart remain unverified. Do not perform unrelated cleanup or restart during this tranche.
+
 
 ## Decisions
 
@@ -67,7 +71,7 @@ Prior unrelated open items remain separate from performance work. Their live sta
 - Diagnostic probes disabled service workers and blocked automatic `TriggerRefresh`, non-allowlisted APIs, and external origins. They are not unrestricted production benchmarks.
 - Temporary probes are not tracked or portable. Recreate a bounded probe or maintain a source-backed harness; do not depend on a particular temporary file.
 - Fresh browser contexts do not clear server caches. CPU slowdown is uncalibrated diagnostic stress, not a physical phone model.
-- A call-stack wrapper confirmed the settings-triggered second `genInputs` call. The existing initial preset deferral does not cover that path.
+- Baseline call tracing found two initial `genInputs` calls. The new path calls `loadSettingsEditor(true, callback)` before session-ready callbacks and builds once. Do not restore the old settings session-ready registration.
 - Width batching must preserve font-sensitive widths, `nogrow`, selection values, minimum sizes, and stable geometry. Hidden controls must size correctly on first display.
 - First-open model and autocomplete loading must not move the startup freeze to the first action. Preserve retry and invalidation behavior.
 - Keep intermediate preview coalescing separate from final-image, error, and completion delivery. Never drop terminal generation messages.
@@ -87,14 +91,23 @@ git diff -- HANDOFF.md
 git log origin/main..HEAD --format="%h %an <%ae> | %cn <%ce> %s"
 ```
 
-Existing targeted checks, both passed during review:
+Existing targeted checks, rerun and passed for this tranche:
 
 ```powershell
 node src/BuiltinExtensions/MobileEnhancements/verify/verify-mobile-perf.mjs
 node src/BuiltinExtensions/MobileEnhancements/verify/verify-genpage-loras.mjs
 ```
 
-Implementation gates. Not run for the documentation-only review:
+New focused checks, passed:
+
+```powershell
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-genpage-startup.mjs
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-genpage-model-loading.mjs
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-genpage-autocomplete.mjs
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-mobile-layout.mjs
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-create-panel.mjs
+```
+Implementation gates. Build, tests, and both formatting checks passed for this tranche:
 
 ```powershell
 dotnet build SwarmUI.sln --configuration Release
@@ -104,7 +117,7 @@ dotnet format style --verify-no-changes
 dotnet build Desktop/Desktop.csproj --configuration Release
 ```
 
-Isolated boot example. Choose a free port and a new throwaway directory. An untracked extension caused a prior failure; classify any current failure from fresh logs.
+Isolated boot example. Choose a free port and a new throwaway directory. The root-checkout run returned 1 due to the existing VideoStages issue; the isolated tracked-source run returned 0.
 
 ```powershell
 dotnet src/bin/Release/net8.0/SwarmUI.dll --ci_test true --launch_mode none --loglevel debug --data_dir "$env:TEMP\swarm-perf-ci\data" --port 7899

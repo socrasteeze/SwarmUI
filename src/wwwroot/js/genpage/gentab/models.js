@@ -474,6 +474,8 @@ class ModelBrowserWrapper {
         let format = subType == 'Wildcards' ? 'Small Cards' : 'Cards';
         extraHeader += `<label for="models_${subType}_sort_by">Sort:</label> <select id="models_${subType}_sort_by"><option>Name</option><option>Title</option><option>DateCreated</option><option>DateModified</option></select> <input type="checkbox" id="models_${subType}_sort_reverse"> <label for="models_${subType}_sort_reverse">Reverse</label>`;
         this.browser = new GenPageBrowserClass(container, this.listModelFolderAndFiles.bind(this), id, format, this.describeModel.bind(this), this.selectModel.bind(this), extraHeader);
+        this.browser.deferInitialRefresh = true;
+        this.browser.maxPreBuild = 50;
         this.promptBox = getRequiredElementById('alt_prompt_textbox');
         this.models = {};
         this.browser.refreshHandler = (callback) => {
@@ -554,6 +556,7 @@ class ModelBrowserWrapper {
         }
         let prefix = path == '' ? '' : (path.endsWith('/') ? path : `${path}/`);
         genericRequest('ListModels', {'path': path, 'depth': Math.round(depth), 'subtype': this.subType, 'sortBy': sortBy, 'sortReverse': reverse}, data => {
+            this.browser.loadRequested = false;
             let files = data.files.sort((a,b) => this.sortModelLocal(a, b, data.files)).map(f => { return { 'name': f.name, 'data': f }; });
             for (let file of files) {
                 file.data.display = cleanModelName(file.data.name.substring(prefix.length));
@@ -602,9 +605,23 @@ class ModelBrowserWrapper {
                 fix();
             }
         }, 0, e => {
+            this.browser.loadRequested = false;
+            let hadLoaded = this.browser.everLoaded;
             showError(`Failed to list models: ${e}`);
             callback([], []);
+            if (!hadLoaded) {
+                this.browser.everLoaded = false;
+            }
         });
+    }
+
+    /** Loads this browser once when its tab is first shown. */
+    loadIfNeeded() {
+        if (this.browser.everLoaded || this.browser.loadRequested) {
+            return;
+        }
+        this.browser.loadRequested = true;
+        this.browser.navigate('');
     }
 
     isStarred(name) {
@@ -1010,7 +1027,15 @@ function setControlNet(model) {
 
 function initialModelListLoad() {
     for (let browser of allModelBrowsers) {
-        browser.browser.navigate('');
+        let pane = browser.browser.container.closest('.genpage-bottom-tab');
+        let tab = document.querySelector(`a[href="#${pane?.id}"]`);
+        if (tab && !tab.dataset.modelBrowserLoadBound) {
+            tab.dataset.modelBrowserLoadBound = 'true';
+            tab.addEventListener('click', () => browser.loadIfNeeded());
+        }
+        if (pane?.classList.contains('show') && pane.classList.contains('active') && tab?.classList.contains('active')) {
+            browser.loadIfNeeded();
+        }
     }
 }
 
