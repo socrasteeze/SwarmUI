@@ -201,6 +201,24 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-13 — merged 1 commit: "patch step-swap noisy on h3 latent videoaudio" (`9571eac`).
+  Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep findings 0.
+  Merge is `ee5eabf`; merge base was `903da81`, the tip of the previous sync, so the window was
+  exactly this one commit. Incoming scope was 1 file, +1/-1: `SwarmKSampler.py` swaps the
+  hand-rolled `torch.zeros(...)` disable-noise latent for `comfy.sample.prepare_empty_noise(latent_samples)`,
+  which lets comfy shape the empty noise correctly for H3 latent video-audio. Not a fork
+  touchpoint — this fork has no local edits in that hunk — so it auto-merged clean.
+  Verified rather than assumed: `prepare_empty_noise` exists in the bundled backend at
+  `dlbackend/comfy/ComfyUI/comfy/sample.py:40`, and the file already imports `comfy` (line 4),
+  so the new call resolves; `py_compile` on the changed file passes.
+  Gates: a working dotnet SDK (10.0.103) was present this time, unlike the last several syncs.
+  Release build succeeded (0 warnings, 0 errors), `dotnet format SwarmUI.sln --verify-no-changes`
+  passed with no output, and the headless boot printed "SwarmUI v0.9.8.3 - Local is now running."
+  The ci-test run returns exit 1, but on a pre-existing, unrelated failure: the out-of-tree
+  extension `src/Extensions/SwarmUI-VideoStages` fails to build with
+  `CS1061: 'WorkflowGenerator' does not contain a definition for 'RunSeedVR2Stage'`. That path is
+  gitignored (`.gitignore:22`) and holds no tracked files, the merge did not touch it, and core
+  Swarm boots past it — so it is not a regression from this sync and is left for its own repo.
 - 2026-09-12 — merged 2 commits: "patch RenameModel api check" (`a56ba95`, for #1538) and "some
   additional api corrections" (`903da81`). Adopted 2 as-is; rejected 0; divergence work 2;
   conflicts 3 across 2 files. Merge is `1a41909`; merge base was `194b879`, the tip of the
