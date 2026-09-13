@@ -35,6 +35,17 @@ Work in this order. The review contains implementation evidence and remaining ac
 6. Continue the planned search/history package: filter with cached search text before full descriptors, reuse parsed metadata, and preserve refresh/scroll/action semantics.
 7. Keep mobile drag, progress/preview coalescing, and polling changes separate. Collect appropriate live interaction traces before changing generation-display behavior.
 
+### Prompt Enhance Strength (approved 2026-09-12, building)
+
+The writer profiles default to a faithful rewrite, so "Enhance" rarely adds anything. Adding a **Strength** control (Faithful / Expand / Full scene, default Full scene) that prepends a directive to the user message; the six profile assets stay byte-identical to the pack.
+
+- Faithful = nothing; Expand = `Mode: expand`; Full scene = `Mode: expand` + a build-a-complete-scene instruction that also says to keep the requested art style (Illustrious/Anima otherwise invent "anime style").
+- Edit profiles (`qwen-image-edit-2511`) cap at Expand: live test showed Full scene invents a new setting and contradicts the edit.
+- A user-typed `/rewrite`, `/expand` or `Mode:` prefix wins; no directive is added.
+- Directive is applied after `Shield`; strength joins the cache key and the provenance JSON; `ListPromptEnhanceStatus` reports allowed strengths.
+- One Sonnet builder. Gates: Release build, `dotnet test`, both format checks, `verify-promptenhance.mjs`, then live Krea 2 ×3 strengths, Illustrious Full scene (tags stay tags), Qwen Edit cap.
+- Writer stays `huihui_ai/qwen3-vl-abliterated:8b-instruct` (same family as Krea 2's Qwen3-VL-4B encoder). The 27B Qwen3.8 Q4 ran at 11.7 tok/s vs ~80 and wrote no better.
+
 Prior unrelated open items remain separate from performance work. Their live status was not rechecked during this review:
 
 - Publication of the external prompt-guide repository remains unverified. Prompt Enhance source is already part of this repository's main history.
