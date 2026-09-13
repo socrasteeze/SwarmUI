@@ -1,6 +1,8 @@
 # WebUI and Mobile Performance Review
 
-Date: 2026-09-12. Reviewed checkout: `a19f6c55` on `main`.
+Date: 2026-09-12. Reviewed checkout: `dd4ffcbd` on `main`.
+
+Implementation status: the initial handoff and review were committed as `251db0ec`. The first implementation tranche has passed source validation and is included in the clean delivery snapshot. See the checkpoint at the end of this document for results and remaining gates.
 
 ## Recommendation
 
@@ -152,3 +154,54 @@ Verdict: BLOCKED for a full motion verdict pending gesture and progress traces.
 | 3 | Frame and interrupt behavior | NOT RUN | Not graded | No live generation/gesture trace | Test rapid reversal, final state, and frame timing |
 
 Tokens: existing local CSS values retained. No new animation system proposed. No previously unanimated state change was selected for added animation; this review concerns responsiveness.
+
+## First implementation checkpoint
+
+The first tranche is implemented. Commit and push are authorized; publication is recorded by Git history. No live-server restart was performed.
+
+- Settings now load before the first parameter build. Startup builds the main form once and leaves preset inputs deferred. A failed settings request still permits one default build. The hidden server-settings form loads when requested.
+- Width measurement batches style reads, isolated measurement nodes, size reads, and writes. Separate wrappers preserve the old wrapping behavior of long labels. Main parameters and settings menus use the batch.
+- Model browsers load through the actual movable-tab click handler, including relocated tabs. Unopened catalogs remain deferred; loaded catalogs retain refresh behavior. Selected-LoRA details fetch one model when needed, with timeout, shared pending requests, and stale-popup guards.
+- Model browsers use a prebuild threshold of 50 through the existing progressive renderer. Generic and history browser defaults remain unchanged. Deferred section offsets keep menu IDs and action callbacks unique across chunks.
+- Genpage requests user data without autocomplete. Its lazy loader retains ownership through chunked parsing, rejects stale callbacks, applies timeouts/retry, invalidates on applied settings or session changes, and refreshes only a registered focused prompt. The bounded endpoint preserves `/simple` defaults while supporting exact Genpage source and parenthesis-escaping behavior.
+
+Two matched startup samples per version used the same live read APIs, fresh 390 x 844 Chromium contexts, 4x CPU slowdown, and a 15-second observation window after DOM content loaded. Browser response overrides supplied frozen JavaScript from `251db0ec` for the baseline and current JavaScript for the candidate. Service workers and automatic `TriggerRefresh` remained disabled. No generation was run.
+
+- Largest main-thread task: baseline **2,956 / 2,775 ms**; candidate **1,516 / 1,532 ms**. Mean reduction: **46.8%**.
+- Sum of each observed long task's excess over 50 ms: baseline **10,505 / 9,860 ms**; candidate **2,572 / 2,386 ms**. Mean reduction: **75.7%**. This is a diagnostic blocking-work sum, not Lighthouse TBT or field INP.
+- DOM elements at the sample point: **151,804 to 39,920**, a **73.7%** reduction. Option elements: **20,434 to 17,142**.
+- Initial main-form builds: **2 to 1**. Hidden preset options: **3,106 to 0**. Initial model-list requests: **6 to 0**.
+- Decoded user-data response: **7,549,996 to 30,293 bytes**. Total decoded API data observed during startup: approximately **31.09 MB to 3.22 MB**.
+
+Native tab-click checks confirmed zero initial catalog requests, one after opening Models, and no additional request after returning to Models. The same check explicitly exercised the refresh path used when the current model changes; unopened catalogs still issued no requests. SwarmUI's movable tabs remove Bootstrap's handler, so loading follows their actual click path. Explicit refresh handlers still update parameter and wildcard data even when the browser's own listing remains deferred.
+
+A separate single-sample interaction experiment compared initial chunks of 512 and 50 records under the same CPU slowdown. Models' largest observed opening task fell from **4,847 to 1,275 ms**. LoRA opening took **3,397 to 1,701 ms**, with its largest task falling from **2,120 to 780 ms**. The 50-record cap was then applied to model wrappers. These samples establish direction; they are not percentile guarantees.
+
+Remaining measured costs: startup still has a task around 1.5 seconds, and first catalog opens still exceed the intended interaction budget. The full LoRA metadata response remains approximately 17 MB decoded. API paging, more selective hidden-form construction, and descriptor/search work remain follow-ups. No claim is made that the entire performance plan or physical-device acceptance is complete.
+
+Verification:
+
+- Release solution build: passed, zero warnings and errors; includes the desktop project.
+- Full NUnit suite: **122 passed**.
+- Both required formatting checks: passed.
+- Existing browser harnesses: mobile performance **50/50**, Genpage LoRAs **27/27**, mobile layout **11/11**, standalone Create panel **91/91**.
+- New [startup](../src/BuiltinExtensions/MobileEnhancements/verify/verify-genpage-startup.mjs), [model-loading](../src/BuiltinExtensions/MobileEnhancements/verify/verify-genpage-model-loading.mjs), and [autocomplete](../src/BuiltinExtensions/MobileEnhancements/verify/verify-genpage-autocomplete.mjs) harnesses passed their focused behavior checks. The [NUnit fixture](../SwarmUITests/AutoCompleteListHelperTests.cs) covers exact/default API source selection, escaping compatibility, and cancellation.
+- Isolated boot reached the running state but exited **1** because the existing untracked `SwarmUI-VideoStages` extension fails to compile against the removed `RunSeedVR2Stage` method. This matches the previously recorded external extension issue and remains open; the boot gate is not marked passed.
+- The new endpoint was verified through compiled NUnit coverage. The running production server was not restarted to deploy it. Installed PWA, physical devices, and live generation remain unverified for this tranche.
+
+## Behavioral guardrail recheck
+
+The four supplied rules were already present in [AGENTS.md](../AGENTS.md). The canonical guidance now explicitly requires bug reproduction, before/after refactor checks, and a final review of scope, simplicity, and acceptance evidence.
+
+- Think before coding: the review defines the first-tranche scope, measurement conditions, compatibility requirements, and excluded deployment/device work. Runtime probes resolved assumptions about tab events, sizing, and startup order.
+- Simplicity first: the recheck removed unused serialized autocomplete context and unused response metadata. Readiness is now a Boolean; session and applied-settings invalidation retain their existing responsibilities. The transport timeout and controller deadline remain because they cover individual requests and the whole operation, respectively.
+- Surgical changes: the diff is confined to startup, model-browser loading, autocomplete, their callers, regression coverage, and state documentation. The unrelated VideoStages failure remains separate.
+- Goal-driven execution: the autocomplete harness verifies actual refetch/publication after applied source, escaping, suffix, and spacing changes. The full NUnit suite still passes all 122 tests. These scoped results do not close the boot, deployment, physical-device, or remaining interaction-performance gates.
+
+## Clean delivery verification
+
+A detached worktree at the documentation checkpoint received all 16 publishable changed/untracked files. SHA-256 checks confirmed equality with the reviewed source. Its Release solution build passed with zero warnings/errors, and its new binary booted with fresh temporary data and exit 0. Source hashes did not drift during validation. The worktree and temporary data were removed afterward.
+
+This check covers tracked source without ignored user extensions. It does not clear the root checkout's VideoStages compatibility issue. The local tracker now separates completed source work, remaining performance work, that extension bug, and physical-device acceptance. Local tracker bodies were read back successfully; collaborative body storage remains unavailable after retry.
+
+The outgoing history had one prohibited attribution trailer in an unpublished fork commit. Message-only repair preserved file trees, author/committer identity, timestamps, and upstream commits. Its descendant documentation checkpoint now has an equivalent new commit ID; references above use that ID. No force-push is required.

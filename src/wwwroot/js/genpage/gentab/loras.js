@@ -36,6 +36,12 @@ class LoraHelper {
     /** If true, the helper is currently modifying parameters, and should not reload from parameter change events. */
     dedup = false;
 
+    /** In-flight bounded metadata requests for selected LoRAs whose catalog has not been opened. */
+    loraDescriptionRequests = Object.create(null);
+
+    /** Shared popup intent counter so a later selected-LoRA action invalidates every older row callback. */
+    popupIntent = 0;
+
     /** Map of LoRA confinement values to their display names. */
     confinementNames = {
         0: 'Global',
@@ -77,6 +83,45 @@ class LoraHelper {
     /** Get the container element for the bottom-bar LoRA listing UI. */
     getUIListContainer() {
         return getRequiredElementById('current_lora_list_view');
+    }
+
+    /** Loads one LoRA description without materializing the full LoRA browser. Requests are single-flight per name. */
+    loadLoraDescription(name, callback) {
+        let model = sdLoraBrowser.models[name];
+        if (!model && !name.endsWith('.safetensors')) {
+            model = sdLoraBrowser.models[`${name}.safetensors`];
+        }
+        if (model) {
+            callback(model);
+            return;
+        }
+        if (this.loraDescriptionRequests[name]) {
+            this.loraDescriptionRequests[name].push(callback);
+            return;
+        }
+        this.loraDescriptionRequests[name] = [callback];
+        genericRequest('DescribeModel', { 'modelName': name, 'subtype': 'LoRA' }, data => {
+            let canonicalName = data && data.model ? (data.model.name || name) : name;
+            let result = data && data.model ? { name: canonicalName, data: data.model } : null;
+            if (result) {
+                sdLoraBrowser.models[name] = result;
+                sdLoraBrowser.models[canonicalName] = result;
+                if (canonicalName.endsWith('.safetensors')) {
+                    sdLoraBrowser.models[canonicalName.substring(0, canonicalName.length - '.safetensors'.length)] = result;
+                }
+            }
+            let callbacks = this.loraDescriptionRequests[name] || [];
+            delete this.loraDescriptionRequests[name];
+            for (let waiting of callbacks) {
+                waiting(result);
+            }
+        }, 0, () => {
+            let callbacks = this.loraDescriptionRequests[name] || [];
+            delete this.loraDescriptionRequests[name];
+            for (let waiting of callbacks) {
+                waiting(null);
+            }
+        }, 15000);
     }
 
     /** Load the current LoRA selections from parameter data. */
@@ -168,6 +213,7 @@ class LoraHelper {
                     sdLoraBrowser.rebuildSelectedClasses();
                 });
                 let doShowLoraPopup = (isClick) => {
+                    let intent = ++loraHelper.popupIntent;
                     let popovers = document.getElementsByClassName('sui-popover-visible');
                     for (let popover of Array.from(popovers)) {
                         if (popover.dataset.isClick == "true" && !isClick) {
@@ -177,6 +223,11 @@ class LoraHelper {
                     }
                     let model = sdLoraBrowser.models[lora.name] ?? sdLoraBrowser.models[lora.name + ".safetensors"];
                     if (!model) {
+                        loraHelper.loadLoraDescription(lora.name, loadedModel => {
+                            if (loadedModel && intent == loraHelper.popupIntent && div.isConnected && (isClick || nameSpan.matches(':hover'))) {
+                                doShowLoraPopup(isClick);
+                            }
+                        });
                         return;
                     }
                     let rect = div.getBoundingClientRect();

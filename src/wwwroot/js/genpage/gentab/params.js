@@ -179,7 +179,7 @@ function enableVideoFramesInput(id, prefix) {
     updateFromFrames();
 }
 
-function getHtmlForParam(param, prefix, isPreset = false) {
+function getHtmlForParam(param, prefix, isPreset = false, widthEntries = null) {
     try {
         let example = param.examples ? `<br><span class="translate">Examples</span>: <code>${param.examples.map(escapeHtmlNoBr).join(`</code>,&emsp;<code>`)}</code>` : '';
         let pop = param.no_popover ? '' : `<div class="sui-popover sui-info-popover" id="popover_${prefix}${param.id}"><b class="translate">${escapeHtmlNoBr(param.name)}</b> (${param.type}):<br><span class="translate slight-left-margin-block">${safeHtmlOnly(param.description)}</span>${example}</div>`;
@@ -203,11 +203,11 @@ function getHtmlForParam(param, prefix, isPreset = false) {
                 switch (param.view_type) {
                     case 'small':
                         return {html: makeNumberInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.default, min, max, step, 'small', param.toggleable, !param.no_popover) + pop,
-                        runnable: () => autoNumberWidth(getRequiredElementById(`${prefix}${param.id}`))};
+                        runnable: () => widthEntries ? scheduleAutoNumberWidth(getRequiredElementById(`${prefix}${param.id}`), widthEntries) : autoNumberWidth(getRequiredElementById(`${prefix}${param.id}`))};
                     case 'normal':
                     case 'big':
                         return {html: makeNumberInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.default, min, max, step, 'big', param.toggleable, !param.no_popover) + pop,
-                        runnable: () => autoNumberWidth(getRequiredElementById(`${prefix}${param.id}`))};
+                        runnable: () => widthEntries ? scheduleAutoNumberWidth(getRequiredElementById(`${prefix}${param.id}`), widthEntries) : autoNumberWidth(getRequiredElementById(`${prefix}${param.id}`))};
                     case 'video_frames':
                         return {html: makeVideoFramesInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.default, min, max, step, param.toggleable, !param.no_popover) + pop,
                             runnable: () => enableVideoFramesInput(`${prefix}${param.id}`, prefix)};
@@ -225,7 +225,7 @@ function getHtmlForParam(param, prefix, isPreset = false) {
                 return {html: makeCheckboxInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.default, param.toggleable, false, !param.no_popover) + pop};
             case 'dropdown':
                 return {html: makeDropdownInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.values, param.default, param.toggleable, !param.no_popover, param['value_names']) + pop,
-                        runnable: () => autoSelectWidth(getRequiredElementById(`${prefix}${param.id}`))};
+                        runnable: () => widthEntries ? scheduleAutoSelectWidth(getRequiredElementById(`${prefix}${param.id}`), widthEntries) : autoSelectWidth(getRequiredElementById(`${prefix}${param.id}`))};
             case 'list':
                 // 'loras' ships its value list separately from `models.LoRA` on genpage's non-compact
                 // ListT2IParams call, duplicating up to ~1MB of names that already arrived in the models map
@@ -281,7 +281,7 @@ function getHtmlForParam(param, prefix, isPreset = false) {
                     modelAltNames[i] = model.cleanDropdown();
                 }
                 return {html: makeDropdownInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, modelList, param.default, param.toggleable, !param.no_popover, modelAltNames, false) + pop,
-                    runnable: () => autoSelectWidth(getRequiredElementById(`${prefix}${param.id}`))};
+                    runnable: () => widthEntries ? scheduleAutoSelectWidth(getRequiredElementById(`${prefix}${param.id}`), widthEntries) : autoSelectWidth(getRequiredElementById(`${prefix}${param.id}`))};
             case 'image':
                 return {html: makeImageInput(param.feature_flag, `${prefix}${param.id}`, param.id, param.name, param.description, param.toggleable, !param.no_popover, !isPreset) + pop};
             case 'audio':
@@ -452,6 +452,7 @@ function genInputs(delay_final = false, includePresets = true) {
     readyToPersistPromptArea = false;
     clearPromptImages();
     let runnables = [];
+    let widthEntries = [];
     let groupsClose = [];
     let groupsEnable = [];
     let isPrompt = (p) => p.id == 'prompt' || p.id == 'negativeprompt';
@@ -517,7 +518,7 @@ function genInputs(delay_final = false, includePresets = true) {
             }
             for (let param of groupHolder.params.sort((a, b) => a.priority - b.priority)) {
                 if (isPrompt(param) ? param.visible == isMain : true) {
-                    let newData = getHtmlForParam(param, "input_");
+                    let newData = getHtmlForParam(param, "input_", false, widthEntries);
                     html += newData.html;
                     if (newData.runnable) {
                         runnables.push(newData.runnable);
@@ -526,7 +527,7 @@ function genInputs(delay_final = false, includePresets = true) {
                 if (presetArea && (isPrompt(param) ? isMain : true)) {
                     let presetParam = JSON.parse(JSON.stringify(param));
                     presetParam.toggleable = true;
-                    let presetData = getHtmlForParam(presetParam, "preset_input_", true);
+                    let presetData = getHtmlForParam(presetParam, "preset_input_", true, widthEntries);
                     presetHtml += presetData.html;
                     if (presetData.runnable) {
                         runnables.push(presetData.runnable);
@@ -555,6 +556,9 @@ function genInputs(delay_final = false, includePresets = true) {
     let final = () => {
         for (let runnable of runnables) {
             runnable();
+        }
+        if (widthEntries.length > 0) {
+            autoWidthBatchHelper.measure(widthEntries);
         }
         for (let group of groupsClose) {
             let elem = getRequiredElementById(`input_group_${group}`);

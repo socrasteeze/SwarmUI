@@ -329,50 +329,9 @@ function tweakNegativePromptBox() {
 }
 
 function loadUserData(callback) {
-    genericRequest('GetMyUserData', {}, data => {
+    genericRequest('GetMyUserData', { includeAutocompletions: false }, data => {
         permissions.updateFrom(data.permissions);
         starredModels = data.starred_models;
-        autoCompletionsList = {};
-        if (data.autocompletions) {
-            let allSet = [];
-            autoCompletionsList['all'] = allSet;
-            for (let val of data.autocompletions) {
-                let split = val.split('\n');
-                let datalist = autoCompletionsList[val[0]];
-                let entry = { name: split[0], low: split[1].replaceAll(' ', '_').toLowerCase(), clean: split[1], raw: val, count: 0, tag: 0 };
-                if (split.length > 2) {
-                    entry.tag = split[2];
-                }
-                if (split.length > 3) {
-                    count = parseInt(split[3]) || 0;
-                    if (count) {
-                        entry.count = count;
-                        entry.count_display = largeCountStringify(count);
-                    }
-                }
-                if (split.length > 4) {
-                    entry.alts = split[4].split(',').map(x => x.trim().toLowerCase());
-                    for (let alt of entry.alts) {
-                        if (!autoCompletionsList[alt]) {
-                            autoCompletionsList[alt] = [];
-                        }
-                        autoCompletionsList[alt].push(entry);
-                    }
-                }
-                else {
-                    entry.alts = [];
-                }
-                if (!datalist) {
-                    datalist = [];
-                    autoCompletionsList[val[0]] = datalist;
-                }
-                datalist.push(entry);
-                allSet.push(entry);
-            }
-        }
-        else {
-            autoCompletionsList = null;
-        }
         if (!language) {
             language = data.language;
         }
@@ -393,6 +352,177 @@ function loadUserData(callback) {
         loadAndApplyTranslations();
     });
 }
+
+/** Loads and formats the Genpage autocomplete list on first focused prompt use. */
+class GenpageAutoCompletions {
+    constructor() {
+        this.activeRequest = null;
+        this.retryAfter = 0;
+        this.loaded = false;
+        this.observedSettings = null;
+        this.knownSession = null;
+    }
+
+    /** Reads a value from the settings metadata returned by GetUserSettings. */
+    settingValue(settings, groupName, settingName, fallback) {
+        let group = settings?.[groupName];
+        group = group && typeof group == 'object' && 'value' in group ? group.value : group;
+        let setting = group?.[settingName];
+        setting = setting && typeof setting == 'object' && 'value' in setting ? setting.value : setting;
+        return setting ?? fallback;
+    }
+
+    /** Records the current server-applied autocomplete format without reading unsaved form controls. */
+    noteAppliedSettings(settings) {
+        let escapeParens = this.settingValue(settings, 'autocomplete', 'escapeparens', true)
+            && this.settingValue(settings, 'paramparsing', 'parsealternativepromptsyntaxes', true);
+        let identity = JSON.stringify([
+            this.settingValue(settings, 'autocomplete', 'source', ''),
+            escapeParens,
+            this.settingValue(settings, 'autocomplete', 'suffix', ''),
+            this.settingValue(settings, 'autocomplete', 'spacingmode', 'None')
+        ]);
+        if (this.observedSettings != null && this.observedSettings != identity) {
+            this.invalidateAppliedSettings();
+        }
+        this.observedSettings = identity;
+    }
+
+    /** Invalidates the published list after the server accepts new user settings. */
+    invalidateAppliedSettings() {
+        this.cancelActiveRequest();
+        autoCompletionsList = null;
+        this.resetPromptCache();
+        this.loaded = false;
+        this.retryAfter = 0;
+    }
+
+    /** Clears incremental prompt matches that were derived from the previous index. */
+    resetPromptCache() {
+        if (typeof promptTabComplete != 'undefined') {
+            promptTabComplete.lastWord = null;
+            promptTabComplete.lastResults = null;
+        }
+    }
+
+    /** Clears an active request without allowing its callbacks to affect later work. */
+    cancelActiveRequest() {
+        let request = this.activeRequest;
+        this.activeRequest = null;
+        if (request) {
+            clearTimeout(request.timeout);
+        }
+    }
+
+    /** Returns whether a callback or parser continuation still owns the active request. */
+    isCurrent(request) {
+        return this.activeRequest == request && request.session == session_id;
+    }
+
+    /** Builds completion buckets in bounded chunks and returns them for atomic publication. */
+    async formatData(data, request) {
+        if (data.warning) {
+            console.warn(`Genpage autocomplete warning: ${data.warning}`);
+        }
+        if (data.autocompletions == null) {
+            return null;
+        }
+        if (!Array.isArray(data.autocompletions)) {
+            throw new Error('Autocomplete response is not a list.');
+        }
+        let parsed = { all: [] };
+        for (let i = 0; i < data.autocompletions.length; i++) {
+            let val = data.autocompletions[i];
+            if (typeof val != 'string') {
+                throw new Error('Autocomplete response contains a non-text entry.');
+            }
+            let split = val.split('\n');
+            if (split.length < 2) {
+                throw new Error('Autocomplete response contains an invalid entry.');
+            }
+            let entry = { name: split[0], low: split[1].replaceAll(' ', '_').toLowerCase(), clean: split[1], raw: val, count: 0, tag: 0 };
+            if (split.length > 2) {
+                entry.tag = split[2];
+            }
+            if (split.length > 3) {
+                let count = parseInt(split[3]) || 0;
+                if (count) {
+                    entry.count = count;
+                    entry.count_display = largeCountStringify(count);
+                }
+            }
+            entry.alts = split.length > 4 ? split[4].split(',').map(x => x.trim().toLowerCase()) : [];
+            let bucketNames = new Set(['all', val[0], ...entry.alts]);
+            for (let bucketName of bucketNames) {
+                if (!parsed[bucketName]) {
+                    parsed[bucketName] = [];
+                }
+                parsed[bucketName].push(entry);
+            }
+            if ((i & 1023) == 1023) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+                if (!this.isCurrent(request)) {
+                    return null;
+                }
+            }
+        }
+        return parsed;
+    }
+
+    /** Records a failed request and applies the retry delay. */
+    fail(request, error) {
+        if (!this.isCurrent(request)) {
+            return;
+        }
+        this.cancelActiveRequest();
+        this.retryAfter = Date.now() + 5000;
+        console.warn(`Genpage autocomplete load failed: ${error}`);
+    }
+
+    /** Parses a successful response while retaining single-flight ownership. */
+    async succeed(request, data) {
+        if (!this.isCurrent(request)) {
+            return;
+        }
+        try {
+            let parsed = await this.formatData(data, request);
+            if (!this.isCurrent(request)) {
+                return;
+            }
+            autoCompletionsList = parsed;
+            this.resetPromptCache();
+            this.loaded = true;
+            this.cancelActiveRequest();
+            this.retryAfter = 0;
+            let active = document.activeElement;
+            if (active && promptTabComplete.enabledBoxes.has(active)) {
+                promptTabComplete.onInput(active);
+            }
+        }
+        catch (error) {
+            this.fail(request, error);
+        }
+    }
+
+    /** Loads the exact configured autocomplete source once for the current session and applied settings. */
+    ensureLoaded() {
+        if (this.knownSession != session_id) {
+            this.invalidateAppliedSettings();
+            this.knownSession = session_id;
+        }
+        if (this.loaded || this.activeRequest || Date.now() < this.retryAfter) {
+            return;
+        }
+        let request = { session: session_id, timeout: null };
+        this.activeRequest = request;
+        // This deadline covers the complete request chain and chunked parser. The transport timeout below bounds each XHR attempt.
+        request.timeout = setTimeout(() => this.fail(request, 'request timed out'), 15000);
+        genericRequest('GetSimpleAutocompletions', { exactSource: true },
+            data => this.succeed(request, data), 0, error => this.fail(request, error), 15000);
+    }
+}
+
+let genpageAutoCompletions = new GenpageAutoCompletions();
 
 function updateAllModels(models) {
     simplifiedMap = {};
@@ -974,30 +1104,30 @@ function genpageLoad() {
             paramConfig.loadUserParamConfigTab();
             autoRepersistParams();
             setInterval(autoRepersistParams, 60 * 60 * 1000); // Re-persist again hourly if UI left over
-            // Skip the New-Preset-modal duplicate build on initial load - it doubles this call's DOM-build
-            // and select2-init work for a modal most page loads never open. Built lazily on first use
-            // (see ensurePresetInputsBuilt() in presets.js), and normally on every later genInputs() call.
-            genInputs(false, false);
-            genToolsList();
-            reviseStatusBar();
-            getRequiredElementById('advanced_options_checkbox').checked = localStorage.getItem('display_advanced') == 'true';
-            toggle_advanced();
-            currentModelHelper.ensureCurrentModel();
-            loadUserData(() => {
-                if (permissions.hasPermission('view_backends_list')) {
-                    loadBackendTypesMenu();
+            // Apply user settings before building controls so the settings callback does not rebuild the
+            // entire form. The initial build also leaves the New Preset controls deferred until first use.
+            loadSettingsEditor(true, () => {
+                genToolsList();
+                reviseStatusBar();
+                getRequiredElementById('advanced_options_checkbox').checked = localStorage.getItem('display_advanced') == 'true';
+                toggle_advanced();
+                currentModelHelper.ensureCurrentModel();
+                loadUserData(() => {
+                    if (permissions.hasPermission('view_backends_list')) {
+                        loadBackendTypesMenu();
+                    }
+                    selectInitialPresetList();
+                });
+                for (let callback of sessionReadyCallbacks) {
+                    callback();
                 }
-                selectInitialPresetList();
+                automaticWelcomeMessage();
+                autoTitle();
+                swarmHasLoaded = true;
+                if (typeof busyIndicator != 'undefined') {
+                    busyIndicator.hide();
+                }
             });
-            for (let callback of sessionReadyCallbacks) {
-                callback();
-            }
-            automaticWelcomeMessage();
-            autoTitle();
-            swarmHasLoaded = true;
-            if (typeof busyIndicator != 'undefined') {
-                busyIndicator.hide();
-            }
         });
         reviseStatusInterval = setInterval(reviseStatusBar, 2000);
     });

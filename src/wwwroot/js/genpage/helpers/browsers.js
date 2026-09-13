@@ -116,6 +116,8 @@ class GenPageBrowserClass {
         this.splitterMinWidth = 100;
         this.splitterMinWidthMobile = 50;
         this.everLoaded = false;
+        this.loadRequested = false;
+        this.deferInitialRefresh = false;
         this.showDisplayFormat = true;
         this.showDepth = true;
         this.showRefresh = true;
@@ -225,6 +227,9 @@ class GenPageBrowserClass {
      */
     refresh() {
         this.refreshHandler(() => {
+            if (this.deferInitialRefresh && !this.everLoaded && !this.loadRequested && !this.hasGenerated) {
+                return;
+            }
             this.lastListCache = null;
             this.chunksRendered = 0;
             let path = this.folder;
@@ -242,6 +247,9 @@ class GenPageBrowserClass {
      */
     lightRefresh() {
         this.lastListCache = null;
+        if (this.deferInitialRefresh && !this.everLoaded && !this.loadRequested && !this.hasGenerated) {
+            return;
+        }
         this.update();
     }
 
@@ -442,16 +450,19 @@ class GenPageBrowserClass {
             if (this.filter && !desc.searchable.toLowerCase().includes(this.filter)) {
                 continue;
             }
-            if (i > maxBuildNow) {
+            if (i >= maxBuildNow) {
                 let remainingFiles = files.slice(i);
+                let nextChunkStartId = id - 1;
                 while (remainingFiles.length > 0) {
                     let chunkSize = Math.min(this.maxPreBuild / 2, remainingFiles.length, 100);
                     let chunk = remainingFiles.splice(0, chunkSize);
+                    let chunkStartId = nextChunkStartId;
                     let sectionDiv = createDiv(null, 'lazyload browser-section-loader');
                     sectionDiv.onclick = () => {
-                        this.buildContentList(container, chunk, sectionDiv, id);
+                        this.buildContentList(container, chunk, sectionDiv, chunkStartId);
                     };
                     container.appendChild(sectionDiv);
+                    nextChunkStartId += chunkSize;
                 }
                 break;
             }

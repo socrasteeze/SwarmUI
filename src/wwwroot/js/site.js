@@ -698,30 +698,62 @@ function load_media_file(elem, type) {
     setMediaFileInput(elem, file, type);
 }
 
-function autoSelectWidth(elem) {
-    if (elem.classList.contains('nogrow')) {
-        return;
+/** Batches temporary text measurements so a parameter rebuild performs one layout read phase. */
+class AutoWidthBatchHelper {
+    /** Measures the supplied controls and applies their existing width rules in one read/write pass. */
+    measure(entries) {
+        let pending = [];
+        for (let entry of entries) {
+            let elem = entry.elem;
+            if (elem.classList.contains('nogrow')) {
+                continue;
+            }
+            pending.push({ elem: elem, font: getComputedStyle(elem).font, text: entry.text, minimum: entry.minimum, padding: entry.padding });
+        }
+        for (let item of pending) {
+            let wrapper = document.createElement('div');
+            wrapper.style.display = 'block';
+            wrapper.style.width = '100%';
+            let span = document.createElement('span');
+            span.style.font = item.font;
+            span.innerText = item.text;
+            wrapper.appendChild(span);
+            document.documentElement.appendChild(wrapper);
+            item.wrapper = wrapper;
+            item.span = span;
+        }
+        let widths = [];
+        for (let item of pending) {
+            widths.push(Math.max(item.minimum, item.span.offsetWidth + item.padding));
+        }
+        for (let i = 0; i < pending.length; i++) {
+            pending[i].elem.style.width = `${widths[i]}px`;
+        }
+        for (let item of pending) {
+            item.wrapper.remove();
+        }
     }
-    let span = document.createElement('span');
-    span.style.font = getComputedStyle(elem).font;
-    span.innerText = elem.selectedOptions[0] ? elem.selectedOptions[0].innerText : elem.value;
-    document.documentElement.appendChild(span);
-    let width = Math.max(50, span.offsetWidth + 30);
-    elem.style.width = `${width}px`;
-    span.remove();
+}
+
+let autoWidthBatchHelper = new AutoWidthBatchHelper();
+
+function autoSelectWidth(elem) {
+    let text = elem.selectedOptions[0] ? elem.selectedOptions[0].innerText : elem.value;
+    autoWidthBatchHelper.measure([{ elem: elem, text: text, minimum: 50, padding: 30 }]);
 }
 
 function autoNumberWidth(elem) {
-    if (elem.classList.contains('nogrow')) {
-        return;
-    }
-    let span = document.createElement('span');
-    span.style.font = getComputedStyle(elem).font;
-    span.innerText = elem.value;
-    document.documentElement.appendChild(span);
-    let width = Math.max(40, span.offsetWidth + 15);
-    elem.style.width = `${width}px`;
-    span.remove();
+    autoWidthBatchHelper.measure([{ elem: elem, text: elem.value, minimum: 40, padding: 15 }]);
+}
+
+/** Queues a dropdown's current label for the next shared width measurement. */
+function scheduleAutoSelectWidth(elem, entries) {
+    entries.push({ elem: elem, text: elem.selectedOptions[0] ? elem.selectedOptions[0].innerText : elem.value, minimum: 50, padding: 30 });
+}
+
+/** Queues a numeric control's current value for the next shared width measurement. */
+function scheduleAutoNumberWidth(elem, entries) {
+    entries.push({ elem: elem, text: elem.value, minimum: 40, padding: 15 });
 }
 
 function makeGenericPopover(id, name, type, description, example) {

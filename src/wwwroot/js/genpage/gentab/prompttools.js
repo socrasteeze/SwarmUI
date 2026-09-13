@@ -161,6 +161,7 @@ class PromptTabCompleteClass {
         this.lastWord = null;
         this.lastResults = null;
         this.blockInput = false;
+        this.enabledBoxes = new WeakSet();
     }
 
     getOrderedMatches(set, prefixLow) {
@@ -177,7 +178,13 @@ class PromptTabCompleteClass {
     }
 
     enableFor(box) {
+        this.enabledBoxes.add(box);
         box.addEventListener('keydown', e => this.onKeyDown(e), true);
+        box.addEventListener('focus', () => {
+            if (document.activeElement == box) {
+                genpageAutoCompletions.ensureLoaded();
+            }
+        }, true);
         box.addEventListener('input', () => this.onInput(box), true);
     }
 
@@ -327,6 +334,9 @@ class PromptTabCompleteClass {
     }
 
     onInput(box) {
+        if (document.activeElement == box) {
+            genpageAutoCompletions.ensureLoaded();
+        }
         if (this.blockInput) {
             return;
         }
