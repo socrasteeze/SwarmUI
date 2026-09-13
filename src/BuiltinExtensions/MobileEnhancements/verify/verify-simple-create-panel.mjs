@@ -490,7 +490,7 @@ const frame = (kind, data) => page.evaluate(([k, d]) => mCreate.onFrame(k, d), [
 const idle = await geometry();
 check('idle: the canvas is already holding real height', idle.previewHeight > 200, `${idle.previewHeight}px`);
 check('idle: the placeholder says so', (await page.textContent('.m-preview-canvas-label')) == 'No preview yet');
-check('idle: the empty canvas is not pinned to the top of the panel',
+check('idle: the canvas is not pinned to the top of the panel',
     await page.evaluate(() => getComputedStyle(document.querySelector('.m-create-preview')).position == 'static'));
 
 // ---- Queued: Generate tapped, nothing back from the server yet ----
@@ -503,8 +503,8 @@ check('queued: the panel is the same total height', queued.panelHeight == idle.p
 check('queued: the label switches and the progress bar shows',
     (await page.textContent('.m-preview-canvas-label')) == 'Queued...'
     && await page.evaluate(() => getComputedStyle(document.querySelector('.m-preview-canvas-bar')).visibility == 'visible'));
-check('queued: the preview pins itself now that something is happening',
-    await page.evaluate(() => getComputedStyle(document.querySelector('.m-create-preview')).position == 'sticky'));
+check('queued: the preview still scrolls with the panel rather than pinning',
+    await page.evaluate(() => getComputedStyle(document.querySelector('.m-create-preview')).position == 'static'));
 
 // ---- First frame: one live tile replaces the placeholder ----
 await frame('progress', { request_id: 'r1', batch_index: 0, overall_percent: 0.4, preview: PIXEL });
@@ -547,19 +547,18 @@ check('after an interrupt: still nothing moved',
     after.generateTop == idle.generateTop && after.promptTop == idle.promptTop,
     `generate ${idle.generateTop} -> ${after.generateTop}, prompt ${idle.promptTop} -> ${after.promptTop}`);
 
-// ---- Collapse is the opt-out: it gives the space back on purpose ----
-// Scroll is normalized on both sides. The question is whether collapsing changes the LAYOUT; the panel taller
-// than its viewport means an auto-scrolled click (or a scrollTop the browser re-clamps once the content
-// shrinks) would otherwise be folded into the comparison and mask the real movement.
-const unscroll = () => page.evaluate(() => { document.querySelector('.m-create-panel').scrollTop = 0; });
-await unscroll();
-const beforeCollapse = await geometry();
-await page.click('.m-preview-toggle');
-await unscroll();
-const collapsed = await geometry();
-check('collapsing the preview does hand the space back', collapsed.generateTop < beforeCollapse.generateTop - 100,
-    `generate ${beforeCollapse.generateTop} -> ${collapsed.generateTop}`);
-await page.click('.m-preview-toggle');
+// ---- The preview scrolls away with the panel: there is no collapse toggle to hand the space back ----
+check('no collapse toggle exists', await page.evaluate(() => !document.querySelector('.m-preview-toggle')));
+const scrolled = await page.evaluate(() => {
+    let panel = document.querySelector('.m-create-panel');
+    let before = document.querySelector('.m-create-preview').getBoundingClientRect().top;
+    panel.scrollTop = 200;
+    let after = document.querySelector('.m-create-preview').getBoundingClientRect().top;
+    panel.scrollTop = 0;
+    return { before, after, moved: panel.scrollHeight > panel.clientHeight };
+});
+check('scrolling the panel moves the canvas with it', !scrolled.moved || scrolled.after < scrolled.before - 50,
+    JSON.stringify(scrolled));
 
 // ---- Starred models sort first ----
 await page.evaluate(pixel => {
