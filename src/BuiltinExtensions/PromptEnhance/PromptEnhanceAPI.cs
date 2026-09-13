@@ -134,10 +134,10 @@ public static class PromptEnhanceAPI
             // Strength is applied after Shield, on the already-shielded prompt, so the directive text can never
             // interact with shielding - Unshield below re-appends the extracted tokens exactly as it always did.
             string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, strength, profile.IsEdit, out string effectiveStrength, out string strengthNote);
-            // Keyed on the un-directed shielded prompt plus effectiveStrength as its own dimension, rather than
-            // on 'directed' - the directive text is a deterministic function of effectiveStrength, so folding
-            // it into the hashed prompt too would just double-count the same distinction.
-            string key = PromptEnhanceCache.Key(shielded, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength);
+            // Keyed on 'directed' (the exact text the writer receives), not on 'shielded' - the strength name alone
+            // does not change when a directive's wording is revised, so a name-only key kept serving replies
+            // written against the old wording.
+            string key = PromptEnhanceCache.Key(directed, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength);
             // Cache lookup happens before health gating, so a cache hit still answers even with nothing healthy.
             if (PromptEnhanceCache.TryGet(key, out string cachedPromptPart))
             {
