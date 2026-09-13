@@ -16,7 +16,11 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="TargetModel">The pack name this profile is written for, as used in <c>output.schema.json</c>
 /// (eg "FLUX.2-klein-4B"). Not necessarily identical to <see cref="Display"/>.</param>
 /// <param name="Text">The full non-interactive system prompt, verbatim from the profile asset file.</param>
-public record class PromptEnhanceProfile(string ID, string Display, string TargetModel, string Text);
+/// <param name="IsEdit">Whether this is an edit profile (rewrites an edit instruction against an existing
+/// image, rather than writing a from-scratch scene) - see <see cref="PromptEnhanceProfiles.KnownEditProfileIDs"/>.
+/// Enhance Strength's <c>full</c> level is not allowed on an edit profile: it invents a new setting and
+/// contradicts the edit, so it is capped down to <c>expand</c> instead (see <c>PromptEnhanceClient.ApplyStrength</c>).</param>
+public record class PromptEnhanceProfile(string ID, string Display, string TargetModel, string Text, bool IsEdit = false);
 
 /// <summary>Registry of per-architecture writer profiles, and the selection logic that picks one for a loaded
 /// model.
@@ -33,6 +37,18 @@ public static class PromptEnhanceProfiles
     /// <summary>All registered profiles, by <see cref="PromptEnhanceProfile.ID"/>. Public so another extension
     /// can register additional profiles.</summary>
     public static Dictionary<string, PromptEnhanceProfile> Profiles = [];
+
+    /// <summary>Profile IDs known to be edit profiles (rewrite an edit instruction against an existing image,
+    /// rather than write a from-scratch scene) - determined here rather than by parsing the <c>.md</c> asset,
+    /// since the asset files are not otherwise touched by this feature. <see cref="Register"/> stamps
+    /// <see cref="PromptEnhanceProfile.IsEdit"/> true for any profile whose ID appears here, so an external
+    /// extension registering its own edit profile can either add its ID to this set before calling
+    /// <see cref="Register"/>, or simply construct the <see cref="PromptEnhanceProfile"/> with
+    /// <c>IsEdit: true</c> directly - both are equivalent.</summary>
+    public static readonly HashSet<string> KnownEditProfileIDs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "qwen-image-edit-2511"
+    };
 
     /// <summary>Display name for each known profile ID. Filled in alongside <see cref="TargetModels"/> as
     /// profiles are loaded from disk.</summary>
@@ -100,9 +116,15 @@ public static class PromptEnhanceProfiles
         ["krea-2"] = "krea-2"
     };
 
-    /// <summary>Registers a profile. Safe to call from another extension's <c>OnInit</c>.</summary>
+    /// <summary>Registers a profile. Safe to call from another extension's <c>OnInit</c>. Stamps
+    /// <see cref="PromptEnhanceProfile.IsEdit"/> true when <paramref name="profile"/>'s ID is in
+    /// <see cref="KnownEditProfileIDs"/>, even if the caller did not already set it.</summary>
     public static void Register(PromptEnhanceProfile profile)
     {
+        if (!profile.IsEdit && KnownEditProfileIDs.Contains(profile.ID))
+        {
+            profile = profile with { IsEdit = true };
+        }
         Profiles[profile.ID] = profile;
     }
 

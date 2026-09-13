@@ -283,13 +283,29 @@ public class PromptEnhanceTests : SwarmUITest
     [Test]
     public void CacheKey_IsStableAndChangesWithPackVersion()
     {
-        string keyA1 = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model");
-        string keyA2 = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model");
+        string keyA1 = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "faithful");
+        string keyA2 = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "faithful");
         Assert.That(keyA1, Is.EqualTo(keyA2));
-        string keyDifferentVersion = PromptEnhanceCache.Key("a prompt", "profile1", "2.0.0", "writer-model");
+        string keyDifferentVersion = PromptEnhanceCache.Key("a prompt", "profile1", "2.0.0", "writer-model", "faithful");
         Assert.That(keyDifferentVersion, Is.Not.EqualTo(keyA1));
-        string keyDifferentPrompt = PromptEnhanceCache.Key("a different prompt", "profile1", "1.0.0", "writer-model");
+        string keyDifferentPrompt = PromptEnhanceCache.Key("a different prompt", "profile1", "1.0.0", "writer-model", "faithful");
         Assert.That(keyDifferentPrompt, Is.Not.EqualTo(keyA1));
+    }
+
+    /// <summary>The cache key changes across every effective strength for otherwise identical inputs, and is
+    /// stable when re-computed for the same strength - this is what keeps a 'full' rewrite and a 'faithful'
+    /// pass-through of the same idea from colliding on one cache entry.</summary>
+    [Test]
+    public void CacheKey_DiffersAcrossStrengths_StablePerStrength()
+    {
+        string faithful1 = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "faithful");
+        string faithful2 = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "faithful");
+        string expand = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "expand");
+        string full = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "full");
+        Assert.That(faithful1, Is.EqualTo(faithful2));
+        Assert.That(faithful1, Is.Not.EqualTo(expand));
+        Assert.That(faithful1, Is.Not.EqualTo(full));
+        Assert.That(expand, Is.Not.EqualTo(full));
     }
 
     /// <summary>Put followed by TryGet round-trips the stored result, isolated to a throwaway data directory
@@ -302,7 +318,7 @@ public class PromptEnhanceTests : SwarmUITest
         Program.DataDir = tempDir;
         try
         {
-            string key = PromptEnhanceCache.Key("round trip prompt", "profile1", "1.0.0", "writer-model");
+            string key = PromptEnhanceCache.Key("round trip prompt", "profile1", "1.0.0", "writer-model", "faithful");
             Assert.That(PromptEnhanceCache.TryGet(key, out string missing), Is.False);
             Assert.That(missing, Is.Null);
             PromptEnhanceCache.Put(key, "the enhanced result");
@@ -568,6 +584,153 @@ public class PromptEnhanceTests : SwarmUITest
         (string promptText, string notes) = PromptEnhanceClient.ExtractNotes("a plain rewritten prompt");
         Assert.That(promptText, Is.EqualTo("a plain rewritten prompt"));
         Assert.That(notes, Is.EqualTo(""));
+    }
+
+    #endregion
+
+    #region PromptEnhanceClient.ApplyStrength
+
+    /// <summary>Strength <c>faithful</c> sends the shielded prompt unchanged - exactly the pre-Strength
+    /// behavior.</summary>
+    [Test]
+    public void ApplyStrength_Faithful_SendsPromptUnchanged()
+    {
+        string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "faithful", false, out string effective, out string note);
+        Assert.That(result, Is.EqualTo("a cat"));
+        Assert.That(effective, Is.EqualTo("faithful"));
+        Assert.That(note, Is.Null);
+    }
+
+    /// <summary>Strength <c>expand</c> prepends exactly <see cref="PromptEnhanceClient.ExpandDirective"/>.</summary>
+    [Test]
+    public void ApplyStrength_Expand_PrependsExpandDirective()
+    {
+        string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "expand", false, out string effective, out string note);
+        Assert.That(result, Is.EqualTo("Mode: expand\n\na cat"));
+        Assert.That(effective, Is.EqualTo("expand"));
+        Assert.That(note, Is.Null);
+    }
+
+    /// <summary>Strength <c>full</c> prepends the exact full-scene directive from the spec, verbatim.</summary>
+    [Test]
+    public void ApplyStrength_Full_PrependsFullDirective()
+    {
+        string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "full", false, out string effective, out string note);
+        Assert.That(result, Is.EqualTo(
+            "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged, and keep the art style I asked for; do not introduce a different style.\n\na cat"));
+        Assert.That(effective, Is.EqualTo("full"));
+        Assert.That(note, Is.Null);
+    }
+
+    /// <summary>A blank strength falls back to the default, <c>full</c>.</summary>
+    [Test]
+    public void ApplyStrength_Blank_FallsBackToFull()
+    {
+        PromptEnhanceClient.ApplyStrength("a cat", "a cat", "", false, out string effective, out string note);
+        Assert.That(effective, Is.EqualTo("full"));
+        Assert.That(note, Is.Null);
+    }
+
+    /// <summary>An unrecognized strength value falls back to <c>full</c>, same as blank.</summary>
+    [Test]
+    public void ApplyStrength_Unknown_FallsBackToFull()
+    {
+        PromptEnhanceClient.ApplyStrength("a cat", "a cat", "extra-spicy", false, out string effective, out string note);
+        Assert.That(effective, Is.EqualTo("full"));
+    }
+
+    /// <summary>Strength is matched case-insensitively - <c>"FULL"</c> behaves exactly like <c>"full"</c>.</summary>
+    [Test]
+    public void ApplyStrength_IsCaseInsensitive()
+    {
+        string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "ExPaNd", false, out string effective, out string note);
+        Assert.That(result, Is.EqualTo("Mode: expand\n\na cat"));
+        Assert.That(effective, Is.EqualTo("expand"));
+    }
+
+    /// <summary>Each of the profile pack's own shortcuts, at the start of the raw prompt, wins over any
+    /// requested strength: no directive is added, and the effective strength reports as <c>user</c>.</summary>
+    [Test]
+    [TestCase("/rewrite make it moodier")]
+    [TestCase("/expand make it moodier")]
+    [TestCase("/positive make it moodier")]
+    [TestCase("/full make it moodier")]
+    [TestCase("/explain make it moodier")]
+    [TestCase("/json make it moodier")]
+    [TestCase("Mode: expand\n\nmake it moodier")]
+    [TestCase("mode: expand\n\nmake it moodier")]
+    public void ApplyStrength_UserShortcutOrMode_Passthrough_NoDirective(string rawPrompt)
+    {
+        string shielded = rawPrompt; // shielding is irrelevant to this check - no Swarm-syntax tokens present
+        string result = PromptEnhanceClient.ApplyStrength(rawPrompt, shielded, "full", false, out string effective, out string note);
+        Assert.That(result, Is.EqualTo(shielded));
+        Assert.That(effective, Is.EqualTo("user"));
+        Assert.That(note, Is.Null);
+    }
+
+    /// <summary>Leading whitespace before a shortcut is trimmed before the check, same as the profile pack's
+    /// own contract.</summary>
+    [Test]
+    public void ApplyStrength_UserShortcut_LeadingWhitespaceTrimmed()
+    {
+        string result = PromptEnhanceClient.ApplyStrength("   /json give me structured output", "/json give me structured output", "full", false, out string effective, out string note);
+        Assert.That(result, Is.EqualTo("/json give me structured output"));
+        Assert.That(effective, Is.EqualTo("user"));
+    }
+
+    /// <summary>A shortcut must match as a whole token - <c>/fully</c> is not <c>/full</c>, so it does not
+    /// trigger the user passthrough and the requested strength is applied normally.</summary>
+    [Test]
+    public void ApplyStrength_ShortcutPrefixOfLongerWord_DoesNotMatch()
+    {
+        string result = PromptEnhanceClient.ApplyStrength("/fully render this", "/fully render this", "expand", false, out string effective, out string note);
+        Assert.That(effective, Is.EqualTo("expand"));
+        Assert.That(result, Is.EqualTo("Mode: expand\n\n/fully render this"));
+    }
+
+    /// <summary>On an edit profile, strength <c>full</c> is capped down to <c>expand</c>, and a note explains
+    /// the cap.</summary>
+    [Test]
+    public void ApplyStrength_EditProfile_FullIsCappedToExpandWithNote()
+    {
+        string result = PromptEnhanceClient.ApplyStrength("edit the sky", "edit the sky", "full", true, out string effective, out string note);
+        Assert.That(result, Is.EqualTo("Mode: expand\n\nedit the sky"));
+        Assert.That(effective, Is.EqualTo("expand"));
+        Assert.That(note, Is.EqualTo("Full scene is not available for edit profiles; used Expand."));
+    }
+
+    /// <summary>On an edit profile, strengths <c>faithful</c> and <c>expand</c> are unaffected by the cap - it
+    /// only ever downgrades <c>full</c>.</summary>
+    [Test]
+    public void ApplyStrength_EditProfile_FaithfulAndExpand_Unaffected()
+    {
+        string faithfulResult = PromptEnhanceClient.ApplyStrength("edit the sky", "edit the sky", "faithful", true, out string faithfulEffective, out string faithfulNote);
+        Assert.That(faithfulResult, Is.EqualTo("edit the sky"));
+        Assert.That(faithfulEffective, Is.EqualTo("faithful"));
+        Assert.That(faithfulNote, Is.Null);
+        string expandResult = PromptEnhanceClient.ApplyStrength("edit the sky", "edit the sky", "expand", true, out string expandEffective, out string expandNote);
+        Assert.That(expandResult, Is.EqualTo("Mode: expand\n\nedit the sky"));
+        Assert.That(expandEffective, Is.EqualTo("expand"));
+        Assert.That(expandNote, Is.Null);
+    }
+
+    /// <summary>A shield -> ApplyStrength -> (simulated writer reply) -> Unshield round trip still restores the
+    /// extracted token byte-identical with a directive applied in between - proves the directive text can never
+    /// interact with the shield/unshield mechanism.</summary>
+    [Test]
+    public void ShieldApplyStrengthUnshield_RoundTrips_WithDirective()
+    {
+        string prompt = "a cat, <lora:x:0.7>, sitting";
+        string shielded = PromptEnhanceClient.Shield(prompt, out List<string> extracted);
+        string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, "full", false, out string effective, out _);
+        Assert.That(effective, Is.EqualTo("full"));
+        Assert.That(directed, Does.StartWith("Mode: expand\n\n"));
+        Assert.That(directed, Does.Not.Contain("<lora:"));
+        // Simulate the writer's reply: it never saw the directive as prompt content to preserve verbatim, it
+        // just rewrote the (directive-prefixed) idea into a plain rewritten prompt, same as any other reply.
+        string simulatedReply = "A cat sitting in a sunlit garden.";
+        string unshielded = PromptEnhanceClient.Unshield(simulatedReply, extracted);
+        Assert.That(unshielded, Is.EqualTo("A cat sitting in a sunlit garden.\n<lora:x:0.7>"));
     }
 
     #endregion

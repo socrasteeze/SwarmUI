@@ -38,10 +38,12 @@ public static class PromptEnhanceCache
 
     /// <summary>Builds the cache key for one enhance request: a lowercase SHA256 hex digest of every input
     /// that can change the result. Stable for identical inputs, and changes whenever the prompt, the
-    /// resolved profile, the profile-pack version, or the writer model differs.</summary>
-    public static string Key(string prompt, string profileId, string packVersion, string writerModel)
+    /// resolved profile, the profile-pack version, the writer model, or the effective Enhance Strength
+    /// differs - two different strengths prepend two different directives (see
+    /// <c>PromptEnhanceClient.ApplyStrength</c>), so they must never collide on the same key.</summary>
+    public static string Key(string prompt, string profileId, string packVersion, string writerModel, string strength)
     {
-        string raw = $"{prompt}|{profileId}|{packVersion}|{writerModel}";
+        string raw = $"{prompt}|{profileId}|{packVersion}|{writerModel}|{strength}";
         return Utilities.BytesToHex(SHA256.HashData(raw.EncodeUTF8())).ToLowerFast();
     }
 
