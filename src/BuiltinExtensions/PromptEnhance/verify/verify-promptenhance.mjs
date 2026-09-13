@@ -65,6 +65,8 @@ let localStorage = {
     getItem(key) { return Object.prototype.hasOwnProperty.call(this.store, key) ? this.store[key] : null; },
     setItem(key, value) { this.store[key] = String(value); }
 };
+// Read by open()'s makeWSRequest error callback. Reassigned per test the same way the others above.
+let showError = () => {};
 
 /** Pulls one class method (by name) out of `src` by brace-matching, starting from its "\n    name(" signature
  * line through the end of its body (inclusive). Returns text usable as an object-literal shorthand method,
@@ -150,6 +152,7 @@ function buildAutoEnhanceHost(overrides) {
         reentryGuard: false,
         autoRunning: false,
         profileOverride: '',
+        strength: 'full',
         appliedEnhancedText: null,
         lastResult: null,
         applyEnabled: false,
@@ -328,7 +331,8 @@ function check(name, pass, detail) {
             pack_version: '1.0.0',
             writer_model: 'qwen3:8b',
             endpoint: 'laptop',
-            cached: true
+            cached: true,
+            strength: 'full'
         },
         promptBox: makeFakeElement(),
         panel: { classList: makeFakeClassList(['prompt-enhance-panel-open']) },
@@ -343,13 +347,14 @@ function check(name, pass, detail) {
     let provenanceElem = fakeElementsById['input_promptenhanceprovenance'];
     let provenance = provenanceElem.value ? JSON.parse(provenanceElem.value) : null;
     check('apply() records provenance as JSON in the hidden param element', provenance != null, `value="${provenanceElem.value}"`);
-    check('...with the original prompt, profile, pack version, writer model, endpoint and cached flag', provenance
+    check('...with the original prompt, profile, pack version, writer model, endpoint, cached flag and strength', provenance
         && provenance.original == 'cat on a wall'
         && provenance.profile == 'anima'
         && provenance.pack_version == '1.0.0'
         && provenance.writer_model == 'qwen3:8b'
         && provenance.endpoint == 'laptop'
-        && provenance.cached === true,
+        && provenance.cached === true
+        && provenance.strength == 'full',
         JSON.stringify(provenance));
     check('...and triggers a change notification on the provenance element too', triggerChangeForCalls.includes(provenanceElem), `calls=${triggerChangeForCalls.length}`);
     check('apply() closes the panel afterward', !host.panel.classList.contains('prompt-enhance-panel-open'), `open=${host.panel.classList.contains('prompt-enhance-panel-open')}`);
@@ -463,6 +468,7 @@ function check(name, pass, detail) {
     host.onGenerateClick(event);
     check('the click is intercepted exactly once (stopPropagation and preventDefault each called once)', event.stoppedCount == 1 && event.preventedCount == 1, `stopped=${event.stoppedCount} prevented=${event.preventedCount}`);
     check('exactly one EnhancePrompt request is sent, carrying the current prompt', capturedInData != null && capturedInData.prompt == 'a cat', `inData=${JSON.stringify(capturedInData)}`);
+    check('...and carrying the current strength preference', capturedInData != null && capturedInData.strength == 'full', `inData=${JSON.stringify(capturedInData)}`);
     check('the generate button is not re-clicked while the request is still in flight', host.generateButton.dispatched.length == 0, `dispatched=${host.generateButton.dispatched.length}`);
     check('the generate button shows an "Enhancing..." busy state while it runs', host.generateButton.innerText == 'Enhancing...', `innerText="${host.generateButton.innerText}"`);
 
@@ -586,12 +592,13 @@ function check(name, pass, detail) {
     };
     getRequiredElementById = () => ({ value: 'some_model.safetensors' });
 
-    let host = buildHost(['refreshStatus', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions'], {
+    let host = buildHost(['refreshStatus', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions', 'applyStrengthOptions'], {
         button: makeFakeElement(),
         buttonEnabled: false,
         profileOverride: '',
         statusRequestSeq: 0,
-        profileSelect: fakeProfileSelect()
+        profileSelect: fakeProfileSelect(),
+        strengthSelect: { options: [] }
     });
     host.button.classList.add('prompt-enhance-disabled');
 
@@ -620,12 +627,13 @@ function check(name, pass, detail) {
     // The same guard applies to the error callback: a stale error reply must not clobber a newer, already-
     // successful reply.
     capturedCalls = [];
-    let host2 = buildHost(['refreshStatus', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions'], {
+    let host2 = buildHost(['refreshStatus', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions', 'applyStrengthOptions'], {
         button: makeFakeElement(),
         buttonEnabled: false,
         profileOverride: '',
         statusRequestSeq: 0,
-        profileSelect: fakeProfileSelect()
+        profileSelect: fakeProfileSelect(),
+        strengthSelect: { options: [] }
     });
     host2.refreshStatus();
     host2.refreshStatus();
@@ -639,6 +647,123 @@ function check(name, pass, detail) {
     // ...then the earlier-dispatched request's stale connection failure arrives afterward.
     capturedCalls[0].onError('connection refused');
     check('a stale error reply does not clobber a newer successful reply', host2.buttonEnabled === true, `buttonEnabled=${host2.buttonEnabled}`);
+}
+
+// ====================================================================================================
+// Part 14: the Strength preference round-trips through pref()/setPref(), keyed 'promptenhance_strength' -
+// the same mechanism mode/profile_override already use (see Part 7)
+// ====================================================================================================
+{
+    localStorage.store = {};
+    let host = buildHost(['pref', 'setPref'], {});
+    check('pref("strength", "full") falls back to the default when nothing is stored', host.pref('strength', 'full') == 'full', `pref=${host.pref('strength', 'full')}`);
+    host.setPref('strength', 'expand');
+    check('setPref("strength", ...) persists under the "promptenhance_strength" key', localStorage.getItem('promptenhance_strength') == 'expand', `stored="${localStorage.getItem('promptenhance_strength')}"`);
+    check('pref("strength", "full") now returns the persisted value, surviving a reload', host.pref('strength', 'full') == 'expand', `pref=${host.pref('strength', 'full')}`);
+}
+
+// ====================================================================================================
+// Part 15: buildStrengthOptions() fills the Strength <select> with the three fixed levels, in order, and
+// restores the persisted strength as the selected value
+// ====================================================================================================
+{
+    document = { createElement: () => ({}) };
+    let select = { children: [], value: '', appendChild(opt) { this.children.push(opt); } };
+    let host = buildHost(['buildStrengthOptions'], {
+        strengthSelect: select,
+        strength: 'expand'
+    });
+    host.buildStrengthOptions();
+    check('all three fixed strength options are added, in order', select.children.length == 3 && select.children[0].value == 'faithful' && select.children[1].value == 'expand' && select.children[2].value == 'full', `count=${select.children.length}`);
+    check('the persisted strength is restored as the selected value', select.value == 'expand', `value="${select.value}"`);
+}
+
+// ====================================================================================================
+// Part 16: applyStrengthOptions() disables (without removing) any option resolved.strengths omits - the
+// edit-profile cap excludes 'full'
+// ====================================================================================================
+{
+    let options = [
+        { value: 'faithful', disabled: false },
+        { value: 'expand', disabled: false },
+        { value: 'full', disabled: false }
+    ];
+    let host = buildHost(['applyStrengthOptions'], { strengthSelect: { options: options } });
+    host.applyStrengthOptions(['faithful', 'expand']);
+    check('"full" is disabled when resolved.strengths omits it (the edit-profile cap)', options[2].disabled === true, `options=${JSON.stringify(options)}`);
+    check('...but "full" is not removed from the select, only disabled', options.length == 3, `count=${options.length}`);
+    check('"faithful" and "expand" stay enabled', options[0].disabled === false && options[1].disabled === false, `options=${JSON.stringify(options)}`);
+    host.applyStrengthOptions(['faithful', 'expand', 'full']);
+    check('every option is re-enabled once the cap is lifted (eg after a model swap)', options.every(o => o.disabled === false), `options=${JSON.stringify(options)}`);
+}
+
+// ====================================================================================================
+// Part 17: refreshStatus() wires a status reply's resolved.strengths into applyStrengthOptions() - the
+// stored strength preference is never touched by this, only which options are selectable
+// ====================================================================================================
+{
+    document = { createElement: () => ({}) };
+    let fakeProfileSelect = () => ({ children: [], dataset: {}, appendChild(opt) { this.children.push(opt); } });
+    let strengthOptions = [
+        { value: 'faithful', disabled: false },
+        { value: 'expand', disabled: false },
+        { value: 'full', disabled: false }
+    ];
+    genericRequest = (route, data, onSuccess) => {
+        onSuccess({
+            profiles: [],
+            endpoints: [{ id: 'writer', kind: 'ollama', model: 'm', enabled: true, healthy: true }],
+            resolved: { profile: 'qwen-image-edit-2511', reason: null, strengths: ['faithful', 'expand'] }
+        });
+    };
+    getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+    let host = buildHost(['refreshStatus', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions', 'applyStrengthOptions'], {
+        button: makeFakeElement(),
+        buttonEnabled: false,
+        profileOverride: '',
+        statusRequestSeq: 0,
+        profileSelect: fakeProfileSelect(),
+        strengthSelect: { options: strengthOptions }
+    });
+    host.refreshStatus();
+    check('a status reply naming an edit profile disables the "full" option via applyStrengthOptions', strengthOptions[2].disabled === true, `options=${JSON.stringify(strengthOptions)}`);
+    check('...and leaves "faithful"/"expand" enabled', strengthOptions[0].disabled === false && strengthOptions[1].disabled === false, `options=${JSON.stringify(strengthOptions)}`);
+}
+
+// ====================================================================================================
+// Part 18: the review path (open()) also sends 'strength' in its EnhancePrompt request, from the same
+// this.strength preference the auto-enhance path (Part 8) reads
+// ====================================================================================================
+{
+    let capturedInData = null;
+    makeWSRequest = (url, inData) => {
+        capturedInData = inData;
+        return { addEventListener: () => {} };
+    };
+    getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+    let promptBox = makeFakeElement();
+    promptBox.value = 'a dragon';
+    let host = buildHost(['open', 'resetPanel', 'showPanel', 'setStatus', 'handleFrame', 'showConflict', 'showPassthrough', 'setApplyEnabled'], {
+        promptBox: promptBox,
+        panel: { classList: makeFakeClassList() },
+        previewArea: makeFakeElement(),
+        statusLine: makeFakeElement(),
+        notesBlock: makeFakeElement(),
+        conflictBlock: makeFakeElement(),
+        passthroughBlock: makeFakeElement(),
+        applyButton: makeFakeElement(),
+        applyEnabled: false,
+        lastResult: null,
+        running: false,
+        autoRunning: false,
+        settled: false,
+        socket: null,
+        profileOverride: '',
+        strength: 'expand'
+    });
+    host.open();
+    check('open() sends the current strength preference in its EnhancePrompt request', capturedInData != null && capturedInData.strength == 'expand', `inData=${JSON.stringify(capturedInData)}`);
+    check('...alongside the current prompt and profile override', capturedInData != null && capturedInData.prompt == 'a dragon' && capturedInData.profile_override == '', `inData=${JSON.stringify(capturedInData)}`);
 }
 
 const failed = results.filter(r => !r.pass);

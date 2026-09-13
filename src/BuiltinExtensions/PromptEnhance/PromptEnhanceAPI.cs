@@ -24,12 +24,19 @@ public static class PromptEnhanceAPI
         API.RegisterAPICall(EnhancePrompt, true, PromptEnhanceExtension.PermUsePromptEnhance);
     }
 
+    /// <summary>Every allowed strength value, in display order. What <c>resolved.strengths</c> reports when
+    /// no profile resolves (rule 7: "all three when no profile resolves").</summary>
+    private static readonly JArray AllStrengths = ["faithful", "expand", "full"];
+
+    /// <summary>Allowed strength values for an edit profile - <c>full</c> excluded, per the edit-profile cap.</summary>
+    private static readonly JArray EditProfileStrengths = ["faithful", "expand"];
+
     [API.APIDescription("Lists Prompt Enhance status for the given model: known writer profiles, configured endpoints and their live health, and which profile (if any) resolves for this model (automatically, or forced via profile_override).",
         """
         "pack_version": "1.1.0+7ff564b9",
         "profiles": [{"id": "anima", "display": "Anima", "target_model": "Anima"}],
         "endpoints": [{"id": "writer", "kind": "ollama", "model": "some-writer-model", "enabled": true, "healthy": true}],
-        "resolved": {"profile": "anima", "reason": null}
+        "resolved": {"profile": "anima", "reason": null, "strengths": ["faithful", "expand", "full"]}
         """)]
     public static async Task<JObject> ListPromptEnhanceStatus(Session session,
         [API.APIParameter("Name of the currently loaded model, used to resolve a writer profile.")] string model,
@@ -59,24 +66,29 @@ public static class PromptEnhanceAPI
                 ["healthy"] = healthy
             });
         }
+        // No resolved profile means the strength select cannot yet know which profile it will land on, so it
+        // offers every strength rather than guessing - the server still enforces the edit-profile cap once a
+        // profile actually resolves and an EnhancePrompt request is dispatched.
+        JArray strengths = profile is null ? AllStrengths : (profile.IsEdit ? EditProfileStrengths : AllStrengths);
         return new JObject()
         {
             ["pack_version"] = PromptEnhanceProfiles.PackVersion,
             ["profiles"] = profiles,
             ["endpoints"] = endpoints,
-            ["resolved"] = new JObject() { ["profile"] = profile?.ID, ["reason"] = reason }
+            ["resolved"] = new JObject() { ["profile"] = profile?.ID, ["reason"] = reason, ["strengths"] = new JArray(strengths) }
         };
     }
 
     [API.APIDescription("Rewrites a typed idea into a prompt shaped for the currently loaded model, via a local writer LLM. Streams status and chunk updates, then a single terminal result/conflict/needs_input/passthrough/error object.",
         """
-        "result": "...", "notes": "", "original": "...", "profile": "anima", "pack_version": "1.1.0+7ff564b9", "writer_model": "...", "endpoint": "writer", "cached": false
+        "result": "...", "notes": "", "original": "...", "profile": "anima", "pack_version": "1.1.0+7ff564b9", "writer_model": "...", "endpoint": "writer", "cached": false, "strength": "full"
         """)]
     public static async Task<JObject> EnhancePrompt(WebSocket socket, Session session,
         [API.APIParameter("The user's raw typed idea to rewrite.")] string prompt,
         [API.APIParameter("Name of the currently loaded model, used to resolve a writer profile.")] string model,
         [API.APIParameter("Optional profile ID to force, overriding automatic resolution.")] string profile_override = "",
-        [API.APIParameter("Optional endpoint ID to force, overriding automatic selection.")] string endpoint_override = "")
+        [API.APIParameter("Optional endpoint ID to force, overriding automatic selection.")] string endpoint_override = "",
+        [API.APIParameter("Enhance Strength: 'faithful' (send unchanged), 'expand' (permit restrained additions), or 'full' (build a complete scene) - default 'full'. Blank/unrecognized falls back to 'full'; capped to 'expand' on an edit profile.")] string strength = "full")
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -88,15 +100,15 @@ public static class PromptEnhanceAPI
             await socket.SendAndReportError($"EnhancePrompt request from {session.User.UserID}", $"The prompt is too long (over {MaxPromptLength} characters).", API.WebsocketTimeout);
             return null;
         }
-        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override), socket);
+        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength), socket);
         return null;
     }
 
     /// <summary>Internal handler: resolves a profile and endpoint, dispatches (or reuses a cached reply from)
     /// the writer LLM, and reports status/chunks/the terminal frame back over the websocket.</summary>
-    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride) input, Action<JObject> output, bool isWS)
+    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength) input, Action<JObject> output, bool isWS)
     {
-        (string prompt, string model, string profileOverride, string endpointOverride) = input;
+        (string prompt, string model, string profileOverride, string endpointOverride, string strength) = input;
         try
         {
             T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
@@ -119,12 +131,18 @@ public static class PromptEnhanceAPI
             }
             bool healthy = healthyEndpoint is not null;
             string shielded = PromptEnhanceClient.Shield(prompt, out List<string> extracted);
-            string key = PromptEnhanceCache.Key(shielded, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model);
+            // Strength is applied after Shield, on the already-shielded prompt, so the directive text can never
+            // interact with shielding - Unshield below re-appends the extracted tokens exactly as it always did.
+            string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, strength, profile.IsEdit, out string effectiveStrength, out string strengthNote);
+            // Keyed on the un-directed shielded prompt plus effectiveStrength as its own dimension, rather than
+            // on 'directed' - the directive text is a deterministic function of effectiveStrength, so folding
+            // it into the hashed prompt too would just double-count the same distinction.
+            string key = PromptEnhanceCache.Key(shielded, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength);
             // Cache lookup happens before health gating, so a cache hit still answers even with nothing healthy.
             if (PromptEnhanceCache.TryGet(key, out string cachedPromptPart))
             {
                 // Notes are not cached (only the prompt part is), so a cache hit never carries notes.
-                output(BuildResult(PromptEnhanceClient.Unshield(cachedPromptPart, extracted), "", prompt, profile, endpoint, true));
+                output(BuildResult(PromptEnhanceClient.Unshield(cachedPromptPart, extracted), "", prompt, profile, endpoint, true, effectiveStrength, strengthNote));
                 return;
             }
             if (!healthy)
@@ -132,8 +150,8 @@ public static class PromptEnhanceAPI
                 output(new JObject() { ["passthrough"] = true, ["reason"] = "No writer endpoint is reachable" });
                 return;
             }
-            output(new JObject() { ["status"] = "running", ["profile"] = profile.ID, ["writer_model"] = endpoint.Model, ["endpoint"] = endpoint.ID });
-            PromptEnhanceRequest request = new(endpoint.Url, endpoint.Kind, endpoint.Model, endpoint.KeepAlive, endpoint.TimeoutSeconds, profile.Text, shielded);
+            output(new JObject() { ["status"] = "running", ["profile"] = profile.ID, ["writer_model"] = endpoint.Model, ["endpoint"] = endpoint.ID, ["strength"] = effectiveStrength });
+            PromptEnhanceRequest request = new(endpoint.Url, endpoint.Kind, endpoint.Model, endpoint.KeepAlive, endpoint.TimeoutSeconds, profile.Text, directed);
             string reply;
             try
             {
@@ -175,7 +193,7 @@ public static class PromptEnhanceAPI
             // extracted. Notes are not cached: a NOTES: line is advisory text about this one writer run, not
             // meaningful to replay from a stale cache hit.
             PromptEnhanceCache.Put(key, promptPart);
-            output(BuildResult(PromptEnhanceClient.Unshield(promptPart, extracted), notes, prompt, profile, endpoint, false));
+            output(BuildResult(PromptEnhanceClient.Unshield(promptPart, extracted), notes, prompt, profile, endpoint, false, effectiveStrength, strengthNote));
         }
         catch (Exception ex)
         {
@@ -187,10 +205,12 @@ public static class PromptEnhanceAPI
         }
     }
 
-    /// <summary>Builds the terminal result frame shared by the cache-hit and fresh-completion paths.</summary>
-    private static JObject BuildResult(string result, string notes, string original, PromptEnhanceProfile profile, PromptEnhanceEndpoint endpoint, bool cached)
+    /// <summary>Builds the terminal result frame shared by the cache-hit and fresh-completion paths. Adds
+    /// <c>strength_note</c> only when <paramref name="strengthNote"/> is non-null (eg the edit-profile cap),
+    /// rather than always carrying an empty string like <c>notes</c> does.</summary>
+    private static JObject BuildResult(string result, string notes, string original, PromptEnhanceProfile profile, PromptEnhanceEndpoint endpoint, bool cached, string effectiveStrength, string strengthNote)
     {
-        return new JObject()
+        JObject frame = new()
         {
             ["result"] = result,
             ["notes"] = notes ?? "",
@@ -199,7 +219,13 @@ public static class PromptEnhanceAPI
             ["pack_version"] = PromptEnhanceProfiles.PackVersion,
             ["writer_model"] = endpoint.Model,
             ["endpoint"] = endpoint.ID,
-            ["cached"] = cached
+            ["cached"] = cached,
+            ["strength"] = effectiveStrength
         };
+        if (strengthNote is not null)
+        {
+            frame["strength_note"] = strengthNote;
+        }
+        return frame;
     }
 }

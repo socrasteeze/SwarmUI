@@ -79,6 +79,14 @@ class PromptEnhanceHelperClass {
         this.profileOverride = this.pref('profile_override', '');
         /** The profile-override <select> inside the panel. */
         this.profileSelect = null;
+        /** Enhance Strength: 'faithful' (send unchanged), 'expand' (permit restrained additions), or 'full'
+         * (build a complete scene, the default). Persisted per user the same way profileOverride is. Sent as
+         * 'strength' on every EnhancePrompt request (both the panel's own review request and the auto-enhance
+         * path) - the server is what actually applies the directive and enforces the edit-profile cap, this
+         * is purely the user's request. */
+        this.strength = this.pref('strength', 'full');
+        /** The Strength <select> inside the panel. */
+        this.strengthSelect = null;
         /** The prompt text this feature most recently wrote into the prompt box (via manual Apply or the
          * auto-enhance path), so a second generate click is never re-enhanced against its own output. Cleared
          * alongside provenance whenever the prompt box's value diverges from it. */
@@ -186,6 +194,10 @@ class PromptEnhanceHelperClass {
                     <label class="prompt-enhance-profile-label translate">Profile</label>
                     <select class="auto-dropdown prompt-enhance-profile-select"></select>
                 </div>
+                <div class="prompt-enhance-profile-row prompt-enhance-strength-row">
+                    <label class="prompt-enhance-profile-label translate">Strength</label>
+                    <select class="auto-dropdown prompt-enhance-strength-select"></select>
+                </div>
                 <textarea class="prompt-enhance-preview" rows="6" readonly></textarea>
                 <div class="prompt-enhance-notes" style="display:none"></div>
                 <div class="prompt-enhance-conflict" style="display:none"></div>
@@ -200,6 +212,7 @@ class PromptEnhanceHelperClass {
         this.panel = panel;
         this.statusLine = panel.querySelector('.prompt-enhance-status');
         this.profileSelect = panel.querySelector('.prompt-enhance-profile-select');
+        this.strengthSelect = panel.querySelector('.prompt-enhance-strength-select');
         this.previewArea = panel.querySelector('.prompt-enhance-preview');
         this.notesBlock = panel.querySelector('.prompt-enhance-notes');
         this.conflictBlock = panel.querySelector('.prompt-enhance-conflict');
@@ -226,6 +239,41 @@ class PromptEnhanceHelperClass {
                 this.open();
             }
         });
+        this.buildStrengthOptions();
+        this.strengthSelect.addEventListener('change', () => {
+            this.strength = this.strengthSelect.value;
+            this.setPref('strength', this.strength);
+            if (this.panel.classList.contains('prompt-enhance-panel-open')) {
+                // Re-send at the newly chosen strength rather than leaving a stale rewrite on screen, same as
+                // changing the profile override above.
+                this.close();
+                this.open();
+            }
+        });
+    }
+
+    /** Fills the Strength <select> with the three fixed levels, once - unlike the profile list, these never
+     * come from the server. Restores the persisted strength as the selected value. */
+    buildStrengthOptions() {
+        for (let entry of [['faithful', 'Faithful'], ['expand', 'Expand'], ['full', 'Full scene']]) {
+            let option = document.createElement('option');
+            option.value = entry[0];
+            option.innerText = entry[1];
+            this.strengthSelect.appendChild(option);
+        }
+        this.strengthSelect.value = this.strength;
+    }
+
+    /** Disables (but does not remove) any Strength option not in 'allowed' - eg 'full' on an edit profile.
+     * The stored preference itself is never overwritten by a cap: the select keeps showing
+     * whatever the user last chose, still sends that value on the next request, and the server is what
+     * actually applies the cap - this only keeps the user from picking an option the currently resolved
+     * profile cannot honor. */
+    applyStrengthOptions(allowed) {
+        for (let i = 0; i < this.strengthSelect.options.length; i++) {
+            let option = this.strengthSelect.options[i];
+            option.disabled = !allowed.includes(option.value);
+        }
     }
 
     /** Fills the profile-override <select> with every registered profile plus an 'Automatic' default, once -
@@ -347,6 +395,12 @@ class PromptEnhanceHelperClass {
                 this.notesBlock.style.display = '';
                 this.notesBlock.innerText = data.notes;
             }
+            if (data.strength_note) {
+                // Shares the same muted block the writer's own NOTES: lines use (rather than a new color/style)
+                // - appended on its own line when a NOTES: line is also present, otherwise shown alone.
+                this.notesBlock.style.display = '';
+                this.notesBlock.innerText = this.notesBlock.innerText ? `${this.notesBlock.innerText}\n${data.strength_note}` : data.strength_note;
+            }
             this.setStatus(`${data.profile} · ${data.writer_model} · ${data.endpoint}${data.cached ? ' (cached)' : ''}`);
             this.setApplyEnabled(true);
             return;
@@ -380,7 +434,7 @@ class PromptEnhanceHelperClass {
         this.running = true;
         this.setStatus('Starting...');
         this.settled = false;
-        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '' }, data => {
+        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
                 this.settled = true;
             }
@@ -424,7 +478,8 @@ class PromptEnhanceHelperClass {
             'pack_version': data.pack_version,
             'writer_model': data.writer_model,
             'endpoint': data.endpoint,
-            'cached': data.cached
+            'cached': data.cached,
+            'strength': data.strength
         });
         this.armProvenanceClearOnEdit(data.result);
         this.appliedEnhancedText = data.result;
@@ -506,6 +561,7 @@ class PromptEnhanceHelperClass {
             }
             this.applyStatusToButton(data);
             this.populateProfileOptions(data.profiles || []);
+            this.applyStrengthOptions((data.resolved && data.resolved.strengths) || ['faithful', 'expand', 'full']);
         }, 0, error => {
             if (requestSeq != this.statusRequestSeq) {
                 return;
@@ -579,7 +635,7 @@ class PromptEnhanceHelperClass {
             this.showPassthrough(reason);
             this.dispatchGenerateClick(altKey);
         };
-        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '' }, data => {
+        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength }, data => {
             if (data.status != null || data.chunk != null) {
                 return;
             }

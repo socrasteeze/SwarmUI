@@ -1,3 +1,4 @@
+using FreneticUtilities.FreneticExtensions;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Utils;
 using System;
@@ -29,6 +30,22 @@ public static class PromptEnhanceClient
     /// as a runaway stream and the request is aborted, so the API can fail open instead of buffering an
     /// unbounded reply.</summary>
     public const int MaxReplyLength = 32000;
+
+    /// <summary>Directive prepended to the shielded user prompt for strength <c>expand</c>: the profile's own
+    /// <c>Mode: expand</c> switch, verbatim (see eg <c>anima.system.md</c> rule "<c>Mode: expand</c> permits
+    /// restrained visual additions consistent with the request").</summary>
+    public const string ExpandDirective = "Mode: expand\n\n";
+
+    /// <summary>Directive prepended to the shielded user prompt for strength <c>full</c>: <see cref="ExpandDirective"/>
+    /// plus an explicit instruction to build out setting/lighting/framing/mood/material detail while preserving
+    /// every detail and art style the user gave. Not allowed on an edit profile - see <see cref="ApplyStrength"/>.</summary>
+    public const string FullDirective = "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged, and keep the art style I asked for; do not introduce a different style.\n\n";
+
+    /// <summary>Shortcut tokens the profile pack itself recognizes at the start of a user message (see eg
+    /// <c>anima.system.md</c>'s "Equivalent shortcuts") - a prompt already starting with one of these (or
+    /// <c>Mode:</c>) is left completely alone by <see cref="ApplyStrength"/>, since the user is already talking
+    /// to the writer directly.</summary>
+    private static readonly string[] UserShortcuts = ["/rewrite", "/expand", "/positive", "/full", "/explain", "/json"];
 
     /// <summary>Shared HTTP client for every writer request. One instance so pooled connections are reused
     /// across calls; the connect timeout is fixed low here because the writer host is a LAN/tailnet machine,
@@ -342,6 +359,78 @@ public static class PromptEnhanceClient
             return $"{text}\n{tokenList}";
         }
         return $"{text}, {tokenList}";
+    }
+
+    /// <summary>Applies the user-selected Enhance Strength to a shielded user prompt, by prepending one of the
+    /// profile pack's own <c>Mode:</c> directives (see <see cref="ExpandDirective"/>/<see cref="FullDirective"/>).
+    /// Applied after <see cref="Shield"/> so the directive text never interacts with shielding - the caller must
+    /// pass <paramref name="rawPrompt"/> (for the shortcut check, rule 2 below) and <paramref name="shieldedPrompt"/>
+    /// (what the directive is actually prepended to) separately.
+    /// <para>Rules, in order: (1) if <paramref name="rawPrompt"/>, trimmed of leading whitespace, already starts
+    /// with one of the profile pack's own shortcuts (<c>/rewrite</c>, <c>/expand</c>, <c>/positive</c>,
+    /// <c>/full</c>, <c>/explain</c>, <c>/json</c>, each matched as a whole token) or <c>Mode:</c>
+    /// (case-insensitive), the user is already talking to the writer directly - no directive is added, and
+    /// <paramref name="effectiveStrength"/> is <c>"user"</c>. (2) Otherwise <paramref name="strength"/> is
+    /// lowercased and blank/unrecognized values fall back to <c>"full"</c> (the feature default). (3)
+    /// <c>full</c> is not allowed on an edit profile (<paramref name="isEditProfile"/>) - it invents a new
+    /// setting and contradicts the edit - so it is downgraded to <c>expand</c> and <paramref name="note"/> is
+    /// set to explain the cap; <paramref name="note"/> is null in every other case.</para></summary>
+    /// <param name="rawPrompt">The user's prompt exactly as submitted, before <see cref="Shield"/> - only used
+    /// for the shortcut/<c>Mode:</c> check.</param>
+    /// <param name="shieldedPrompt">The already-shielded prompt the directive (if any) is prepended to.</param>
+    /// <param name="strength">The requested strength: <c>faithful</c>, <c>expand</c>, or <c>full</c>.</param>
+    /// <param name="isEditProfile">Whether the resolved profile is an edit profile (<see cref="PromptEnhanceProfile.IsEdit"/>).</param>
+    /// <param name="effectiveStrength">The strength actually applied: <c>faithful</c>, <c>expand</c>, <c>full</c>,
+    /// or <c>user</c> when a shortcut/<c>Mode:</c> passthrough won.</param>
+    /// <param name="note">A human-readable explanation when the requested strength was capped, else null.</param>
+    public static string ApplyStrength(string rawPrompt, string shieldedPrompt, string strength, bool isEditProfile, out string effectiveStrength, out string note)
+    {
+        note = null;
+        string trimmedStart = (rawPrompt ?? "").TrimStart();
+        if (trimmedStart.StartsWith("Mode:", StringComparison.OrdinalIgnoreCase) || StartsWithUserShortcut(trimmedStart))
+        {
+            effectiveStrength = "user";
+            return shieldedPrompt;
+        }
+        string requested = (strength ?? "").Trim().ToLowerFast();
+        if (requested != "faithful" && requested != "expand" && requested != "full")
+        {
+            requested = "full";
+        }
+        if (requested == "full" && isEditProfile)
+        {
+            effectiveStrength = "expand";
+            note = "Full scene is not available for edit profiles; used Expand.";
+        }
+        else
+        {
+            effectiveStrength = requested;
+        }
+        return effectiveStrength switch
+        {
+            "expand" => $"{ExpandDirective}{shieldedPrompt}",
+            "full" => $"{FullDirective}{shieldedPrompt}",
+            _ => shieldedPrompt
+        };
+    }
+
+    /// <summary>True if <paramref name="trimmedStart"/> starts with one of <see cref="UserShortcuts"/> as a
+    /// whole token - the shortcut is not merely a prefix of a longer word (eg <c>/full</c> must not match
+    /// <c>/fully</c>).</summary>
+    private static bool StartsWithUserShortcut(string trimmedStart)
+    {
+        foreach (string shortcut in UserShortcuts)
+        {
+            if (trimmedStart.StartsWith(shortcut, StringComparison.Ordinal))
+            {
+                int nextIndex = shortcut.Length;
+                if (nextIndex >= trimmedStart.Length || !char.IsLetterOrDigit(trimmedStart[nextIndex]))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// <summary>True if the writer's reply is a caller-contract hard stop: a reply that, after trimming leading

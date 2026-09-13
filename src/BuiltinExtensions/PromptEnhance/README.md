@@ -58,7 +58,8 @@ owned here.
    never cached - it isn't a success, so it's treated as a passthrough instead of poisoning future lookups.
 5. **Provenance.** Applying a result writes one hidden T2I param, `Prompt Enhance Provenance`
    (id `promptenhanceprovenance`) as JSON: `original`, `profile`, `pack_version`, `writer_model`, `endpoint`,
-   `cached`. It is registered `VisibleNormally: false, Toggleable: false, Nonreusable: true,
+   `cached`, `strength` (the effective strength actually used - see "Strength" below). It is registered
+   `VisibleNormally: false, Toggleable: false, Nonreusable: true,
    IntentionalUnused: true` - hidden from the params list but still built and still written into image
    metadata, since `GenParameterMetadata` only skips a param for `HideFromMetadata`, not for
    `VisibleNormally` alone; `IntentionalUnused` is required because nothing server-side ever reads the param
@@ -77,6 +78,46 @@ owned here.
 | Reply begins `NEEDS INPUT:` | Hard stop, same red block treatment, plus a logged profile miss (`Logs.Warning`) - a non-interactive profile should never emit this. |
 | Reply is empty or whitespace-only after `NOTES:` lines are split off | Treated as passthrough, not cached. |
 | Panel closed mid-stream | Silent. The in-flight socket is closed without raising an error. |
+
+## Strength
+
+The panel also carries a **Strength** dropdown (Faithful / Expand / Full scene), sent as `strength` on every
+`EnhancePrompt` request (both the panel's own review request and the silent auto-enhance path) and persisted
+per user the same way the profile override is (`pref('strength', 'full')`). It controls how much the writer is
+asked to add on top of a faithful rewrite, by prepending a directive to the (already-shielded) user message -
+the profile files themselves are never modified:
+
+| API value | Effect |
+|---|---|
+| `faithful` | Sends the shielded prompt unchanged - exactly the pre-Strength behavior. |
+| `expand` | Prepends `Mode: expand\n\n` - the profile pack's own "restrained visual additions" switch. |
+| `full` | **Default.** Prepends an explicit instruction to build out setting, lighting, camera framing, mood, and material detail while keeping every detail and art style the user gave unchanged. |
+
+Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
+
+1. **User shortcut wins.** If the user's own prompt already starts with one of the profile pack's shortcuts
+   (`/rewrite`, `/expand`, `/positive`, `/full`, `/explain`, `/json`, each matched as a whole token) or
+   `Mode:` (case-insensitive), the user is already talking to the writer directly - no directive is added,
+   and the effective strength reports as `user`.
+2. **Blank/unrecognized falls back to `full`**, the feature default. The value is lowercased on input.
+3. **Edit-profile cap.** `full` is not allowed on an edit profile (currently `qwen-image-edit-2511` -
+   see `PromptEnhanceProfiles.KnownEditProfileIDs`/`PromptEnhanceProfile.IsEdit`): it invents a new setting
+   and contradicts the edit, so it is capped down to `expand` instead, and the terminal frame carries a
+   `strength_note` explaining the cap (eg "Full scene is not available for edit profiles; used Expand.").
+   `ListPromptEnhanceStatus`'s `resolved.strengths` reflects the cap too (`["faithful", "expand"]` for an
+   edit profile, `["faithful", "expand", "full"]` otherwise, or when no profile has resolved yet). The
+   frontend disables/hides options `resolved.strengths` omits, but never overwrites the stored preference -
+   a later model swap that lifts the cap sees the full choice again.
+4. **Order.** The directive is applied *after* `PromptEnhanceClient.Shield`, on the shielded prompt, so it can
+   never interact with shielding - `Unshield` still re-appends the shield-extracted tokens exactly as before.
+   The shortcut check in rule 1 looks at the user's raw, unshielded prompt.
+
+The cache key (`PromptEnhanceCache.Key`) folds in the effective strength as its own dimension, so a `full`
+rewrite and a `faithful` pass-through of the same idea never collide on one cache entry, and a repeat request
+at the same effective strength still hits the cache. Both the `running` status frame and the terminal result
+frame report `strength` (the effective value actually used); a capped request also carries `strength_note`.
+Applying a result includes `strength` alongside the other six fields in the provenance JSON recorded into the
+hidden `promptenhanceprovenance` param.
 
 ## Mode control and auto-enhance
 
