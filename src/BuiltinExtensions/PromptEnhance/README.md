@@ -259,7 +259,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.2.0+0d2a1cd9`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.3.0+d6d484bc`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 
