@@ -112,9 +112,10 @@ Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
    never interact with shielding - `Unshield` still re-appends the shield-extracted tokens exactly as before.
    The shortcut check in rule 1 looks at the user's raw, unshielded prompt.
 
-The cache key (`PromptEnhanceCache.Key`) folds in the effective strength as its own dimension, so a `full`
-rewrite and a `faithful` pass-through of the same idea never collide on one cache entry, and a repeat request
-at the same effective strength still hits the cache. Both the `running` status frame and the terminal result
+The cache key (`PromptEnhanceCache.Key`) hashes the exact text the writer receives - directive included - plus
+the effective strength, so a `full` rewrite and a `faithful` pass-through of the same idea never collide, a
+repeat request at the same strength still hits the cache, and revising a directive's wording invalidates the
+replies written against the old wording instead of serving them. Both the `running` status frame and the terminal result
 frame report `strength` (the effective value actually used); a capped request also carries `strength_note`.
 Applying a result includes `strength` alongside the other six fields in the provenance JSON recorded into the
 hidden `promptenhanceprovenance` param.
