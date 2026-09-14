@@ -352,19 +352,49 @@ const filtered = await page.evaluate(() => {
 });
 check('a parameter the preset already sets is not offered again', !filtered.includes('sampler'), filtered.join(','));
 const fl2va = await page.evaluate(() => {
-    let savedMeta = mState.paramMeta, savedModels = mState.models;
-    mState.paramMeta = { videomodel: {}, videoframes: {}, videosteps: {}, sampler: {} };
+    let savedModels = mState.models;
     mState.models = { 'Stable-Diffusion': [['sdxl/base.safetensors', 'stable-diffusion-xl-v1-base'], ['minimax/minimax_h3_fl2va_pruned_int8.safetensors', 'minimax-h3']] };
-    let working = { videosteps: '8' };
-    let added = mPresets.addFL2VAParams(working);
-    mState.paramMeta = savedMeta;
+    let out = { model: mPresets.fl2vaSuggestion('videomodel'), frames: mPresets.fl2vaSuggestion('videoframes'), other: mPresets.fl2vaSuggestion('sampler') };
     mState.models = savedModels;
-    return { added, working };
+    return out;
 });
-check('FL2VA settings add only advertised, unset keys and keep existing values',
-    fl2va.added.join(',') == 'videomodel,videoframes' && fl2va.working.videosteps == '8'
-    && fl2va.working.videomodel == 'minimax/minimax_h3_fl2va_pruned_int8.safetensors' && fl2va.working.videoframes == '124',
+check('FL2VA suggestions pick the FL2VA model, the documented frame count, and nothing for other params',
+    fl2va.model == 'minimax/minimax_h3_fl2va_pruned_int8.safetensors' && fl2va.frames == '124' && fl2va.other == '',
     JSON.stringify(fl2va));
+// The Video section is always in the editor for advertised video params: empty fields with the suggestion as a
+// placeholder, and only what the user types is saved. The save is failed on purpose so the preset list that the
+// delete checks below compare against is left unchanged.
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.params = {};
+    window.__savedMeta = mState.paramMeta;
+    mState.paramMeta = Object.assign({}, mState.paramMeta, { videoframes: {}, videosteps: {} });
+    window.__calls = [];
+    window.__failNext = true;
+    mPresets.openEditor(null, () => {});
+});
+const videoSection = await page.evaluate(() => {
+    let fields = [...__sheet().querySelectorAll('.m-preset-video .m-preset-field')];
+    let frames = fields[0];
+    frames.value = '243';
+    frames.dispatchEvent(new Event('input'));
+    __sheet().querySelector('.m-preset-field').value = 'Video One';
+    __sheet().querySelector('.m-edit-save-button').click();
+    return { count: fields.length, placeholders: fields.map(f => f.placeholder), otherRows: __sheet().querySelectorAll('.m-preset-params .m-preset-param-row').length };
+});
+await page.waitForFunction(() => window.__calls.some(c => c.route == 'AddNewPreset'));
+const videoPayload = await page.evaluate(() => {
+    mState.paramMeta = window.__savedMeta;
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return window.__calls.find(c => c.route == 'AddNewPreset').args.param_map;
+});
+check('the editor always shows advertised FL2VA fields, empty with the suggestion as placeholder',
+    videoSection.count == 2 && videoSection.placeholders.join(',') == '124,20' && videoSection.otherRows == 0, JSON.stringify(videoSection));
+check('only the video fields the user filled are saved', JSON.stringify(videoPayload) == '{"videoframes":"243"}', JSON.stringify(videoPayload));
 
 // ---- Deleting ----
 await page.evaluate(() => {
