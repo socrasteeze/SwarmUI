@@ -26,6 +26,21 @@ class MPresets {
     /** How many rows the parameter picker renders at once. Truncation is reported rather than silent. */
     static PickerLimit = 60;
 
+    /** Image To Video parameters for a MiniMax H3 FL2VA preset, with starting values from the H3 docs. This
+     * client's Create tab has no video controls, so a preset is the only way to set them here. A null value
+     * means "the FL2VA model if one is listed". The frame images (Init Image, Video End Image) are images, not
+     * text, so they cannot live in this editor. */
+    static FL2VAParams = [
+        ['videomodel', null],
+        ['videoframes', '124'],
+        ['videosteps', '20'],
+        ['videocfg', '1'],
+        ['videofps', '24'],
+        ['initimagecreativity', '0'],
+        ['audiosilentprefixduration', '0.1'],
+        ['h3memmlpmemory', 'auto']
+    ];
+
     /** Registers the More-tab entry. Called at script load: registerMoreItem's contract is that every
      * registration happens before m_app.js builds that tab. */
     install() {
@@ -218,6 +233,18 @@ class MPresets {
             mUI.note(`Captured ${keys.length} parameter${keys.length == 1 ? '' : 's'}.`);
         });
         paramActions.appendChild(addCurrent);
+        let addVideo = mUI.el('button', 'm-preset-small-button', 'Add FL2VA video settings');
+        addVideo.addEventListener('click', () => {
+            let added = this.addFL2VAParams(working);
+            if (added.length == 0) {
+                mUI.note('This preset already has every FL2VA video setting the server offers.');
+                return;
+            }
+            renderParams();
+            let needsModel = added.includes('videomodel') && working['videomodel'] == '';
+            mUI.note(`Added ${added.length} setting${added.length == 1 ? '' : 's'}.${needsModel ? ' Set Video Model to your FL2VA model.' : ''}`);
+        });
+        paramActions.appendChild(addVideo);
         let addOne = mUI.el('button', 'm-preset-small-button', 'Add parameter');
         addOne.addEventListener('click', () => this.openParamPicker(working, () => renderParams()));
         paramActions.appendChild(addOne);
@@ -328,6 +355,25 @@ class MPresets {
             out[key] = Array.isArray(val) ? val.join(',') : `${val}`;
         }
         return out;
+    }
+
+    /** Adds each FL2VA video parameter the server advertises and `working` does not already set, and returns
+     * the added keys. Existing values are never overwritten. */
+    addFL2VAParams(working) {
+        let added = [];
+        for (let [key, val] of MPresets.FL2VAParams) {
+            if (key in working || !mState.paramMeta[key]) {
+                continue;
+            }
+            if (val == null) {
+                // ListT2IParams lists each model as [name, architecture].
+                let names = (mState.models['Stable-Diffusion'] || []).map(entry => Array.isArray(entry) ? entry[0] : entry);
+                val = names.find(name => `${name}`.toLowerCase().includes('fl2va')) || '';
+            }
+            working[key] = `${val}`;
+            added.push(key);
+        }
+        return added;
     }
 
     /** Picklist of every parameter the server advertises that this preset does not already set. */
