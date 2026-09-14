@@ -254,7 +254,7 @@ let presetOverrideMsg = translatable('Overridden by preset(s):');
 
 function create_new_preset_button() {
     ensurePresetInputsBuilt();
-    clearPresetView();
+    autoWidthBatchHelper.batch(() => clearPresetView());
     getRequiredElementById('new_preset_name').value = presetBrowser.folder;
     getRequiredElementById('new_preset_modal_title').innerText = createNewPresetTitle.get();
     let curImg = currentImageHelper.getCurrentImage();
@@ -499,21 +499,23 @@ function duplicatePreset(preset) {
 
 function editPreset(preset) {
     ensurePresetInputsBuilt();
-    clearPresetView();
-    preset_to_edit = preset;
-    presetHelpers.enableImageElem.checked = false;
-    getRequiredElementById('new_preset_name').value = preset.title;
-    getRequiredElementById('preset_description').value = preset.description;
-    getRequiredElementById('new_preset_modal_title').innerText = editPresetTitle.get();
-    for (let key of Object.keys(preset.param_map)) {
-        let type = gen_param_types.filter(p => p.id == key)[0];
-        if (type) {
-            let presetElem = getRequiredElementById(`preset_input_${type.id}`);
-            setDirectParamValue(type, preset.param_map[key], presetElem);
-            getRequiredElementById(`preset_input_${type.id}_toggle`).checked = true;
-            doToggleEnable(presetElem.id);
+    autoWidthBatchHelper.batch(() => {
+        clearPresetView();
+        preset_to_edit = preset;
+        presetHelpers.enableImageElem.checked = false;
+        getRequiredElementById('new_preset_name').value = preset.title;
+        getRequiredElementById('preset_description').value = preset.description;
+        getRequiredElementById('new_preset_modal_title').innerText = editPresetTitle.get();
+        for (let key of Object.keys(preset.param_map)) {
+            let type = gen_param_types.filter(p => p.id == key)[0];
+            if (type) {
+                let presetElem = getRequiredElementById(`preset_input_${type.id}`);
+                setDirectParamValue(type, preset.param_map[key], presetElem);
+                getRequiredElementById(`preset_input_${type.id}_toggle`).checked = true;
+                doToggleEnable(presetElem.id);
+            }
         }
-    }
+    });
     let curImg = currentImageHelper.getCurrentImage();
     let run = () => {
         triggerChangeFor(presetHelpers.enableImageElem);

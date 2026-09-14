@@ -700,8 +700,31 @@ function load_media_file(elem, type) {
 
 /** Batches temporary text measurements so a parameter rebuild performs one layout read phase. */
 class AutoWidthBatchHelper {
+    /** Runs `callback` with measurements queued, then measures every queued control once using its latest text. Use around code that fires change events on many controls, since each would otherwise force its own layout. */
+    batch(callback) {
+        if (this.queued) {
+            callback();
+            return;
+        }
+        this.queued = new Map();
+        try {
+            callback();
+        }
+        finally {
+            let entries = [...this.queued.values()];
+            this.queued = null;
+            this.measure(entries);
+        }
+    }
+
     /** Measures the supplied controls and applies their existing width rules in one read/write pass. */
     measure(entries) {
+        if (this.queued) {
+            for (let entry of entries) {
+                this.queued.set(entry.elem, entry);
+            }
+            return;
+        }
         let pending = [];
         for (let entry of entries) {
             let elem = entry.elem;
