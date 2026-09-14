@@ -30,7 +30,7 @@ owned here.
    | 2 | Configured folder/filename override | A user-editable list of regexes over the model's lowercased, subfolder-relative name, loaded from `Data/PromptEnhance/overrides.json` (see "Folder/filename override config" below). Ships with `^ill/` → `illustriousxl` and `^anima/` → `anima`. |
    | 3 | Built-in filename override | The original single fallback regex, anchored on a name segment (`(^|[\/_ -])(illustrious\|noob)`). Catches Illustrious/NoobAI checkpoints outside a configured folder. |
    | 4 | Model class ID map | `qwen-image-edit` and `qwen-image-edit-plus` both map to `qwen-image-edit-2511`. Plain `qwen-image` T2I is deliberately left unmapped - it has no profile written for it. |
-   | 5 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`, `krea-2`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the override map/filename fallback handle IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (already covered by the class map). |
+   | 5 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`, `krea-2`, `minimax-h3`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the override map/filename fallback handle IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (already covered by the class map). |
    | 6 | None | The Enhance button is disabled, with the reason shown in its tooltip. The panel's manual override dropdown (row 1) is always reachable from here regardless - see "Manual profile override" below. |
 
 2. **Shielding.** Before the prompt is sent to the writer, `PromptEnhanceClient.Shield` extracts every
@@ -42,6 +42,11 @@ owned here.
    covered by the tag shield. Removing a token can orphan a separator; `CollapseSeparators` repairs doubled
    commas, stray comma spacing, doubled plain spaces, and a leading/trailing comma, without touching newlines
    or rewriting anything else.
+   For a video profile (`PromptEnhanceProfiles.KnownVideoProfileIDs`, currently `minimax-h3`), a
+   `Task:` / `Duration:` header is then prepended, built by `PromptEnhanceClient.BuildVideoHeader` from the
+   request's `video_task` and `video_duration`. The frontend derives those from the current params: Init Image
+   or an Image To Video model means a start frame, Video End Image means an end frame (`T2VA`, `I2VA`, `FL2VA`,
+   `L2VA`), and duration is the last frame's timestamp on H3's 17n+5 frame grid. Image profiles never get it.
 3. **Transport.** `PromptEnhanceClient.ChatStream` posts to `/api/chat` (Ollama) or `/v1/chat/completions`
    (OpenAI-compatible), streamed, and reads it back with `StreamReader.ReadLineAsync` against a linked
    cancellation token that carries both the per-request timeout and the session's own interrupt/shutdown

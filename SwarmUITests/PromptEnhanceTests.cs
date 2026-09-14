@@ -148,6 +148,19 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(reason, Is.Null);
     }
 
+    /// <summary>MiniMax H3 has its own compat class, so both its FL2VA and Ref2VA checkpoints resolve through
+    /// <c>CompatClassMap</c>, and the profile is flagged as a video profile.</summary>
+    [Test]
+    public void Resolve_CompatClassMap_MiniMaxH3Resolves()
+    {
+        PromptEnhanceProfiles.Register(new("minimax-h3", "MiniMax H3", "MiniMax-H3", "h3 system text"));
+        T2IModel model = MakeModel("minimax_h3_fl2va_pruned_int8_convrot.safetensors", "minimax-h3", "minimax-h3");
+        PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+        Assert.That(resolved?.ID, Is.EqualTo("minimax-h3"));
+        Assert.That(reason, Is.Null);
+        Assert.That(PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(resolved.ID), Is.True);
+    }
+
     /// <summary>A model that matches no filename override, class, or compat class resolves to null with a
     /// reason naming the unresolved class.</summary>
     [Test]
@@ -731,6 +744,20 @@ public class PromptEnhanceTests : SwarmUITest
         string simulatedReply = "A cat sitting in a sunlit garden.";
         string unshielded = PromptEnhanceClient.Unshield(simulatedReply, extracted);
         Assert.That(unshielded, Is.EqualTo("A cat sitting in a sunlit garden.\n<lora:x:0.7>"));
+    }
+
+    /// <summary>The video header carries a known task and a two-decimal duration, and ends in a blank line.</summary>
+    [Test]
+    public void BuildVideoHeader_KnownTaskAndDuration()
+    {
+        Assert.That(PromptEnhanceClient.BuildVideoHeader("fl2va", 123 / 24.0), Is.EqualTo("Task: FL2VA\nDuration: 5.13\n\n"));
+    }
+
+    /// <summary>An unknown task falls back to T2VA, and a missing duration is left out.</summary>
+    [Test]
+    public void BuildVideoHeader_UnknownTaskNoDuration()
+    {
+        Assert.That(PromptEnhanceClient.BuildVideoHeader("bogus", 0), Is.EqualTo("Task: T2VA\n\n"));
     }
 
     #endregion

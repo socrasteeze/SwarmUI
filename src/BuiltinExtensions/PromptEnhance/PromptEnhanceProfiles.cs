@@ -50,6 +50,14 @@ public static class PromptEnhanceProfiles
         "qwen-image-edit-2511"
     };
 
+    /// <summary>Profile IDs that target a video model and understand the <c>Task:</c> / <c>Duration:</c> header the
+    /// frontend builds from the current video parameters (see <c>PromptEnhanceAPI.EnhancePrompt_Internal</c>). Any
+    /// other profile never receives that header, so image profiles and their cache keys are unaffected.</summary>
+    public static readonly HashSet<string> KnownVideoProfileIDs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "minimax-h3"
+    };
+
     /// <summary>Display name for each known profile ID. Filled in alongside <see cref="TargetModels"/> as
     /// profiles are loaded from disk.</summary>
     private static readonly Dictionary<string, string> DisplayNames = new()
@@ -59,6 +67,7 @@ public static class PromptEnhanceProfiles
         ["flux2-klein-9b"] = "FLUX.2 klein 9B",
         ["illustriousxl"] = "IllustriousXL",
         ["krea-2"] = "Krea 2",
+        ["minimax-h3"] = "MiniMax H3",
         ["qwen-image-edit-2511"] = "Qwen Image Edit 2511"
     };
 
@@ -70,6 +79,7 @@ public static class PromptEnhanceProfiles
         ["flux2-klein-9b"] = "FLUX.2-klein-9B",
         ["illustriousxl"] = "IllustriousXL",
         ["krea-2"] = "Krea-2",
+        ["minimax-h3"] = "MiniMax-H3",
         ["qwen-image-edit-2511"] = "Qwen-Image-Edit-2511"
     };
 
@@ -105,15 +115,17 @@ public static class PromptEnhanceProfiles
     /// classes that are exactly one architecture wide. Never map <c>qwen-image</c> (spans both edit and non-edit
     /// classes, already covered by <see cref="ModelClassMap"/>) or <c>stable-diffusion-xl-v1</c> (spans
     /// IllustriousXL and vanilla SDXL - the filename override map handles IllustriousXL, and vanilla SDXL has
-    /// no profile at all). Anima and Krea 2 each have their own distinct compat class (<c>anima</c>,
-    /// <c>krea-2</c>, see <c>T2IModelClassSorter.cs</c>) and so are mapped here directly rather than via a
-    /// filename guess.</summary>
+    /// no profile at all). Anima, Krea 2 and MiniMax H3 each have their own distinct compat class (<c>anima</c>,
+    /// <c>krea-2</c>, <c>minimax-h3</c>, see <c>T2IModelClassSorter.cs</c>) and so are mapped here directly rather
+    /// than via a filename guess. The H3 compat class covers both the FL2VA and Ref2VA checkpoints; the profile
+    /// itself handles the Ref2VA case.</summary>
     private static readonly Dictionary<string, string> CompatClassMap = new()
     {
         ["flux-2-klein-4b"] = "flux2-klein-4b",
         ["flux-2-klein-9b"] = "flux2-klein-9b",
         ["anima"] = "anima",
-        ["krea-2"] = "krea-2"
+        ["krea-2"] = "krea-2",
+        ["minimax-h3"] = "minimax-h3"
     };
 
     /// <summary>Registers a profile. Safe to call from another extension's <c>OnInit</c>. Stamps
