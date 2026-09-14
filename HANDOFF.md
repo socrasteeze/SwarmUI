@@ -68,6 +68,40 @@ No measured FL2VA run exists; all 18 runs above were Ref2VA. Baseline is the doc
 - Does not transfer: the ≤294-frame limit (measured on the reference path only) and shift 8/5 (tuned with Turbo on Ref2VA; audio 5 unreachable in Swarm).
 - Suggested test to get a real baseline: same prompt and seed at 124 frames, Memory Optimization on, FBC off vs on; then 294 vs 362 frames with the winner. Judge audio separately and read the config back from the output's embedded `prompt` tag.
 
+#### FL2VA parameter lists (Swarm UI)
+
+Pick the path by input: **no image → T2V** (FL2VA as main Model); **first frame (± last) → I2V** (Image To Video group). On the T2V path, images attached to the prompt box go to `SwarmMiniMaxH3CollectReferences` as `<Picture N>` (Ref2VA-style), never as a keyframe; only the I2V path emits `SwarmMiniMaxH3AddKeyframes`.
+
+T2V (text only):
+
+| Group | Param | Value |
+|---|---|---|
+| Core | Model | FL2VA (or hybrid) |
+| Core | Steps / CFG Scale | 20 (8 with Turbo) / 1 |
+| Resolution | Width × Height | sides ≤1536, e.g. 1216×704 |
+| Video | Text2Video Frames / Video FPS | 124 or 243 (max 362) / 24 |
+| Sampling | Sampler / Scheduler | unset (`res_multistep`/`simple`); Turbo: `euler`/`simple` |
+| Sampling | Sigma Shift | 12 |
+| Audio | Audio Silent Prefix Duration | 0.1 (prefix, not suffix) |
+| H3 Memory Optimization | enable | on, defaults |
+| H3 FirstBlockCache | enable | per planned config above (defaults); Spectrum/TeaCache/EasyCache off |
+| LoRAs | Turbo 8-step | only with Turbo steps; skip on Turbo-merged checkpoints (e.g. Dasiwa hybrid Turbo) |
+| Prompt | — | visuals + audio; no attached images |
+
+I2V (first/last frame): same Sampling, Audio, H3 and prompt rows as T2V, plus:
+
+| Group | Param | Value |
+|---|---|---|
+| Init Image | Init Image / Creativity | first frame / **0** (main-model Steps/CFG then barely matter) |
+| Image To Video | Video Model | FL2VA (or hybrid) |
+| Image To Video | Video Frames / Steps / CFG | 124 or 243 (max 362) / 20 (8 Turbo) / 1 |
+| Image To Video | Video Resolution / FPS | sides ≤1536 / 24 |
+| Image To Video | Video End Image | last frame (optional) |
+
+Leave alone for FL2VA: prompt-attached images/audio/video (Ref2VA inputs), Refiner, Video Swap Model, Video Extend.
+
+Observed 2026-09-13 21:19: a T2V job on `DasiwaMinimaxH3_dasiwaHybridTurboV2` at 2176×1696 × 243 frames with a prompt-attached image and no Memory Optimization sat at `0/8 Model Initializing` for 11+ min (GPU 100 % util at 111 W, 32 GB VRAM full, i.e. offload-thrashing). Cause: resolution (~1M tokens), not a hang.
+
 Prior unrelated open items remain separate from performance work. Their live status was not rechecked during this review:
 
 - Publication of the external prompt-guide repository remains unverified. Prompt Enhance source is already part of this repository's main history.
