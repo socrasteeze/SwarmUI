@@ -434,7 +434,7 @@ class PromptEnhanceHelperClass {
         this.running = true;
         this.setStatus('Starting...');
         this.settled = false;
-        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength }, data => {
+        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields() }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
                 this.settled = true;
             }
@@ -545,6 +545,35 @@ class PromptEnhanceHelperClass {
         }, wait);
     }
 
+    /** Reads the current video settings into the EnhancePrompt 'video_task' / 'video_duration' fields. The server
+     * only forwards them to video profiles (eg MiniMax H3), so this is harmless for image models.
+     * <p>A start frame is an enabled Init Image with data, or an enabled Image To Video model (its source frame is
+     * generated first). An end frame is an enabled Video End Image with data. Duration uses MiniMax H3's 17n+5 frame
+     * grid and the timestamp of the last frame.</p>
+     */
+    videoRequestFields() {
+        let enabled = id => {
+            let param = getParamById(id);
+            return param && document.getElementById(`input_${id}`) && isParamEnabled(param);
+        };
+        let hasImage = id => enabled(id) && !!getInputVal(document.getElementById(`input_${id}`));
+        let viaVideoModel = enabled('videomodel') && getInputVal(document.getElementById('input_videomodel'));
+        let hasStart = hasImage('initimage') || !!viaVideoModel;
+        let hasEnd = hasImage('videoendimage');
+        let task = hasStart && hasEnd ? 'FL2VA' : hasEnd ? 'L2VA' : hasStart ? 'I2VA' : 'T2VA';
+        let framesId = viaVideoModel ? 'videoframes' : 'text2videoframes';
+        let frames = enabled(framesId) ? parseInt(getInputVal(document.getElementById(`input_${framesId}`))) : 124;
+        if (!(frames > 0)) {
+            frames = 124;
+        }
+        frames = 5 + Math.ceil(Math.max(0, frames - 5) / 17) * 17;
+        let fps = enabled('videofps') ? parseInt(getInputVal(document.getElementById('input_videofps'))) : 24;
+        if (!(fps > 0)) {
+            fps = 24;
+        }
+        return { 'video_task': task, 'video_duration': (frames - 1) / fps };
+    }
+
     /** Fetches current status for the selected model and updates the button's enabled state.
      * <p>Guarded against out-of-order replies: this dispatch's sequence number is captured in the closure, and
      * both callbacks return early if it is no longer the current one, so a reply from an older, superseded
@@ -635,7 +664,7 @@ class PromptEnhanceHelperClass {
             this.showPassthrough(reason);
             this.dispatchGenerateClick(altKey);
         };
-        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength }, data => {
+        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields() }, data => {
             if (data.status != null || data.chunk != null) {
                 return;
             }

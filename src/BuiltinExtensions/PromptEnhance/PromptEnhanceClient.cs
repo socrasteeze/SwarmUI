@@ -361,6 +361,23 @@ public static class PromptEnhanceClient
         return $"{text}, {tokenList}";
     }
 
+    /// <summary>Video tasks a video profile's <c>Task:</c> header accepts (see <c>minimax-h3.system.md</c>).</summary>
+    private static readonly HashSet<string> VideoTasks = ["T2VA", "I2VA", "FL2VA", "L2VA"];
+
+    /// <summary>Builds the <c>Task:</c> / <c>Duration:</c> header prepended to a video profile's shielded prompt, from
+    /// the frontend's current video settings. An unrecognized task falls back to <c>T2VA</c>; a non-positive duration
+    /// is left out so the profile applies its own default. Always ends with a blank line.</summary>
+    public static string BuildVideoHeader(string task, double durationSeconds)
+    {
+        string normalized = (task ?? "").Trim().ToUpperInvariant();
+        string header = $"Task: {(VideoTasks.Contains(normalized) ? normalized : "T2VA")}\n";
+        if (durationSeconds > 0 && double.IsFinite(durationSeconds))
+        {
+            header += $"Duration: {durationSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}\n";
+        }
+        return $"{header}\n";
+    }
+
     /// <summary>Applies the user-selected Enhance Strength to a shielded user prompt, by prepending one of the
     /// profile pack's own <c>Mode:</c> directives (see <see cref="ExpandDirective"/>/<see cref="FullDirective"/>).
     /// Applied after <see cref="Shield"/> so the directive text never interacts with shielding - the caller must

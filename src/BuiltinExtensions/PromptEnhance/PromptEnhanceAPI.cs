@@ -88,7 +88,9 @@ public static class PromptEnhanceAPI
         [API.APIParameter("Name of the currently loaded model, used to resolve a writer profile.")] string model,
         [API.APIParameter("Optional profile ID to force, overriding automatic resolution.")] string profile_override = "",
         [API.APIParameter("Optional endpoint ID to force, overriding automatic selection.")] string endpoint_override = "",
-        [API.APIParameter("Enhance Strength: 'faithful' (send unchanged), 'expand' (permit restrained additions), or 'full' (build a complete scene) - default 'full'. Blank/unrecognized falls back to 'full'; capped to 'expand' on an edit profile.")] string strength = "full")
+        [API.APIParameter("Enhance Strength: 'faithful' (send unchanged), 'expand' (permit restrained additions), or 'full' (build a complete scene) - default 'full'. Blank/unrecognized falls back to 'full'; capped to 'expand' on an edit profile.")] string strength = "full",
+        [API.APIParameter("Optional video task for video profiles: 'T2VA', 'I2VA', 'FL2VA' or 'L2VA'. Ignored for image profiles.")] string video_task = "",
+        [API.APIParameter("Optional clip length in seconds for video profiles. Ignored for image profiles, or when 0.")] double video_duration = 0)
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -100,15 +102,15 @@ public static class PromptEnhanceAPI
             await socket.SendAndReportError($"EnhancePrompt request from {session.User.UserID}", $"The prompt is too long (over {MaxPromptLength} characters).", API.WebsocketTimeout);
             return null;
         }
-        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength), socket);
+        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration), socket);
         return null;
     }
 
     /// <summary>Internal handler: resolves a profile and endpoint, dispatches (or reuses a cached reply from)
     /// the writer LLM, and reports status/chunks/the terminal frame back over the websocket.</summary>
-    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength) input, Action<JObject> output, bool isWS)
+    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration) input, Action<JObject> output, bool isWS)
     {
-        (string prompt, string model, string profileOverride, string endpointOverride, string strength) = input;
+        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration) = input;
         try
         {
             T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
@@ -131,6 +133,10 @@ public static class PromptEnhanceAPI
             }
             bool healthy = healthyEndpoint is not null;
             string shielded = PromptEnhanceClient.Shield(prompt, out List<string> extracted);
+            if (PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID))
+            {
+                shielded = $"{PromptEnhanceClient.BuildVideoHeader(videoTask, videoDuration)}{shielded}";
+            }
             // Strength is applied after Shield, on the already-shielded prompt, so the directive text can never
             // interact with shielding - Unshield below re-appends the extracted tokens exactly as it always did.
             string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, strength, profile.IsEdit, out string effectiveStrength, out string strengthNote);
