@@ -351,6 +351,20 @@ const filtered = await page.evaluate(() => {
     return [...__sheet().querySelectorAll('.m-preset-row-sub')].map(e => e.textContent);
 });
 check('a parameter the preset already sets is not offered again', !filtered.includes('sampler'), filtered.join(','));
+const fl2va = await page.evaluate(() => {
+    let savedMeta = mState.paramMeta, savedModels = mState.models;
+    mState.paramMeta = { videomodel: {}, videoframes: {}, videosteps: {}, sampler: {} };
+    mState.models = { 'Stable-Diffusion': [['sdxl/base.safetensors', 'stable-diffusion-xl-v1-base'], ['minimax/minimax_h3_fl2va_pruned_int8.safetensors', 'minimax-h3']] };
+    let working = { videosteps: '8' };
+    let added = mPresets.addFL2VAParams(working);
+    mState.paramMeta = savedMeta;
+    mState.models = savedModels;
+    return { added, working };
+});
+check('FL2VA settings add only advertised, unset keys and keep existing values',
+    fl2va.added.join(',') == 'videomodel,videoframes' && fl2va.working.videosteps == '8'
+    && fl2va.working.videomodel == 'minimax/minimax_h3_fl2va_pruned_int8.safetensors' && fl2va.working.videoframes == '124',
+    JSON.stringify(fl2va));
 
 // ---- Deleting ----
 await page.evaluate(() => {
