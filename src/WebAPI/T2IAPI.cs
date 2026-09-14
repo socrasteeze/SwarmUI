@@ -727,6 +727,23 @@ public static class T2IAPI
 
     public enum ImageHistorySortMode { Name, Date }
 
+    /// <summary>Parses the user's <see cref="Settings.User.HiddenHistoryFolders"/> setting into a comparison set:
+    /// comma separated, each entry a folder path below the output directory ("_comfy0", "inputs/_comfy0"),
+    /// normalized to forward slashes with surrounding slashes trimmed. Matching is case-insensitive.</summary>
+    public static HashSet<string> ParseHiddenFolders(string setting)
+    {
+        return new((setting ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(entry => entry.Replace('\\', '/').Trim('/'))
+            .Where(entry => entry.Length > 0), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Joins history path parts (any of which may be empty) into one forward-slash path below the output
+    /// directory, for comparison against <see cref="ParseHiddenFolders"/>'s entries.</summary>
+    public static string JoinHistoryPath(params string[] parts)
+    {
+        return string.Join('/', parts.Where(part => !string.IsNullOrEmpty(part)));
+    }
+
     private static JObject GetListAPIInternal(Session session, string rawPath, string root, HashSet<string> extensions, Func<string, bool> isAllowed, int depth, ImageHistorySortMode sortBy, bool sortReverse, string filter = null)
     {
         int maxInHistory = session.User.Settings.MaxImagesInHistory;
@@ -742,12 +759,16 @@ public static class T2IAPI
             Logs.Error(consoleError);
             return new JObject() { ["error"] = userError };
         }
-        // Root-folder hiding is deliberately applied at the top level only: the setting names folders sitting
-        // directly in the output directory (tool scratch dirs like "_comfy0", extension dirs like "VNCCS"), and
-        // hiding by bare name at any depth would silently swallow a same-named folder the user does want.
-        HashSet<string> hiddenRoots = new((session.User.Settings.HiddenHistoryFolders ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
-        bool atOutputRoot = string.IsNullOrWhiteSpace(rawPath) || rawPath.Replace('\\', '/').Trim('/') is "" or ".";
-        bool isHiddenRoot(string dir, string subDir) => hiddenRoots.Count > 0 && atOutputRoot && dir == "" && hiddenRoots.Contains(subDir);
+        // Hiding matches a folder's whole path below the output directory, so a bare name like "_comfy0" still
+        // only hides the top-level folder (never a same-named folder deeper in the tree the user does want),
+        // while a path entry like "inputs/_comfy0" hides a nested scratch dir that has no top-level name to give.
+        HashSet<string> hiddenRoots = ParseHiddenFolders(session.User.Settings.HiddenHistoryFolders);
+        string browseBase = (rawPath ?? "").Replace('\\', '/').Trim('/');
+        if (browseBase == ".")
+        {
+            browseBase = "";
+        }
+        bool isHiddenRoot(string dir, string subDir) => hiddenRoots.Count > 0 && hiddenRoots.Contains(JoinHistoryPath(browseBase, dir, subDir));
         try
         {
             ConcurrentDictionary<string, string> dirsConc = [];
@@ -808,9 +829,9 @@ public static class T2IAPI
                 if (specialFolder.StartsWith(rawRefPath))
                 {
                     // Shared special folders (Comfy scratch dirs, FrameSaver virtual dirs) are grafted in here
-                    // rather than found by the directory walk, so they need their own hidden-root check.
-                    string exposed = specialFolder[rawRefPath.Length..].Trim('/');
-                    if (isHiddenRoot("", exposed.Before('/')))
+                    // rather than found by the directory walk, so they need their own hidden check. Their key is
+                    // already the full path below the output directory, so it is matched directly.
+                    if (hiddenRoots.Count > 0 && hiddenRoots.Contains(specialFolder.Replace('\\', '/').Trim('/')))
                     {
                         continue;
                     }
