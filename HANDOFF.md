@@ -46,6 +46,27 @@ The writer profiles default to a faithful rewrite, so "Enhance" rarely added any
 - One Sonnet builder. Gates: Release build, `dotnet test`, both format checks, `verify-promptenhance.mjs`, then live Krea 2 ×3 strengths, Illustrious Full scene (tags stay tags), Qwen Edit cap.
 - Writer stays `huihui_ai/qwen3-vl-abliterated:8b-instruct` (same family as Krea 2's Qwen3-VL-4B encoder). The 27B Qwen3.8 Q4 ran at 11.7 tok/s vs ~80 and wrote no better.
 
+### MiniMax H3 Ref2VA: Swarm vs the clean ComfyUI config (logged 2026-09-13, no action decided)
+
+Clean-audio ComfyUI run (18 runs, 2026-09-13): Turbo 8-step LoRA, `euler`/`simple`/8, sigma shift video 8 / audio 5, H3 Memory Optimization only, ≤294 frames, reference clip trimmed so its soundtrack matches the post-snap frame count and fed via `ref_video_audio_N`. FirstBlockCache, Spectrum and Sparse Attention all broke audio. Swarm differs:
+
+- Audio sigma shift is hard-coded to 3 (`WorkflowGeneratorModelSupport.cs` `MiniMaxH3SigmaShift` node); only video shift is a param (default 12). Audio 5 is not reachable.
+- Reference-video soundtrack is never wired: `WorkflowGenerator.cs` sends only frames to `SwarmMiniMaxH3CollectReferences` (the `// TODO: Handle videos with embedded audio properly`), so `ref_video_audio_N` stays empty. Swarm's ref-video path is video-only, a different path from the tested one.
+- No guard or warning above 294 frames (362 broke audio every run); no warning that FirstBlockCache/Spectrum break H3 audio.
+- `length` passed to CollectReferences is the raw frame count, not the 17k+5-aligned one (node re-snaps; likely harmless).
+- Reachable by hand today: video shift 8, euler/simple/8 + Turbo LoRA, Memory Optimization on, ≤294 frames, no caches.
+
+Candidate changes if pursued: audio shift param, wire the ref video's soundtrack, frame cap/warning.
+
+### MiniMax H3 FL2VA: suggested starting config (logged 2026-09-13, untested)
+
+No measured FL2VA run exists; all 18 runs above were Ref2VA. Baseline is the documented default (`docs/Video Model Support.md`), which Swarm already uses: CFG 1, 20 steps (10 often enough), `res_multistep`/`simple`, sigma shift video 12 / audio 3 (audio fixed), frames 5+17n up to 362, sides ~512–1536, Audio Silent Prefix Duration ~0.1. Use the Image To Video group with the FL2VA model; "Video End Image" sets the last frame.
+
+- Likely carries over: keep FirstBlockCache and Spectrum off (the audio/video sigma-schedule split is model-level); Memory Optimization is expected safe.
+- Untested: Turbo LoRA at `euler`/`simple`/8.
+- Does not transfer: the ≤294-frame limit (measured on the reference path only) and shift 8/5 (tuned with Turbo on Ref2VA; audio 5 unreachable in Swarm).
+- Suggested test to get a real baseline: same prompt at 294 and 362 frames, with and without Turbo LoRA, Memory Optimization only; judge audio separately and read the config back from the output's embedded `prompt` tag.
+
 Prior unrelated open items remain separate from performance work. Their live status was not rechecked during this review:
 
 - Publication of the external prompt-guide repository remains unverified. Prompt Enhance source is already part of this repository's main history.
