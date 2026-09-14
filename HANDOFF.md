@@ -62,10 +62,11 @@ Candidate changes if pursued: audio shift param, wire the ref video's soundtrack
 
 No measured FL2VA run exists; all 18 runs above were Ref2VA. Baseline is the documented default (`docs/Video Model Support.md`), which Swarm already uses: CFG 1, 20 steps (10 often enough), `res_multistep`/`simple`, sigma shift video 12 / audio 3 (audio fixed), frames 5+17n up to 362, sides ~512–1536, Audio Silent Prefix Duration ~0.1. Use the Image To Video group with the FL2VA model; "Video End Image" sets the last frame.
 
-- Likely carries over: keep FirstBlockCache and Spectrum off (the audio/video sigma-schedule split is model-level); Memory Optimization is expected safe.
+- Cache audio breakage does not carry over (operator, 2026-09-13): the Ref2VA FirstBlockCache/Spectrum/Sparse Attention failures are attributed to the reference-audio input, which FL2VA does not have. Unverified on FL2VA until a run confirms it.
+- Planned FL2VA config: H3 Memory Optimization + H3 FirstBlockCache at its defaults (Custom, Safe-preset values, Temporal Guard on). FBC is silently skipped (log warning only) if Spectrum, TeaCache or EasyCache is also active, so keep those off. FBC reuse is bounded (0.10–0.95 window, max 2 hits), so its gain is small at Turbo step counts and real around 20 steps.
 - Untested: Turbo LoRA at `euler`/`simple`/8.
 - Does not transfer: the ≤294-frame limit (measured on the reference path only) and shift 8/5 (tuned with Turbo on Ref2VA; audio 5 unreachable in Swarm).
-- Suggested test to get a real baseline: same prompt at 294 and 362 frames, with and without Turbo LoRA, Memory Optimization only; judge audio separately and read the config back from the output's embedded `prompt` tag.
+- Suggested test to get a real baseline: same prompt and seed at 124 frames, Memory Optimization on, FBC off vs on; then 294 vs 362 frames with the winner. Judge audio separately and read the config back from the output's embedded `prompt` tag.
 
 Prior unrelated open items remain separate from performance work. Their live status was not rechecked during this review:
 
