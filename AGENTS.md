@@ -201,6 +201,46 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-14 — merged 4 commits: "Adds YuE2 support (#1539)" (`fc03283`), "draft yue2 docs"
+  (`1c0b551`), "tweak yue docs, compatfeature the ace inputs" (`6123c02`), and "fix sticky image
+  params" (`d1b55b9`). Adopted 4 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge
+  sweep findings 0. Merge is `60a2972`; merge base was `9571eac`, the tip of the previous sync, so
+  the window was exactly these four commits.
+  Incoming scope was 8 files (deduped), +98/-17: new YuE2 audio-model support end to end —
+  `T2IModelClassSorter.cs` registers `CompatYue2`/`yue-2` with its own safetensors-header
+  fingerprint (`vae2llm.weight`, `llm2vae.weight`, `latent_pos_embed.pe`,
+  `model.layers.0.self_attn.qkv_proj.weight`, `time_embedder.mlp.0.weight`); `WorkflowGenerator.cs`
+  adds YuE2's default sampler/scheduler (`dpm_2`/`sgm_uniform`) and the `YuE2GenerateABC` →
+  `YuE2GenerateMusic` node pair (900s max duration, per the second commit in the PR);
+  `WorkflowGeneratorModelSupport.cs` adds `IsYue2()` and threads it through the shared
+  MiniMax-Music-3 empty-latent-audio and VAE-loader branches; `T2IParamTypes.cs` widens
+  `Text2AudioDuration`'s tooltip and gates four ACE-Step-specific text2audio params (BPM, time
+  signature, language, key scale) behind a new `audio_ace_inputs` feature flag instead of the
+  blanket `text2audio` flag; `main.js`/`T2IEngine.cs` add `yue-2` to the text2audio compat-feature
+  list and wire `audio_ace_inputs` as a real (`doCompatFeature`) and disregarded feature flag;
+  `params.js`'s "sticky param" cookie handler collapses a nested null-check into one condition
+  (behavior-preserving); `docs/Audio Model Support.md` gains the YuE2 section.
+  Every incoming-touched file here is a fork touchpoint (`WorkflowGenerator.cs`,
+  `WorkflowGeneratorModelSupport.cs`, `T2IModelClassSorter.cs`, `T2IParamTypes.cs`, `T2IEngine.cs`,
+  `params.js`, `main.js` all carry fork edits — LoRA weight clamping, the spoke-mode generation
+  gate, the Civitai-BaseModel LoRA-class mapping, the lazy-multiselect/auto-width batching tranche
+  — per the Fork Delta above), but every upstream hunk landed in its own new lines or an
+  `else if` branch alongside the fork's, so git auto-merged clean with no conflicts in any of them.
+  Verified rather than assumed, not just "no conflict markers": diffed the merge commit against
+  its first parent (fork's pre-merge tip) file by file and confirmed each diff is exactly upstream's
+  4-commit change (nothing lost, nothing from the fork's side clobbered); grepped for the new
+  symbols (`CompatYue2`, `IsYue2`, `audio_ace_inputs`) and confirmed every reference resolves to a
+  real definition; no `.py` files were touched by this window. Brace/paren balance on all five
+  changed `.cs` files: 597/597, 328/328, 106/106, 503/503, 208/208 braces, all matched (parens too,
+  except `WorkflowGenerator.cs`'s pre-existing 1503/1502 imbalance, confirmed present identically
+  on both this file's pre-merge fork tip and the incoming upstream tip before the merge — not
+  introduced here). Zero conflict markers tree-wide.
+  Gates: **no working dotnet SDK in this environment** (`dotnet: command not found`) — Release
+  build, `dotnet format --verify-no-changes`, and `dotnet test SwarmUITests` could not run; this is
+  the same recurring gap as 2026-09-12 and earlier, not new. Not covered by any fallback here:
+  actual comfy-side execution of the new `YuE2GenerateABC`/`YuE2GenerateMusic`/
+  `EmptyYuE2LatentAudio` nodes (needs the YuE2 model + a GPU backend, neither available in this
+  container) and the live headless boot check.
 - 2026-09-13 — merged 1 commit: "patch step-swap noisy on h3 latent videoaudio" (`9571eac`).
   Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep findings 0.
   Merge is `ee5eabf`; merge base was `903da81`, the tip of the previous sync, so the window was
