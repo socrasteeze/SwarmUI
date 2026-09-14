@@ -2086,6 +2086,17 @@
 .m-preset-params::-webkit-scrollbar {
     display: none;
 }
+/* Always-present FL2VA video fields in the preset editor. Collapsed unless the preset already sets one. */
+.m-preset-video > summary {
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+.m-preset-video-params {
+    display: flex;
+    flex-direction: column;
+}
 .m-preset-param-row {
     margin-bottom: 0.4rem;
 }
