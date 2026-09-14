@@ -508,8 +508,8 @@ public class Settings : AutoConfiguration
         [ConfigComment("If enabled, folders will be discarded from starred image paths.\nIf disabled, entire original image path will be replicated beneath the star folder.")]
         public bool StarNoFolders = false;
 
-        [ConfigComment("A comma separated list of top-level folder names to hide from the Image History browser, eg \"_comfy0,VNCCS\"."
-            + "\nOnly folders directly inside your output directory are matched, and matching is case-insensitive."
+        [ConfigComment("A comma separated list of folders to hide from the Image History browser, eg \"_comfy0,VNCCS,inputs/_comfy0\"."
+            + "\nEach entry is a folder path below your output directory, so a bare name only matches a top-level folder. Matching is case-insensitive."
             + "\nThe files are not deleted or moved - they are only left out of the history listing."
             + "\nDefault is blank, which hides nothing.")]
         public string HiddenHistoryFolders = "";
