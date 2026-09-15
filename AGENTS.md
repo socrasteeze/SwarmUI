@@ -201,6 +201,13 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-15 (second) — merged 1 commit: "probably fix video audio input for h3 i2v" (`5f804ce`). Adopted
+  1 as-is; rejected 0; divergence work 0; conflicts 0. Merge is `78b4e1d`. Incoming scope was
+  `WorkflowGenerator.cs` +10 and `WorkflowGeneratorSteps.cs` +4, additive: on the MiniMax H3
+  image-to-video path an explicit Video Audio Input now converts the current media to a latent image
+  and re-attaches that audio, and a joint audio-video latent is converted to a latent image first. No fork edits touch that block. Release build
+  0 warnings/errors; `dotnet test` 168/168.
+
 - 2026-09-15 — merged 4 commits: "YuE2: max_abc_tokens needs to be longer than that." (`6764fc1`),
   "swap yue2 internal params to defaults" (`72c5a0f`), "more audio support tweaks" (`d5fb4a0`), and
   "fix the selected highlight on new gens" (`0a94b2`). Adopted 4 as-is; rejected 0; divergence work
