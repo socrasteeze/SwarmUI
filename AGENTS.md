@@ -201,6 +201,26 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-15 (second sync) — merged 1 commit: "probably fix video audio input for h3 i2v"
+  (`5f804cc`). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep
+  findings 0. Merge is `<pending>`; merge base was `0cf3423`, the tip of the same day's first
+  sync, so the window was exactly this one commit.
+  Incoming scope was 2 files, +14/-0, both fork touchpoints (`WorkflowGenerator.cs`,
+  `WorkflowGeneratorSteps.cs`) and both auto-merged cleanly: `WorkflowGenerator.cs` adds an
+  `explicitAudio` capture/reattach around the MiniMax-H3 i2v keyframes node so an explicit
+  `VideoAudioInput` survives the `AsLatentImage` conversion instead of being dropped;
+  `WorkflowGeneratorSteps.cs`'s audio-load step now converts `CurrentMedia` off
+  `DT_LATENT_AUDIOVIDEO` before attaching the loaded audio node, avoiding a data-type mismatch.
+  No working dotnet SDK in this environment (same recurring gap as prior entries). Verified
+  textually: zero conflict markers tree-wide; brace/paren balance on both changed files —
+  `WorkflowGenerator.cs` 599/599 braces, 1507/1506 parens (pre-existing 1-paren surplus,
+  present identically before this merge); `WorkflowGeneratorSteps.cs` 535/535 braces,
+  1400/1399 parens (same pre-existing 1-paren surplus pattern as the twenty-…-prior entries'
+  1398/1397 finding, grown by 2 with unrelated intervening code, not new damage). Both incoming
+  hunks confirmed present verbatim in the merged files (`explicitAudio`,
+  `DT_LATENT_AUDIOVIDEO` guard). This entry is written before the merge is pushed and held for
+  a human (or a later session with a working SDK) to run the real gates.
+
 - 2026-09-15 — merged 4 commits: "YuE2: max_abc_tokens needs to be longer than that." (`6764fc1`),
   "swap yue2 internal params to defaults" (`72c5a0f`), "more audio support tweaks" (`d5fb4a0`), and
   "fix the selected highlight on new gens" (`0a94b2`). Adopted 4 as-is; rejected 0; divergence work
