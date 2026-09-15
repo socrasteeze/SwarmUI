@@ -201,6 +201,44 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-15 — merged 4 commits: "YuE2: max_abc_tokens needs to be longer than that." (`6764fc1`),
+  "swap yue2 internal params to defaults" (`72c5a0f`), "more audio support tweaks" (`d5fb4a0`), and
+  "fix the selected highlight on new gens" (`0a94b2`). Adopted 4 as-is; rejected 0; divergence work
+  0; conflicts 0; clean-merge sweep findings 0. Merge is `195f9c4`; merge base was `e65c68c`, the
+  tip of the previous sync, so the window was exactly these four commits.
+  Incoming scope was 3 files, +15/-11 net: continued follow-up to the previous sync's YuE2 feature.
+  `WorkflowGenerator.cs` raises `max_abc_tokens` 1024→8192, adds `penalty_window` and settles on
+  final `temperature`/`top_p`/`top_k`/`repetition_penalty` defaults for both the ABC-generation and
+  music-generation YuE2 nodes (the three commits touching this file landed as sequential edits to
+  the same two `JObject` literals, so the merged result is their cumulative effect, verified by
+  diffing the merge against the pre-merge fork tip — matches exactly). `ComfyUISelfStartBackend.cs`
+  adds `audio_encoders` to `FoldersToForwardInComfyPath` (comfy path-forwarding list, additive).
+  `generatehandler.js` swaps the in-batch-strip audio thumbnail from a live `<audio controls>`
+  element to a static `imgs/audio_placeholder.jpg` image (the asset already exists in-tree from the
+  prior sync's YuE2 work; real audio playback with waveform controls remains in
+  `currentimagehandler.js`'s full-view popup and `mediacontrols.js`, both unaffected), and reorders
+  a `gotTrackedImageResult`/`setImageFor` call pair in the tracked-image completion path to fix a
+  selected-highlight-not-applied bug on freshly completed gens.
+  `generatehandler.js` is a fork touchpoint (`dataset.src` full-resolution-image mobile-PWA pass,
+  2026-08-28 — see Fork Delta), but both upstream hunks landed in lines the fork's `dataset.src`
+  logic doesn't touch (the `isAudio` branch and the `gotTrackedImageResult` ordering, both above/
+  before the fork's `dataset.src` assignment), so it auto-merged clean with no conflicts; confirmed
+  by diffing the merge against the pre-merge fork tip and checking `dataset.src` is unchanged at its
+  same two call sites. `WorkflowGenerator.cs` and `ComfyUISelfStartBackend.cs` are also fork
+  touchpoints (LoRA weight clamping / spoke-mode gate and Civitai-BaseModel mapping elsewhere in
+  the former; unrelated hunks in the latter) but every incoming hunk here landed outside the fork's
+  edited lines, so both auto-merged clean too. Zero conflict markers tree-wide.
+  Gates: **no working dotnet SDK in this environment** (`dotnet: command not found`, and none found
+  anywhere on the filesystem) — Release build, `dotnet format --verify-no-changes`, the headless
+  boot check, and `dotnet test SwarmUITests` could not run; same recurring gap as 2026-09-14 and
+  earlier. Substituted static checks: brace/paren balance on both changed `.cs` files (597/597 and
+  1503/1502 — the latter's imbalance is the same pre-existing, non-merge-introduced one noted in the
+  2026-09-14 entry — for `WorkflowGenerator.cs`; 286/286 and 572/572 for `ComfyUISelfStartBackend.cs`,
+  both clean); `node --check` on the merged `generatehandler.js` (syntax OK); confirmed
+  `imgs/audio_placeholder.jpg` exists on disk so the new image-src reference isn't dangling. No
+  `.py` files touched by this window. Not covered by any fallback here: actual comfy-side execution
+  of the retuned YuE2 sampling parameters (needs the YuE2 model + a GPU backend, neither available
+  in this container) and the live headless boot check.
 - 2026-09-14 — merged 4 commits: "Adds YuE2 support (#1539)" (`fc03283`), "draft yue2 docs"
   (`1c0b551`), "tweak yue docs, compatfeature the ace inputs" (`6123c02`), and "fix sticky image
   params" (`d1b55b9`). Adopted 4 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge
