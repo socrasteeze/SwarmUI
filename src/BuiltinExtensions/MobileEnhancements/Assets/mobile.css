@@ -157,6 +157,11 @@ body.coarse-pointer .browser_container {
 body.pwa-standalone.small-window .alt-prompt-buttons-wrapper {
     padding-bottom: var(--safe-bottom);
 }
+/* That padding makes the grid row taller, and the + button is centered in the row, so pin it to the top to
+   stay level with Generate. */
+body.pwa-standalone.small-window .alt-text-add-button-wrapper {
+    align-self: start;
+}
 
 /* The welcome/tip banner is 150% of the 14px body baseline (21px) on desktop, where it has room to spare.
    On a phone-width viewport that wraps the tip text across many lines and eats most of the screen.
