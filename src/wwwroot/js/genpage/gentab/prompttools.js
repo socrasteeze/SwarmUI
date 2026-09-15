@@ -553,19 +553,22 @@ class PromptPlusButton {
             this.regionModalProcessChanges();
             $('#text_prompt_region_modal').modal('show');
         }});
-        buttons.push({ key: 'image', key_html: 'Add Temporary Image/Video/Audio', title: "Add an image, video, or audio file to use as a prompt input (transient temporary, not saved to file)", action: () => {
+        // Images and video/audio are separate entries: a combined accept filter makes the iOS Files picker much slower to populate.
+        let addTemporaryMedia = (accept, types) => {
             this.autoHideMenu();
             let input = document.createElement('input');
             input.type = 'file';
-            input.accept = 'image/*,video/*,audio/*';
+            input.accept = accept;
             input.onchange = (e) => {
                 let file = e.target.files[0];
-                if (file && (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/'))) {
+                if (file && types.some(type => file.type.startsWith(`${type}/`))) {
                     imagePromptAddImage(file);
                 }
             };
             input.click();
-        }});
+        };
+        buttons.push({ key: 'image', key_html: 'Add Temporary Image', title: "Add an image file to use as a prompt input (transient temporary, not saved to file)", action: () => addTemporaryMedia('image/*', ['image']) });
+        buttons.push({ key: 'video_audio', key_html: 'Add Temporary Video/Audio', title: "Add a video or audio file to use as a prompt input (transient temporary, not saved to file)", action: () => addTemporaryMedia('video/*,audio/*', ['video', 'audio']) });
         buttons.push({ key: 'select_image', key_html: 'Select or Upload Image/Video/Audio', title: "Select an image, video, or audio prompt input from the inputs browser (saved to a persistent folder)", action: () => {
             this.autoHideMenu();
             inputBrowserHelper.openInputBrowser(null, ['image', 'video', 'audio'], file => {
