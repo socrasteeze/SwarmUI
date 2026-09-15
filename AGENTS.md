@@ -203,7 +203,7 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 - 2026-09-15 (second sync) — merged 1 commit: "probably fix video audio input for h3 i2v"
   (`5f804cc`). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep
-  findings 0. Merge is `<pending>`; merge base was `0cf3423`, the tip of the same day's first
+  findings 0. Merge is `b66a347`; merge base was `0cf3423`, the tip of the same day's first
   sync, so the window was exactly this one commit.
   Incoming scope was 2 files, +14/-0, both fork touchpoints (`WorkflowGenerator.cs`,
   `WorkflowGeneratorSteps.cs`) and both auto-merged cleanly: `WorkflowGenerator.cs` adds an
