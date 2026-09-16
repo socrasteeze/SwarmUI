@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-09-16 · **Branch:** `main` · **Base:** `f4b206b7` · **Tree:** clean after this delivery commit
+**Updated:** 2026-09-16 · **Branch:** `claude/ecstatic-maxwell-6kgnqq` (harness-assigned push target this session; `main`/`origin/main` are 16 commits behind and still need a fast-forward) · **Base:** `f4b206b7` · **Tree:** clean after this delivery commit
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
@@ -13,6 +13,7 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 - Installed-PWA "+" button now level with Generate (safe-area padding had centered it 17 px low) — `src/BuiltinExtensions/MobileEnhancements/Assets/mobile.css`
 - Merged upstream `5f804cce` ("probably fix video audio input for h3 i2v"), no conflicts — see AGENTS.md Upstream Sync Log
 - 2026-09-16: fast-forwarded `main` to `c68744af` (a prepared but unpushed sync branch merging 3 more upstream commits — waveform/duration utility extraction, no conflicts, no `.cs` files) and pushed to `origin/main`; dotnet unavailable in this container so build/format/test gates could not be run — see AGENTS.md Upstream Sync Log
+- 2026-09-16 (scheduled sync): merged 7 more upstream commits (audio metadata support — `AudioFile.cs`/`VideoFile.cs` via new `z440.atl.core` dep, `SwarmSaveAudioWS` node, `music-metadata.min.js` client-side parsing, 4 new `.agents/skills/*.md` files) into `claude/ecstatic-maxwell-6kgnqq`, one conflict in `Text2Image.cshtml`'s script block resolved by keeping the fork's `defer` convention; dotnet still unavailable so validated with `node --check`/`py_compile`/brace-balance fallbacks only — see AGENTS.md Upstream Sync Log for full detail
 
 ## Open
 1. Restart Swarm, bypass the PWA cache, then on the iPhone confirm: preset edit opens without freezing, "Add Temporary Image" Files picker opens as fast as `/simple`, "+" is level with Generate.

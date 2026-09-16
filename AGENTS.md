@@ -201,6 +201,68 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-16 (fifth) — started on `claude/ecstatic-maxwell-6kgnqq`, which held the fourth
+  sync's merge plus 8 more commits never fast-forwarded onto `origin/main` (`main`/`origin/main`
+  were both still at `78b4e1d`, the second sync's tip — 9 ahead / 0 behind, the same
+  stranded-branch pattern this log and ComfyUI's `FORK_NOTES.md` have recorded before). `git
+  fetch upstream master` found 7 new commits past `06da16b`: `974fd71` ("SwarmSaveAudioWS"),
+  `ce6051f` ("audio file metadata support"), `6524281` (vendors `music-metadata.min.js`),
+  `83bb8cc` ("parse audio metadata in frontend too"), `cca9eab` ("Those totally support video
+  too hell yeah"), `566e8ec` ("Audio Format"), and `06da16b` ("i asked mister gippity to make a
+  few skill files"). Together they add end-to-end audio metadata support: new `src/Media/
+  AudioFile.cs` and `VideoFile.cs` (both wrapping the new `z440.atl.core` 7.16.0 NuGet package,
+  added to `src/SwarmUI.deps.props`), `MediaFile.cs`/`MediaMetaType.cs`/`ImageFile.cs` extended
+  to share the new metadata surface, a new `SwarmSaveAudioWS` node
+  (`SwarmComfyCommon/SwarmSaveImageWS.py`, +64 lines) mirroring the existing image-save
+  websocket node, `swarmhelper.js` and `WGNodeData.cs` wiring it into the workflow generator,
+  `Session.cs` gaining 44 lines of session-scoped metadata caching, `T2IParamTypes.cs`/
+  `T2IAPI.cs`/`OutputMetadataTracker.cs` small additive hooks, the vendored
+  `js/lib/music-metadata.min.js` plus `metadatahelpers.js`/`currentimagehandler.js` reading it
+  client-side, `MediaFileTests.cs` (new, 60 lines), a README/docs license-attribution line for
+  ATL.NET and music-metadata, and four new `.agents/skills/*.md` files (backend-api-routes,
+  frontend-javascript, t2i-parameter-handling, workflow-generator) — none of which existed on
+  this fork before, so they land as pure additions. 26 files changed, +662/-41. Adopted all 7
+  as-is; rejected 0; nothing in this window matches a rejected-feature pattern.
+  One conflict, in `src/Pages/Text2Image.cshtml`'s `@section Scripts`: upstream added a new
+  `<script src="js/lib/music-metadata.min.js">` line without `defer` (matching its pre-fork
+  style), colliding with the fork's app-wide `defer`-on-every-script rewrite (2026-08-28, see
+  Fork Delta). This is the same conflict shape the 2026-08-xx `video_editor.js` sync already hit
+  and resolved (documented earlier in this log): resolved in favor of the fork side again — kept
+  all 31 existing `defer` attributes and inserted upstream's new line as
+  `<script defer src="js/lib/music-metadata.min.js"></script>`, placed at the same position
+  upstream chose (immediately after `exif-reader.min.js`, before `welcomemessages.js`). Verified
+  zero conflict markers remain tree-wide after resolution and the script count is 31 (30
+  pre-existing + 1 new), all carrying `defer`. The other 6 commits' files (`Session.cs`,
+  `ComfyUIAPIAbstractBackend.cs`, `ComfyUIBackendExtension.cs`, `T2IParamTypes.cs`,
+  `OutputMetadataTracker.cs`, `T2IAPI.cs`, `currentimagehandler.js`) are all existing fork
+  touchpoints but every incoming hunk landed on lines the fork doesn't edit, so they auto-merged
+  clean with zero conflict markers.
+  Gates: **no working `dotnet` SDK in this container** (`dotnet: command not found`, none found
+  on the filesystem) — Release build, `dotnet format --verify-no-changes`, `dotnet test`, and the
+  ci-test boot could not run, the same recurring gap as several earlier entries in this log.
+  Substituted static checks: `node --check` on all 4 changed/new JS files (`swarmhelper.js`,
+  `currentimagehandler.js`, `metadatahelpers.js`, `music-metadata.min.js`) — syntax OK; `python3
+  -m py_compile` on the changed `SwarmSaveImageWS.py` — OK; brace/paren balance on all 13
+  changed/new `.cs` files — all clean except four with a pre-existing imbalance
+  (`ComfyUIAPIAbstractBackend.cs` 348/345 braces, `ComfyUIBackendExtension.cs` 755/756 parens,
+  `OutputMetadataTracker.cs` 148/147 braces, `T2IAPI.cs` 383/382 braces), each confirmed present
+  at the exact same magnitude in the pre-merge blob (`git show <premerge-tip>:<file>`), so none
+  of the four is merge-introduced — almost certainly brace/paren characters inside string or
+  comment literals, consistent with what earlier entries in this log have already noted about
+  this fallback check's false positives on `.cs` files. Author/committer scan over the merge
+  range: only the fork owner's own upstream authorship and `socrasteeze <socradeez@gmail.com>`
+  (merge commit); no attribution trailers found in the incoming diff. **Not covered:** no GPU or
+  dotnet in this container, so no actual audio-metadata extraction, no Release build, and no
+  `dotnet test` run; the new `.agents/skills/*.md` files were only checked for having landed as
+  additions, not read for content quality. **Delivery target differs from AGENTS.md's own "only
+  `origin/main`" rule** for the same reason recorded at the fourth sync's stranding and in
+  ComfyUI's `FORK_NOTES.md` twenty-second sync: this session's harness assigned
+  `claude/ecstatic-maxwell-6kgnqq` as the only permitted push target, so this merge and log entry
+  went to `origin/claude/ecstatic-maxwell-6kgnqq`, not `origin/main`. `main` is now 16 commits
+  behind this branch (the fourth sync's 9 plus this sync's merge/log commits) and still needs a
+  fast-forward in a future session with `origin/main` as its assigned target. This sync ran
+  unattended (scheduled, no human watching live).
+
 - 2026-09-15 (fourth) — merged 1 commit: "allow video/audio to be dragged into the center area
   interface" (`718c2168`). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge
   sweep findings 0. Merge is `f4b206b7`; merge base was `81780d6e`, the tip of the previous sync, so
