@@ -165,6 +165,7 @@ Task-specific techniques learned during development go in `.agents/skills/(skill
 - Always full braced blocks; never inline `if`/etc.
 - `///` XML docs on all fields, methods, and properties.
 - C# 12 on dotnet 8.
+- Never `{ get; set; }` — a field is a field; properties are only for when they actually do something unique.
 - Check internal utilities and [FreneticUtilities](https://github.com/FreneticLLC/FreneticUtilities) before reimplementing anything common — e.g. always `ToLowerFast` for lowercasing a string.
 
 ### JavaScript (`src/wwwroot/js`)

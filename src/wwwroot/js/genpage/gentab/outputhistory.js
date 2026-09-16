@@ -175,6 +175,24 @@ function buttonsForImage(fullsrc, src, metadata, isCurrentImage = false) {
             }
         });
     }
+    if (mediaType == 'video') {
+        buttons.push({
+            label: 'Edit Video',
+            title: 'Opens a Timeline Media Editor to edit this video',
+            onclick: (e) => {
+                mediaEditorInterface.open(src, metadata, fullsrc);
+            }
+        });
+    }
+    if (mediaType == 'audio') {
+        buttons.push({
+            label: 'Edit Audio',
+            title: 'Opens a Timeline Media Editor to edit this audio',
+            onclick: (e) => {
+                mediaEditorInterface.open(src, metadata, fullsrc);
+            }
+        });
+    }
     if (permissions.hasPermission('local_image_folder') && !isDataImage) {
         buttons.push({
             label: 'Open In Folder',
@@ -290,9 +308,6 @@ function describeOutputFile(image) {
     if (extension == 'html') {
         forceImage = 'imgs/html.jpg';
         forcePreview = forceImage;
-    }
-    else if (['wav', 'mp3', 'aac', 'ogg', 'flac'].includes(extension)) {
-        forcePreview = 'imgs/audio_placeholder.jpg';
     }
     let dragImage = forceImage ?? `${image.data.src}`;
     let imageSrc = forcePreview ?? `${image.data.src}?preview=true${allowAnimToggle}`;
