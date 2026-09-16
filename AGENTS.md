@@ -201,6 +201,24 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-15 (fourth) — merged 1 commit: "allow video/audio to be dragged into the center area
+  interface" (`718c2168`). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge
+  sweep findings 0. Merge is `f4b206b7`; merge base was `81780d6e`, the tip of the previous sync, so
+  the window was exactly this one commit. Incoming scope was 1 file, +5/-0, JS only — zero `.cs`
+  files.
+  `currentimagehandler.js` gains an `else if` branch in the drag/drop file handler so a dropped
+  video or audio file is read as a data URL and passed to `setCurrentImage`, same as the existing
+  image branch; it landed as new lines adjacent to, not overlapping, the fork's own edits in that
+  function, so it auto-merged clean with no conflicts.
+  Gates: `dotnet build SwarmUI.sln --configuration Release` — Build succeeded, 0 warnings, 0 errors,
+  both before and after the merge (baseline recorded pre-merge per sync-upstream Phase 1).
+  `dotnet format SwarmUI.sln --verify-no-changes` — no output, no violations (expected: zero `.cs`
+  files touched by this window). `node --check` on the merged file — syntax OK. Zero conflict
+  markers tree-wide after resolution. Author/committer scan on the merge range showed only the one
+  upstream commit's own author (Alex "mcmonkey" Goodwin); the merge commit carries
+  `socrasteeze <socradeez@gmail.com>`. This entry is written before the merge is pushed and held for
+  the fork owner to push.
+
 - 2026-09-15 (third) — merged 3 commits: "generic waveform and duration utilities" (`1083fb8`),
   "batch view audio: waveform display" (`efafeed`), and "Fix imageview modal size on narrow windows"
   (#1541, `9724ddd`). Adopted 3 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep

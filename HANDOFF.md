@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-09-16 · **Branch:** `main` · **Base:** `c68744af` · **Tree:** clean after this delivery commit
+**Updated:** 2026-09-16 · **Branch:** `main` · **Base:** `f4b206b7` · **Tree:** clean after this delivery commit
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
