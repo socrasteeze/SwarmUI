@@ -201,6 +201,53 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-15 (third) — merged 3 commits: "generic waveform and duration utilities" (`1083fb8`),
+  "batch view audio: waveform display" (`efafeed`), and "Fix imageview modal size on narrow windows"
+  (#1541, `9724ddd`). Adopted 3 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge sweep
+  findings 0. Merge is `b365137`; merge base was `5f804cc`, the tip of the previous sync, so the
+  window was exactly these three commits. Incoming scope was 5 files, +202/-161, JS and CSS only —
+  zero `.cs` files.
+  `util.js` gains the two new generic helpers the window is built around: `durationStringifyColons`
+  (seconds to `hh:mm:ss.dd`, with a `decimalPlaces` argument) and `renderWaveform`/
+  `renderWaveformImage` (decode an audio URL, build peaks, draw a waveform to a canvas and hand
+  back a data URL). `mediacontrols.js` is the source of that extraction and shrinks by 161 lines:
+  its private `formatTime`, `buildPeaksFromBuffer`, and waveform-drawing methods are deleted in
+  favour of the shared utilities. `video_editor.js` follows suit, dropping
+  `VideoEditorInterface.formatTime` and switching its four timeline labels to
+  `durationStringifyColons(..., 2)`. `generatehandler.js` adds 7 lines inside the existing
+  `isAudio` branch: the batch-strip thumbnail still starts as the static
+  `imgs/audio_placeholder.jpg`, then an async `renderWaveformImage` call replaces it with a real
+  waveform, guarded by an `imgHolder.image != audio || !imgElem.isConnected` staleness check and a
+  swallowed `.catch`. `genpage.css` changes one line — the expanded-mode image-view modal height
+  from `calc(min(100vw, 100vh - 2em))` to `calc(100vh - 2em)`, so a narrow window no longer clamps
+  the modal to viewport *width*.
+  `generatehandler.js` is a fork touchpoint (`dataset.src` full-resolution-image mobile-PWA pass,
+  2026-08-28 — see Fork Delta), and this is the second consecutive sync to land upstream work in
+  that file. It auto-merged clean again for the same reason: upstream's hunk sits at lines 117-129
+  inside the `isAudio` branch, while the fork's `dataset.src` assignment is at line 138 and below,
+  and both survive the merge unchanged. Verified there are no orphaned callers of the three deleted
+  methods anywhere in fork-tracked code, and that both new `util.js` symbols resolve
+  (`durationStringifyColons` at `util.js:873`, `renderWaveformImage` at `util.js:1278`). `util.js`
+  has no script-order problem here: it already loads ahead of the genpage helpers.
+  Verify gate: `dotnet build src/SwarmUI.csproj --configuration Release` clean (exit 0);
+  `dotnet format SwarmUI.sln --verify-no-changes` clean (exit 0); `dotnet test` 168/168 passed.
+  The ONNX GPU acceleration gate was run as part of the same-day ComfyUI sync and passed on this
+  fork's backend at `E:/SwarmUI/dlbackend/comfy` (torch 2.9.0+cu130, onnxruntime-gpu 1.23.2, real
+  Conv inference on `CUDAExecutionProvider`) — no backend Python deps were touched by this merge
+  regardless.
+  **Pre-existing failure, not merge-caused:** the headless ci-test boot exits 1 on this box because
+  the gitignored third-party extension `src/Extensions/SwarmUI-VideoStages` fails to build —
+  `TimelineRunner.cs(258,20): error CS1061: 'WorkflowGenerator' does not contain a definition for
+  'RunSeedVR2Stage'`, i.e. VideoStages expects an API from the separately-installed
+  SwarmUI-SeedVR2Upscaler extension that its installed version does not provide. That is downloaded
+  user extension code under `src/Extensions/`, not fork-tracked source, and this merge changed zero
+  `.cs` files, so it cannot be the cause. The rest of the boot is clean and the server reaches
+  "SwarmUI v0.9.8.3 - Local is now running." Needs a version bump of one or both of those two
+  extensions to clear; tracked separately from this sync.
+  **Not covered:** the opt-in Playwright harnesses under
+  `src/BuiltinExtensions/MobileEnhancements/verify/` were not run, so the new waveform thumbnail was
+  not exercised in a live browser.
+
 - 2026-09-15 (second) — merged 1 commit: "probably fix video audio input for h3 i2v" (`5f804ce`). Adopted
   1 as-is; rejected 0; divergence work 0; conflicts 0. Merge is `78b4e1d`. Incoming scope was
   `WorkflowGenerator.cs` +10 and `WorkflowGeneratorSteps.cs` +4, additive: on the MiniMax H3
