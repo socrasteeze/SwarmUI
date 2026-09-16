@@ -202,6 +202,58 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-16 — merged 17 commits, the audio/media-editor window: audio file metadata support
+  (`ce6051f2`), `SwarmSaveAudioWS` (`974fd710`), `musicmetadata.min.js` (`6524281a`), frontend audio
+  metadata parsing (`83bb8cc4`), video support alongside it (`cca9eaba`), Audio Format (`566e8ecf`),
+  five agent skill files (`06da16b2`), history-view waveforms (`92dbe30d`), timeline waveform display
+  (`a00f86ea`), a responsive fix (`316a7882`), audio editing in the advanced video editor
+  (`ea8bda6c`), media editor renames (`048bcd32`), split marks and keybinds (`3595d412`), timeline
+  section exclusion (`9de8007a`), a slider snap fix (`f2c9be55`), per-section volume control
+  (`4ba09dd1`), and cleanups (`d8be0f94`). Adopted 17 as-is; rejected 0; divergence work 0; conflicts
+  2, both resolved in the fork's favour. Merge is `22684454`; merge base was `718c2168`, the tip of
+  the previous sync. Incoming scope was 39 files, +1824/-574.
+
+  **Conflict 1 — `AGENTS.md`.** Upstream added one line to its own C# conventions list ("Never use the
+  `{ get; set; }` syntax..."), and the merge tried to drag upstream's whole conventions block over the
+  fork's "Behavioral guardrails" closing paragraph. This is exactly the case the "Instruction
+  authority" section anticipates, so the fork's text won wholesale. The one genuinely new upstream
+  rule is a technical convention, not agent policy, so it was kept — transplanted into the fork's own
+  `### C# (src/*.cs)` section as "Never `{ get; set; }` — a field is a field; properties are only for
+  when they actually do something unique." Upstream's duplicate conventions list was discarded; the
+  fork already carries every other line in it.
+
+  **Conflict 2 — `src/Pages/Text2Image.cshtml` `@section Scripts`.** Same block, two unrelated
+  changes: upstream added `js/lib/music-metadata.min.js` and renamed
+  `helpers/video_editor.js` → `helpers/media_editor.js`; the fork loads every genpage script with
+  `defer` (2026-08-28 first-paint work, recorded in the Fork Delta). Resolved by taking upstream's
+  file list and reapplying the fork's `defer` to every tag — the same resolution this conflict got on
+  the 2026-08 sync. Neither change is semantically opposed to the other, so nothing was dropped.
+
+  The `video_editor.js` → `media_editor.js` rename was the one risk worth checking: the fork had
+  never edited that file (`git log --author=socrasteeze` on the old path is empty), so the rename
+  carried no fork work. `videoEditorInterface` is gone tree-wide and `mediaEditorInterface` (declared
+  at `media_editor.js:729`) resolves for all three of its callers — `outputhistory.js:183`, `:192`,
+  and `main.js:733`. The surviving `video_editor_*` strings in `GenTabModals.cshtml` are upstream's
+  own DOM ids inside the renamed feature, not stale fork references.
+
+  Gates: `dotnet build src/SwarmUI.csproj --configuration Release` — Build succeeded, 0 warnings,
+  0 errors, both before the merge (baseline) and after. `dotnet format SwarmUI.sln
+  --verify-no-changes` — exit 0, no violations. `dotnet test SwarmUITests/SwarmUITests.csproj
+  --configuration Release` — 170/170 passed, which includes upstream's new `MediaFileTests.cs`.
+  `node --check` on all eight merged/renamed JS files including the new minified lib — all OK. Zero
+  conflict markers tree-wide after resolution. Author/committer scan over the merged range shows only
+  Alex "mcmonkey" Goodwin and `socrasteeze <socradeez@gmail.com>`; the merge commit itself is
+  `socrasteeze <socradeez@gmail.com>` on both sides, and the range carries 0 AI-attribution trailers.
+
+  Headless boot: exit 1 on the first run, from `src/Extensions/SwarmUI-VideoStages` failing to build
+  (`TimelineRunner.cs(258,20): error CS1061: 'WorkflowGenerator' does not contain a definition for
+  'RunSeedVR2Stage'`). **Not caused by this merge and not this fork's code** — that directory is
+  gitignored (`.gitignore:22`) third-party extension content, and `RunSeedVR2Stage` is absent from
+  the tracked tree both at `718c2168` and at `HEAD`, so the extension was already broken against this
+  fork before the sync. Re-run with that one extension moved aside: `is now running`, **exit 0**, zero
+  `[Error]` lines. The extension was restored to its original path afterwards. It needs a separate
+  look from the fork owner; a sync is the wrong place to fix it.
+
 - 2026-09-15 (fourth) — merged 1 commit: "allow video/audio to be dragged into the center area
   interface" (`718c2168`). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0; clean-merge
   sweep findings 0. Merge is `f4b206b7`; merge base was `81780d6e`, the tip of the previous sync, so
