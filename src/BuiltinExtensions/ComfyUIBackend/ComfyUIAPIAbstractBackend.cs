@@ -628,7 +628,7 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
             if (format > 2)
             {
                 index = (format >> 4) & 0xffff;
-                format &= 7;
+                format &= 15;
             }
             MediaType type;
             if (eventId == 3)
@@ -650,6 +650,10 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
                     5 => MediaType.VideoMp4,
                     6 => MediaType.VideoWebm,
                     7 => MediaType.VideoMov,
+                    8 => MediaType.AudioMp3,
+                    9 => MediaType.AudioWav,
+                    10 => MediaType.AudioFlac,
+                    11 => MediaType.AudioOgg,
                     _ => MediaType.ImageJpg
                 };
             }
