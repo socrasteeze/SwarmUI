@@ -202,6 +202,12 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-16 (second sync) — merged 1 commit: better detection for ideogram and anima plus sam3
+  detection in `T2IModelClassSorter.cs` (`80f0f902`). Adopted 1 as-is; rejected 0; divergence work 0;
+  conflicts 0. Merge is `aa37760e`; merge base was `80f0f902`'s parent, the tip of the morning sync.
+  Incoming scope was 1 file, +10/-2. Gates: `dotnet build src/SwarmUI.csproj --configuration Release`
+  0 errors; `dotnet format SwarmUI.sln --verify-no-changes` exit 0; `dotnet test` 170/170 passed.
+
 - 2026-09-16 — merged 17 commits, the audio/media-editor window: audio file metadata support
   (`ce6051f2`), `SwarmSaveAudioWS` (`974fd710`), `musicmetadata.min.js` (`6524281a`), frontend audio
   metadata parsing (`83bb8cc4`), video support alongside it (`cca9eaba`), Audio Format (`566e8ecf`),
