@@ -202,6 +202,42 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-17 — routine check, nothing to merge. `git fetch upstream` (after unshallowing this
+  container's clone, which was `--depth 1` and had no merge-base with `upstream/master` at all
+  until that ran) showed `upstream/master` still at `80f0f902` ("Better detection for ideogram
+  and anima; adds sam3 detection", #1543) — the exact commit the 2026-09-16 second sync already
+  merged. Incoming window: 0 commits, so no merge, no conflicts, nothing to adopt or reject, and
+  no clean-merge sweep needed. Gates were still run in full per the routine-sync gate, against
+  the (unchanged) tree:
+  `dotnet build src/SwarmUI.csproj --configuration Release` — Build succeeded, 0 warnings, 0
+  errors. `dotnet format SwarmUI.sln --verify-no-changes` — **pre-existing fail**, 122 whitespace
+  findings across 6 files (`TagDexEntry.cs`, `Utilities.cs`, `AdminAPI.cs`, `ModelsAPI.cs`,
+  `T2IAPI.cs`, `ComfyUIBackendExtension.cs`/`WorkflowGeneratorSteps.cs`), all long
+  array/collection-literal wrapping decisions, present at `HEAD` before any fetch and therefore
+  unrelated to this sync. Looks like a `dotnet-format`/Roslyn line-wrapping difference tied to
+  this sandbox's SDK (8.0.131, apt-installed fresh into this container — no dotnet was
+  preinstalled) versus whatever patch version this repo is normally verified on; not something a
+  sync should "fix" by reformatting unrelated code, and needs the fork owner's own box to confirm
+  it does not reproduce there. `dotnet test SwarmUITests/SwarmUITests.csproj --configuration
+  Release` — **pre-existing fail**, does not even build: 53× `CS0121` "ambiguous...TestDelegate
+  ... Action" errors spread across `SpokeModePolicyTests.cs`, `SpokeModeHostileTests.cs`,
+  `SwarmSwarmBackendTests.cs`, `OutputPathTests.cs`, `FilenamePrefixTests.cs`,
+  `AutoCompleteListHelperTests.cs`, `PromptEnhanceTests.cs` — every `Assert.Throws`/
+  `Assert.DoesNotThrow`/`Assert.That`/`Assert.ThrowsAsync` call the suite makes. NUnit resolved
+  to exactly the pinned `4.6.1` (`SwarmUITests.csproj`'s own version, confirmed via
+  `project.assets.json`, not a floating-version drift), and pinning `LangVersion=12` on the CLI
+  didn't change it either, so this reads as a Roslyn-compiler-version artifact of this sandbox's
+  SDK rather than a real regression — but it could not be confirmed here, since there is no other
+  SDK in this container to cross-check against. Flagged for the fork owner to verify on the
+  normal build box; this sync did not touch any test file to work around it. Headless boot check
+  (`dotnet src/bin/Release/net8.0/SwarmUI.dll --ci_test true --launch_mode none --loglevel debug
+  --data_dir <tmp> --port <free>`, after fetching upstream tags by read-only URL the same way
+  `.github/workflows/build-and-check.yml` does, to avoid the expected "Tag list empty" error this
+  fork always gets otherwise) — `is now running`, exit 0, zero `[Error]` lines. GPU acceleration
+  check: not applicable, no GPU or comfy backend install in this sandbox. `/clean` was still run
+  before the (doc-only) push per fork law. This entry exists so the next sync knows the fork was
+  confirmed current as of this date and doesn't need to re-derive the merge-base from scratch.
+
 - 2026-09-16 (second sync) — merged 1 commit: better detection for ideogram and anima plus sam3
   detection in `T2IModelClassSorter.cs` (`80f0f902`). Adopted 1 as-is; rejected 0; divergence work 0;
   conflicts 0. Merge is `aa37760e`; merge base was `80f0f902`'s parent, the tip of the morning sync.
