@@ -202,6 +202,13 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-17 (third check) — routine check, nothing to merge. `git pull --ff-only origin` was
+  already current and `git fetch upstream` showed `upstream/master` still at `7de3e8de` ("Model
+  Downloader: handy manual folder name input"), the commit the second sync merged as `17f3c92`.
+  Incoming window: 0 commits, so no merge, no conflicts, no gates run (no source changed), no
+  push. Tree clean, `main` even with `origin/main`. Logged so the next sync knows the fork was
+  confirmed current as of this check.
+
 - 2026-09-17 (second sync) — merged 1 commit: "Model Downloader: handy manual folder name input"
   (`7de3e8d`). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0. Merge is `17f3c92`;
   merge base was `98bea42`, the tip of the morning's routine-check sync. Incoming scope was 4
