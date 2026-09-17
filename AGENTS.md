@@ -202,6 +202,29 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-17 (second sync) — merged 1 commit: "Model Downloader: handy manual folder name input"
+  (`7de3e8d`). Adopted 1 as-is; rejected 0; divergence work 0; conflicts 0. Merge is `17f3c92`;
+  merge base was `98bea42`, the tip of the morning's routine-check sync. Incoming scope was 4
+  files, +37/-4: `src/Pages/_Generate/GenTabModals.cshtml`, `UtilitiesTab.cshtml`, `genpage.css`,
+  `src/wwwroot/js/genpage/utiltab.js`. Two of the four are fork touchpoints — `GenTabModals.cshtml`
+  (the `contenteditable` paste-modal div) and `utiltab.js` (the `ForwardImageRequest` civitai-video
+  redirect fix) — both auto-merged with zero conflict markers; both fork edits re-grepped present
+  in the merged tree (`contenteditable="true"` on `image_editor_paste_pastebox`,
+  `genericRequest('ForwardImageRequest', ...)` in `utiltab.js`) rather than assumed. Gates:
+  `dotnet build src/SwarmUI.csproj --configuration Release` — 0 warnings, 0 errors.
+  `dotnet format SwarmUI.sln --verify-no-changes` — same pre-existing 122-whitespace-finding fail
+  as the morning sync, identical file list, confirmed unrelated to this window's 4 files. `dotnet
+  test SwarmUITests/SwarmUITests.csproj` — same pre-existing 53× `CS0121` build failure as the
+  morning sync. Headless boot check — first attempt (no upstream tags fetched) reproduced the
+  known "Tag list empty" `[Error]`/exit 1; re-ran after `git fetch
+  https://github.com/mcmonkeyprojects/SwarmUI.git 'refs/tags/*:refs/tags/*'` (the
+  `build-and-check.yml` workaround) and got a clean `is now running`, exit 0, zero `[Error]` lines.
+  Also built and boot-tested the pre-merge tree (`98bea42`) in a throwaway worktree to confirm the
+  format/test/boot-without-tags failures are pre-existing and not introduced by this merge — all
+  three reproduced identically there. GPU acceleration check: not applicable, no GPU or comfy
+  backend install in this sandbox. `/clean` run before the push per fork law. This sync ran
+  unattended (scheduled, no human watching live).
+
 - 2026-09-17 — routine check, nothing to merge. `git fetch upstream` (after unshallowing this
   container's clone, which was `--depth 1` and had no merge-base with `upstream/master` at all
   until that ran) showed `upstream/master` still at `80f0f902` ("Better detection for ideogram
