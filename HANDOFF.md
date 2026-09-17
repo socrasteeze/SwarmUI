@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-09-16 · **Branch:** `main` · **Base:** `f4b206b7` · **Tree:** clean after this delivery commit
+**Updated:** 2026-09-17 · **Branch:** `main` · **Base:** `af86ceef` · **Tree:** clean after this delivery commit
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
@@ -13,6 +13,7 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 - Installed-PWA "+" button now level with Generate (safe-area padding had centered it 17 px low) — `src/BuiltinExtensions/MobileEnhancements/Assets/mobile.css`
 - Merged upstream `5f804cce` ("probably fix video audio input for h3 i2v"), no conflicts — see AGENTS.md Upstream Sync Log
 - 2026-09-16: fast-forwarded `main` to `c68744af` (a prepared but unpushed sync branch merging 3 more upstream commits — waveform/duration utility extraction, no conflicts, no `.cs` files) and pushed to `origin/main`; dotnet unavailable in this container so build/format/test gates could not be run — see AGENTS.md Upstream Sync Log
+- 2026-09-17: routine automated sync check (unrelated to the mobile/PWA thread above) — `upstream/master` had 0 new commits since the 2026-09-16 second sync, so nothing to merge. Installed `dotnet-sdk-8.0` via apt into this container (previously unavailable) and ran the full gate suite anyway: build clean, headless boot clean (after fetching upstream tags read-only, same as CI), but `dotnet format --verify-no-changes` and `dotnet test` both fail in this sandbox in ways that reproduce identically before touching anything — see AGENTS.md Upstream Sync Log for the detail. Logged only; no feature work touched.
 
 ## Open
 1. Restart Swarm, bypass the PWA cache, then on the iPhone confirm: preset edit opens without freezing, "Add Temporary Image" Files picker opens as fast as `/simple`, "+" is level with Generate.
@@ -22,6 +23,7 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 5. Decide on the Ref2VA gaps (audio shift param, ref-video soundtrack wiring, >294-frame warning) — `WorkflowGeneratorModelSupport.cs` `MiniMaxH3SigmaShift`, `WorkflowGenerator.cs` CollectReferences block.
 6. Prompt Enhance endpoints point at `qwen3.8-27b-q4` (~12 tok/s) while the decision below says the 8B writer stays; reconcile `Data/PromptEnhance/endpoints.json` with the user (runtime file, user-owned).
 7. Carried: `SwarmUI-VideoStages` still references removed `RunSeedVR2Stage` (root boot exits 1); physical-device PWA acceptance; startup/LoRA-metadata performance pass per `docs/WebUI-Performance-Review.md`.
+8. Unconfirmed sandbox-only gate failures from the 2026-09-17 sync (see AGENTS.md Upstream Sync Log): `dotnet format --verify-no-changes` reports 122 pre-existing whitespace findings across 6 files, and `dotnet test` fails to build the NUnit suite with 53× `CS0121` ambiguous-overload errors (`TestDelegate` vs `Action`). Both reproduce on a clean checkout with no merge involved, so they're either a real latent issue or an SDK/Roslyn version mismatch with this sandbox's apt-installed `dotnet-sdk-8.0` (8.0.131) — needs confirming on the normal build box.
 
 ## Decisions
 - Split the classic media menu (option A) over images-only-on-touch (B) or an extension override (C) — keeps video/audio reachable everywhere; accepts an upstream-file edit.
