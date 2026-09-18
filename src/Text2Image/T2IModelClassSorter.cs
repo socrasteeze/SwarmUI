@@ -211,7 +211,10 @@ public class T2IModelClassSorter
         bool isLtxv2Lora(JObject h) => (hasLoraKey(h, "transformer_blocks.0.attn1.to_k") && hasLoraKey(h, "transformer_blocks.0.attn1.to_out.0") && hasLoraKey(h, "transformer_blocks.9.attn2.to_v"))
             || (hasLoraKey(h, "transformer_blocks.0.audio_attn1.to_k") && hasLoraKey(h, "transformer_blocks.0.audio_attn1.to_out.0") && hasLoraKey(h, "transformer_blocks.9.audio_attn1.to_v"));
         bool isMiniMaxH3(JObject h) => hasKey(h, "video_patch_proj.weight") && hasKey(h, "audio_patch_proj.weight");
-        bool isMiniMaxH3Lora(JObject h) => (hasLoraKey(h, "blocks.0.adaln_proj.linear") || hasLoraKey(h, "blocks.0.attn.qkv_proj")) && hasLoraKey(h, "blocks.49.mlp.fc2") && hasLoraKey(h, "token_refiner.blocks.0.attn.out_proj");
+        // Anchor on block 49 (H3 DiT is always 50 blocks): 'token_refiner' is only present when the text encoder was trained, and block 0 is absent from front-pruned loras.
+        bool isMiniMaxH3Lora(JObject h) => (hasLoraKey(h, "blocks.49.adaln_proj.linear") || hasLoraKey(h, "blocks.49.attn.qkv_proj") || hasLoraKey(h, "blocks.49.attn.out_proj") || hasLoraKey(h, "blocks.49.mlp.fc2") || hasLoraKey(h, "blocks.49.mlp.fc1"))
+                                        && !hasLoraKey(h, "blocks.0.attn.gate") && !hasLoraKey(h, "blocks.0.mlp.gate") && !hasLoraKey(h, "blocks.0.attn.wk")
+                                        && !hasLoraKey(h, "blocks.49.attn.gate") && !hasLoraKey(h, "blocks.49.mlp.gate") && !hasLoraKey(h, "blocks.49.attn.wk");
         bool isMiniMaxH3Embedding(JObject h) => h.ContainsKey("qwen3vl_32b") && h.Properties().Count() < 4;
         bool isMiniMaxH3VideoVae(JObject h) => h.ContainsKey("decoder.transformer_blocks.0.scale1") && h.ContainsKey("encoder.down.5.block.0.conv1.weight");
         bool isMiniMaxH3AudioVae(JObject h) => h.ContainsKey("pre_block.attn.zero_k_bias");
