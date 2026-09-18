@@ -202,6 +202,19 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-18 — routine check, nothing to merge. `git status --short` was clean, git identity was
+  re-set for this clone (`user.name`/`user.email`), and `git remote set-url --push upstream
+  DISABLED-NEVER-PUSH-TO-UPSTREAM` was re-applied (per-clone setting, does not persist).
+  `git fetch upstream` showed `upstream/master` still at `7de3e8de` ("Model Downloader: handy
+  manual folder name input"), the same commit the 2026-09-17 second sync merged as `17f3c92` and
+  the 2026-09-17 third check already confirmed current — `git merge-base HEAD upstream/master`
+  equals `upstream/master`'s tip exactly. Incoming window: 0 commits, so no merge, no conflicts,
+  no gates run (no source changed). Tree clean, local branch even with `origin/main` at
+  `b0ae2561` before this entry. `/clean` was still run before pushing this
+  log-only entry per fork law (a docs commit to `AGENTS.md` is still a push to `origin/main`). Ran
+  unattended (scheduled, no human watching live). Logged so the next sync knows the fork was
+  confirmed current as of this check.
+
 - 2026-09-17 (third check) — routine check, nothing to merge. `git pull --ff-only origin` was
   already current and `git fetch upstream` showed `upstream/master` still at `7de3e8de` ("Model
   Downloader: handy manual folder name input"), the commit the second sync merged as `17f3c92`.
