@@ -202,6 +202,39 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-18 (second check, fresh container) — routine unattended sync check, nothing to merge.
+  Fresh session/container (git identity inherited the container global `Claude
+  <noreply@anthropic.com>` and was re-set locally to `socrasteeze <socradeez@gmail.com>`;
+  `upstream` remote re-added with push disabled via
+  `DISABLED-NEVER-PUSH-TO-UPSTREAM`, since neither survives a fresh clone). `git fetch upstream`
+  showed `upstream/master` still at `7de3e8de` ("Model Downloader: handy manual folder name
+  input") — `git merge-base HEAD upstream/master` equals `upstream/master`'s tip exactly.
+  Incoming window: 0 commits, so no merge, no conflicts, no clean-merge sweep needed. This
+  session's checkout was the per-session branch `noble/trusting-dijkstra-x8u3om` (45 commits
+  ahead of, 0 behind, `origin/main`; that branch had never been pushed), not `main` — per this
+  run's instructions, `main`/`master` are off-limits as push targets here, so this log entry and
+  anything else land only on that branch, pushed to `origin` under its own name.
+  Gates were still run in full despite the empty window, since this container had no prior
+  baseline recorded: `dotnet-sdk-8.0` (8.0.131, apt) installed successfully this time (the
+  2026-09-17 sync's own attempt on a similarly fresh container had failed). `dotnet build
+  SwarmUI.sln --configuration Release` — the `SwarmUI` project itself builds clean; `Desktop.csproj`
+  fails on this Linux box with `CS0103` (`WebView`/`InitializeComponent` undefined), consistent
+  with the 2026-09-04 entry noting the Avalonia desktop launcher was "only verified for Windows
+  upstream"; `SwarmUITests.csproj` fails with the same 53x `CS0121` ambiguous-overload errors
+  (`TestDelegate` vs `Action`) logged 2026-09-17, reproduced identically with zero source changes
+  applied, confirming it is this sandbox's SDK/Roslyn pairing and not a merge artifact. `dotnet
+  format SwarmUI.sln --verify-no-changes` reproduced the same pre-existing whitespace findings in
+  the same 6 files (`TagDexEntry.cs`, `Utilities.cs`, `AdminAPI.cs`, `ModelsAPI.cs`, `T2IAPI.cs`,
+  plus one more) logged 2026-09-17. Headless `./launch-linux.sh --ci-test true --launch_mode none
+  --loglevel debug`, run after fetching upstream tags read-only the same way CI does — **exit 0,
+  clean boot**, no `RunSeedVR2Stage`/`SwarmUI-VideoStages` failure this time (that extension isn't
+  present in this container, so its absence isn't evidence of a fix). No nested `dlbackend/ComfyUI`
+  checkout exists in this container (gitignored, fetched at first run) — the
+  custom_nodes fast-forward-only handling this run's instructions describe had nothing to act on.
+  Ran unattended (scheduled, no human watching live). Logged so the next sync knows the fork was
+  confirmed current as of this check, and that build/format/test gate failures on a bare sandbox
+  container are expected and pre-existing, not new.
+
 - 2026-09-18 — routine check, nothing to merge. `git status --short` was clean, git identity was
   re-set for this clone (`user.name`/`user.email`), and `git remote set-url --push upstream
   DISABLED-NEVER-PUSH-TO-UPSTREAM` was re-applied (per-clone setting, does not persist).
