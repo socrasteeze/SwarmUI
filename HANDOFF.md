@@ -86,7 +86,7 @@ On turbo-merged checkpoints (Eros Max, DaSiWa) at 4-9 steps, **run turbo alone.*
 
 ### Eros Max author guidance (2026-09-17, from pasted beta5/4/3 release notes)
 
-- **Never use the Eros hybrid in i2v mode.** Always prompt ref2va or t2va format, **even with a single image input** — treat it as a reference, not frame 1. i2v-style prompting causes odd outputs, random camera changes, blue lighting shifts. This is a prompt-format rule; no extra checkpoint fixes it.
+- **Prefer ref2va or t2va prompt format over i2v, even with a single image input** — treat that image as a reference, not frame 1. The author's failure case is conditional: *"if you run an underdeveloped or manually written prompt you will get odd outputs, random camera changes, and blue lighting color shifts when you use the i2v prompt style"* — thin prompt **plus** i2v style. Reported to be lenient in practice on simple single-reference work, strict on multi-reference or complex motion; prompt depth matters more than format compliance. Prompt-format issue, not a missing checkpoint. Random camera changes or blue shift is the known signature — check the prompt before blaming a sampler or checkpoint.
 - Use `TURBO-hybrid_int8` by default (local: `10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized`). TURBO files bake in turbo-delta fusion, saving 4.2GB vs loading both ref and fl turbos.
 - **Non-turbo full-step audio is always better than turbo audio**; the author calls H3's integrated audio "terrible". Use the non-turbo checkpoint for dialogue.
 - Concept LoRAs (mystic_v4, anatomy enhancer) stack readily on beta5 at **0.2-0.6 strength** — lower than usual.
