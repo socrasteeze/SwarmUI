@@ -28,7 +28,7 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 3. Classic preset editor's first open still costs ~1.6 s desktop: `ensurePresetInputsBuilt()` calls full `genInputs()`, rebuilding the main panel too — `presets.js:197`.
 4. Run the FL2VA baseline test listed under Reference and record results. **Note:** its FBC-off-vs-on arm is superseded for turbo checkpoints — see "Turbo H3 acceleration". Still valid on the non-distilled 25-step path.
 4b. Run the sampler shootout: Grid Gen presets axis, fixed seed + init image, four `AB/s8` presets. The only open H3 question research cannot answer (author's style/motion/audio claims are subjective and untested on this content).
-4c. Verify the presets' `integrated_multimodal_description:` prompt scaffold is actually ref2va format — it was inherited from the old `minimax/FL2VA` preset and predates knowing the ref2va-only rule. The author points at the H3 developer prompting guide for the spec.
+4c. Write prompts in ref2va/t2va format (never i2v style) — the 12 new presets carry **no prompt** by design, so the operator supplies it and the Grid Gen override trap does not apply. The author points at the H3 developer prompting guide for the spec. The two original `minimax/FL2VA*` presets still carry their own prompt scaffold.
 5. Decide on the Ref2VA gaps (audio shift param, ref-video soundtrack wiring, >294-frame warning) — `WorkflowGeneratorModelSupport.cs` `MiniMaxH3SigmaShift`, `WorkflowGenerator.cs` CollectReferences block.
 6. Prompt Enhance endpoints point at `qwen3.8-27b-q4` (~12 tok/s) while the decision below says the 8B writer stays; reconcile `Data/PromptEnhance/endpoints.json` with the user (runtime file, user-owned).
 7. Carried: `SwarmUI-VideoStages` still references removed `RunSeedVR2Stage` (root boot exits 1); physical-device PWA acceptance; startup/LoRA-metadata performance pass per `docs/WebUI-Performance-Review.md`.
@@ -94,7 +94,7 @@ On turbo-merged checkpoints (Eros Max, DaSiWa) at 4-9 steps, **run turbo alone.*
 
 ### H3 presets created (2026-09-17) — in `Users.ldb`, not the repo
 
-12 presets via the AddNewPreset API, all pinned `exactbackendid=0`, all labeled `[HYBRID - REF2VA or FL2VA]` with the ref2va warning in the description. The 8 Eros presets pin the TURBO-hybrid beta5 W4A8 checkpoint.
+12 presets via the AddNewPreset API, all carrying **no prompt** (operator supplies it), all pinned `exactbackendid=0`, all labeled `[HYBRID - REF2VA or FL2VA]` with the ref2va warning in the description. The 8 Eros presets pin the TURBO-hybrid beta5 W4A8 checkpoint.
 
 - `AB/s8 {er_sde-beta57, res_multistep-simple, lcm-simple, euler-simple}` — step-matched at 8 for a clean sampler shootout; only sampler/scheduler varies. Note er_sde at 8 is **above** its 4-6 author band; recheck a weak result at 6 before blaming the sampler.
 - `minimax/Eros {er_sde-beta57 6, res_multistep 9, lcm 8, euler 8}` — author-band steps.
@@ -104,7 +104,7 @@ On turbo-merged checkpoints (Eros Max, DaSiWa) at 4-9 steps, **run turbo alone.*
 Grid Gen presets axis for the shootout (fixed seed + init image set outside the grid):
 `AB/s8 er_sde-beta57 || AB/s8 res_multistep-simple || AB/s8 lcm-simple || AB/s8 euler-simple`
 
-Grid Gen precedence trap: `GridGeneratorExtension.cs:198` applies presets **after** cloning base params, so a preset's stored prompt **overwrites** the grid-level prompt. Preset names match lowercased; a miss aborts the whole grid.
+Grid Gen precedence trap: `GridGeneratorExtension.cs:198` applies presets **after** cloning base params, so a preset with a stored prompt **overwrites** the grid-level prompt — avoided here by leaving prompt unset on all 12. Preset names match lowercased; a miss aborts the whole grid.
 
 API trap: `AddNewPreset` takes `param_map` at the **top level**, not nested under `raw` as the docstring implies — any `JObject` parameter binds to the whole request body (`APICallReflectBuilder.cs:46`). The documented shape throws an unguarded NRE at `BasicAPIFeatures.cs:552`, surfacing as a bare HTTP 400.
 
