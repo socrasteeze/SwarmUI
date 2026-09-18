@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-09-18 · **Branch:** `main` · **Base:** `bd792365` · **Tree:** clean after this delivery commit
+**Updated:** 2026-09-17 (H3 preset session) · **Branch:** `main` · **Base:** `e82a24b5` · **Tree:** clean
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
@@ -20,11 +20,15 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 
 - 2026-09-18: routine automated sync check. `git fetch upstream` showed `upstream/master` still at `7de3e8de`, 0 new commits since the 2026-09-17 second sync; nothing to merge, no gates run (no source changed). Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. This sync ran unattended (scheduled, no human watching live). All earlier handoff detail above is unchanged.
 
+- 2026-09-17 (H3 preset session, separate thread from the mobile/PWA work above): created 12 MiniMax H3 sampling presets via the AddNewPreset API and researched which accelerators actually apply at turbo step counts. Details in "Reference: MiniMax H3" → the three new subsections. Two prior beliefs were corrected (sparse attention does not harm FL2VA; the Sol INT8 defaults are fine on ComfyUI 0.36.0) and the FBC/MemOpt line under Decisions was struck. No repo source was touched by this work — presets live in `Users.ldb`. Separately committed two pre-existing uncommitted edits found in the tree (`e82a24b5`, Ultralytics/SAM path forwarding + Anima LoRA detection), which were **not** from this session; the user confirmed committing them.
+
 ## Open
 1. Restart Swarm, bypass the PWA cache, then on the iPhone confirm: preset edit opens without freezing, "Add Temporary Image" Files picker opens as fast as `/simple`, "+" is level with Generate.
 2. Decide whether `/simple` gets Start frame / End frame slots (send `initimage` / `videoendimage`). Today `/simple` cannot set keyframes; prompt images go to H3 as `<Picture N>` references.
 3. Classic preset editor's first open still costs ~1.6 s desktop: `ensurePresetInputsBuilt()` calls full `genInputs()`, rebuilding the main panel too — `presets.js:197`.
-4. Run the FL2VA baseline test listed under Reference and record results.
+4. Run the FL2VA baseline test listed under Reference and record results. **Note:** its FBC-off-vs-on arm is superseded for turbo checkpoints — see "Turbo H3 acceleration". Still valid on the non-distilled 25-step path.
+4b. Run the sampler shootout: Grid Gen presets axis, fixed seed + init image, four `AB/s8` presets. The only open H3 question research cannot answer (author's style/motion/audio claims are subjective and untested on this content).
+4c. Verify the presets' `integrated_multimodal_description:` prompt scaffold is actually ref2va format — it was inherited from the old `minimax/FL2VA` preset and predates knowing the ref2va-only rule. The author points at the H3 developer prompting guide for the spec.
 5. Decide on the Ref2VA gaps (audio shift param, ref-video soundtrack wiring, >294-frame warning) — `WorkflowGeneratorModelSupport.cs` `MiniMaxH3SigmaShift`, `WorkflowGenerator.cs` CollectReferences block.
 6. Prompt Enhance endpoints point at `qwen3.8-27b-q4` (~12 tok/s) while the decision below says the 8B writer stays; reconcile `Data/PromptEnhance/endpoints.json` with the user (runtime file, user-owned).
 7. Carried: `SwarmUI-VideoStages` still references removed `RunSeedVR2Stage` (root boot exits 1); physical-device PWA acceptance; startup/LoRA-metadata performance pass per `docs/WebUI-Performance-Review.md`.
@@ -35,7 +39,7 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 - Batch width measurement inside `AutoWidthBatchHelper` over skipping `triggerChangeFor` in `clearPresetView` — keeps every change listener running, only the layout reads merge.
 - `/simple` FL2VA fields prefill only params the server advertises and never overwrite existing values; Init/End images stay out because the editor stores text.
 - Prompt Enhance writer stays `huihui_ai/qwen3-vl-abliterated:8b-instruct`; the 27B wrote no better at ~12 vs ~80 tok/s.
-- Planned FL2VA config uses H3 Memory Optimization + FirstBlockCache defaults; the Ref2VA cache audio breakage is attributed to reference audio (operator call, unverified on FL2VA).
+- ~~Planned FL2VA config uses H3 Memory Optimization + FirstBlockCache defaults~~ — **superseded 2026-09-17**, see "Turbo H3 acceleration" below. On turbo checkpoints at 4-9 steps run turbo alone: FBC measures 0.8% at 4 steps, and H3 Memory Optimization is not numerically neutral. The Ref2VA cache audio breakage remains attributed to reference audio (operator call, unverified on FL2VA).
 - Optimize the existing architecture; keep upstream's mobile Genpage layout and the separate `/simple` client.
 
 ## Traps
@@ -68,6 +72,43 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 | LoRA / Prompt | Turbo LoRA only with Turbo steps, not on Turbo-merged checkpoints; describe visuals + audio, no attached images | same |
 
 Leave alone for FL2VA: prompt-attached images/audio/video, Refiner, Video Swap Model, Video Extend.
+
+### Turbo H3 acceleration (2026-09-17) — supersedes the FBC/MemOpt plan above
+
+On turbo-merged checkpoints (Eros Max, DaSiWa) at 4-9 steps, **run turbo alone.** The backend already has `--use-sage-attention` and `--disable-comfy-compiler` in ExtraArgs, so no config change is needed.
+
+- **Step-skipping caches are dead at turbo step counts.** Measured A/B: 4-step run 68.23s → 68.83s with FBC (**0.8%, noise**); the same node gives 18.6% at 20 steps. TeaCache/EasyCache/FBC/Spectrum are all tuned for ~20 steps. They remain legitimate on the non-distilled 25-step path.
+- **Avoid H3 Memory Optimization.** Measured 1.27x but **changed output at an identical seed** (mean pixel diff 2.27/255) and breaks on GGUF. Block swap is OOM-only, and 32GB fits the W4A8 checkpoint resident.
+- **Sparse/window attention does not harm FL2VA** — the opposite of the earlier assumption. FL2VA held 0.8498-0.9144 SSIM under aggressive sparsity vs T2VA's 0.7584-0.7765 (LMSYS, 2026-08-27), via a "first frame sink". Moot at turbo anyway: the first ten denoising steps run dense regardless of config.
+- **Sol INT8 QK/PV defaults are fine on this install.** The sm_120 Sage noise bug (pure noise above ~160k tokens) was the INT8 double-quantization concern and was fixed in ComfyUI 0.31.1; local is 0.36.0. Do not hand-disable them.
+- "JuanAttn" (`juanattnbeta` param group) returns zero web results — no identifiable upstream, so do not assume its window semantics match published benchmarks.
+- **Remaining bottleneck is VAE decode**, a fixed ~43.5s — over half of a ~79s run, untouched by any sampler setting. PyTorch is already 2.9.0+cu130.
+
+### Eros Max author guidance (2026-09-17, from pasted beta5/4/3 release notes)
+
+- **Never use the Eros hybrid in i2v mode.** Always prompt ref2va or t2va format, **even with a single image input** — treat it as a reference, not frame 1. i2v-style prompting causes odd outputs, random camera changes, blue lighting shifts. This is a prompt-format rule; no extra checkpoint fixes it.
+- Use `TURBO-hybrid_int8` by default (local: `10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized`). TURBO files bake in turbo-delta fusion, saving 4.2GB vs loading both ref and fl turbos.
+- **Non-turbo full-step audio is always better than turbo audio**; the author calls H3's integrated audio "terrible". Use the non-turbo checkpoint for dialogue.
+- Concept LoRAs (mystic_v4, anatomy enhancer) stack readily on beta5 at **0.2-0.6 strength** — lower than usual.
+- Sampler table (beta5, confirmed verbatim): `er_sde`/`beta57` 4-6 (best style preservation, least drift) · `res_multistep`/`simple` 6-9 (good motion; beta at 8-9 is sharpest for fast motion but plastic/burned) · `LCM`/`simple` 6-8 (best turbo audio) · `euler`/`simple` 4-8. CFG 1 throughout.
+
+### H3 presets created (2026-09-17) — in `Users.ldb`, not the repo
+
+12 presets via the AddNewPreset API, all pinned `exactbackendid=0`, all labeled `[HYBRID - REF2VA or FL2VA]` with the ref2va warning in the description. The 8 Eros presets pin the TURBO-hybrid beta5 W4A8 checkpoint.
+
+- `AB/s8 {er_sde-beta57, res_multistep-simple, lcm-simple, euler-simple}` — step-matched at 8 for a clean sampler shootout; only sampler/scheduler varies. Note er_sde at 8 is **above** its 4-6 author band; recheck a weak result at 6 before blaming the sampler.
+- `minimax/Eros {er_sde-beta57 6, res_multistep 9, lcm 8, euler 8}` — author-band steps.
+- `minimax/DaSiWa Turbo {4, 8}` — shift 12, model unset (any DaSiWa turbo build).
+- `minimax/DaSiWa NonDistill {res_multistep, euler} 25` — pins `dasiwaHybridV2_int8`, shift 12. **CFG 3.5 is a guess, not author-published** — the author gives no CFG for non-distilled rows. Tune it.
+
+Grid Gen presets axis for the shootout (fixed seed + init image set outside the grid):
+`AB/s8 er_sde-beta57 || AB/s8 res_multistep-simple || AB/s8 lcm-simple || AB/s8 euler-simple`
+
+Grid Gen precedence trap: `GridGeneratorExtension.cs:198` applies presets **after** cloning base params, so a preset's stored prompt **overwrites** the grid-level prompt. Preset names match lowercased; a miss aborts the whole grid.
+
+API trap: `AddNewPreset` takes `param_map` at the **top level**, not nested under `raw` as the docstring implies — any `JObject` parameter binds to the whole request body (`APICallReflectBuilder.cs:46`). The documented shape throws an unguarded NRE at `BasicAPIFeatures.cs:552`, surfacing as a bare HTTP 400.
+
+**Parked:** `smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models` (HF) — weight-selection merge of MiniMax's official fl2va+ref2va, no training, int8 only, **no turbo variant**, no published sampling settings. Not an upgrade; useful only as a neutral official-weights baseline if Eros Max output looks stylistically skewed by its merged LoRAs. Try `b25-49` first. Deferred by the user 2026-09-17.
 
 ## Verify
 ```powershell
