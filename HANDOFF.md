@@ -1,6 +1,6 @@
 # HANDOFF
 
-**Updated:** 2026-09-17 · **Branch:** `main` · **Base:** `af86ceef` · **Tree:** clean after this delivery commit
+**Updated:** 2026-09-18 · **Branch:** `main` · **Base:** `bd792365` · **Tree:** clean after this delivery commit
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
@@ -17,6 +17,8 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 - 2026-09-17 (second sync, later the same day): merged 1 new upstream commit, "Model Downloader: handy manual folder name input" (`7de3e8d`) — 4 files, both fork touchpoints it touched (`GenTabModals.cshtml`'s paste-modal div, `utiltab.js`'s `ForwardImageRequest` fix) auto-merged clean and were re-verified present. Confirmed the format/test/no-tags-boot failures logged above are pre-existing by building and boot-testing the pre-merge tree in a throwaway worktree — all three reproduced identically there, so this merge introduced no new gate failures. Pushed to `origin/main` via `/clean`. This sync ran unattended (scheduled, no human watching live).
 
 - 2026-09-17 (third check, later still): `git fetch upstream` showed 0 new commits past `7de3e8de`; nothing merged, no gates run, nothing pushed. Logged in AGENTS.md Upstream Sync Log. All earlier handoff detail above is unchanged.
+
+- 2026-09-18: routine automated sync check. `git fetch upstream` showed `upstream/master` still at `7de3e8de`, 0 new commits since the 2026-09-17 second sync; nothing to merge, no gates run (no source changed). Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. This sync ran unattended (scheduled, no human watching live). All earlier handoff detail above is unchanged.
 
 ## Open
 1. Restart Swarm, bypass the PWA cache, then on the iPhone confirm: preset edit opens without freezing, "Add Temporary Image" Files picker opens as fast as `/simple`, "+" is level with Generate.
