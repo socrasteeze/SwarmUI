@@ -30,7 +30,7 @@ The user waived the handoff line cap; the H3 reference sections below were logge
 4b. Run the sampler shootout: Grid Gen presets axis, fixed seed + init image, four `AB/s8` presets. The only open H3 question research cannot answer (author's style/motion/audio claims are subjective and untested on this content).
 4c. Write prompts in ref2va/t2va format (never i2v style) — the 12 new presets carry **no prompt** by design, so the operator supplies it and the Grid Gen override trap does not apply. The author points at the H3 developer prompting guide for the spec. The two original `minimax/FL2VA*` presets still carry their own prompt scaffold.
 5. Decide on the Ref2VA gaps (audio shift param, ref-video soundtrack wiring, >294-frame warning) — `WorkflowGeneratorModelSupport.cs` `MiniMaxH3SigmaShift`, `WorkflowGenerator.cs` CollectReferences block.
-6. Prompt Enhance endpoints point at `qwen3.8-27b-q4` (~12 tok/s) while the decision below says the 8B writer stays; reconcile `Data/PromptEnhance/endpoints.json` with the user (runtime file, user-owned).
+6. Prompt Enhance **verified working 2026-09-17** (extension loads 7 writer profiles, pack 1.3.0; all 3 endpoints reachable). Config still points at `qwen3.8-27b-q4` while the decision below says the 8B stays — user chose to **leave it as-is** after verification. Raw-API A/B on the laptop host: 27B 16.0 tok/s and leaked chain-of-thought into the output ("We need answer user's request..."), 8B 47.5 tok/s and returned a clean usable prompt. That test bypassed the writer profiles, so the leak may be suppressed in real use. Both models are already present on the laptop host, so switching needs no download.
 7. Carried: `SwarmUI-VideoStages` still references removed `RunSeedVR2Stage` (root boot exits 1); physical-device PWA acceptance; startup/LoRA-metadata performance pass per `docs/WebUI-Performance-Review.md`.
 8. Unconfirmed sandbox-only gate failures from the 2026-09-17 sync (see AGENTS.md Upstream Sync Log): `dotnet format --verify-no-changes` reports 122 pre-existing whitespace findings across 6 files, and `dotnet test` fails to build the NUnit suite with 53× `CS0121` ambiguous-overload errors (`TestDelegate` vs `Action`). Both reproduce on a clean checkout with no merge involved, so they're either a real latent issue or an SDK/Roslyn version mismatch with this sandbox's apt-installed `dotnet-sdk-8.0` (8.0.131) — needs confirming on the normal build box.
 
@@ -100,6 +100,18 @@ On turbo-merged checkpoints (Eros Max, DaSiWa) at 4-9 steps, **run turbo alone.*
 - `minimax/Eros {er_sde-beta57 6, res_multistep 9, lcm 8, euler 8}` — author-band steps.
 - `minimax/DaSiWa Turbo {4, 8}` — shift 12, model unset (any DaSiWa turbo build).
 - `minimax/DaSiWa NonDistill {res_multistep, euler} 25` — pins `dasiwaHybridV2_int8`, shift 12. **CFG 3.5 is a guess, not author-published** — the author gives no CFG for non-distilled rows. Tune it.
+
+Preset sets, all prompt-free and backend-0 pinned (operator sets prompt, init image, and a FIXED seed):
+
+- `AB/s8 *` (4) — sampler shootout, checkpoint pinned to TURBO-hybrid beta5. Single axis, 4 cells.
+- `GRID/samp *` (4) — same samplers, **no checkpoint pinned**, for a 2-axis grid against a Video Model axis.
+- `LEN/{10s 240f, 15s 360f, 20s 480f}` (3) — clip-length scaling, **sampler unset** (set the shootout winner outside the grid), checkpoint pinned. Run after the shootout.
+
+Checkpoint axis was pruned by hashing: `h3ErosMax_beta5` is **byte-identical** to `10Eros_Max_h3_TURBO-hybrid_beta5_w4a8` (same SHA over the first 20MB, both 13350MB) — testing both wastes a row. Also excluded: the non-turbo `hybrid` (needs 20-25 steps), and the 20GB variants of both families (different quant, not comparable at matched settings). That leaves 2 genuinely distinct turbo checkpoints: TURBO-hybrid beta5 and `dasiwaHybridTurboV2_3203313`.
+
+Caveat on the 2-axis grid: DaSiWa wants shift 12 and the GRID presets leave shift unset (default 3), so DaSiWa runs off-spec. Sampler comparison *within* each model row is still clean; cross-model is not. Eros beta5 publishes no shift value, so no single setting serves both.
+
+Length caveat: 480f (20s) **exceeds** the 294-frame limit measured on Ref2VA and the <=362 noted max — may fail or degrade. 360f (15s) is inside it, and is the first length where JuanAttn is worth measuring (set Window Seconds below 15 or it silently no-ops).
 
 Grid Gen presets axis for the shootout (fixed seed + init image set outside the grid):
 `AB/s8 er_sde-beta57 || AB/s8 res_multistep-simple || AB/s8 lcm-simple || AB/s8 euler-simple`
