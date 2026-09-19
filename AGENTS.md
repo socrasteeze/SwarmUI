@@ -202,6 +202,27 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-19 (second check, later the same day) — routine re-check, nothing to merge. Ran
+  unattended (scheduled, no human watching live), on the assigned working branch
+  `noble/trusting-dijkstra-8vl1r0` (0 commits behind `origin/main`, HEAD already at the first
+  2026-09-19 entry's commit `5f4f0ba` when this check started). `git status --short` was clean.
+  Git identity was already correctly set (`socrasteeze <socradeez@gmail.com>`) from the first
+  check earlier today; re-confirmed rather than assumed. `upstream` remote was already present
+  from the first check; `git remote get-url --push upstream` was re-verified as
+  `DISABLED-NEVER-PUSH-TO-UPSTREAM` before touching it further. `git fetch upstream` showed
+  `upstream/master` still at `7de3e8de` ("Model Downloader: handy manual folder name input") —
+  the exact same SHA the first check today confirmed — and `git merge-base HEAD
+  upstream/master` equals that same SHA, so the incoming window is 0 commits: the fork is
+  unchanged since this morning's check. No merge, no conflicts, no clean-merge sweep, no
+  AGENTS.md-reintroduction risk (no merge occurred). Following the 2026-09-17
+  third-check/2026-09-18 precedent for a repeat same-day check with nothing new: gates were
+  **not** re-run (no source changed since the first check's full gate suite, which already
+  covered build/format/test/boot for this exact tree). `dlbackend/` re-checked and still does
+  not exist in this container — still N/A for the ComfyUI backend/custom_nodes review, same as
+  the first check today; not re-fabricated. `/clean` run before pushing this log-only entry per
+  fork law. Logged only so the next sync knows this branch was re-confirmed current as of this
+  second check, without duplicating the first entry's gate detail.
+
 - 2026-09-19 — routine check, nothing to merge. Ran unattended (scheduled, no human watching
   live). `main` was on the leftover `noble/trusting-dijkstra-19t9es` branch at session start
   (46 commits ahead of `main`, unrelated feature work) — left untouched, `git checkout main`
