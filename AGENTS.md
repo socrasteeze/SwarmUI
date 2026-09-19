@@ -202,6 +202,47 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-19 — routine check, nothing to merge. Ran unattended (scheduled, no human watching
+  live). `main` was on the leftover `noble/trusting-dijkstra-19t9es` branch at session start
+  (46 commits ahead of `main`, unrelated feature work) — left untouched, `git checkout main`
+  instead (working tree was clean). Local `main` was 46 commits **behind** `origin/main`
+  (`263b446` → `a6a1827`) — fast-forwarded with `git merge --ff-only origin/main` before
+  touching upstream at all; those 46 commits were already-pushed prior-session work (mobile
+  media editor, `MediaFileTests.cs`, H3 LoRA detection relax, etc.), not anything this session
+  authored. Git identity re-set for this clone (`user.name`/`user.email`). `upstream` remote
+  was missing in this container (fresh clone) — added fresh
+  (`https://github.com/mcmonkeyprojects/SwarmUI.git`) and immediately
+  `git remote set-url --push upstream DISABLED-NEVER-PUSH-TO-UPSTREAM`; verified
+  `git remote get-url --push upstream` returns the sentinel before any other remote op.
+  `git fetch upstream` showed `upstream/master` still at `7de3e8de` ("Model Downloader: handy
+  manual folder name input") — `git merge-base HEAD upstream/master` equals that same SHA, so
+  the fork is already fully current (0 incoming commits, same state the 2026-09-17
+  second/third and 2026-09-18 checks confirmed). No merge, no conflicts, no clean-merge sweep,
+  so no re-check of the mobile/PWA coupling watchlist was needed (nothing merged) and no
+  AGENTS.md-reintroduction risk (no merge = upstream's `AGENTS.md` text was never on the
+  table). Unlike some prior sandbox sessions, this container had no `dotnet` preinstalled but
+  `apt-get install -y dotnet-sdk-8.0` succeeded cleanly (8.0.131, same version prior sessions
+  saw) with working network access, so the full gate suite ran for real against the unchanged
+  tree rather than being skipped: `dotnet build src/SwarmUI.csproj --configuration Release` —
+  Build succeeded, 0 warnings, 0 errors. `dotnet format SwarmUI.sln --verify-no-changes` —
+  **pre-existing fail**, exactly 122 WHITESPACE findings across the same 7 files logged since
+  2026-09-17 (`TagDexEntry.cs`, `Utilities.cs`, `AdminAPI.cs`, `ModelsAPI.cs`, `T2IAPI.cs`,
+  `ComfyUIBackendExtension.cs`, `WorkflowGeneratorSteps.cs`) — count and file list confirmed by
+  direct grep, not eyeballed. `dotnet test SwarmUITests/SwarmUITests.csproj --configuration
+  Release` — **pre-existing fail**, exactly 53× `CS0121` ambiguous-overload errors
+  (`TestDelegate` vs `Action`/`Func`), same sandbox/Roslyn-version artifact logged since
+  2026-09-17, count confirmed by grep. Headless boot check (after `git fetch
+  https://github.com/mcmonkeyprojects/SwarmUI.git 'refs/tags/*:refs/tags/*'`, the
+  `build-and-check.yml` tag workaround) — `is now running`, exit 0, zero `[Error]` lines (one
+  unrelated `[Warning]` about DotNET 10 not being installed yet, expected/harmless). GPU
+  acceleration check: not applicable — `dlbackend/` does not exist in this container (no prior
+  install/runtime; SwarmUI auto-downloads its embedded ComfyUI backend there at runtime, and
+  this is a bare source checkout), so there is no comfy backend or custom_nodes tree to review
+  or fast-forward here; noted honestly rather than fabricating activity. `/clean` run before
+  pushing this log-only entry per fork law (a docs commit to `AGENTS.md`/`HANDOFF.md` is still
+  a push to `origin/main`). Logged so the next sync knows the fork was confirmed current, with
+  a genuine (not skipped) gate run, as of this check.
+
 - 2026-09-18 — routine check, nothing to merge. `git status --short` was clean, git identity was
   re-set for this clone (`user.name`/`user.email`), and `git remote set-url --push upstream
   DISABLED-NEVER-PUSH-TO-UPSTREAM` was re-applied (per-clone setting, does not persist).
