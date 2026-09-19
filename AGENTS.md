@@ -202,6 +202,35 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-19 (2nd) — 2 incoming commits, `bb5bf1d` (full-view video horizontal-offset fix,
+  `currentimagehandler.js`) and `eb39c7d` (WebSocket error handling: a new
+  `Utilities.SendJsonNoError` extension method, and `SendAndReportError` now sends
+  best-effort instead of the throwing `SendJson`, so a client that dropped its socket
+  mid-download no longer takes the download task down with it — touches `Utilities.cs`,
+  `BasicAPIFeatures.cs`, `ModelsAPI.cs`). Found on a re-fetch several hours past the
+  same-day sync-check below, same container. Clean merge (`git merge upstream/master
+  --no-commit --no-ff`), zero conflict markers. All four touched files are fork
+  touchpoints (`Utilities.cs`'s `ReadGitCommit`/`SplitStandardCsv` edits,
+  `BasicAPIFeatures.cs`/`ModelsAPI.cs`'s spoke-mode write-gating,
+  `currentimagehandler.js`'s mobile-viewer coupling) — re-verified present and disjoint
+  from the incoming hunks after the merge, not assumed: `SpokeModePolicy.
+  AssertModelTreeWriteAllowed("download a model")` still sits between two of the new
+  `SendAndReportError` calls in `ModelsAPI.cs`'s download handler, and
+  `ReadGitCommit`/`SplitStandardCsv`/`StrictFilenameCleanKeepDots` in `Utilities.cs` are
+  untouched by the new `SendJsonNoError` method (different region of the file). Fixed
+  the upstream push sentinel this container had wrong (`DISABLED` instead of this repo's
+  `DISABLED-NEVER-PUSH-TO-UPSTREAM`) before touching anything else. `dotnet build
+  src/SwarmUI.csproj --configuration Release` — succeeded, 0 warnings, 0 errors.
+  `dotnet test SwarmUITests/SwarmUITests.csproj --configuration Release` — same
+  pre-existing 53x `CS0121` ambiguous-overload sandbox artifact logged since 2026-09-17,
+  confirmed none of the four failing files were touched by this merge. Headless boot
+  check (`--ci_test true --launch_mode none`, throwaway `--data_dir`/port): "is now
+  running", exit 0. `dotnet format --verify-no-changes` not re-run (pre-existing
+  WHITESPACE findings, unrelated files, already logged). No GPU/comfy backend install in
+  this sandbox, so the download path itself is unexercised beyond the type check and
+  boot. Author/committer on the merge commit: `socrasteeze <socradeez@gmail.com>`; no
+  AI-attribution trailer. This sync ran unattended (scheduled, no human watching live).
+
 - 2026-09-19 — routine check, nothing to merge. Ran unattended (scheduled, no human watching
   live). `main` was on the leftover `noble/trusting-dijkstra-19t9es` branch at session start
   (46 commits ahead of `main`, unrelated feature work) — left untouched, `git checkout main`
