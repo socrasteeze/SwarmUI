@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../Assets/tagdex.css" />
+    <style>
+        :root { --shadow: #555; --background-panel: #222; --text: #eee; --text-soft: #bbb; }
+        html { scrollbar-gutter: stable; }
+        body { margin: 0; padding: 1rem; background: #111; color: var(--text); font: 16px sans-serif; }
+        button, input { min-height: 40px; }
+        .tagdex-root { display: flex; flex-direction: column; max-width: 70rem; margin: auto; }
+    </style>
+</head>
+<body>
+    <div class="tagdex-root">
+        <section class="tagdex-library" aria-labelledby="tagdex_library_title">
+            <div class="tagdex-row">
+                <h3 id="tagdex_library_title">My Library</h3>
+                <input id="tagdex_library_search" class="tagdex-search" type="search" placeholder="Search library" />
+                <button id="tagdex_library_refresh" class="basic-button tagdex-button">Refresh</button>
+                <button id="tagdex_library_add" class="basic-button tagdex-button">Add Character</button>
+                <button id="tagdex_library_review" class="basic-button tagdex-button">Review</button>
+            </div>
+            <div id="tagdex_library_status" class="tagdex-status" aria-live="polite"></div>
+            <div id="tagdex_library_results" class="tagdex-library-results"></div>
+        </section>
+    </div>
+    <script>
+        let sessionReadyCallbacks = [];
+        let gen_param_types = [];
+        function setDirectParamValue() {}
+        function imagePromptAddImageData() {}
+        function makeWSRequest() { return { send() {} }; }
+        let character = { id: 'c1', revision: 'r1', data: { name: 'Test Character', series: 'Test Series' } };
+        let variants = [{ id: 'v1', revision: 'vr1', data: { character_id: 'c1', name: 'Main Variant', recipe: { prompt: 'p', negative_prompt: '', base_family: 'anima', checkpoint: '', loras: [] } } }];
+        function genericRequest(route, args, success) {
+            let data = route == 'TagDexLibraryCharacters' ? { results: [character], total: 1 }
+                : route == 'TagDexLibraryCharacter' ? { record: character, variants: variants }
+                : route == 'TagDexLibraryArchive' ? (() => { let other = args.sha?.startsWith('b') || args.q == 'Other'; let model = { archive_sha256: (other ? 'b' : 'a').repeat(64), name: other ? 'Other LoRA' : 'Fixture LoRA', version: 'v1', base_family: other ? 'stable-diffusion-xl' : 'anima', recommended_weight: 0.8 }; return args.sha ? { model } : { results: [model] }; })()
+                : route == 'TagDexLibrarySave' ? (() => { let saved = { id: args.id || 'v2', revision: 'saved', data: args.body.data }; if (args.action == 'create_variant') { variants.push(saved); } return { record: saved }; })()
+                : route == 'TagDexLibraryResolve' ? { loras: [], ready: true, checkpoint_status: 'ready' }
+                : route == 'TagDexLibraryVariant' ? { record: variants[0], images: [] } : { ok: true };
+            setTimeout(() => success(data), 40);
+        }
+    </script>
+    <script src="../Assets/tagdex_editor.js"></script>
+    <script src="../Assets/tagdex_library.js"></script>
+    <script>for (let callback of sessionReadyCallbacks) { callback(); }</script>
+</body>
+</html>

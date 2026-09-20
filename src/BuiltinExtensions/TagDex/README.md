@@ -165,6 +165,49 @@ Selecting a hidden mode's dataset falls back to Best Match rather than sorting b
 The layout toggle cycles list, two columns and three columns. Both the sort mode and the layout persist in
 browser storage under `m_client_tagdex_sort` and `m_client_tagdex_view`.
 
+## Replicated custom library
+
+`Data/TagDex/local.json` can connect TagDex to the local AnimaDex library and the NAS Model Manager archive. Both
+connections are disabled by default. Their credentials remain server-side and are never included in TagDex
+preferences.
+
+```json
+{
+  "library": {
+    "enabled": true,
+    "url": "http://local-animadex.example",
+    "key": "replace-with-library-key",
+    "timeout_seconds": 30
+  },
+  "archive": {
+    "enabled": true,
+    "url": "https://model-manager.example",
+    "token": "replace-with-archive-token",
+    "timeout_seconds": 300
+  }
+}
+```
+
+The Genpage **My Library** panel and `/simple` **My Library** sheet browse characters, show every variant, and
+apply a ready recipe without replacing unrelated generation settings. Recipe LoRAs keep their stack order.
+Duplicate logical models are not added twice. A different weight on an already selected LoRA is reported as a
+conflict instead of being overwritten.
+
+Both surfaces use the same native editor. It edits character fields and full recipes, searches the configured
+archive, adds verified model references, changes weights, reorders or removes stack entries, and clones variants.
+Conflict Review shows retained versions and resolves only after an explicit choice. Manual gallery uploads have
+unknown provenance; generated-image provenance is never invented.
+
+`TagDexLibraryResolve` fetches the authoritative variant revision from local AnimaDex. A persisted install receipt
+binds the archive SHA-256 to the current file path, size, timestamp, and Swarm logical name. A changed file is
+rehash-checked. A tensor hash can identify an `unverified` candidate but never makes it ready. Missing models are
+reported as `not_downloaded` and generation stops. `TagDexLibraryAcquire` downloads from the configured archive
+origin into the normal LoRA download folder, verifies the full-file SHA-256 before publication, refuses overwrite,
+does not resave the safetensors header, refreshes inventory, and records the installed identity.
+
+Library edits use `TagDexLibrarySave`, a fixed action allowlist covering characters, variants, images, favorites,
+and conflict resolution. TagDex stores no separate character database or pending edit queue.
+
 ## Gotchas
 
 - **`anima_styles` now accepts pushes.** `ThumbnailFor` checks the sanitized-name stem first for every dataset,

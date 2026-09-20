@@ -48,5 +48,16 @@
     <div class="tagdex-manage" id="tagdex_manage" style="display:none;">
         <div class="tagdex-download-list" id="tagdex_download_list"></div>
     </div>
+    <section class="tagdex-library" aria-labelledby="tagdex_library_title">
+        <div class="tagdex-row">
+            <h3 id="tagdex_library_title">My Library</h3>
+            <input id="tagdex_library_search" class="tagdex-search" type="search" placeholder="Search library" autocomplete="off" />
+            <button id="tagdex_library_refresh" class="basic-button tagdex-button">Refresh</button>
+            <button id="tagdex_library_add" class="basic-button tagdex-button" data-requiredpermission="tagdex_manage">Add Character</button>
+            <button id="tagdex_library_review" class="basic-button tagdex-button" data-requiredpermission="tagdex_manage">Review</button>
+        </div>
+        <div id="tagdex_library_status" class="tagdex-status" aria-live="polite"></div>
+        <div id="tagdex_library_results" class="tagdex-library-results"></div>
+    </section>
     <div class="browser_container tagdex-browser" id="tagdex_browser_container"></div>
 </div>
