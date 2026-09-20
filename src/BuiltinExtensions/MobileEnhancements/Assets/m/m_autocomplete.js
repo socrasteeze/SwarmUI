@@ -7,7 +7,7 @@
  *    server defaults on failure).
  *  - AdvancedPopover is a genpage helper and is not loaded here; a viewport-anchored floating popover is
  *    also the exact thing that had to be patched twice for the mobile keyboard. This renders a
- *    QuickType-style strip in normal flow immediately above whichever box is being typed in.
+ *    QuickType-style overlay immediately above whichever box is being typed in.
  *  - Completing individual LINES inside a wildcard file needs the async getWildcardDataFor/<AUTO-RETRY>
  *    dance. Wildcard file NAMES complete; their contents do not.
  * The completion data loads on first prompt focus, keeping a large tag CSV off the startup-critical path. If no
@@ -447,20 +447,16 @@ class MAutoComplete {
     }
 
     /** Attaches the completer to a textarea. paramId names the mState param the box writes to. Creates one
-     * permanent strip element positioned right ABOVE the box, immediately - not lazily on first match - so
-     * it always occupies its reserved height (m.css floors .m-ac-slot's min-height). Suggestions appearing
-     * and disappearing as you type used to insert/remove the whole element, which shifted every control
-     * below it (quick params, the LoRA row) on every keystroke; now only the strip's CONTENTS change.
+     * permanent strip element positioned above the box. The slot has no flow height; populated suggestions
+     * overlay the space above the field, so typing does not move the prompt or later controls.
      *
-     * It sits above the box - which on the Create panel means directly under the Generate row - and stays in
-     * normal flow. An earlier version pinned it to the top of the on-screen keyboard so chips were within
+     * It overlays the row above the box. An earlier version pinned it to the top of the on-screen keyboard so chips were within
      * thumb reach. That is now the wrong trade twice over: iOS draws its own form-accessory bar (the up/down
      * arrows and Done) in exactly that band and renders it over web content, so the chips ended up behind it;
      * and with Enter/Tab accepting the highlighted suggestion, reaching a chip with a thumb is no longer the
      * primary path anyway. Reading the strip matters, touching it does not.
      *
-     * The strip still lives inside a wrapper. The wrapper is what owns the reserved 44px, which keeps the
-     * reservation in one place rather than split between the strip's own min-height and its margin. */
+     * The strip still lives inside a wrapper, which is its positioning anchor. */
     enableFor(box, paramId) {
         box.dataset.mParam = paramId;
         let slot = mUI.el('div', 'm-ac-slot');
@@ -543,7 +539,7 @@ class MAutoComplete {
         localStorage.setItem('m_client_enter_accepts', on ? 'yes' : 'no');
     }
 
-    /** Empties one box's strip (contents only - the reserved space stays). */
+    /** Empties one box's strip. */
     clearSlot(box) {
         let strip = this.slots.get(box);
         if (strip) {

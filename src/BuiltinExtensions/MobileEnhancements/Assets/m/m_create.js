@@ -1145,39 +1145,17 @@ class MCreate {
 
     /** Clipboard paste on the prompt box: image items become prompt images (the user's screenshot-paste
      * flow). Text is deliberately left alone here - this box is where prompts are typed, so a pasted path
-     * belongs in the text, not attached as an image. That is what the clipboard button is for. */
+     * belongs in the text, not attached as an image. The attachment + button opens the photo library. */
     onPaste(e) {
-        if (this.attachFromTransfer(e.clipboardData, false) > 0) {
+        if (this.attachFromTransfer(e.clipboardData) > 0) {
             e.preventDefault();
         }
     }
 
-    /** Attaches a text payload as a prompt image when it is one: a data URI, or a Swarm output path / View
-     * URL. Returns whether it attached anything. */
-    attachFromText(text) {
-        let val = `${text || ''}`.trim();
-        if (!val) {
-            return false;
-        }
-        if (val.startsWith('data:image/')) {
-            mState.promptImages.push({ 'kind': 'data', 'value': val });
-            mState.changed();
-            return true;
-        }
-        let entry = typeof mImages != 'undefined' ? mImages.promptPathEntry(val) : null;
-        if (entry) {
-            mState.promptImages.push(entry);
-            mState.changed();
-            return true;
-        }
-        return false;
-    }
-
-    /** Attaches every image a paste event's DataTransfer carries, falling back to its text payload when it
-     * carries no file and allowText says text counts. Returns how many prompt images it added.
+    /** Attaches every image a paste event's DataTransfer carries. Returns how many prompt images it added.
      * This is the clipboard path that always works: a paste event hands the page its own data with no
      * permission prompt and no secure-context rule involved, unlike navigator.clipboard.read. */
-    attachFromTransfer(data, allowText) {
+    attachFromTransfer(data) {
         if (!data) {
             return 0;
         }
@@ -1204,9 +1182,6 @@ class MCreate {
                 }
             }
         }
-        if (count == 0 && allowText && data.getData && this.attachFromText(data.getData('text/plain'))) {
-            count++;
-        }
         return count;
     }
 
@@ -1223,170 +1198,7 @@ class MCreate {
         reader.readAsDataURL(file);
     }
 
-    /** Clipboard button: attach whatever is on the clipboard as prompt image(s). Image blobs go through
-     * addImageFile (the same path as paste-on-the-prompt-box). A Swarm output path or a data URI uses the
-     * existing attach helpers. Empty or non-image clipboard is a warning, not an error.
-     *
-     * **The read API is the optimistic path, not the only one.** `navigator.clipboard` is undefined outside a
-     * secure context, and this client is normally reached at a LAN address over plain HTTP - which is
-     * insecure by that rule no matter how local it is, so the button used to dead-end on every phone that
-     * wasn't pointed at localhost. `read()` also rejects when the clipboard-read permission is denied or
-     * dismissed, when the document isn't focused, and on browsers that expose it to extensions only. Every
-     * one of those ends in openPasteSheet(), where the user's own paste gesture hands the page the data no
-     * API here is allowed to take. The old readText() retry is gone with them: it fails for the same reasons
-     * read() just did, costs a second permission prompt to find that out, and the sheet accepts pasted text
-     * anyway. */
-    pasteFromClipboard() {
-        let attached = (count) => {
-            if (count > 0) {
-                mUI.note(count == 1 ? 'Pasted image.' : `Pasted ${count} images.`);
-            }
-            else {
-                mUI.warn('Clipboard has no image.');
-            }
-        };
-        if (navigator.clipboard && navigator.clipboard.read) {
-            navigator.clipboard.read().then(items => {
-                let files = [];
-                let texts = [];
-                let pending = items.length;
-                if (pending == 0) {
-                    attached(0);
-                    return;
-                }
-                let finish = () => {
-                    if (--pending > 0) {
-                        return;
-                    }
-                    for (let i = 0; i < files.length; i++) {
-                        this.addImageFile(files[i]);
-                    }
-                    let extra = 0;
-                    if (files.length == 0) {
-                        for (let i = 0; i < texts.length; i++) {
-                            if (this.attachFromText(texts[i])) {
-                                extra++;
-                            }
-                        }
-                    }
-                    attached(files.length + extra);
-                };
-                for (let i = 0; i < items.length; i++) {
-                    let item = items[i];
-                    let imageType = null;
-                    for (let t = 0; t < item.types.length; t++) {
-                        if (item.types[t].startsWith('image/')) {
-                            imageType = item.types[t];
-                            break;
-                        }
-                    }
-                    if (imageType) {
-                        item.getType(imageType).then(blob => {
-                            files.push(new File([blob], 'clipboard.png', { 'type': blob.type || imageType }));
-                            finish();
-                        }, finish);
-                    }
-                    else if (item.types.indexOf('text/plain') >= 0) {
-                        item.getType('text/plain').then(blob => blob.text()).then(text => {
-                            texts.push(text);
-                            finish();
-                        }, finish);
-                    }
-                    else {
-                        finish();
-                    }
-                }
-            }, () => this.openPasteSheet());
-            return;
-        }
-        this.openPasteSheet();
-    }
-
-    /** The clipboard fallback: a focused paste box in a sheet, for every browser and context that will not
-     * hand the page the clipboard on its own (see pasteFromClipboard above - over plain LAN HTTP that is all
-     * of them). A paste event carries its own data with no permission and no secure context involved, so this
-     * path always works.
-     *
-     * **contenteditable, not a textarea**, which is the whole reason this is a box of its own rather than a
-     * pointer at the prompt field: iOS only offers Paste for a copied image over a region that can hold one,
-     * and a plain textarea is not one. The old message sent people to the prompt box, where a phone's paste
-     * menu would silently decline to offer the image they had just copied.
-     *
-     * "Choose an image instead" reuses the strip's own hidden file input - on a phone that opens the photo
-     * library, which is where a screenshot actually lives, and it is the guaranteed path when a paste gesture
-     * is unavailable entirely. */
-    openPasteSheet() {
-        let content = mUI.el('div', 'm-paste-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'Paste an image'));
-        content.appendChild(mUI.el('div', 'm-paste-hint', 'This browser will not hand the page your clipboard on its own (that needs HTTPS or localhost). Tap the box below and paste: long-press then Paste on a phone, Ctrl+V on a desktop.'));
-        let box = mUI.el('div', 'm-paste-box');
-        box.contentEditable = 'true';
-        box.setAttribute('role', 'textbox');
-        box.setAttribute('aria-label', 'Paste an image here');
-        box.dataset.placeholder = 'Paste here';
-        content.appendChild(box);
-        let pickButton = mUI.el('button', 'm-wide-button', 'Choose an image instead');
-        content.appendChild(pickButton);
-        let close = mUI.openSheet(content);
-        pickButton.addEventListener('click', () => {
-            close();
-            if (this.fileInput) {
-                this.fileInput.click();
-            }
-        });
-        let done = (count) => {
-            box.innerHTML = '';
-            if (count > 0) {
-                close();
-                mUI.note(count == 1 ? 'Pasted image.' : `Pasted ${count} images.`);
-            }
-            else {
-                // The sheet stays open on a miss - the user is already in the paste gesture, and closing it
-                // would mean tapping the clipboard button again to try the other thing on their clipboard.
-                mUI.warn('Nothing usable pasted - copy an image, a data URI, or a Swarm image path.');
-            }
-        };
-        box.addEventListener('paste', (e) => {
-            let count = this.attachFromTransfer(e.clipboardData, true);
-            if (count > 0) {
-                e.preventDefault();
-                done(count);
-                return;
-            }
-            // An image copied out of a web page - or, on a phone, out of the photo library - can arrive as
-            // markup with no file and no usable text behind it. Let that default paste land in the box, then
-            // read the <img> back out of it on the next task. A data: src is the bytes themselves and a View
-            // URL from this same server resolves to an output path, so attachFromText takes both; a blob:
-            // src is neither, but it is real bytes this page is allowed to read, so fetch it into a file.
-            // The box is cleared on every one of those paths, so nothing is left sitting in it.
-            setTimeout(() => {
-                let src = box.querySelector('img') ? box.querySelector('img').src : '';
-                if (!src || this.attachFromText(src)) {
-                    done(src ? 1 : 0);
-                    return;
-                }
-                fetch(src).then(response => response.blob()).then(blob => {
-                    if (!blob.type || !blob.type.startsWith('image/')) {
-                        done(0);
-                        return;
-                    }
-                    this.addImageFile(new File([blob], 'pasted.png', { 'type': blob.type }));
-                    done(1);
-                }, () => done(0));
-            }, 0);
-        });
-        // Focused SYNCHRONOUSLY, inside the click that opened the sheet, and that timing is the whole point:
-        // a browser places a caret and raises the on-screen keyboard for a focus() only while the user's own
-        // tap is still the live gesture. This first shipped as a focus() from a 300ms timer, to let the open
-        // transition finish - which lands outside that window, so a phone ignored it and the box sat there
-        // unfocused. That cost a second tap on the box before a long-press would even offer Paste, and made
-        // one clipboard button feel like two button presses.
-        // preventScroll because the sheet is still parked at translateY(100%) for the frame this runs in:
-        // without it the browser scrolls the page toward where the box is not yet.
-        box.focus({ 'preventScroll': true });
-    }
-
-    /** Quick params row: seed mode, images count, tuning steppers, and one combined resolution picker. */
+    /** Quick params row: seed mode, image count, tuning controls, and aspect/size steppers. */
     buildQuickParams() {
         let wrap = mUI.el('div', 'm-quick-wrap');
         let row = mUI.el('div', 'm-quick-row');
@@ -1433,11 +1245,6 @@ class MCreate {
             });
             this.imagesGroup.appendChild(btn);
         }
-        let clipBtn = mUI.el('button', 'm-seg-button', '📋');
-        clipBtn.title = 'Paste clipboard as prompt image';
-        clipBtn.setAttribute('aria-label', 'Paste clipboard as prompt image');
-        clipBtn.addEventListener('click', () => this.pasteFromClipboard());
-        this.imagesGroup.appendChild(clipBtn);
         let clearBtn = mUI.el('button', 'm-seg-button', 'CLR');
         clearBtn.title = 'Clear prompt images and prefix';
         clearBtn.setAttribute('aria-label', 'Clear prompt images and prefix');
@@ -1485,21 +1292,9 @@ class MCreate {
         this.samplerRow.appendChild(this.buildChoiceSelect('sampler', 'Sampler'));
         this.samplerRow.appendChild(this.buildChoiceSelect('scheduler', 'Scheduler'));
         wrap.appendChild(this.samplerRow);
-        // Aspect and size are two controls, not one fused list. The ratio is a framing decision that changes
-        // rarely; the size is a cost decision nudged constantly. Fusing them turned every size nudge into a
-        // scroll past every other ratio's rungs, which is what the one-picker version cost in practice.
+        // Keep framing and size independently adjustable with matching steppers.
         let resRow = mUI.el('div', 'm-quick-row m-res-row');
-        this.aspectSelect = document.createElement('select');
-        this.aspectSelect.className = 'm-aspect-select';
-        this.aspectSelect.setAttribute('aria-label', 'Aspect ratio');
-        this.aspectSelect.addEventListener('change', () => {
-            mState.params['aspectratio'] = this.aspectSelect.value;
-            // A change event only fires when the value actually moved, so any change leaves whatever ratio a
-            // prompt image had matched - including a move onto Custom, which is the manual escape hatch.
-            mState.customRatio = 0;
-            mState.changed();
-        });
-        resRow.appendChild(this.aspectSelect);
+        resRow.appendChild(this.buildAspectStepper());
         resRow.appendChild(this.buildSideLengthStepper());
         wrap.appendChild(resRow);
         return wrap;
@@ -1524,6 +1319,63 @@ class MCreate {
         plus.addEventListener('click', () => this.adjustSideLength(1));
         wrap.appendChild(plus);
         return wrap;
+    }
+
+    /** Builds the aspect-ratio stepper. Its choices remain derived from server metadata, with fork extras and
+     * a stored unknown value retained so restored sessions never lose their generation dimensions. */
+    buildAspectStepper() {
+        let wrap = mUI.el('div', 'm-number-stepper m-aspect-stepper');
+        wrap.appendChild(mUI.el('span', 'm-stepper-label', 'Aspect'));
+        let minus = mUI.el('button', 'm-stepper-button', '−');
+        minus.setAttribute('aria-label', 'Decrease aspect ratio');
+        minus.addEventListener('click', () => this.adjustAspect(-1));
+        wrap.appendChild(minus);
+        this.aspectValue = mUI.el('span', 'm-stepper-value');
+        wrap.appendChild(this.aspectValue);
+        let plus = mUI.el('button', 'm-stepper-button', '+');
+        plus.setAttribute('aria-label', 'Increase aspect ratio');
+        plus.addEventListener('click', () => this.adjustAspect(1));
+        wrap.appendChild(plus);
+        return wrap;
+    }
+
+    /** Returns the server's aspect list with fork additions and Custom, preserving a restored unknown value. */
+    aspectLadder() {
+        let meta = mState.paramMeta['aspectratio'];
+        let serverValues = meta && meta.values ? meta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '9:16'];
+        let aspects = serverValues.filter(v => v != 'Custom');
+        for (let aspect of Object.keys(MState.ExtraAspects)) {
+            if (!aspects.includes(aspect)) {
+                aspects.push(aspect);
+            }
+        }
+        let current = mState.params['aspectratio'];
+        if (current && current != 'Custom' && !aspects.includes(current)) {
+            aspects.push(current);
+        }
+        aspects.sort((a, b) => {
+            let aParts = `${a}`.split(':');
+            let bParts = `${b}`.split(':');
+            let aRatio = parseFloat(aParts[0]) / parseFloat(aParts[1]);
+            let bRatio = parseFloat(bParts[0]) / parseFloat(bParts[1]);
+            return aRatio - bRatio;
+        });
+        aspects.push('Custom');
+        return aspects;
+    }
+
+    /** Walks the aspect list without wrapping. A new aspect clears a prompt-image matched custom ratio. */
+    adjustAspect(direction) {
+        let aspects = this.aspectLadder();
+        let current = mState.params['aspectratio'] || aspects[0];
+        let at = aspects.indexOf(current);
+        let next = aspects[Math.min(aspects.length - 1, Math.max(0, at + direction))];
+        if (next == current) {
+            return;
+        }
+        mState.params['aspectratio'] = next;
+        mState.customRatio = 0;
+        mState.changed();
     }
 
     /** The rungs the size stepper walks, as stored-state strings. Whatever the state currently holds and the
@@ -1689,17 +1541,11 @@ class MCreate {
     renderResolutionControls() {
         let stateChanged = false;
         let aspectMeta = mState.paramMeta['aspectratio'];
-        let serverValues = aspectMeta && aspectMeta.values ? aspectMeta.values : ['1:1', '4:3', '3:2', '16:9', '2:3', '9:16', 'Custom'];
-        // Server ratios first, then the fork-added ones, with Custom kept last as the manual escape hatch.
-        let aspects = serverValues.filter(v => v != 'Custom').concat(Object.keys(MState.ExtraAspects)).concat(['Custom']);
         // Seed the state from the shown default rather than leaving it unset: an absent aspectratio is not
         // the same as the displayed one, and the server would otherwise fall through to raw dimensions.
         if (!mState.params['aspectratio']) {
             mState.params['aspectratio'] = aspectMeta && aspectMeta.default ? aspectMeta.default : '1:1';
             stateChanged = true;
-        }
-        if (!aspects.includes(mState.params['aspectratio'])) {
-            aspects.splice(aspects.length - 1, 0, mState.params['aspectratio']);
         }
         // Seeded rather than left blank so the default is a concrete, visible 1024 instead of an Auto value
         // that resolves differently per checkpoint.
@@ -1710,8 +1556,8 @@ class MCreate {
         }
         // Custom is two different things depending on whether a prompt image supplied a ratio, and the label
         // has to say which - one sends matched pixels, the other defers to the full UI.
-        MCreate.syncOptions(this.aspectSelect, aspects.map(aspect => [aspect, aspect != 'Custom' ? aspect
-            : (mState.customRatio ? 'Custom · matched' : 'Custom · full UI')]), mState.params['aspectratio']);
+        this.aspectValue.textContent = mState.params['aspectratio'] != 'Custom' ? mState.params['aspectratio']
+            : (mState.customRatio ? 'Matched' : 'Custom');
         let side = `${mState.params['sidelength'] ?? ''}`;
         this.sizeValue.textContent = side == '' ? 'Auto' : side;
         // Read from previewResolution, not from a local recomputation: it derives from a real buildGenInput,

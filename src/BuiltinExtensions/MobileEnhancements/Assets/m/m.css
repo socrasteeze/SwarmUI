@@ -545,16 +545,17 @@
     flex: 1 1 0;
     min-width: 0;
 }
-.m-aspect-select {
-    min-height: 44px;
-    padding: 0 0.4rem;
+.m-aspect-stepper {
     flex: 1 1 0;
-    min-width: 0;
 }
-/* Wider share than the ratio list: the label line has to hold "2016 × 1152" unellipsed, and 44px touch
-   targets on both ends of the value already claim most of the control. */
+.m-aspect-stepper .m-stepper-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Equal widths leave room for both the aspect value and the final pixel dimensions. */
 .m-size-stepper {
-    flex: 1.5 1 0;
+    flex: 1 1 0;
 }
 .m-ratio-row {
     display: flex;
@@ -579,7 +580,7 @@
    the prompt box down the screen as it progresses. That was the old behaviour: the block was display: none
    until the first tile, then ~40dvh of it appeared at the top of the panel, under the user's thumb. --- */
 .m-create-preview {
-    --m-preview-h: 38dvh;
+    --m-preview-h: 24dvh;
     background: var(--background);
     padding-bottom: 0.4rem;
     margin-bottom: 0.2rem;
@@ -598,11 +599,6 @@
 }
 /* No tiles: the canvas placeholder is holding the same space, so an empty grid would double it. */
 .m-create-preview.m-preview-empty .m-preview-grid {
-    display: none;
-}
-/* While the on-screen keyboard is up the visual viewport is already tiny; a canvas-worth of preview on top
-   of that would crowd the prompt box right when it matters most. */
-.m-body.m-kb-open .m-preview-grid {
     display: none;
 }
 /* The stand-in for the grid while there are no tiles. Same height as the grid, by construction. */
@@ -639,11 +635,6 @@
 @keyframes m-pending-slide {
     from { background-position: -60% 0; }
     to { background-position: 160% 0; }
-}
-/* Keyboard-open deliberately gives the space back, so the canvas goes with the grid - the reservation exists
-   to stop generation moving things, not to defend an empty box against the keyboard. */
-.m-body.m-kb-open .m-preview-canvas {
-    display: none;
 }
 
 /* --- Resolved-prompt readout (below the preview, NOT inside it - see m_create.js) --- */
@@ -720,12 +711,12 @@
 }
 
 /* --- Autocomplete suggestion strip --- */
-/* The slot is the flow element and the strip is what moves. Height is reserved here, unconditionally and
-   whether or not the strip is currently pinned to the keyboard, so that neither typing (chips coming and
-   going) nor the keyboard opening shifts anything below it. */
+/* The slot holds suggestions above the prompt without reserving an empty row. The strip is out of flow, so
+   chips appearing or clearing never move the prompt or the controls below it. */
 .m-ac-slot {
-    min-height: 44px;
-    margin-bottom: 0.2rem;
+    height: 0;
+    position: relative;
+    z-index: 1;
 }
 .m-ac-strip {
     display: flex;
@@ -734,9 +725,16 @@
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     padding: 0.25rem 0;
-    /* Matches a populated row's height (36px chip + this rule's own vertical padding). */
     min-height: 44px;
     box-sizing: border-box;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--background);
+}
+.m-ac-strip:empty {
+    display: none;
 }
 /* The strip is deliberately NOT pinned to the top of the keyboard. iOS draws its own form-accessory bar
    (up/down arrows and Done) in that band, over web content, so a pinned strip renders behind it. Enter/Tab
@@ -1348,40 +1346,6 @@
     font-weight: bold;
     font-size: 15px;
     margin-bottom: 0.5rem;
-}
-
-/* --- Clipboard paste sheet (m_create.js openPasteSheet) ---
-   Opened by the 📋 button whenever the browser will not read the clipboard itself, which over plain LAN HTTP
-   is always. The box is contenteditable, so it needs the border, the min-height and the placeholder a
-   textarea would have given for free. Dashed border rather than solid: it is a drop target for a gesture,
-   not a field with a value. */
-.m-paste-hint {
-    color: var(--text-soft);
-    font-size: 13px;
-    line-height: 1.35;
-    margin-bottom: 0.6rem;
-}
-.m-paste-box {
-    box-sizing: border-box;
-    width: 100%;
-    min-height: 5.5rem;
-    max-height: 40dvh;
-    overflow-y: auto;
-    padding: 0.7rem;
-    border: 1px dashed var(--border-color);
-    border-radius: 0.7rem;
-    background: var(--background);
-    color: var(--text);
-    -webkit-user-select: text;
-    user-select: text;
-}
-.m-paste-box:empty::before {
-    content: attr(data-placeholder);
-    color: var(--text-soft);
-}
-.m-paste-box img {
-    max-width: 100%;
-    height: auto;
 }
 
 /* --- LoRA sheet --- */
