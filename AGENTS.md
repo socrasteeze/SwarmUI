@@ -202,6 +202,41 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-20 — routine check, nothing to merge. Ran unattended (scheduled, no human watching
+  live) in a fresh container whose working tree was already on a harness-assigned session
+  branch, `noble/trusting-dijkstra-1yqy37` (HEAD `8606463`, equal to `origin/main` at session
+  start — same stranded-branch pattern the 2026-09-19 entry below noted for
+  `noble/trusting-dijkstra-19t9es`; this run's push target is that branch, not `main`, per this
+  session's harness restriction, so **`main` still needs a future fast-forward from
+  `noble/trusting-dijkstra-1yqy37`** once a maintainer or a later sync merges it in). Git
+  identity was wrong at the container/global level (`Claude` / `noreply@anthropic.com`) and was
+  set locally before any commit (`user.name`/`user.email`). `upstream` remote was missing
+  (fresh clone) — added fresh and immediately `git remote set-url --push upstream
+  DISABLED-NEVER-PUSH-TO-UPSTREAM`; verified `git remote get-url --push upstream` returns the
+  sentinel and `git remote get-url --push origin` still points at `socrasteeze/SwarmUI` before
+  touching anything else. `git fetch upstream` showed `upstream/master` at `eb39c7d1` — `git
+  merge-base HEAD upstream/master` equals that same SHA exactly, so 0 incoming commits (this
+  fork already carries `eb39c7d`/`e139f12`, the WS-error-handling + video-offset merge logged in
+  the 2026-09-19 (2nd) entry below). No merge, no conflicts, no clean-merge sweep needed, no
+  AGENTS.md-reintroduction risk (no merge = upstream's `AGENTS.md` text was never on the table).
+  `dotnet` is not installed in this container and outbound install is blocked by the
+  environment's proxy policy (known, previously-documented gap — no real `dotnet
+  build`/`dotnet test`/ci-test boot could run here); substituted the fallback gates instead: a
+  full conflict-marker sweep (`grep -rn '^<<<<<<< \|^=======$\|^>>>>>>> '` across the tree,
+  zero hits) and confirmed no `.cs`/`.py` files were touched (nothing was merged), so the
+  brace-balance and `py_compile` fallbacks are not applicable this run. Confirmed `dlbackend/`
+  does not exist and `src/Extensions/` holds only the gitignored `put_extensions_here`
+  placeholder in this container (bare source checkout, backend never installed) — there is no
+  `dlbackend/ComfyUI/custom_nodes` tree here to review or sync for the "SwarmUI+ComfyUI
+  Backend" ask; that tree is a separate runtime download, not part of this git repo, and this
+  sync has nothing to do there. Manual `/clean` equivalent run before pushing this log-only
+  entry (diff and commit scanned for AI-attribution trailers, secrets, and personal data — none
+  found; author/committer confirmed `socrasteeze <socradeez@gmail.com>`, no `Co-Authored-By` or
+  model-name trailer) rather than the packaged `/clean` skill, whose own default push target is
+  `origin/main` and would conflict with this session's branch-scoped push restriction. Logged
+  so the next sync knows the fork was confirmed current as of this check, and that
+  `noble/trusting-dijkstra-1yqy37` is waiting on a fast-forward into `main`.
+
 - 2026-09-19 (2nd) — 2 incoming commits, `bb5bf1d` (full-view video horizontal-offset fix,
   `currentimagehandler.js`) and `eb39c7d` (WebSocket error handling: a new
   `Utilities.SendJsonNoError` extension method, and `SendAndReportError` now sends
