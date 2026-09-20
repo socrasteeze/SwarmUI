@@ -202,6 +202,27 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-20 — Scheduled multi-fork sync run (alongside ai-toolkit and ComfyUI), no human
+  watching live. Fresh container: local git identity defaulted to the container's global
+  `Claude <noreply@anthropic.com>`, corrected locally to `socrasteeze <socradeez@gmail.com>`
+  before touching anything; the `upstream` remote did not exist yet either — added fresh
+  (`https://github.com/mcmonkeyprojects/SwarmUI`), push URL set to this repo's sentinel
+  `DISABLED-NEVER-PUSH-TO-UPSTREAM` and verified before any other remote operation.
+  `git fetch upstream` then `git rev-list --left-right --count HEAD...upstream/master` = 0/0
+  — already level with upstream, nothing to merge. `git fetch origin main` also came back
+  0/0 against local `HEAD` — this container's checkout already matched `origin/main`'s tip
+  (`8606463`) exactly, no stale-local-branch divergence to reconcile this time. No
+  `dlbackend/` in this fresh container (it's auto-downloaded at runtime, not tracked here),
+  so there was nothing to fast-forward on the ComfyUI-backend side either — matches this
+  file's own note that Swarm's bundled backend "does not read from or depend on any
+  separate standalone ComfyUI install." No `dotnet` toolchain in this sandbox, so the build
+  / test / headless-boot verify gate could not run — moot regardless, since no commit was
+  made and the tree is byte-identical to `origin/main`. Published the unchanged tip to
+  `origin/noble/trusting-dijkstra-94shr3` (the session's assigned branch for this run, not
+  `main` — the calling harness's per-session branch assignment takes precedence over this
+  file's "publish to origin/main" default here); no PR opened, upstream push sentinel
+  re-verified immediately before the push.
+
 - 2026-09-19 (2nd) — 2 incoming commits, `bb5bf1d` (full-view video horizontal-offset fix,
   `currentimagehandler.js`) and `eb39c7d` (WebSocket error handling: a new
   `Utilities.SendJsonNoError` extension method, and `SendAndReportError` now sends
