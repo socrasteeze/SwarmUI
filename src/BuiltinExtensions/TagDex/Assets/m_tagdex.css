@@ -356,3 +356,100 @@
     white-space: normal;
     overflow-wrap: anywhere;
 }
++
+.tagdex-editor-dialog {
+    width: min(56rem, calc(100vw - 2rem));
+    max-height: calc(100vh - 2rem);
+    padding: 0;
+    border: 1px solid var(--shadow);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text);
+}
+
+.tagdex-editor-dialog::backdrop {
+    background: rgb(0 0 0 / 65%);
+}
+
+.tagdex-editor {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem;
+    max-height: calc(100vh - 3rem);
+    overflow: auto;
+}
+
+.tagdex-editor h3,
+.tagdex-editor h4 {
+    margin: 0;
+}
+
+.tagdex-editor-form,
+.tagdex-editor-stack,
+.tagdex-editor-field {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.tagdex-editor-field > span {
+    font-weight: 600;
+}
+
+.tagdex-editor-field input,
+.tagdex-editor-field textarea,
+.tagdex-editor-stack input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.tagdex-editor-field input[type="checkbox"] {
+    width: auto;
+    justify-self: start;
+}
+
+.tagdex-editor-error {
+    min-height: 1.25rem;
+    color: var(--danger, #d55);
+}
+
+.tagdex-editor-field textarea {
+    min-height: 5rem;
+    resize: vertical;
+}
+
+.tagdex-editor-lora,
+.tagdex-editor-result,
+.tagdex-editor-actions {
+    display: grid;
+    grid-template-columns: minmax(8rem, 1fr) auto auto auto auto;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.tagdex-editor-result {
+    grid-template-columns: minmax(8rem, 1fr) auto;
+}
+
+.tagdex-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.tagdex-editor-conflicts pre {
+    max-height: 14rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+    .tagdex-editor-lora {
+        grid-template-columns: 1fr auto;
+    }
+
+    .tagdex-editor-lora > span {
+        grid-column: 1 / -1;
+        overflow-wrap: anywhere;
+    }
+}

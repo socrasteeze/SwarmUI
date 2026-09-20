@@ -33,6 +33,8 @@ public partial class TagDexExtension : Extension
         ScriptFiles.Add("Assets/tagdex_core.js");
         ScriptFiles.Add("Assets/tagdex_prompt.js");
         ScriptFiles.Add("Assets/tagdex_tab.js");
+        ScriptFiles.Add("Assets/tagdex_library.js");
+        ScriptFiles.Add("Assets/tagdex_editor.js");
         StyleSheetFiles.Add("Assets/tagdex.css");
         // The /simple hook goes in OtherAssets, not ScriptFiles: ScriptFiles injects on every Razor page, where
         // MAutoComplete does not exist. It is loaded explicitly by MobileEnhancements' Assets/m/index.html.
@@ -40,6 +42,7 @@ public partial class TagDexExtension : Extension
         // Same reasoning for the stylesheet: StyleSheetFiles would inject it into every Razor page, and it is only
         // ever wanted on /simple.
         OtherAssets.Add("Assets/m_tagdex.css");
+        OtherAssets.Add("Assets/tagdex_editor.js");
         TagDexData.Init();
         API.RegisterAPICall(TagDexListSources, false, PermUseTagDex);
         API.RegisterAPICall(TagDexSearchEntries, false, PermUseTagDex);
@@ -56,6 +59,18 @@ public partial class TagDexExtension : Extension
         API.RegisterAPICall(TagDexSetThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexDeleteThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexReconcileFavorites, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexLibraryCharacters, false, PermUseTagDex);
+        API.RegisterAPICall(TagDexLibraryCharacter, false, PermUseTagDex);
+        API.RegisterAPICall(TagDexLibraryVariant, false, PermUseTagDex);
+        API.RegisterAPICall(TagDexLibraryImage, false, PermUseTagDex);
+        API.RegisterAPICall(TagDexLibraryResolve, false, PermUseTagDex);
+        API.RegisterAPICall(TagDexLibraryGenerate, true, PermUseTagDex);
+        API.RegisterAPICall(TagDexLibraryReview, false, PermManageTagDex);
+        API.RegisterAPICall(TagDexLibrarySave, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexLibraryAcquire, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexLibraryArchive, false, PermManageTagDex);
+        API.RegisterAPICall(TagDexLibraryStartGenerate, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexLibraryJob, false, PermManageTagDex);
     }
 
     /// <inheritdoc/>

@@ -96,6 +96,296 @@ class MTagDexClass {
             return;
         }
         mUI.registerMoreItem('TagDex Datasets', () => this.openDatasetSheet());
+        mUI.registerMoreItem('My Library', () => this.openLibrarySheet());
+        mUI.registerMoreItem('Add Character', () => this.ensureLibraryEditor(() => this.editLibraryCharacter(null)));
+        mUI.registerMoreItem('Conflict Review', () => this.ensureLibraryEditor(() => tagDexLibraryEditor.review(true, () => mUI.note('Conflict resolved.'))));
+    }
+
+    /** Loads the shared editor asset on /simple without exposing configuration. */
+    ensureLibraryEditor(callback) {
+        if (typeof tagDexLibraryEditor != 'undefined') {
+            callback();
+            return;
+        }
+        let existing = document.querySelector('.tagdex-editor-loader');
+        if (existing) {
+            existing.addEventListener('load', callback, { once: true });
+            return;
+        }
+        let script = document.createElement('script');
+        script.className = 'tagdex-editor-loader';
+        script.src = '/ExtensionFile/TagDexExtension/Assets/tagdex_editor.js';
+        script.addEventListener('load', callback, { once: true });
+        document.head.appendChild(script);
+    }
+
+    /** Opens the local replicated character library on /simple. */
+    openLibrarySheet() {
+        let content = mUI.el('div', 'm-tagdex-browse-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'My Library'));
+        let search = document.createElement('input');
+        search.type = 'search';
+        search.placeholder = 'Search';
+        search.className = 'm-tagdex-search';
+        search.setAttribute('aria-label', 'Search library');
+        let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
+        let results = mUI.el('div', 'm-tagdex-browse-results');
+        content.append(search, status, results);
+        mUI.openSheet(content);
+        let timer = null;
+        let load = () => this.loadAllLibraryCharacters(search.value, data => {
+            results.innerHTML = '';
+            for (let character of data.results || []) {
+                let button = mUI.el('button', 'm-wide-button', character.data.series ? `${character.data.name} · ${character.data.series}` : character.data.name);
+                button.addEventListener('click', () => this.openLibraryCharacter(character.id));
+                results.appendChild(button);
+            }
+            status.textContent = (data.results || []).length == 0 ? 'No library characters found.' : `${data.total} characters`;
+        }, error => status.textContent = error);
+        search.addEventListener('input', () => {
+            clearTimeout(timer);
+            timer = setTimeout(load, 250);
+        });
+        load();
+    }
+
+    /** Loads every bounded custom-library character page. */
+    loadAllLibraryCharacters(q, callback, error, offset = 0, rows = []) {
+        genericRequest('TagDexLibraryCharacters', { q: q, offset: offset, limit: 250 }, data => {
+            rows.push(...(data.results || []));
+            if (rows.length < (data.total || 0) && (data.results || []).length > 0) {
+                this.loadAllLibraryCharacters(q, callback, error, rows.length, rows);
+                return;
+            }
+            callback({ ...data, results: rows });
+        }, 0, error);
+    }
+
+    /** Opens all variants for one library character. */
+    openLibraryCharacter(id) {
+        genericRequest('TagDexLibraryCharacter', { id: id }, data => {
+            let content = mUI.el('div', 'm-tagdex-browse-sheet');
+            content.appendChild(mUI.el('div', 'm-sheet-title', data.record.data.name));
+            let editCharacter = mUI.el('button', 'm-wide-button', 'Edit Character');
+            editCharacter.addEventListener('click', () => this.editLibraryCharacter(data.record));
+            content.appendChild(editCharacter);
+            for (let variant of data.variants || []) {
+                let row = mUI.el('div', 'm-tagdex-card');
+                row.appendChild(mUI.el('div', 'm-tagdex-card-name', variant.data.name));
+                let apply = mUI.el('button', 'm-tagdex-action', 'Apply');
+                apply.addEventListener('click', () => this.applyLibraryVariant(variant));
+                let gallery = mUI.el('button', 'm-tagdex-action', 'Gallery');
+                gallery.addEventListener('click', () => this.openLibraryGallery(variant));
+                let edit = mUI.el('button', 'm-tagdex-action', 'Edit');
+                edit.addEventListener('click', () => this.editLibraryVariant(null, variant));
+                let clone = mUI.el('button', 'm-tagdex-action', 'Clone');
+                clone.addEventListener('click', () => this.ensureLibraryEditor(() => tagDexLibraryEditor.variant(null, variant, true, () => mUI.note('Variant cloned.'), true)));
+                row.append(apply, gallery, edit, clone);
+                content.appendChild(row);
+            }
+            let add = mUI.el('button', 'm-wide-button', 'Add Variant');
+            add.addEventListener('click', () => this.editLibraryVariant(data.record, null));
+            content.appendChild(add);
+            mUI.openSheet(content);
+        }, 0, error => mUI.warn(error));
+    }
+
+    /** Resolves and atomically applies one library recipe to /simple state. */
+    applyLibraryVariant(variant) {
+        genericRequest('TagDexLibraryResolve', { variantId: variant.id, revision: variant.revision, model: mState.params['model'] || '' }, data => {
+            let missing = (data.loras || []).filter(lora => lora.status == 'not_downloaded');
+            let unverified = (data.loras || []).filter(lora => lora.status == 'unverified');
+            if (missing.length > 0) {
+                this.openLibraryDownloads(variant, missing);
+                return;
+            }
+            if (unverified.length > 0) {
+                mUI.warn(`${unverified.length} LoRA(s) need identity verification.`);
+                return;
+            }
+            if (!data.ready) {
+                mUI.warn(data.checkpoint_status == 'incompatible' ? 'Checkpoint Incompatible.' : 'Model stack is incompatible.');
+                return;
+            }
+            let current = mState.getLoras();
+            let normalize = name => `${name || ''}`.replace(/\.safetensors$/i, '');
+            for (let lora of data.loras || []) {
+                let logicalName = normalize(lora.logical_name);
+                let found = current.find(existing => normalize(existing.name) == logicalName);
+                if (found && found.weight != lora.weight) {
+                    mUI.warn(`Weight conflict for ${lora.name}.`);
+                    return;
+                }
+                if (!found) {
+                    current.push({ name: logicalName, weight: lora.weight });
+                }
+            }
+            let recipe = variant.data.recipe;
+            let append = (currentValue, addition) => {
+                let currentText = `${currentValue || ''}`.trim();
+                let addedText = `${addition || ''}`.trim();
+                if (!addedText || currentText == addedText || currentText.endsWith(`, ${addedText}`)) {
+                    return currentText || addedText;
+                }
+                return currentText ? `${currentText}, ${addedText}` : addedText;
+            };
+            mState.params['prompt'] = append(mState.params['prompt'], recipe.prompt);
+            mState.params['negativeprompt'] = append(mState.params['negativeprompt'], recipe.negative_prompt);
+            if (recipe.checkpoint) {
+                mState.params['model'] = recipe.checkpoint;
+            }
+            mState.setLoras(current);
+            mUI.note(`${variant.data.name} applied.`);
+        }, 0, error => mUI.warn(error));
+    }
+
+    /** Opens explicit progress and cancel controls for unresolved LoRAs. */
+    openLibraryDownloads(variant, missing) {
+        let content = mUI.el('div', 'm-tagdex-browse-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Downloads'));
+        for (let lora of missing) {
+            let row = mUI.el('div', 'm-tagdex-card');
+            let status = mUI.el('div', 'm-tagdex-card-name', `${lora.name} · Not Downloaded`);
+            let button = mUI.el('button', 'm-tagdex-action', 'Download');
+            let socket = null;
+            let downloaded = false;
+            button.addEventListener('click', () => {
+                if (downloaded) {
+                    this.applyLibraryVariant(variant);
+                    return;
+                }
+                if (socket) {
+                    socket.send('{"signal":"cancel"}');
+                    return;
+                }
+                socket = makeWSRequest('TagDexLibraryAcquire', { archiveSha256: lora.archive_sha256, name: lora.name, version: lora.version || '' }, data => {
+                    if (data.current_percent != null) {
+                        status.textContent = `${lora.name} · ${Math.round(data.current_percent * 100)}%`;
+                        button.textContent = 'Cancel';
+                    }
+                    if (data.success) {
+                        socket = null;
+                        downloaded = true;
+                        status.textContent = `${lora.name} · Downloaded`;
+                        button.textContent = 'Check';
+                    }
+                }, 0, error => {
+                    socket = null;
+                    button.textContent = 'Retry';
+                    mUI.warn(error);
+                });
+            });
+            row.append(status, button);
+            content.appendChild(row);
+        }
+        mUI.openSheet(content);
+    }
+
+    /** Opens every gallery image and lets the user add one as a reference. */
+    openLibraryGallery(variant) {
+        genericRequest('TagDexLibraryVariant', { id: variant.id }, data => {
+            let content = mUI.el('div', 'm-tagdex-browse-sheet');
+            content.appendChild(mUI.el('div', 'm-sheet-title', 'Gallery'));
+            let grid = mUI.el('div', 'm-tagdex-grid m-tagdex-grid-2');
+            for (let image of data.images || []) {
+                let item = mUI.el('div', 'm-tagdex-card');
+                let button = mUI.el('button', 'm-tagdex-card', 'Loading...');
+                genericRequest('TagDexLibraryImage', { sha: image.data.thumb_sha256, mime: image.data.mime }, loaded => {
+                    button.innerHTML = '';
+                    let preview = document.createElement('img');
+                    preview.className = 'm-tagdex-card-image';
+                    preview.src = loaded.image;
+                    preview.alt = image.data.caption || variant.data.name;
+                    button.appendChild(preview);
+                });
+                button.addEventListener('click', () => genericRequest('TagDexLibraryImage', { sha: image.data.blob_sha256, mime: image.data.mime }, loaded => {
+                    mState.params['promptimages'] = [loaded.image];
+                    mState.changed();
+                    mUI.note('Reference added.');
+                }));
+                let cover = mUI.el('button', 'm-tagdex-action', 'Set Cover');
+                cover.addEventListener('click', () => {
+                    let updated = JSON.parse(JSON.stringify(variant.data));
+                    updated.cover_image_id = image.id;
+                    genericRequest('TagDexLibrarySave', { action: 'update_variant', id: variant.id, body: { base_revision: variant.revision, data: updated } }, result => {
+                        variant = result.record;
+                        mUI.note('Cover updated.');
+                    }, 0, error => mUI.warn(error));
+                });
+                item.append(button, cover);
+                grid.appendChild(item);
+            }
+            content.appendChild(grid);
+            let upload = document.createElement('input');
+            upload.type = 'file';
+            upload.accept = 'image/png,image/jpeg,image/webp';
+            upload.setAttribute('aria-label', 'Upload Image');
+            upload.addEventListener('change', () => {
+                let file = upload.files[0];
+                if (!file) {
+                    return;
+                }
+                let reader = new FileReader();
+                reader.onload = () => genericRequest('TagDexLibrarySave', { action: 'upload_image', id: variant.id, body: {
+                    image: reader.result, caption: '', recipe_revision: null, recipe_snapshot: null
+                } }, () => mUI.note('Image uploaded.'), 0, error => mUI.warn(error));
+                reader.readAsDataURL(file);
+            });
+            content.appendChild(upload);
+            let generate = mUI.el('button', 'm-wide-button', 'Generate Reference');
+            generate.addEventListener('click', () => this.generateLibraryReference(variant, content, generate));
+            content.appendChild(generate);
+            mUI.openSheet(content);
+        }, 0, error => mUI.warn(error));
+    }
+
+    /** Starts and polls one authoritative local-AnimaDex reference job. */
+    generateLibraryReference(variant, content, button) {
+        button.disabled = true;
+        button.textContent = 'Starting';
+        genericRequest('TagDexLibraryStartGenerate', { variantId: variant.id, revision: variant.revision }, data => {
+            let polls = 0;
+            let poll = () => {
+                if (!content.isConnected || polls++ > 600) {
+                    return;
+                }
+                genericRequest('TagDexLibraryJob', { jobId: data.job_id }, job => {
+                    let status = job.status || 'running';
+                    button.textContent = status == 'running' || status == 'queued' ? 'Generating' : status;
+                    if (status == 'completed' || status == 'done' || status == 'succeeded') {
+                        mUI.note('Reference generated.');
+                        this.openLibraryGallery(variant);
+                    }
+                    else if (status == 'failed' || status == 'error' || status == 'cancelled') {
+                        button.disabled = false;
+                        button.textContent = 'Retry';
+                        mUI.warn(job.error || 'Reference generation failed.');
+                    }
+                    else {
+                        setTimeout(poll, 1000);
+                    }
+                }, 0, error => {
+                    button.disabled = false;
+                    button.textContent = 'Retry';
+                    mUI.warn(error);
+                });
+            };
+            poll();
+        }, 0, error => {
+            button.disabled = false;
+            button.textContent = 'Retry';
+            mUI.warn(error);
+        });
+    }
+
+    /** Creates or updates one character. */
+    editLibraryCharacter(record) {
+        this.ensureLibraryEditor(() => tagDexLibraryEditor.character(record, true, () => mUI.note('Character saved.')));
+    }
+
+    /** Creates or updates one ordered variant recipe. */
+    editLibraryVariant(character, record) {
+        this.ensureLibraryEditor(() => tagDexLibraryEditor.variant(character, record, true, () => mUI.note('Variant saved.')));
     }
 
     /** Registers the Characters tab in the bottom nav. Runs at script load, before m_app.js wires the
