@@ -8,7 +8,7 @@
  *    the complaint actually was.
  * 2. Starred models sort first. The pickers cap how many rows they render, so on a real library this is what
  *    decides whether a favourite is on screen at all.
- * 3. The compact priority controls keep their contracts: Random seed expansion, a separate aspect picklist and size stepper,
+ * 3. The compact priority controls keep their contracts: Random seed expansion, aspect and size steppers,
  *    paired architecture/preset picklists, exact 0.05 LoRA weights, TagDex favorites and browse-to-prompt
  *    insertion, and multi-word TagDex typeahead acceptance.
  * 4. Deleting the selected genpage image chooses the newest surviving image from the current-session batch,
@@ -212,13 +212,13 @@ check('an empty prompt box still stands at its three-row floor',
 const initialControls = await page.evaluate(() => ({
     randomLabel: document.querySelector('.m-seed-random').textContent,
     seedInputHidden: getComputedStyle(document.querySelector('.m-seed-input')).display == 'none',
-    aspectPickers: document.querySelectorAll('.m-aspect-select').length,
+    aspectSteppers: document.querySelectorAll('.m-aspect-stepper').length,
     sizeSteppers: document.querySelectorAll('.m-size-stepper').length,
     oldResolutionPickers: document.querySelectorAll('.m-resolution-select, .m-size-select, .m-res-readout').length,
     tagDexButtons: document.querySelectorAll('.m-tagdex-browse-button').length
 }));
 check('seed starts as one Random button', initialControls.randomLabel == 'Random' && initialControls.seedInputHidden, JSON.stringify(initialControls));
-check('aspect is a picklist and size is a stepper', initialControls.aspectPickers == 1 && initialControls.sizeSteppers == 1 && initialControls.oldResolutionPickers == 0, JSON.stringify(initialControls));
+check('aspect and size are steppers', initialControls.aspectSteppers == 1 && initialControls.sizeSteppers == 1 && initialControls.oldResolutionPickers == 0, JSON.stringify(initialControls));
 check('TagDex browse is mounted once in the Create picker row', initialControls.tagDexButtons == 1, `${initialControls.tagDexButtons} buttons`);
 
 await page.click('.m-seed-random');
@@ -238,22 +238,26 @@ await page.waitForFunction(() => getComputedStyle(document.querySelector('.m-see
 const randomAgain = await page.evaluate(() => ({ locked: mState.seedLocked, seed: mState.params.seed, randomVisible: getComputedStyle(document.querySelector('.m-seed-random')).display != 'none' }));
 check('seed X reverts to Random and -1', !randomAgain.locked && randomAgain.seed == '-1' && randomAgain.randomVisible, JSON.stringify(randomAgain));
 
-// Aspect and size are independent controls: picking a ratio must not disturb the size, and stepping the
+// Aspect and size are independent controls: stepping a ratio must not disturb the size, and stepping the
 // size must not disturb the ratio. The stepper's readout is now the only place the final pixel size appears,
 // so it is checked on both moves.
-await page.evaluate(() => { mState.params.sidelength = '1024'; mState.changed(); });
-await page.selectOption('.m-aspect-select', '16:9');
+await page.evaluate(() => { mState.params.sidelength = '1024'; mState.params.aspectratio = '3:2'; mState.changed(); });
+await page.click('.m-aspect-stepper .m-stepper-button:last-of-type');
 // mState.changed() re-renders on the next animation frame, so read the DOM only once it has caught up.
-await page.waitForFunction(() => document.querySelector('.m-size-stepper .m-stepper-label').textContent == '1344 × 768');
+await page.waitForFunction(() => document.querySelector('.m-aspect-stepper .m-stepper-value').textContent == '7:4');
 const resolution = await page.evaluate(() => ({
     aspect: mState.params.aspectratio,
     side: mState.params.sidelength,
     dims: mState.previewResolution(),
+    generated: mState.buildGenInput(),
     label: document.querySelector('.m-size-stepper .m-stepper-label').textContent,
     value: document.querySelector('.m-size-stepper .m-stepper-value').textContent
 }));
-check('aspect picklist writes the ratio and leaves the size alone', resolution.aspect == '16:9' && resolution.side == '1024', JSON.stringify(resolution));
-check('size stepper shows the rung it moves and the pixels it produces', resolution.dims.join('x') == '1344x768' && resolution.value == '1024' && resolution.label == '1344 × 768', JSON.stringify(resolution));
+check('aspect stepper writes the next wider ratio and leaves the size alone', resolution.aspect == '7:4' && resolution.side == '1024', JSON.stringify(resolution));
+check('extra aspect ratios generate as Custom pixels', resolution.generated.aspectratio == 'Custom'
+    && `${resolution.generated.width}x${resolution.generated.height}` == resolution.dims.join('x'), JSON.stringify(resolution.generated));
+check('size stepper shows the rung it moves and the pixels it produces', resolution.value == '1024'
+    && resolution.label == resolution.dims.join(' × '), JSON.stringify(resolution));
 
 // Ladder walk: up through every rung, clamped at the top, then back down and clamped at the bottom.
 const sizeSteps = [];
@@ -264,14 +268,14 @@ for (let i = 0; i < 4; i++) {
         && document.querySelector('.m-size-stepper .m-stepper-label').textContent == dims,
         await page.evaluate(() => [`${mState.params.sidelength}`, mState.previewResolution().join(' × ')]));
 }
-check('size steps up the fixed ladder, redraws, and clamps at the top', sizeSteps.join(' | ') == '1152=1520x864 | 1280=1680x960 | 1536=2016x1152 | 1536=2016x1152', sizeSteps.join(' | '));
+check('size steps up the fixed ladder, redraws, and clamps at the top', sizeSteps.join(' | ') == '1152=1536x896 | 1280=1664x960 | 1536=2048x1152 | 1536=2048x1152', sizeSteps.join(' | '));
 const sizeDown = [];
 for (let i = 0; i < 4; i++) {
     await page.click('.m-size-stepper .m-stepper-button:first-of-type');
     sizeDown.push(await page.evaluate(() => `${mState.params.sidelength}`));
 }
 check('size steps back down and clamps at the bottom rung', sizeDown.join(',') == '1280,1152,1024,1024', sizeDown.join(','));
-check('stepping size never rewrites the aspect ratio', await page.evaluate(() => mState.params.aspectratio == '16:9'));
+check('stepping size never rewrites the aspect ratio', await page.evaluate(() => mState.params.aspectratio == '7:4'));
 
 await page.evaluate(() => {
     mState.presets = [
@@ -551,6 +555,7 @@ check('after an interrupt: still nothing moved',
 check('no collapse toggle exists', await page.evaluate(() => !document.querySelector('.m-preview-toggle')));
 const scrolled = await page.evaluate(() => {
     let panel = document.querySelector('.m-create-panel');
+    panel.scrollTop = 0;
     let before = document.querySelector('.m-create-preview').getBoundingClientRect().top;
     panel.scrollTop = 200;
     let after = document.querySelector('.m-create-preview').getBoundingClientRect().top;
@@ -559,6 +564,18 @@ const scrolled = await page.evaluate(() => {
 });
 check('scrolling the panel moves the canvas with it', !scrolled.moved || scrolled.after < scrolled.before - 50,
     JSON.stringify(scrolled));
+
+const keyboardGeometry = await page.evaluate(() => {
+    let preview = document.querySelector('.m-create-preview');
+    let prompt = document.querySelector('.m-prompt-box');
+    let before = { preview: preview.getBoundingClientRect().height, prompt: prompt.getBoundingClientRect().top };
+    document.body.classList.add('m-kb-open');
+    let during = { preview: preview.getBoundingClientRect().height, prompt: prompt.getBoundingClientRect().top };
+    document.body.classList.remove('m-kb-open');
+    return { before, during };
+});
+check('keyboard state keeps the compact preview and prompt position stable', keyboardGeometry.before.preview == keyboardGeometry.during.preview
+    && keyboardGeometry.before.prompt == keyboardGeometry.during.prompt, JSON.stringify(keyboardGeometry));
 
 // ---- Starred models sort first ----
 await page.evaluate(pixel => {
@@ -795,7 +812,7 @@ await page.evaluate(() => {
     mCreate.renderQuickParams();
 });
 
-// Prefix sits above Steps/CFG; clipboard and CLR follow the 1/2/4 batch buttons.
+// Prefix sits above Steps/CFG; CLR follows the 1/2/4 batch buttons.
 const layout = await page.evaluate(() => {
     let prefix = document.querySelector('.m-prefix-input');
     let tune = document.querySelector('.m-tune-row');
@@ -818,9 +835,9 @@ const layout = await page.evaluate(() => {
     };
 });
 check('Prefix field sits above the Steps/CFG row', layout.prefixBeforeTune);
-check('batch row is 1, 2, 4, clipboard, CLR',
-    layout.batch == '1,2,4,📋,CLR', layout.batch);
-check('batch 1/2/4/paste/CLR buttons are equal width',
+check('batch row is 1, 2, 4, CLR',
+    layout.batch == '1,2,4,CLR', layout.batch);
+check('batch 1/2/4/CLR buttons are equal width',
     layout.batchEqual, JSON.stringify(layout.batchWidths));
 check('Prefix row is visible once filenameprefix is advertised', layout.prefixVisible);
 check('batch group right edge matches Prefix', layout.batchRightAlign, `gap ${layout.batchRightGap}px`);
@@ -887,6 +904,30 @@ const bars = await page.evaluate(() => {
     return { width: panel.scrollbarWidth, sheetRule: sheetRule };
 });
 check('Create/Models panel scrollbar is hidden', bars.width == 'none' || bars.sheetRule, JSON.stringify(bars));
+
+const restoredAspect = await page.evaluate(() => {
+    mState.params.aspectratio = '8:7';
+    mCreate.renderResolutionControls();
+    let restored = mCreate.aspectValue.textContent;
+    mCreate.adjustAspect(-1);
+    let narrower = mState.params.aspectratio;
+    mState.params.aspectratio = '8:7';
+    mCreate.adjustAspect(1);
+    let wider = mState.params.aspectratio;
+    mState.params.aspectratio = 'Custom';
+    mState.customRatio = 1.7;
+    let customCount = mCreate.aspectLadder().filter(value => value == 'Custom').length;
+    mCreate.adjustAspect(1);
+    let clamped = mState.params.aspectratio == 'Custom' && mState.customRatio == 1.7;
+    mCreate.adjustAspect(-1);
+    return { restored, narrower, wider, customCount, clamped, exited: mState.params.aspectratio, ratio: mState.customRatio };
+});
+check('a restored ratio stays visible and steps to its numeric neighbors', restoredAspect.restored == '8:7'
+    && restoredAspect.narrower == '1:1' && restoredAspect.wider == '4:3', JSON.stringify(restoredAspect));
+check('Custom is one endpoint and preserves matched dimensions when clamped', restoredAspect.customCount == 1
+    && restoredAspect.clamped, JSON.stringify(restoredAspect));
+check('stepping away from Custom clears the matched ratio', restoredAspect.exited == '3:1'
+    && restoredAspect.ratio == 0, JSON.stringify(restoredAspect));
 
 await browser.close();
 
