@@ -262,6 +262,14 @@ These two are the only escapes these files actually use. Values are tab-indented
   `/clean` run before pushing per fork law. Author/committer on the merge commit:
   `socrasteeze <socradeez@gmail.com>`; no AI-attribution trailer.
 
+  **Correction (same day, follow-up session):** `upstream/master` had a second commit,
+  `163503e` ("qwen image 2.1 docs"), pushed after this session's fetch — it wasn't missed by
+  choice, it landed too late to be in scope. It adds the `Qwen Image 2.1` doc section, the
+  `qwenimage21.jpg` image, and corrects `StandardWidth`/`StandardHeight` on the
+  `qwen-image-2.1` and `qwen-image-2.1/vae` entries in `T2IModelClassSorter.cs` from 2048
+  down to 1024 (mcmonkey's own fix). Merged clean in a follow-up sync, merge commit
+  `b0832e4f`, reconciled with this entry's `031230f` via merge commit on push. No conflicts.
+
 - 2026-09-19 (2nd) — 2 incoming commits, `bb5bf1d` (full-view video horizontal-offset fix,
   `currentimagehandler.js`) and `eb39c7d` (WebSocket error handling: a new
   `Utilities.SendJsonNoError` extension method, and `SendAndReportError` now sends
