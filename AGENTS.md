@@ -202,6 +202,31 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-21 (third check, later the same day) — routine automated check, nothing to merge.
+  Ran unattended (scheduled, no human watching live). Fresh container: no `upstream` remote,
+  no local git identity set (global git config still wrong — a vendor identity, not
+  `socrasteeze` — overridden locally per policy). Checked-out branch was a leftover session branch
+  (`noble/trusting-dijkstra-qjmw88`) — `git fetch origin` confirmed it exactly matched
+  `origin/main` (both at `c47204a`, the tip of this same day's second sync check), so it was
+  left as the working branch and nothing was discarded; working tree was clean. Local `main`
+  was stale at `263b446` (behind `origin/main`) — updated the ref only (`git branch -f main
+  HEAD`), no checkout/reset needed since HEAD already equaled `origin/main`. `upstream` remote
+  added fresh and immediately pinned to this fork's exact sentinel (`git remote set-url --push
+  upstream DISABLED-NEVER-PUSH-TO-UPSTREAM`), verified via `git remote get-url --push upstream`
+  before any other remote operation. `git fetch upstream` showed `upstream/master` still at
+  `163503e` ("qwen image 2.1 docs", unchanged since the previous check) —
+  `git merge-base --is-ancestor upstream/master HEAD` returned true, so the fork is fully
+  current (0 incoming commits). No merge, no conflicts, no gate suite (no source changed,
+  matching the established no-op-sync pattern). Backend/custom_nodes review: `dlbackend/`
+  does not exist in this checkout (bare source checkout, confirmed by direct filesystem
+  check, matching every prior sync). `/home/user/ComfyUI` exists in this container but is
+  the unrelated `socrasteeze/ComfyUI` sibling fork with its own AGENTS.md/history, and its
+  `custom_nodes/` holds only ComfyUI's own stock example files
+  (`example_node.py.example`, `websocket_image_save.py`) — no installed third-party nodes
+  to fast-forward; out of scope, left untouched. Logged only; no feature work touched.
+  Author/committer on this commit: `socrasteeze <socradeez@gmail.com>`; no AI-attribution
+  trailer.
+
 - 2026-09-21 (second check, later the same day) — routine automated check, nothing to merge.
   Ran unattended (scheduled, no human watching live). Fresh container: no `upstream` remote,
   no local git identity set. Checked-out branch was a leftover session branch
