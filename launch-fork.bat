@@ -36,6 +36,29 @@ if !UPSTREAM_NEW! GTR 0 (
 :launch
 set SWARM_FORK_CHECKED=1
 
+rem --- Local AnimaDex (TagDex character library backend) ---------------------
+rem Every TagDexLibrary* route proxies to the local AnimaDex /api/library, which also runs
+rem the workstation-initiated NAS sync (AnimaDex docs/library-setup.md). Start it alongside
+rem SwarmUI as a background task; it is left running when SwarmUI stops.
+rem ANIMADEX_DEV enables /api/dev for TagDex's image/favorite relay; features.dev_key gates it.
+rem Idempotent: an in-app restart re-enters this script, and netstat guards against a second
+rem copy on the port. Never fails the launch - without the venv TagDex reports the library
+rem as unavailable.
+set ANIMADEX_DIR=D:\anima\AnimaDex
+set ANIMADEX_PY=!ANIMADEX_DIR!\.venv\Scripts\pythonw.exe
+if exist "!ANIMADEX_PY!" (
+    netstat -ano | findstr /R /C:"127.0.0.1:5000 .*LISTENING" >nul
+    if errorlevel 1 (
+        echo Starting local AnimaDex ^(character library^) on 127.0.0.1:5000 ...
+        set ANIMADEX_DEV=1
+        start "AnimaDex" /D "!ANIMADEX_DIR!" /MIN "!ANIMADEX_PY!" -m animadex serve
+    ) else (
+        echo Local AnimaDex already running on 127.0.0.1:5000.
+    )
+) else (
+    echo NOTE: AnimaDex venv not found at "!ANIMADEX_PY!" - TagDex character library will be offline.
+)
+
 rem Called by explicit path, not bare name: cmd does not search the current directory when
 rem NoDefaultCurrentDirectoryInExePath is set, so a bare "call launch-windows.bat" dies with
 rem "not recognized" even though cd /D above put us in the right folder.
