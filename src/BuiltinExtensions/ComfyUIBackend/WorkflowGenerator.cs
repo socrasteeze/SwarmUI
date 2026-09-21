@@ -839,9 +839,9 @@ public partial class WorkflowGenerator
     public (JArray, JArray, JArray, JArray) BuildInputImageHandling(List<JArray> images, JArray pos, JArray neg, JArray latent)
     {
         JArray imgNeg = null;
-        if (IsKontext() || IsOmniGen() || IsQwenImage() || IsAnyFlux2() || IsBoogu() || IsMageFlow() || (IsKrea2() && UserInput.Get(ComfyUIBackendExtension.EnableReferenceLatents, "none") != "none"))
+        if (IsKontext() || IsOmniGen() || IsQwenImage() || IsQwenImage21() || IsAnyFlux2() || IsBoogu() || IsMageFlow() || (IsKrea2() && UserInput.Get(ComfyUIBackendExtension.EnableReferenceLatents, "none") != "none"))
         {
-            if (IsOmniGen() || IsQwenImageEditPlus() || IsBoogu() || IsMageFlow())
+            if (IsOmniGen() || IsQwenImageEditPlus() || IsQwenImage21() || IsBoogu() || IsMageFlow())
             {
                 imgNeg = neg;
             }
@@ -873,7 +873,7 @@ public partial class WorkflowGenerator
             }
             if (img is not null)
             {
-                if (IsQwenImageEditPlus() || IsBoogu() || IsMageFlow())
+                if (IsQwenImageEditPlus() || IsQwenImage21() || IsBoogu() || IsMageFlow())
                 {
                     neg = imgNeg;
                 }
@@ -1069,7 +1069,7 @@ public partial class WorkflowGenerator
             defscheduler ??= "simple";
         }
         // TODO: Registry of model default preferences instead of this
-        else if (IsFlux() || IsWanVideo() || IsWanVideo22() || IsOmniGen() || IsQwenImage() || IsZImage() || IsZetaChroma() || IsErnie() || IsHiDreamO1() || IsLens() || IsPixelDiT() || IsKrea2() || IsBoogu() || IsMageFlow() || IsMiniMaxMusic3() || IsSeedVR2())
+        else if (IsFlux() || IsWanVideo() || IsWanVideo22() || IsOmniGen() || IsQwenImage() || IsQwenImage21() || IsZImage() || IsZetaChroma() || IsErnie() || IsHiDreamO1() || IsLens() || IsPixelDiT() || IsKrea2() || IsBoogu() || IsMageFlow() || IsMiniMaxMusic3() || IsSeedVR2())
         {
             defscheduler ??= "simple";
         }
@@ -1173,7 +1173,7 @@ public partial class WorkflowGenerator
         }
         else
         {
-            if (IsKontext() || (IsQwenImage() && IsQwenImageEdit()))
+            if (IsKontext() || (IsQwenImage() && IsQwenImageEdit()) || IsQwenImage21())
             {
                 if (MaskShrunkInfo is not null && MaskShrunkInfo.ScaledImage is not null)
                 {
@@ -2732,6 +2732,36 @@ public partial class WorkflowGenerator
                     ["image"] = qwenImage
                 }, id);
             }
+        }
+        else if (IsQwenImage21())
+        {
+            JArray imageNode = GetPromptImage(true, true, 0);
+            for (int i = 1; i < 16; i++)
+            {
+                JArray image2 = GetPromptImage(true, true, i);
+                if (image2 is null)
+                {
+                    break;
+                }
+                string batched = CreateNode("ImageBatch", new JObject()
+                {
+                    ["image1"] = imageNode,
+                    ["image2"] = image2
+                });
+                imageNode = [batched, 0];
+            }
+            node = CreateNode("SwarmTextEncodeAdvanced", new JObject()
+            {
+                ["clip"] = clip,
+                ["lora_hooks"] = CreateDynamicLoraHooks(),
+                ["steps"] = steps,
+                ["prompt"] = prompt,
+                ["width"] = width,
+                ["height"] = height,
+                ["target_width"] = width,
+                ["target_height"] = height,
+                ["images"] = imageNode
+            }, id);
         }
         else if (IsHunyuanVideoI2V() && prompt.StartsWith("<image:"))
         {
