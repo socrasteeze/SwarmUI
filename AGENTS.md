@@ -202,6 +202,30 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-21 (second check, later the same day) — routine automated check, nothing to merge.
+  Ran unattended (scheduled, no human watching live). Fresh container: no `upstream` remote,
+  no local git identity set. Checked-out branch was a leftover session branch
+  (`noble/trusting-dijkstra-r5q8uj`) — `git fetch origin` confirmed it exactly matched
+  `origin/main` (both at `ad10764`, which already carries this same day's earlier sync work
+  plus the unrelated `launch-fork: start local AnimaDex alongside SwarmUI` commit), so it was
+  left as the working branch and nothing was discarded; working tree was clean. Local `main`
+  was stale at `263b446` (5 commits behind `origin/main`) — updated the ref only
+  (`git branch -f main HEAD`), no checkout/reset needed since HEAD already equaled
+  `origin/main`. Git identity set for this clone. `upstream` remote added fresh and
+  immediately pinned to this fork's exact sentinel
+  (`git remote set-url --push upstream DISABLED-NEVER-PUSH-TO-UPSTREAM`), verified via
+  `git remote get-url --push upstream` before any other remote operation. `git fetch upstream`
+  showed `upstream/master` still at `163503e` ("qwen image 2.1 docs", the same commit the
+  first 2026-09-21 entry's correction merged in) — `git merge-base --is-ancestor
+  upstream/master HEAD` returned true, so the fork is fully current (0 incoming commits).
+  No merge, no conflicts, no gate suite (no source changed, matching the 2026-09-18 and
+  2026-09-17-third-check pattern for a no-op sync). Backend/custom_nodes review:
+  `dlbackend/` does not exist in this checkout (bare source checkout, confirmed by direct
+  filesystem check, matching every prior sync). `/home/user/ComfyUI` exists in this container
+  but is the unrelated `socrasteeze/ComfyUI` sibling fork with its own AGENTS.md/history —
+  out of scope, left untouched. Logged only; no feature work touched. Author/committer on
+  this commit: `socrasteeze <socradeez@gmail.com>`; no AI-attribution trailer.
+
 - 2026-09-21 — merged 1 commit: "Adds Qwen2.1 support" (#1548, `2de300f`). Adopted 1 as-is;
   rejected 0; divergence work 0; conflicts 0. Merge is `031230f`; merge base was `eb39c7d`,
   the tip of the 2026-09-19 (2nd) sync. Ran unattended (scheduled, no human watching live).
