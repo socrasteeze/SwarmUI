@@ -202,6 +202,66 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-21 — merged 1 commit: "Adds Qwen2.1 support" (#1548, `2de300f`). Adopted 1 as-is;
+  rejected 0; divergence work 0; conflicts 0. Merge is `031230f`; merge base was `eb39c7d`,
+  the tip of the 2026-09-19 (2nd) sync. Ran unattended (scheduled, no human watching live).
+  Container start state: fresh clone, no `upstream` remote, `dotnet` not preinstalled, and
+  the checked-out branch was a leftover `noble/trusting-dijkstra-gh18mu` from the session
+  harness — verified identical to `origin/main` (both at `94c10a0`) before touching it, so
+  nothing was discarded. Local `main` was 55 commits **behind** `origin/main`
+  (`263b446` → `94c10a0`) — fast-forwarded with `git merge --ff-only origin/main` first;
+  those 55 commits were already-pushed prior-session work (the H3 preset session, several
+  routine sync checks, the TagDex character-library-editing feature), not anything this
+  session authored. Git identity set for this clone. `upstream` remote added fresh and
+  immediately pinned to the fork's exact sentinel
+  (`git remote set-url --push upstream DISABLED-NEVER-PUSH-TO-UPSTREAM`), verified via
+  `git remote get-url --push upstream` before any other remote operation.
+
+  Incoming scope was 5 files, +80/-6: `SwarmComfyCommon/SwarmText.py`,
+  `WorkflowGenerator.cs`, `WorkflowGeneratorModelSupport.cs`, `CommonModels.cs`,
+  `T2IModelClassSorter.cs`. Three of the five are fork-relevant touchpoints —
+  `T2IModelClassSorter.cs` (the fork's Anima/Ideogram-4/SAM3 detection functions),
+  `WorkflowGeneratorModelSupport.cs` (`MiniMaxH3SigmaShift`), and `WorkflowGenerator.cs`
+  (`SwarmMiniMaxH3CollectReferences`) — all auto-merged with zero conflict markers, and all
+  three fork regions re-grepped present and disjoint from the new Qwen2.1 hunks after the
+  merge, not assumed: `isAnima`/`isIdeogram4`/`isSam3` and their compat registrations are
+  untouched in `T2IModelClassSorter.cs` (different region from the new
+  `CompatQwenImage21`/`qwen-image-2.1` entry), `MiniMaxH3SigmaShift` still creates its node
+  in `WorkflowGeneratorModelSupport.cs`, and `SwarmMiniMaxH3CollectReferences` is still
+  wired in `WorkflowGenerator.cs`.
+
+  Gates: `dotnet-sdk-8.0` (8.0.131) installed cleanly via apt after an initial 404 cleared
+  up with `apt-get update` first. `dotnet build src/SwarmUI.csproj --configuration Release`
+  — succeeded, 0 warnings, 0 errors. `dotnet format SwarmUI.sln --verify-no-changes` —
+  **pre-existing fail**, exactly 122 WHITESPACE findings across the same 7 files logged
+  since 2026-09-17 (`TagDexEntry.cs`, `Utilities.cs`, `AdminAPI.cs`, `ModelsAPI.cs`,
+  `T2IAPI.cs`, `ComfyUIBackendExtension.cs`, `WorkflowGeneratorSteps.cs`), confirmed by
+  direct grep and by re-running format against a throwaway worktree of the pre-merge tip
+  (`94c10a0`) — identical 122 findings, same files, there too. `dotnet test
+  SwarmUITests/SwarmUITests.csproj --configuration Release` — **pre-existing fail**, 55×
+  (up from the 53× logged since 2026-09-17) `CS0121` ambiguous-overload errors
+  (`TestDelegate` vs `Action`/`Func`); the count moved only because `TagDexLibraryTests.cs`
+  (added by the 2026-09-19/20 TagDex feature work this session fast-forwarded in, unrelated
+  to this merge) hits the same sandbox/Roslyn artifact for 2 more assertions — confirmed by
+  running the identical test command against the same pre-merge worktree, which reproduced
+  55× there too, same file list. Headless boot check (after fetching upstream tags
+  read-only, the `build-and-check.yml` workaround) — `is now running`, exit 0, zero
+  `[Error]` lines (one expected `.NET 10 not installed` warning). GPU acceleration check:
+  not applicable, no GPU in this sandbox.
+
+  Backend/custom_nodes review: `dlbackend/` does not exist in this SwarmUI checkout (bare
+  source checkout, confirmed by direct filesystem check, matching every prior sync). This
+  container does have a separate `/home/user/ComfyUI` checkout with a `custom_nodes/`
+  directory, but it is an unrelated sibling project — its own fork (`socrasteeze/ComfyUI`,
+  own `upstream`/`origin`, own `AGENTS.md`/`FORK_NOTES.md`, own independent commit
+  history) with no reference to it anywhere in this SwarmUI checkout's config, and its
+  `custom_nodes/` holds only ComfyUI's own stock example files
+  (`example_node.py.example`, `websocket_image_save.py`) — no installed third-party nodes
+  to fast-forward. Left entirely untouched as out of scope for this repo's sync task.
+
+  `/clean` run before pushing per fork law. Author/committer on the merge commit:
+  `socrasteeze <socradeez@gmail.com>`; no AI-attribution trailer.
+
 - 2026-09-19 (2nd) — 2 incoming commits, `bb5bf1d` (full-view video horizontal-offset fix,
   `currentimagehandler.js`) and `eb39c7d` (WebSocket error handling: a new
   `Utilities.SendJsonNoError` extension method, and `SendAndReportError` now sends
