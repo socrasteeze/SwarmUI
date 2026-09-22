@@ -202,6 +202,24 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-22 (third check, bare container) — routine automated check as part of a scheduled
+  multi-fork sync run (ai-toolkit, ComfyUI, SwarmUI), no human watching live. Working tree was
+  clean on `main` at `03d4400` ("sync: 2026-09-22 live-box check, comfyui-manager FF"),
+  matching `origin/main` 0/0. `upstream` remote did not exist in this container — added fresh
+  (`https://github.com/mcmonkeyprojects/SwarmUI`), push URL pinned to
+  `DISABLED-NEVER-PUSH-TO-UPSTREAM` and verified before any other remote operation. Git
+  identity: container global config carried the unapproved vendor identity
+  (`Claude <noreply@anthropic.com>`); set locally to `socrasteeze <socradeez@gmail.com>` and
+  `commit.gpgsign=false` before any commit. `git fetch upstream`; upstream default branch
+  resolved as `master`. `upstream/master` still at `33dc339` — `git merge-base --is-ancestor
+  upstream/master HEAD` returned true (`HEAD...upstream/master` measured 0 behind / 59 ahead),
+  so 0 incoming commits; no merge, no conflicts.
+
+  No `dlbackend/` in this container (bare, no bundled ComfyUI backend checkout) and no `dotnet`
+  SDK available, so the backend/custom_nodes fast-forward review from the live Windows box
+  entry above and the build/format/ci-test gates were **not applicable/not covered** here —
+  same underlying reason as this fork's other bare-container sync entries elsewhere.
+
 - 2026-09-22 (second check, live Windows box) — routine automated check, SwarmUI already current; one backend node fast-forwarded. Ran unattended (scheduled, no human watching live). Working tree was clean on `main` at `22f411c1` ("HANDOFF: 2026-09-22 sync check, nothing to merge"), matching `origin/main` 0/0. Remotes already correct: `origin` → `socrasteeze/SwarmUI`, `upstream` fetch → `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Git identity already `socrasteeze <socradeez@gmail.com>`. `git pull --ff-only origin main` — already up to date. `git fetch upstream`; upstream default branch resolved as `master` (via `refs/remotes/upstream/HEAD` and `git remote show upstream`). `upstream/master` still at `33dc339` ("probably account for rgba image data in some nodes") — `git merge-base --is-ancestor upstream/master HEAD` returned true, so 0 incoming commits; no merge, no conflicts, no gate suite (no SwarmUI source changed).
 
   Backend/custom_nodes review (live `dlbackend/` present on this box, unlike the container check earlier today):
