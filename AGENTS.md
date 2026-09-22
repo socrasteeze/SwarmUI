@@ -202,6 +202,55 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-22 — routine automated check, nothing to merge. Ran unattended (scheduled, no
+  human watching live) on branch `noble/trusting-dijkstra-8hbv6h` per this run's explicit
+  one-off instruction to push there instead of `main` (`origin/main` and this branch were
+  identical at `8071394` before this entry, so nothing was left behind on `main`). Fresh
+  container: no `upstream` remote, global git identity was a vendor identity
+  (`Claude <noreply@anthropic.com>`, not `socrasteeze`) — overridden locally per policy
+  before any commit. `upstream` remote added fresh and immediately pinned to this fork's
+  exact sentinel (`git remote set-url --push upstream DISABLED-NEVER-PUSH-TO-UPSTREAM`),
+  verified via `git remote get-url --push upstream` before any other remote operation.
+  `dotnet-sdk-8.0` (8.0.131) installed cleanly via apt. Baseline gates recorded before
+  fetching upstream, per sync-upstream Phase 1: `dotnet build src/SwarmUI.csproj
+  --configuration Release` — 0 warnings, 0 errors. `dotnet format SwarmUI.sln
+  --verify-no-changes` — **pre-existing fail**, exactly 122 WHITESPACE findings across the
+  same 7 files logged since 2026-09-17, confirmed by direct count. `dotnet test
+  SwarmUITests/SwarmUITests.csproj --configuration Release` — **pre-existing fail**,
+  exactly 55x `CS0121` ambiguous-overload errors, same count and same file list as the
+  2026-09-21 entry. Headless boot check (throwaway `--data_dir`/port, after fetching
+  upstream tags read-only) — `is now running`, exit 0, zero `[Error]` lines.
+  `git fetch upstream` showed `upstream/master` still at `163503e` ("qwen image 2.1
+  docs") — `git merge-base --is-ancestor upstream/master HEAD` returned true, so the fork
+  is fully current (0 incoming commits, same state the three 2026-09-21 checks
+  established). No merge, no conflicts, no gate suite beyond the baseline above (no source
+  changed).
+
+  ComfyUIBackend vendored-version review (this run's own added scope, not a standing sync
+  step): `dlbackend/` does not exist in this checkout (bare source checkout, confirmed by
+  direct filesystem check, matching every prior sync) — SwarmUI has no vendored copy of
+  ComfyUI to bump. `src/BuiltinExtensions/ComfyUIBackend/ComfyUISelfStartBackend.cs`
+  manages an externally-installed Comfy at runtime: it `git pull`s the managed Comfy
+  checkout's own `master` branch on launch (not a pinned SHA), and separately maintains
+  `ComfyNodeGitPins` (currently empty — no active per-node commit pins) for optional
+  custom-node repos. The only literal version constants in that file
+  (`SwarmValidatedFrontendVersion = "1.51.9"`, `CurrentTorchVersion = "2.13.0"`,
+  `diffusers >= 0.36.0`) are upstream's own values, and since this fork's tree already
+  contains upstream's tip exactly (0 commits behind), they are already current — there is
+  nothing to fast-forward. `git diff upstream/master --stat --
+  src/BuiltinExtensions/ComfyUIBackend/` shows only this fork's own intentional additions
+  on top of that same upstream tip (spoke-mode write gating, Civitai-BaseModel mapping,
+  base64-image loading) — expected divergence, not a stale version marker. Logged so a
+  future sync knows this was checked and found nothing to update.
+
+  Backend/custom_nodes review: `/home/user/ComfyUI` exists in this container but is the
+  unrelated `socrasteeze/ComfyUI` sibling fork with its own AGENTS.md/history, and its
+  `custom_nodes/` holds only ComfyUI's own stock example files
+  (`example_node.py.example`, `websocket_image_save.py`) — no installed third-party nodes
+  to fast-forward; out of scope, left untouched. Logged only; no feature work touched.
+  Author/committer on this commit: `socrasteeze <socradeez@gmail.com>`; no AI-attribution
+  trailer.
+
 - 2026-09-21 (third check, later the same day) — routine automated check, nothing to merge.
   Ran unattended (scheduled, no human watching live). Fresh container: no `upstream` remote,
   no local git identity set (global git config still wrong — a vendor identity, not
