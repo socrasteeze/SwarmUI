@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-09-22 (routine sync check) · **Branch:** `main` · **Base:** `9fc4fe0` · **Tree:** clean
+**Updated:** 2026-09-22 (second sync check, live Windows) · **Branch:** `main` · **Base:** `22f411c1` · **Tree:** clean
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
 The user waived the handoff line cap; the H3 reference sections below were logged at the user's request.
 
 ## Done this session
+- 2026-09-22 (second check, live Windows box): routine automated sync — `upstream/master` still at `33dc339`, already an ancestor of HEAD; nothing to merge, no gates. Fast-forwarded live backend node `comfyui-manager` `946ef8fe`→`3e1f5d3a` (32 commits, DB list only). Skipped dirty checkouts: DLNode ReActor (behind 17 + local `nodes.py`), TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`). Left `.disabled` folders alone. Bundled ComfyUI current. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended. All earlier handoff detail above is unchanged.
+
 - Classic preset editor no longer freezes on open: width measurements batch into one pass (951 ms → 75 ms desktop, 690 controls identical) — `src/wwwroot/js/site.js` `AutoWidthBatchHelper.batch`, `src/wwwroot/js/genpage/gentab/presets.js`
 - `/simple` preset editor offers FL2VA Image To Video fields — `src/BuiltinExtensions/MobileEnhancements/Assets/m/m_presets.js` (`FL2VAParams`)
 - Classic "+" menu splits "Add Temporary Image" (`image/*`) from "Add Temporary Video/Audio" — the combined filter made the iOS Files picker slow to populate — `src/wwwroot/js/genpage/gentab/prompttools.js`
