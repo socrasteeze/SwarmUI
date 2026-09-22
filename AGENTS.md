@@ -202,6 +202,17 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-22 (second check, live Windows box) — routine automated check, SwarmUI already current; one backend node fast-forwarded. Ran unattended (scheduled, no human watching live). Working tree was clean on `main` at `22f411c1` ("HANDOFF: 2026-09-22 sync check, nothing to merge"), matching `origin/main` 0/0. Remotes already correct: `origin` → `socrasteeze/SwarmUI`, `upstream` fetch → `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Git identity already `socrasteeze <socradeez@gmail.com>`. `git pull --ff-only origin main` — already up to date. `git fetch upstream`; upstream default branch resolved as `master` (via `refs/remotes/upstream/HEAD` and `git remote show upstream`). `upstream/master` still at `33dc339` ("probably account for rgba image data in some nodes") — `git merge-base --is-ancestor upstream/master HEAD` returned true, so 0 incoming commits; no merge, no conflicts, no gate suite (no SwarmUI source changed).
+
+  Backend/custom_nodes review (live `dlbackend/` present on this box, unlike the container check earlier today):
+  - Updated: `dlbackend/comfy/ComfyUI/custom_nodes/comfyui-manager` fast-forwarded `946ef8fe` → `3e1f5d3a` (32 commits; tip "update DB"; custom-node-list.json DB refreshes only).
+  - Current (clean, 0 behind): bundled ComfyUI `dlbackend/comfy/ComfyUI` at `b33e2b55c` on `master`; DLNodes Frame-Interpolation, GGUF, Krea2-Ostris-Edit, SeedVR2 Image/Video, controlnet_aux, IPAdapter_plus; custom_nodes KJNodes, MiniMaxH3-FirstBlockCache, MiniMaxH3_Ref-Patch, seedvr2-tilingupscaler, Spectrum-MiniMax-H3, RES4LYF, rgthree-comfy, was-node-suite-comfyui.
+  - Skipped dirty (local edits, not discarded/stashed): DLNode `ComfyUI-ReActor` (behind origin by 17, modified `nodes.py`); DLNode `ComfyUI-TeaCache` (modified `nodes.py`); custom_node `ComfyUI-WD14-Tagger` (modified `requirements.txt`); custom_node `ComfyUI-RMBG` (modified `requirements.txt` + untracked `__pycache__`). `__pycache__`-only dirty and already current: APG_ImYourCFGNow, ConditioningKrea2Rebalance, Skimmed_CFG, comfyui-mask-boundingbox, ComfyUI-QwenVL, ComfyUI_Comfyroll_CustomNodes.
+  - Left alone: `ComfyUI-nunchaku.disabled` (DLNodes + custom_nodes), `comfyui-sam3.disabled`. Non-git custom_nodes left as-is: comfyui-auto-nodes-layout, ComfyUI-Crystools, llm_sdxl_adapter.
+  - GPU acceleration check: not applicable (no DLNode reinstall, no `pip install` in `python_embeded`, no ComfyUI backend update — manager DB FF only).
+
+  Author/committer on this commit: `socrasteeze <socradeez@gmail.com>`; no AI-attribution trailer.
+
 - 2026-09-22 — routine automated check, nothing to merge. Ran unattended (scheduled, no
   human watching live). Container start state: `origin` only, no `upstream` remote, global
   git identity wrong (vendor identity, not `socrasteeze`) — overridden locally per policy
