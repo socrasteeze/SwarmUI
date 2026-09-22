@@ -316,8 +316,13 @@ public class ComfyUser
         {
             return;
         }
-        ComfyUIRedirectHelper.Users.TryRemove(MasterSID, out _);
         ClientIsClosed.Cancel();
+        if (MasterSID is not null)
+        {
+            // Null until a backend sends a message carrying a 'sid' - a socket that dies before then (eg a backend
+            // restart) never got one, and TryRemove throws on a null key.
+            ComfyUIRedirectHelper.Users.TryRemove(MasterSID, out _);
+        }
         Unreserve();
         Socket.Dispose();
         await Utilities.RunCheckedTask(async () => await Task.WhenAll(Clients.Values.Select(async c =>
