@@ -202,6 +202,35 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-22 — routine automated check, nothing to merge. Ran unattended (scheduled, no
+  human watching live). Container start state: `origin` only, no `upstream` remote, global
+  git identity wrong (vendor identity, not `socrasteeze`) — overridden locally per policy
+  before touching git. Checked-out branch was a leftover session branch
+  (`noble/trusting-dijkstra-cgxoc7`) sitting at `9fc4fe0` ("ComfyUI: fix null MasterSID
+  crashing socket close, and skipped cleanup") — `git fetch origin` confirmed it exactly
+  matched `origin/main` (both at `9fc4fe0`), so it was left as the working branch and
+  nothing was discarded; working tree was clean. That commit postdates the last logged
+  entry (2026-09-21, third check) but is fork-owner work unrelated to any upstream merge,
+  matching what that entry flagged as a possibility. `upstream` remote added fresh and
+  immediately pinned to this fork's exact sentinel (`git remote set-url --push upstream
+  DISABLED-NEVER-PUSH-TO-UPSTREAM`), verified via `git remote get-url --push upstream`
+  before any other remote operation. `git fetch upstream master` showed `upstream/master`
+  at `33dc339` ("probably account for rgba image data in some nodes") —
+  `git merge-base --is-ancestor upstream/master HEAD` returned true, so the fork is fully
+  current (0 incoming commits; `upstream/master` is already reachable from HEAD). No merge,
+  no conflicts, no gate suite (no source changed, matching the established no-op-sync
+  pattern). `dotnet` is not installed in this container, so the build/format/boot gates
+  could not have run regardless; noted rather than silently skipped. Local `main` was stale
+  at `263b446` (behind `origin/main`) — updated the ref only (`git branch -f main HEAD`), no
+  checkout/reset needed since HEAD already equaled `origin/main`. Backend/custom_nodes
+  review: `dlbackend/` does not exist in this checkout (confirmed by direct filesystem
+  check — bare source checkout, matching every prior sync); `Data/`, `Models/`, `Output/`
+  also absent, so the symlink trap does not apply here. `/home/user/ComfyUI` exists in this
+  container but is the unrelated `socrasteeze/ComfyUI` sibling fork running its own separate
+  sync — out of scope, left untouched. Logged only; no feature work touched.
+  Author/committer on this commit: `socrasteeze <socradeez@gmail.com>`; no AI-attribution
+  trailer.
+
 - 2026-09-21 (third check, later the same day) — routine automated check, nothing to merge.
   Ran unattended (scheduled, no human watching live). Fresh container: no `upstream` remote,
   no local git identity set (global git config still wrong — a vendor identity, not
