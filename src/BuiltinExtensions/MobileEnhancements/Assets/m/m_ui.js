@@ -69,7 +69,7 @@ class MUI {
      * (mState.starredFirst), and a list whose order changes with nothing on screen explaining why reads as a
      * list in a random order - this is what says "these are your stars". */
     starBadge(subtype, name) {
-        return mState.isStarred(subtype, name) ? this.el('span', 'm-model-star', '★') : null;
+        return mState.isStarred(subtype, name) ? this.el('span', 'm-model-star', 'â˜…') : null;
     }
 
     /** Thumbnail for a model, or null when it has no preview image. */
@@ -124,9 +124,10 @@ class MUI {
         this.tabs[name] = { 'build': build, 'onShow': onShow };
     }
 
-    /** Registers one extra row at the bottom of the More tab, so another extension can add an entry without
-     * editing m_app.js. Call at script load: the More tab builds lazily on first activation, and every script
-     * that could register runs before m_app.js, which is loaded last. */
+    /** Registers one extra More-tab row, so another extension can add an entry without editing m_app.js.
+     * Rows are sorted alphabetically with the built-ins when the More tab builds. Call at script load: the
+     * More tab builds lazily on first activation, and every script that could register runs before m_app.js,
+     * which is loaded last. */
     registerMoreItem(label, onClick) {
         this.moreItems.push({ 'label': label, 'onClick': onClick });
     }

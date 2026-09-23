@@ -6,20 +6,17 @@
          interactive-widget=resizes-content is Chromium-only (iOS Safari ignores it) - harmless to ship, but it
          buys nothing on the primary target platform, so never treat it as the iOS keyboard solution.
 
-         NOTE: this meta is REWRITTEN at runtime by mobile_core.js's fixViewport() (loaded below), which drops
-         maximum-scale. It is left here without maximum-scale so the static file and the runtime result agree -
-         a reader should not have to run the app to learn what the viewport actually ends up being.
+         NOTE: this meta is REWRITTEN at runtime by mobile_core.js's fixViewport() (loaded below). On /simple,
+         fixViewport keeps maximum-scale=1; on every other page it omits it. The static tag here matches the
+         /simple runtime result so a reader does not have to run the app to learn what this page ends up with.
 
-         History, because it will otherwise get "fixed" back: this file used to pin maximum-scale=1, arguing that
-         since iOS 10 Safari ignores scale limits for user-initiated pinch and honours them only for automatic
-         focus zoom. The first half is right; the second half was an inference from an on-device observation, not
-         a documented contract. And it is not free: Android Chrome/Firefox DO honour maximum-scale, so it
-         suppressed real pinch zoom there, and maximum-scale < 2 is the documented WCAG 1.4.4 failure that
-         axe-core flags. The correct fix for focus zoom is the 16px floor on every focusable field (m.css), which
-         is verified complete across every input/select/textarea in this client. If focus zoom is ever observed
-         again on device, find the actual cause - a field under 16px, or a layout wider than the viewport
-         triggering Safari's shrink-to-fit - rather than reinstating this. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+         Why maximum-scale=1 returns for /simple: the 16px focusable-field floor in m.css is necessary and is
+         verified complete, but on-device it alone did not stop iOS PWA focus-zoom on the prompt (see AGENTS.md
+         /simple notes). iOS 10+ ignores scale caps for user pinch and only applies them to automatic focus
+         zoom, so pinch remains available on iPhone; Android does honour the cap, which is why genpage stays
+         uncapped (WCAG 1.4.4) and only this phone client re-pins it. Also keep overflow-x:hidden on html/body
+         (m.css) so shrink-to-fit cannot reintroduce the same symptom via a wider-than-viewport layout. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>SwarmUI Mobile</title>
     <link rel="icon" href="/favicon.ico" />
     [HEADEXTRA]
@@ -50,10 +47,10 @@
               status-bar-style "black" instead (iOS reserves the bar itself), so --safe-top resolves to 0 in
               production; the measured fallback stays in place for the translucent mode.
            3. body.pwa-standalone / body.coarse-pointer classes.
-         DELIBERATE SIDE EFFECT: its fixViewport() rewrites the viewport meta above and drops `maximum-scale=1`,
-         restoring pinch zoom. That is intended - maximum-scale=1 is the documented WCAG 1.4.4 failure pattern and
-         the 16px focusable-field floor (m.css) is the correct fix for focus zoom, which is already fully in place.
-         This also makes /simple match the genpage, which has run without maximum-scale since mobile_core shipped.
+         DELIBERATE SIDE EFFECT: its fixViewport() rewrites the viewport meta above. On /simple it keeps
+         `maximum-scale=1` (iOS PWA focus-zoom on the prompt; see the viewport comment). On genpage it omits the
+         cap so pinch zoom and WCAG 1.4.4 stay intact there. The 16px focusable-field floor (m.css) remains
+         required either way.
          Must load BEFORE the m_* scripts so the body classes and --safe-top exist before first paint/layout.
          `defer` is required: the constructor touches document.body. -->
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/mobile_core.js?vary=[VARY]"></script>

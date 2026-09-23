@@ -60,24 +60,19 @@ class MApp {
         });
     }
 
-    /** More tab: links + small toggles. */
+    /** More tab: links + small toggles. Rows are appended in alphabetical order by a stable
+     * sort label (built-ins and registerMoreItem contributions share one list), so adding a row
+     * does not require picking an insert position. Haptics has no More control: generation haptics
+     * still honour `m_client_haptics` if set elsewhere, defaulting on. */
     buildMore(panel) {
         let list = mUI.el('div', 'm-more-list');
+        let rows = [];
+        let addRow = (label, el) => {
+            rows.push({ 'label': label, 'el': el });
+        };
         let classic = mUI.el('a', 'm-more-item', 'Open Classic UI');
         classic.href = '/Text2Image';
-        list.appendChild(classic);
-        // One preference for both UIs: `m_client_haptics` is read by m_gen.js here and by mobile_network.js
-        // on the genpage, so this is the single place the user sets it - the genpage has no equivalent control.
-        let haptics = mUI.el('button', 'm-more-item');
-        let renderHaptics = () => {
-            haptics.textContent = `Haptics: ${localStorage.getItem('m_client_haptics') == 'off' ? 'Off' : 'On'}`;
-        };
-        renderHaptics();
-        haptics.addEventListener('click', () => {
-            localStorage.setItem('m_client_haptics', localStorage.getItem('m_client_haptics') == 'off' ? 'on' : 'off');
-            renderHaptics();
-        });
-        list.appendChild(haptics);
+        addRow('Open Classic UI', classic);
         // Off by default, and that default is load-bearing rather than timid - see enterWouldAccept. With it
         // on, Enter takes the top suggestion for any word; with it off, only inside a `<tag:`.
         let enterAccept = mUI.el('button', 'm-more-item');
@@ -89,7 +84,7 @@ class MApp {
             mAutoComplete.setEnterAccepts(!mAutoComplete.enterAccepts);
             renderEnterAccept();
         });
-        list.appendChild(enterAccept);
+        addRow('Enter accepts suggestion', enterAccept);
         // Backend pin. Visibility is re-evaluated on every state change rather than decided here: this panel
         // builds lazily on first activation, and a deep link to #more can build it before ListT2IParams has
         // landed - at which point paramMeta is empty and the row would be hidden forever. The same
@@ -104,7 +99,7 @@ class MApp {
         };
         renderBackend();
         mState.onChange(renderBackend);
-        list.appendChild(backend);
+        addRow('Backend', backend);
         let clear = mUI.el('button', 'm-more-item', 'Reset mobile client state');
         clear.addEventListener('click', () => {
             mUI.confirm('Clear saved prompt, presets selection, and params?', () => {
@@ -112,14 +107,14 @@ class MApp {
                 location.reload();
             });
         });
-        list.appendChild(clear);
+        addRow('Reset mobile client state', clear);
         let hardRefresh = mUI.el('button', 'm-more-item', 'Force update (clear app cache)');
         hardRefresh.addEventListener('click', () => {
             mUI.confirm('Delete the cached app files and reload? Your prompt and settings are kept.', () => {
                 this.hardRefresh();
             });
         });
-        list.appendChild(hardRefresh);
+        addRow('Force update (clear app cache)', hardRefresh);
         // Restart the SERVER - deliberately distinct from "Force update" above, which only ever touches this
         // browser (caches + service worker). The two are not interchangeable: a Release-build server reads
         // every /simple, MobileEnhancements and TagDex asset from disk ONCE and serves that copy for its whole
@@ -141,12 +136,16 @@ class MApp {
                 this.restartServer(restart);
             });
         });
-        list.appendChild(restart);
+        addRow('Restart Server', restart);
         for (let i = 0; i < mUI.moreItems.length; i++) {
             let entry = mUI.moreItems[i];
             let item = mUI.el('button', 'm-more-item', entry.label);
             item.addEventListener('click', () => entry.onClick());
-            list.appendChild(item);
+            addRow(entry.label, item);
+        }
+        rows.sort((a, b) => a.label.localeCompare(b.label, undefined, { 'sensitivity': 'base' }));
+        for (let i = 0; i < rows.length; i++) {
+            list.appendChild(rows[i].el);
         }
         panel.appendChild(list);
     }
