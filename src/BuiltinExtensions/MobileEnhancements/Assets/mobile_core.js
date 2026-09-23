@@ -140,8 +140,13 @@ class MobileEnhancements {
     }
 
     /**
-     * Replace the server-rendered viewport meta (which pins `maximum-scale=1.0` and blocks pinch zoom)
-     * with a mobile-friendly one: pinch zoom restored, safe-area insets enabled, keyboard resizes content.
+     * Replace the server-rendered viewport meta (often pinned with maximum-scale=1.0) with a mobile-friendly
+     * one: safe-area insets enabled, keyboard resizes content. Genpage keeps pinch zoom (no maximum-scale).
+     *
+     * /simple is special: on-device, the 16px focusable-field floor in m.css alone does not stop iOS PWA
+     * focus-zoom on the prompt (audited: nothing focusable is under 16px). Restoring maximum-scale=1 here
+     * is scoped to /simple only. iOS 10+ ignores scale caps for user pinch and only applies them to
+     * automatic focus zoom; Android does honour them, so genpage stays uncapped for WCAG 1.4.4.
      */
     fixViewport() {
         let meta = document.querySelector('meta[name="viewport"]');
@@ -150,7 +155,12 @@ class MobileEnhancements {
             meta.setAttribute('name', 'viewport');
             document.head.appendChild(meta);
         }
-        meta.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content');
+        let path = location.pathname || '';
+        let isSimple = path === '/simple' || path.startsWith('/simple/');
+        let content = isSimple
+            ? 'width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content'
+            : 'width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content';
+        meta.setAttribute('content', content);
     }
 
     /** Add a body class so CSS can target installed-PWA display (safe-area padding, hidden browser affordances). */

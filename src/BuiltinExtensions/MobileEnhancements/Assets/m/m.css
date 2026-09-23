@@ -10,6 +10,13 @@
    The layout itself is what the shell could never be: normal document flow, per-panel scrollers, sticky
    bars - no fixed body, no overflow:hidden shell, no JS layout engine. */
 
+/* Clamp the document itself, not only .m-body: overflow-x on body alone can still leave html/scrollWidth
+   wider than the visual viewport, which is the other documented path to iOS focus-zoom (shrink-to-fit). */
+html:has(.m-body) {
+    overflow-x: hidden;
+    max-width: 100%;
+}
+
 .m-body {
     --m-safe-bottom: min(env(safe-area-inset-bottom), 34px);
     /* Landscape notch/Dynamic Island insets. The manifest declares orientation "any", so this client really
@@ -38,7 +45,9 @@
 .m-body input,
 .m-body textarea,
 .m-body select {
-    font-size: 16px;
+    /* max() keeps a 16px floor even if a later rule tries to inherit the 13px body text size.
+       iOS PWA auto-zooms on focus when the *computed* size is under 16px. */
+    font-size: max(16px, 100%);
     color: var(--text);
     background-color: var(--background-panel);
     border: 1px solid var(--border-color);
@@ -318,8 +327,8 @@
     resize: none;
     /* Restated rather than only inherited from the .m-body field rule: this is the one field where a
        regression would be felt immediately (iOS zooms the page on focus below 16px), so it should survive
-       anyone reworking the shared rule. See also maximum-scale=1 in index.html. */
-    font-size: 16px;
+       anyone reworking the shared rule. Pair with maximum-scale=1 on /simple (index.html + fixViewport). */
+    font-size: max(16px, 100%);
 }
 /* A floor under the auto-grow in m_create.js, which drives height inline. Three lines of 16px text plus the
    0.5rem padding either side and the border, matching the rows=3 the box is built with. Without it a stale
@@ -1190,7 +1199,7 @@
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     padding: 0.4rem 0.6rem;
-    font-size: 16px;
+    font-size: max(16px, 100%);
     min-height: 40px;
 }
 .m-coach-custom-save {
@@ -1768,7 +1777,7 @@
     padding: 0.5rem;
     min-height: 44px;
     /* 16px, or iOS zooms the page the moment this is focused - same floor as every other field here. */
-    font-size: 16px;
+    font-size: max(16px, 100%);
 }
 .m-grid-search {
     width: 100%;
@@ -1979,7 +1988,7 @@
     min-height: 44px;
     /* Restated rather than inherited, for the same reason .m-prompt-box restates it: below 16px iOS zooms the
        page on focus, and this sheet is nothing but focusable fields. */
-    font-size: 16px;
+    font-size: max(16px, 100%);
 }
 .m-preset-new-button {
     width: 100%;
@@ -1996,7 +2005,7 @@
     box-sizing: border-box;
     padding: 0.5rem;
     min-height: 44px;
-    font-size: 16px;
+    font-size: max(16px, 100%);
     margin-bottom: 0.4rem;
 }
 /* Capped rather than free-running: the sheet itself scrolls, and without a ceiling a long preset list pushed
