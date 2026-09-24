@@ -118,7 +118,7 @@ class MModels {
                     cur.push({ 'name': model.name, 'weight': model.lora_default_weight || 1 });
                     mState.setLoras(cur);
                 }
-                mUI.note(`LoRA added: ${mUI.modelName(model.name)}`);
+                mUI.note(`LoRA added: ${mUI.modelLines(model, true).primary}`);
             }
         });
         return card;
