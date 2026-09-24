@@ -9,7 +9,7 @@
  * 2. Starred models sort first. The pickers cap how many rows they render, so on a real library this is what
  *    decides whether a favourite is on screen at all.
  * 3. The compact priority controls keep their contracts: Random seed expansion, aspect and size steppers,
- *    paired architecture/preset picklists, exact 0.05 LoRA weights, TagDex favorites and browse-to-prompt
+ *    paired architecture/preset picklists, LoRA weight steppers (0.05/0.5), TagDex favorites and browse-to-prompt
  *    insertion, and multi-word TagDex typeahead acceptance.
  * 4. Deleting the selected genpage image chooses the newest surviving image from the current-session batch,
  *    or clears the canvas when none survives. The shipped helper is extracted rather than copied.
@@ -326,7 +326,7 @@ await page.evaluate(() => {
     mState.setLoras([{ name: 'Consistency_Edit_V2.safetensors', weight: 0.2 }]);
     mCreate.openLoraSheet();
 });
-check('LoRA weight uses a 0.05-step picker, not a slider', await page.evaluate(() =>
+check('LoRA weight uses a stepped picker, not a slider', await page.evaluate(() =>
     document.querySelectorAll('.m-lora-weight-picker').length == 1 && document.querySelectorAll('.m-lora-slider').length == 0));
 // ListModels truncates at the server's ModelListSanityCap and truncates before it sorts, so on a large
 // library it answers with an arbitrary slice - which is why the picker's corpus is the uncapped boot list
@@ -342,6 +342,52 @@ check('ListModels rows still enrich the models they cover',
 await page.click('.m-lora-weight-picker .m-lora-weight-button:last-child');
 const loraWeight = await page.evaluate(() => ({ state: mState.getLoras()[0].weight, shown: document.querySelector('.m-lora-weight-input').value }));
 check('LoRA plus advances exactly 0.05', loraWeight.state == 0.25 && loraWeight.shown == '0.25', JSON.stringify(loraWeight));
+const loraStepUi = await page.evaluate(() => {
+    let toggle = document.querySelector('.m-lora-step-toggle');
+    let buttons = [...toggle.querySelectorAll('.m-seg-button')].map(b => ({
+        step: b.dataset.step, selected: b.classList.contains('m-selected'), text: b.textContent
+    }));
+    let input = document.querySelector('.m-lora-weight-input');
+    return {
+        buttons,
+        hasInputMode: input.getAttribute('inputmode'),
+        min: input.min, max: input.max
+    };
+});
+check('LoRA sheet shows 0.05/0.5 step toggle defaulting to 0.05',
+    loraStepUi.buttons.length == 2
+        && loraStepUi.buttons[0].step == '0.05' && loraStepUi.buttons[0].selected
+        && loraStepUi.buttons[1].step == '0.5' && !loraStepUi.buttons[1].selected,
+    JSON.stringify(loraStepUi));
+check('LoRA weight input has no decimal inputMode so mobile can type minus',
+    loraStepUi.hasInputMode == null && loraStepUi.min == '-2' && loraStepUi.max == '2',
+    JSON.stringify(loraStepUi));
+const loraNegative = await page.evaluate(() => {
+    let input = document.querySelector('.m-lora-weight-input');
+    input.value = '-0.7';
+    input.dispatchEvent(new Event('change'));
+    return { state: mState.getLoras()[0].weight, shown: input.value };
+});
+check('LoRA type-in accepts negatives at 0.05 precision',
+    loraNegative.state == -0.7 && loraNegative.shown == '-0.7', JSON.stringify(loraNegative));
+await page.click('.m-lora-step-toggle .m-seg-button[data-step="0.5"]');
+await page.click('.m-lora-weight-picker .m-lora-weight-button:last-child');
+const loraHalf = await page.evaluate(() => ({
+    state: mState.getLoras()[0].weight,
+    shown: document.querySelector('.m-lora-weight-input').value,
+    selected: document.querySelector('.m-lora-step-toggle .m-seg-button[data-step="0.5"]').classList.contains('m-selected'),
+    stored: sessionStorage.getItem('m-lora-weight-step')
+}));
+check('LoRA plus with step 0.5 advances from typed negative',
+    loraHalf.state == -0.2 && loraHalf.shown == '-0.2' && loraHalf.selected && loraHalf.stored == '0.5',
+    JSON.stringify(loraHalf));
+await page.click('.m-lora-weight-picker .m-lora-weight-button:first-child');
+const loraMinus = await page.evaluate(() => ({
+    state: mState.getLoras()[0].weight,
+    shown: document.querySelector('.m-lora-weight-input').value
+}));
+check('LoRA minus with step 0.5 goes more negative',
+    loraMinus.state == -0.7 && loraMinus.shown == '-0.7', JSON.stringify(loraMinus));
 await page.evaluate(() => {
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
@@ -349,6 +395,7 @@ await page.evaluate(() => {
     mState.setLoras([]);
     // Put the boot list back the way the rest of the harness expects it - indexLoras reads it on every call.
     mState.models['LoRA'] = [];
+    sessionStorage.removeItem('m-lora-weight-step');
 });
 
 await page.click('.m-tagdex-browse-button');
@@ -598,6 +645,11 @@ const loraRows = await page.evaluate(() => [...document.querySelectorAll('.m-lor
     .map(row => ({ name: row.querySelector('.m-model-name').textContent, starred: !!row.querySelector('.m-model-star') })));
 check('LoRA picker: the starred LoRA is first', loraRows.length == 4 && loraRows[0].name == 'zzz_starred', JSON.stringify(loraRows.map(r => r.name)));
 check('LoRA picker: it is marked as starred', !!loraRows[0]?.starred);
+    const starGlyph = await page.evaluate(() => {
+        const star = document.querySelector('.m-lora-results .m-model-result .m-model-star');
+        return star ? star.textContent : null;
+    });
+    check('LoRA picker: star badge is U+2605 not mojibake', starGlyph === '\u2605', JSON.stringify(starGlyph));
 check('LoRA picker: everything else keeps its original order',
     loraRows.slice(1).map(r => r.name).join(',') == 'aaa_first,bbb_middle,zzz_unstarred',
     loraRows.slice(1).map(r => r.name).join(','));
@@ -686,54 +738,194 @@ const arch = await page.evaluate(() => {
 check('arch filter: other known group folders are hidden',
     arch == 'ill/keep.safetensors,misc/unknown.safetensors', arch);
 
-// LoRA picker keeps other-architecture rows visible: matching folder is sorted first, nothing is hidden.
-const archSort = await page.evaluate(() => {
+// LoRA picker Limited mode hard-hides other known architecture folders (banner must match the list).
+const archHard = await page.evaluate(() => {
+    mState.presets = [
+        { title: 'ill/pose', param_map: { model: 'ill/ckpt' } },
+        { title: 'qwen/edit', param_map: { model: 'qwen/ckpt' } },
+        { title: 'anima/base', param_map: { model: 'anima/ckpt' } }
+    ];
     mState.archFilter = 'ill';
     let list = [
         { name: 'qwen/other.safetensors' },
         { name: 'ill/keep.safetensors' },
-        { name: 'anima/also.safetensors' }
+        { name: 'anima/also.safetensors' },
+        { name: 'misc/unknown.safetensors' }
     ];
-    return MCreate.sortArchFirst(list, 'LoRA').map(m => m.name).join(',');
+    return mState.filterByArch(list, 'LoRA').map(m => m.name).join(',');
 });
-check('LoRA arch sort: matching folder first, other architectures still shown',
-    archSort == 'ill/keep.safetensors,qwen/other.safetensors,anima/also.safetensors', archSort);
+check('LoRA arch limit: other known architecture folders are hidden',
+    archHard == 'ill/keep.safetensors,misc/unknown.safetensors', archHard);
 
 // The checkpoint's own compat class is a second, automatic gate: picking a Qwen checkpoint must not leave
 // SDXL LoRAs in a picker that can never load them, and it must not need the architecture picker to be set.
-// Unknown class is kept (unknown is not incompatible) and so is a starred model, exactly as in filterByArch.
+// Unknown class is kept (unknown is not incompatible). Starred other-arch LoRAs are NOT kept under Limited
+// (Adam: hide them; still available via "tap to show all").
 const compat = await page.evaluate(() => {
     mState.archFilter = '';
     mState.loadParamMeta({
         list: [],
         models: {
-            'Stable-Diffusion': [['qwen/ckpt.safetensors', 'qwen-image'], ['ill/ckpt.safetensors', 'sdxl-base']],
-            'LoRA': [['qwen/keep.safetensors', 'qwen-image/lora'], ['ill/hide.safetensors', 'sdxl-base/lora'],
-                ['misc/unknown.safetensors', null], ['ill/starred.safetensors', 'sdxl-base/lora']]
+            'Stable-Diffusion': [
+                ['qwen/ckpt.safetensors', 'qwen-image'],
+                ['ill/ckpt.safetensors', 'sdxl-base'],
+                ['flux/ckpt.safetensors', 'flux']
+            ],
+            'LoRA': [
+                ['qwen/keep.safetensors', 'qwen-image/lora'],
+                ['ill/hide.safetensors', 'sdxl-base/lora'],
+                ['misc/unknown.safetensors', null],
+                ['ill/starred.safetensors', 'sdxl-base/lora'],
+                ['flux/untagged.safetensors', null],
+                ['flux/wrongclass.safetensors', 'sdxl-base/lora']
+            ]
         },
         model_classes: {
             'qwen-image': { compat_class: 'qwen-image' },
             'qwen-image/lora': { compat_class: 'qwen-image' },
             'sdxl-base': { compat_class: 'stable-diffusion-xl-v1' },
-            'sdxl-base/lora': { compat_class: 'stable-diffusion-xl-v1' }
+            'sdxl-base/lora': { compat_class: 'stable-diffusion-xl-v1' },
+            'flux': { compat_class: 'flux' }
         }
     });
+    mState.presets = [
+        { title: 'ill/pose', param_map: { model: 'ill/ckpt.safetensors' } },
+        { title: 'flux/portrait', param_map: { model: 'flux/ckpt.safetensors' } },
+        { title: 'qwen/edit', param_map: { model: 'qwen/ckpt.safetensors' } }
+    ];
     mState.starredModels = { 'LoRA': ['ill/starred.safetensors'] };
     mState.params['model'] = 'qwen/ckpt.safetensors';
-    let list = [{ name: 'qwen/keep.safetensors' }, { name: 'ill/hide.safetensors' },
-        { name: 'misc/unknown.safetensors' }, { name: 'ill/starred.safetensors' }];
+    let list = [
+        { name: 'qwen/keep.safetensors' },
+        { name: 'ill/hide.safetensors' },
+        { name: 'misc/unknown.safetensors' },
+        { name: 'ill/starred.safetensors' },
+        { name: 'flux/untagged.safetensors' },
+        { name: 'flux/wrongclass.safetensors' }
+    ];
     let picked = mState.filterByModelCompat(list, 'LoRA').map(m => m.name).join(',');
     let active = mState.activeModelCompat();
+    // SDXL checkpoint: flux-folder LoRAs must not survive Limited-to-SDXL just because class is null/wrong.
+    mState.params['model'] = 'ill/ckpt.safetensors';
+    let sdxlList = [
+        { name: 'ill/hide.safetensors' },
+        { name: 'misc/unknown.safetensors' },
+        { name: 'flux/untagged.safetensors' },
+        { name: 'flux/wrongclass.safetensors' },
+        { name: 'qwen/keep.safetensors' }
+    ];
+    let sdxlPicked = mState.filterByModelCompat(sdxlList, 'LoRA').map(m => m.name).join(',');
     delete mState.params['model'];
     let unpicked = mState.filterByModelCompat(list, 'LoRA').length;
-    return { active, cleared: mState.activeModelCompat(), picked, unpicked };
+    return { active, cleared: mState.activeModelCompat(), picked, sdxlPicked, unpicked };
 });
 check('checkpoint compat: an incompatible LoRA is hidden without the arch picker being set',
-    compat.picked == 'qwen/keep.safetensors,misc/unknown.safetensors,ill/starred.safetensors', JSON.stringify(compat));
+    compat.picked == 'qwen/keep.safetensors,misc/unknown.safetensors', JSON.stringify(compat));
+check('checkpoint compat: starred other-arch LoRA is hidden under Limited (not exempt)',
+    !compat.picked.split(',').includes('ill/starred.safetensors'), JSON.stringify(compat));
+check('checkpoint compat: other-arch folders are hidden even when untagged or mis-classed',
+    compat.sdxlPicked == 'ill/hide.safetensors,misc/unknown.safetensors', JSON.stringify(compat));
 check('checkpoint compat: the class comes from the picked checkpoint',
     compat.active == 'qwen-image' && compat.cleared == null, JSON.stringify(compat));
 check('checkpoint compat: no checkpoint picked means no filtering at all',
-    compat.unpicked == 4, JSON.stringify(compat));
+    compat.unpicked == 6, JSON.stringify(compat));
+
+// Klein/ with no presets must still hard-hide under an SDXL Limited banner once any classed model in that
+// folder is a different architecture - folderCompatClasses covers hand-laid folders presetGroups() misses.
+const klein = await page.evaluate(() => {
+    mState.loadParamMeta({
+        list: [],
+        models: {
+            'Stable-Diffusion': [
+                ['ill/ckpt.safetensors', 'sdxl-base']
+            ],
+            'LoRA': [
+                ['klein/classed.safetensors', 'flux'],
+                ['klein/untagged.safetensors', null],
+                ['ill/keep.safetensors', 'sdxl-base/lora'],
+                ['misc/unknown.safetensors', null]
+            ]
+        },
+        model_classes: {
+            'sdxl-base': { compat_class: 'stable-diffusion-xl-v1' },
+            'sdxl-base/lora': { compat_class: 'stable-diffusion-xl-v1' },
+            'flux': { compat_class: 'flux' }
+        }
+    });
+    // No klein preset on purpose - only ill.
+    mState.presets = [
+        { title: 'ill/pose', param_map: { model: 'ill/ckpt.safetensors' } }
+    ];
+    mState.starredModels = {};
+    mState.archFilter = '';
+    mState.params['model'] = 'ill/ckpt.safetensors';
+    let list = [
+        { name: 'klein/classed.safetensors' },
+        { name: 'klein/untagged.safetensors' },
+        { name: 'ill/keep.safetensors' },
+        { name: 'misc/unknown.safetensors' }
+    ];
+    let compatPicked = mState.filterByModelCompat(list, 'LoRA').map(m => m.name).join(',');
+    mState.archFilter = 'ill';
+    let archPicked = mState.filterByArch(list, 'LoRA').map(m => m.name).join(',');
+    return { compatPicked, archPicked };
+});
+check('checkpoint compat: Klein folder without presets is hard-hidden when Limited by SDXL',
+    klein.compatPicked == 'ill/keep.safetensors,misc/unknown.safetensors', JSON.stringify(klein));
+check('arch filter: Klein folder without presets is hard-hidden when Limited to ill',
+    klein.archPicked == 'ill/keep.safetensors,misc/unknown.safetensors', JSON.stringify(klein));
+
+// Starred other-arch must hide under Limited (both gates) and reappear when show-all returns the unfiltered list.
+const starredLimited = await page.evaluate(() => {
+    mState.loadParamMeta({
+        list: [],
+        models: {
+            'Stable-Diffusion': [
+                ['ill/ckpt.safetensors', 'sdxl-base'],
+                ['flux/ckpt.safetensors', 'flux']
+            ],
+            'LoRA': [
+                ['ill/keep.safetensors', 'sdxl-base/lora'],
+                ['flux/starred.safetensors', 'flux'],
+                ['klein/starred.safetensors', 'flux']
+            ]
+        },
+        model_classes: {
+            'sdxl-base': { compat_class: 'stable-diffusion-xl-v1' },
+            'sdxl-base/lora': { compat_class: 'stable-diffusion-xl-v1' },
+            'flux': { compat_class: 'flux' }
+        }
+    });
+    mState.presets = [
+        { title: 'ill/pose', param_map: { model: 'ill/ckpt.safetensors' } },
+        { title: 'flux/portrait', param_map: { model: 'flux/ckpt.safetensors' } }
+    ];
+    mState.starredModels = { 'LoRA': ['flux/starred.safetensors', 'klein/starred.safetensors'] };
+    mState.params['model'] = 'ill/ckpt.safetensors';
+    mState.archFilter = 'ill';
+    let list = [
+        { name: 'ill/keep.safetensors' },
+        { name: 'flux/starred.safetensors' },
+        { name: 'klein/starred.safetensors' }
+    ];
+    let archLimited = mState.filterByArch(list, 'LoRA').map(m => m.name).join(',');
+    let compatLimited = mState.filterByModelCompat(list, 'LoRA').map(m => m.name).join(',');
+    // show-all path in applyArchFilter/applyModelFilter returns the original list unchanged.
+    let showAll = list.map(m => m.name).join(',');
+    let sorted = mState.starredFirst(
+        mState.filterByArch(list, 'LoRA'), 'LoRA').map(m => m.name).join(',');
+    return { archLimited, compatLimited, showAll, sorted };
+});
+check('Limited arch: starred Flux/Klein LoRAs are hidden',
+    starredLimited.archLimited == 'ill/keep.safetensors', JSON.stringify(starredLimited));
+check('Limited compat: starred Flux/Klein LoRAs are hidden',
+    starredLimited.compatLimited == 'ill/keep.safetensors', JSON.stringify(starredLimited));
+check('show-all: unfiltered list still contains starred other-arch LoRAs',
+    starredLimited.showAll == 'ill/keep.safetensors,flux/starred.safetensors,klein/starred.safetensors',
+    JSON.stringify(starredLimited));
+check('starredFirst still lifts favourites among survivors (only ill/keep left)',
+    starredLimited.sorted == 'ill/keep.safetensors', JSON.stringify(starredLimited));
+
 await page.evaluate(() => {
     mState.starredModels = {};
     mState.loadParamMeta({ list: [], models: {}, model_classes: {} });
@@ -821,6 +1013,59 @@ check('sampler options are the server values with a leading default', sampler.sa
 check('picking a sampler and scheduler writes the raw values into state', sampler.picked == 'dpmpp_2m,karras', sampler.picked);
 check('a picked sampler is not also shown as an Advanced chip', sampler.chips == 0, `${sampler.chips}`);
 check('picking the default option clears the param from state', sampler.afterDefault == false, `${sampler.afterDefault}`);
+
+// Refiner Upscale / Method: a compact Upscale row under Sampler. Scale always uses the preferred
+// ladder unioned with Examples; Method reuses buildChoiceSelect. Selecting 1 clears refinerupscale
+// (server IgnoreIf). Both are in coveredParams so they do not also show as Advanced chips.
+const upscaleHidden = await page.evaluate(() => {
+    mCreate.renderQuickParams();
+    return getComputedStyle(document.querySelector('.m-upscale-row')).display;
+});
+check('upscale row is hidden when refiner params are not advertised', upscaleHidden == 'none', upscaleHidden);
+const upscale = await page.evaluate(() => {
+    mState.paramMeta['refinerupscale'] = { id: 'refinerupscale', name: 'Refiner Upscale', type: 'decimal',
+        default: '1', min: 0.25, max: 8, view_max: 4, step: 0.25, examples: ['1', '1.5', '2'] };
+    mState.paramMeta['refinerupscalemethod'] = { id: 'refinerupscalemethod', name: 'Refiner Upscale Method',
+        type: 'dropdown', default: 'pixel-lanczos',
+        values: ['pixel-lanczos', 'latent-nearest-exact'],
+        value_names: ['Pixel Lanczos', 'Latent Nearest Exact'] };
+    mCreate.renderQuickParams();
+    let row = document.querySelector('.m-upscale-row');
+    let selects = row.querySelectorAll('.m-choice-select');
+    let out = {
+        rowDisplay: getComputedStyle(row).display,
+        count: selects.length,
+        covered: mCreate.coveredParams.includes('refinerupscale')
+            && mCreate.coveredParams.includes('refinerupscalemethod'),
+        scaleOptions: [...selects[0].options].map(o => `${o.value}=${o.textContent}`).join('|'),
+        methodOptions: [...selects[1].options].map(o => `${o.value}=${o.textContent}`).join('|'),
+        helperExamples: MCreate.upscaleScaleOptions(mState.paramMeta['refinerupscale'], '1').join(','),
+        helperGenerated: MCreate.upscaleScaleOptions({ min: 0.25, view_max: 4 }, '1.1').join(',')
+    };
+    selects[0].value = '1.5';
+    selects[0].dispatchEvent(new Event('change'));
+    selects[1].value = 'latent-nearest-exact';
+    selects[1].dispatchEvent(new Event('change'));
+    out.picked = `${mState.params['refinerupscale']},${mState.params['refinerupscalemethod']}`;
+    mCreate.renderAdvChips();
+    out.chips = [...document.querySelectorAll('.m-adv-chip')].map(c => c.textContent)
+        .filter(t => /upscale/i.test(t)).length;
+    selects[0].value = '1';
+    selects[0].dispatchEvent(new Event('change'));
+    out.afterOff = 'refinerupscale' in mState.params;
+    delete mState.params['refinerupscalemethod'];
+    delete mState.paramMeta['refinerupscale'];
+    delete mState.paramMeta['refinerupscalemethod'];
+    mCreate.renderQuickParams();
+    return out;
+});
+check('upscale row appears once refiner params are advertised', upscale.rowDisplay != 'none' && upscale.count == 2, JSON.stringify(upscale));
+check('upscale scale options always use preferred ladder (union Examples)', upscale.scaleOptions == '1=Upscale: Off|1.25=Upscale: 1.25x|1.5=Upscale: 1.5x|1.75=Upscale: 1.75x|2=Upscale: 2x|2.5=Upscale: 2.5x|3=Upscale: 3x|4=Upscale: 4x', upscale.scaleOptions);
+check('upscaleScaleOptions keeps preferred ladder when Examples present', upscale.helperExamples == '1,1.25,1.5,1.75,2,2.5,3,4', upscale.helperExamples);
+check('upscaleScaleOptions keeps unknown current on preferred ladder', upscale.helperGenerated == '1,1.1,1.25,1.5,1.75,2,2.5,3,4', upscale.helperGenerated);
+check('picking upscale scale and method writes raw values', upscale.picked == '1.5,latent-nearest-exact', upscale.picked);
+check('picked upscale params are covered, not Advanced chips', upscale.covered && upscale.chips == 0, JSON.stringify(upscale));
+check('selecting upscale Off (1) clears the param', upscale.afterOff == false, `${upscale.afterOff}`);
 
 // The Prefix row is hidden unless the session advertises the `filenameprefix` param - renderQuickParams
 // recomputes `prefixRow.style.display` from `mState.paramMeta` on every render (m_create.js). This harness

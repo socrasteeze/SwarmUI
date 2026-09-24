@@ -545,7 +545,8 @@ html:has(.m-body) {
    second row pushes Generate further below the fold for no information the row cannot hold. nowrap keeps
    them side by side instead of letting the stepper drop under the select at narrow widths. */
 .m-res-row,
-.m-sampler-row {
+.m-sampler-row,
+.m-upscale-row {
     flex-wrap: nowrap;
 }
 .m-choice-select {
@@ -1497,6 +1498,16 @@ html:has(.m-body) {
     align-items: center;
     justify-content: center;
 }
+.m-lora-step-toggle {
+    display: flex;
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 0.5rem;
+}
+.m-lora-step-toggle .m-seg-button {
+    flex: 1 1 50%;
+    min-width: 0;
+}
 .m-lora-weight-picker {
     display: grid;
     grid-template-columns: 44px minmax(4rem, 1fr) 44px;
@@ -2012,10 +2023,12 @@ html:has(.m-body) {
 }
 .m-viewer-actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
     padding: 0.6rem 0.6rem calc(0.6rem + var(--m-safe-bottom)) 0.6rem;
-    justify-content: center;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 .m-viewer-action {
     background: var(--background-panel);
@@ -2023,7 +2036,9 @@ html:has(.m-body) {
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     min-height: 44px;
-    padding: 0 0.8rem;
+    padding: 0 0.65rem;
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 /* --- Models tab --- */
@@ -2201,6 +2216,11 @@ html:has(.m-body) {
     display: flex;
     gap: 0.4rem;
     align-items: center;
+}
+.m-preset-param-value .m-preset-field {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
 }
 .m-preset-param-remove {
     flex: 0 0 44px;

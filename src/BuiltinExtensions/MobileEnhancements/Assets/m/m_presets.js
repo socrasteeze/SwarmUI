@@ -8,11 +8,10 @@
  * Server-side this is entirely the existing routes (AddNewPreset with is_edit, DuplicatePreset,
  * DeletePreset). Nothing here needs a new API.
  *
- * The parameter map is edited as raw key/value text rows on purpose. A preset can carry any parameter the
- * server knows, including ones this client has no control for, and a typed editor would have to either hide
- * those or grow a widget per type - so the honest first version shows every entry, labels it with the
- * server's display name where there is one, and lets the value be typed. Nothing is silently dropped on
- * save: a row this client cannot render specially still round-trips exactly as it arrived. */
+ * The parameter map is edited as labelled rows: dropdowns when ListT2IParams ships `values` (and a fixed
+ * scale picklist for Refiner/SeedVR upscale), free text otherwise. A preset can carry any parameter the
+ * server knows, including ones this client has no dedicated Create control for - those stay free text so
+ * nothing is silently dropped on save. */
 class MPresets {
 
     /** Parameters never captured by "Use current Create settings".
@@ -118,7 +117,7 @@ class MPresets {
                 let row = mUI.el('button', 'm-preset-row-item');
                 let text = mUI.el('span', 'm-preset-row-text');
                 text.appendChild(mUI.el('span', 'm-preset-row-name',
-                    `${preset.is_starred ? '★ ' : ''}${preset.title}`));
+                    `${preset.is_starred ? '\u2605 ' : ''}${preset.title}`));
                 let count = Object.keys(preset.param_map || {}).length;
                 text.appendChild(mUI.el('span', 'm-preset-row-sub', preset.description
                     ? `${preset.description}` : `${count} parameter${count == 1 ? '' : 's'}`));
@@ -170,7 +169,7 @@ class MPresets {
         let starred = preset ? !!preset.is_starred : false;
         let starButton = mUI.el('button', 'm-preset-star-toggle');
         let renderStar = () => {
-            starButton.textContent = starred ? '★ Starred' : '☆ Not starred';
+            starButton.textContent = starred ? '\u2605 Starred' : '\u2606 Not starred';
             starButton.setAttribute('aria-pressed', `${starred}`);
         };
         renderStar();
@@ -196,20 +195,11 @@ class MPresets {
                 label.title = key;
                 row.appendChild(label);
                 let valueWrap = mUI.el('div', 'm-preset-param-value');
-                let input = mUI.el('input', 'm-preset-field');
-                input.type = 'text';
-                input.value = working[key] ?? '';
-                input.placeholder = this.fl2vaSuggestion(key);
                 // An empty field is not saved, so the section never adds anything the user did not type.
-                input.addEventListener('input', () => {
-                    if (input.value == '') {
-                        delete working[key];
-                    }
-                    else {
-                        working[key] = input.value;
-                    }
-                });
-                valueWrap.appendChild(input);
+                valueWrap.appendChild(this.buildParamValueControl(key, working, {
+                    'allowEmpty': true,
+                    'placeholder': this.fl2vaSuggestion(key)
+                }));
                 row.appendChild(valueWrap);
                 videoList.appendChild(row);
             }
@@ -231,13 +221,7 @@ class MPresets {
                 label.title = key;
                 row.appendChild(label);
                 let valueWrap = mUI.el('div', 'm-preset-param-value');
-                let input = mUI.el('input', 'm-preset-field');
-                input.type = 'text';
-                input.value = working[key];
-                input.addEventListener('input', () => {
-                    working[key] = input.value;
-                });
-                valueWrap.appendChild(input);
+                valueWrap.appendChild(this.buildParamValueControl(key, working));
                 let remove = mUI.el('button', 'm-preset-param-remove', '×');
                 remove.setAttribute('aria-label', `Remove ${MCreate.paramLabel(key)}`);
                 remove.addEventListener('click', () => {
@@ -381,6 +365,68 @@ class MPresets {
 
     /** The suggested starting value shown as a placeholder for an FL2VA video parameter, or '' if none. Video Model
      * suggests the first listed model whose name contains "fl2va". */
+
+    /** Value control for one preset parameter. Dropdown when the server advertises `values`, fixed-scale
+     * picklist for Refiner/SeedVR upscale, otherwise a free-text field. `allowEmpty` (video section) deletes
+     * the key when cleared so untouched suggestions are never saved. */
+    buildParamValueControl(key, working, opts = {}) {
+        let meta = mState.paramMeta[key];
+        let current = working[key] ?? '';
+        let allowEmpty = !!opts.allowEmpty;
+        let onCommit = (val) => {
+            if (allowEmpty && val == '') {
+                delete working[key];
+            }
+            else {
+                working[key] = val;
+            }
+        };
+        let values = null;
+        let names = null;
+        if (meta && meta.values && meta.values.length > 0) {
+            values = meta.values.map(v => `${v}`);
+            names = meta.value_names && meta.value_names.length == meta.values.length
+                ? meta.value_names : values;
+        }
+        else if (MCreate.UpscaleScaleParams.includes(key)) {
+            values = MCreate.upscaleScaleOptions(meta, current);
+            names = values;
+        }
+        if (values) {
+            let select = document.createElement('select');
+            select.className = 'm-preset-field';
+            if (allowEmpty) {
+                let blank = document.createElement('option');
+                blank.value = '';
+                blank.textContent = opts.placeholder || '';
+                select.appendChild(blank);
+            }
+            for (let i = 0; i < values.length; i++) {
+                let option = document.createElement('option');
+                option.value = values[i];
+                option.textContent = names[i];
+                select.appendChild(option);
+            }
+            let shown = `${current}`;
+            if (shown != '' && !values.includes(shown)) {
+                let extra = document.createElement('option');
+                extra.value = shown;
+                extra.textContent = shown;
+                select.appendChild(extra);
+            }
+            select.value = shown;
+            select.addEventListener('change', () => onCommit(select.value));
+            return select;
+        }
+        let input = mUI.el('input', 'm-preset-field');
+        input.type = 'text';
+        input.value = current;
+        if (opts.placeholder) {
+            input.placeholder = opts.placeholder;
+        }
+        input.addEventListener('input', () => onCommit(input.value));
+        return input;
+    }
     fl2vaSuggestion(key) {
         let entry = MPresets.FL2VAParams.find(([k]) => k == key);
         if (!entry) {

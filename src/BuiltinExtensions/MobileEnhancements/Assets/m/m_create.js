@@ -24,7 +24,7 @@ class MCreate {
         this.lastCompleted = [];
         /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip).
          * width/height are covered because the resolution controls own them - see mState.buildGenInput. */
-        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'steps', 'cfgscale', 'sampler', 'scheduler', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix'];
+        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'steps', 'cfgscale', 'sampler', 'scheduler', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix', 'refinerupscale', 'refinerupscalemethod'];
         /** Quick picklists keyed by parameter id (sampler, scheduler): {select, label}. */
         this.choiceSelects = {};
         /** Quick numeric steppers keyed by parameter id. */
@@ -1292,6 +1292,12 @@ class MCreate {
         this.samplerRow.appendChild(this.buildChoiceSelect('sampler', 'Sampler'));
         this.samplerRow.appendChild(this.buildChoiceSelect('scheduler', 'Scheduler'));
         wrap.appendChild(this.samplerRow);
+        // Refiner upscale is a number on the server, but day-to-day use is a few fixed scales - a picklist
+        // beats a free-text Advanced chip. Method sits beside it when ComfyUI advertises the dropdown.
+        this.upscaleRow = mUI.el('div', 'm-quick-row m-upscale-row');
+        this.upscaleRow.appendChild(this.buildUpscaleScaleSelect());
+        this.upscaleRow.appendChild(this.buildChoiceSelect('refinerupscalemethod', 'Method'));
+        wrap.appendChild(this.upscaleRow);
         // Keep framing and size independently adjustable with matching steppers.
         let resRow = mUI.el('div', 'm-quick-row m-res-row');
         resRow.appendChild(this.buildAspectStepper());
@@ -1432,6 +1438,82 @@ class MCreate {
         return wrap;
     }
 
+    /** Numeric upscale params that get a fixed-scale picklist rather than a free-text field. */
+    static UpscaleScaleParams = ['refinerupscale', 'seedvrupscale'];
+
+    /** Preferred upscale scales. Always used (clipped to min/view_max), then unioned with Examples. */
+    static UpscaleScalePrefs = ['1', '1.25', '1.5', '1.75', '2', '2.5', '3', '4'];
+
+    /** Scale options for Refiner/SeedVR upscale: always the preferred ladder clipped to
+     * min..view_max (falling back to max), unioned with any Examples and the current value
+     * so a preset or typed value is never silently rewritten. Server Examples stay in the
+     * list but no longer replace the fuller ladder. */
+    static upscaleScaleOptions(meta, current) {
+        let options = [];
+        let min = Number.isFinite(parseFloat(meta && meta.min)) ? parseFloat(meta.min) : 0.25;
+        let viewMax = Number.isFinite(parseFloat(meta && meta.view_max)) ? parseFloat(meta.view_max) : NaN;
+        let max = Number.isFinite(viewMax) && viewMax > 0 ? viewMax
+            : (Number.isFinite(parseFloat(meta && meta.max)) ? parseFloat(meta.max) : 4);
+        for (let scale of MCreate.UpscaleScalePrefs) {
+            let n = parseFloat(scale);
+            if (n >= min && n <= max) {
+                options.push(scale);
+            }
+        }
+        if (meta && meta.examples && meta.examples.length > 0) {
+            for (let v of meta.examples) {
+                let s = `${v}`;
+                if (!options.includes(s)) {
+                    options.push(s);
+                }
+            }
+        }
+        let cur = current != null && `${current}` != '' ? `${current}` : '';
+        if (cur && !options.includes(cur)) {
+            options.push(cur);
+        }
+        options.sort((a, b) => parseFloat(a) - parseFloat(b));
+        return options;
+    }
+
+    /** Compact scale picklist for refinerupscale. Selecting 1 clears the param (server IgnoreIf is "1"). */
+    buildUpscaleScaleSelect() {
+        let select = document.createElement('select');
+        select.className = 'm-choice-select';
+        select.setAttribute('aria-label', 'Upscale');
+        select.addEventListener('change', () => {
+            let val = select.value;
+            if (val == '' || val == '1') {
+                delete mState.params['refinerupscale'];
+            }
+            else {
+                mState.params['refinerupscale'] = val;
+            }
+            mState.changed();
+        });
+        this.upscaleScaleSelect = select;
+        return select;
+    }
+
+    /** Syncs the refiner upscale scale picklist. Hidden when the session does not advertise the param. */
+    renderUpscaleScaleSelect() {
+        let select = this.upscaleScaleSelect;
+        let meta = mState.paramMeta['refinerupscale'];
+        if (!meta) {
+            select.style.display = 'none';
+            return false;
+        }
+        select.style.display = '';
+        let current = `${mState.params['refinerupscale'] ?? ''}`;
+        if (current == '') {
+            current = '1';
+        }
+        let scales = MCreate.upscaleScaleOptions(meta, current);
+        let entries = scales.map(scale => [scale, scale == '1' ? 'Upscale: Off' : `Upscale: ${scale}x`]);
+        MCreate.syncOptions(select, entries, current);
+        return true;
+    }
+
     /** Builds one labelled picklist for a string param with server-supplied values. Options come from
      * paramMeta in renderQuickParams, so the control is a bare label until ListT2IParams lands. */
     buildChoiceSelect(paramId, label) {
@@ -1526,12 +1608,19 @@ class MCreate {
             }
             control.value.textContent = `${shown}`;
         }
-        let anyChoice = false;
-        for (let paramId in this.choiceSelects) {
-            anyChoice = this.renderChoiceSelect(paramId) || anyChoice;
+        let anySampler = false;
+        for (let paramId of ['sampler', 'scheduler']) {
+            if (this.choiceSelects[paramId]) {
+                anySampler = this.renderChoiceSelect(paramId) || anySampler;
+            }
         }
         // Hidden outright rather than left as an empty row when the backend offers neither (no ComfyUI).
-        this.samplerRow.style.display = anyChoice ? '' : 'none';
+        this.samplerRow.style.display = anySampler ? '' : 'none';
+        let anyUpscale = this.renderUpscaleScaleSelect();
+        if (this.choiceSelects['refinerupscalemethod']) {
+            anyUpscale = this.renderChoiceSelect('refinerupscalemethod') || anyUpscale;
+        }
+        this.upscaleRow.style.display = anyUpscale ? '' : 'none';
         this.renderResolutionControls();
     }
 
@@ -1775,31 +1864,43 @@ class MCreate {
         return this.loraMap.get(name) || this.loraMap.get(MState.stripModelExt(name)) || { 'name': name };
     }
 
-    /** Soft architecture preference for the LoRA picker: matching-folder rows first, others still shown.
-     * Unlike filterByArch (used by the checkpoint picker), this never hides another known group - Adam still
-     * wants flux/qwen/anima LoRAs visible while an architecture is selected for presets. */
-    static sortArchFirst(list, subtype) {
-        if (!mState.archFilter) {
-            return list;
-        }
-        let filter = mState.archFilter.toLowerCase();
-        let matched = [];
-        let rest = [];
-        for (let model of list) {
-            if (MState.modelFolder(model.name).toLowerCase() == filter) {
-                matched.push(model);
-            }
-            else {
-                rest.push(model);
-            }
-        }
-        return matched.concat(rest);
-    }
-
-    /** LoRA bottom sheet: active LoRAs with exact 0.05-step weight pickers, add-picker from ListModels. */
+    /** LoRA bottom sheet: active LoRAs with weight pickers (+/- step toggle 0.05|0.5), add-picker from ListModels. */
     openLoraSheet() {
         mState.refreshUserData();
         let content = mUI.el('div', 'm-lora-sheet');
+        let weightStep = 0.05;
+        try {
+            let saved = sessionStorage.getItem('m-lora-weight-step');
+            if (saved == '0.5' || saved == '0.05') {
+                weightStep = parseFloat(saved);
+            }
+        }
+        catch (e) {
+            /* sessionStorage may be unavailable */
+        }
+        let stepToggle = mUI.el('div', 'm-lora-step-toggle m-seg-group');
+        stepToggle.setAttribute('aria-label', 'LoRA weight step');
+        let syncStepToggle = () => {
+            for (let btn of stepToggle.querySelectorAll('.m-seg-button')) {
+                btn.classList.toggle('m-selected', parseFloat(btn.dataset.step) == weightStep);
+            }
+        };
+        for (let step of [0.05, 0.5]) {
+            let btn = mUI.el('button', 'm-seg-button', `${step}`);
+            btn.dataset.step = `${step}`;
+            btn.setAttribute('aria-label', `Weight step ${step}`);
+            btn.addEventListener('click', () => {
+                weightStep = step;
+                try {
+                    sessionStorage.setItem('m-lora-weight-step', `${step}`);
+                }
+                catch (e) { /* ignore */ }
+                syncStepToggle();
+            });
+            stepToggle.appendChild(btn);
+        }
+        syncStepToggle();
+        content.appendChild(stepToggle);
         let renderRows;
         let listWrap = mUI.el('div', 'm-lora-rows');
         content.appendChild(listWrap);
@@ -1836,7 +1937,7 @@ class MCreate {
                 weight.appendChild(minus);
                 let input = document.createElement('input');
                 input.type = 'number';
-                input.inputMode = 'decimal';
+                // No inputMode='decimal' — many mobile keyboards omit the minus key on that layout.
                 input.min = '-2';
                 input.max = '2';
                 input.step = '0.05';
@@ -1848,15 +1949,25 @@ class MCreate {
                 plus.setAttribute('aria-label', `Increase ${mUI.modelName(loras[i].name)} weight`);
                 weight.appendChild(plus);
                 let setWeight = (value) => {
-                    let next = Math.min(2, Math.max(-2, Math.round(value * 20) / 20));
+                    let next = parseFloat(value);
+                    if (!Number.isFinite(next)) {
+                        next = 0;
+                    }
+                    // Type-in and +/- both clamp to [-2, 2] at 0.05 precision (finest).
+                    // +/- adds/subtracts the sheet-level step (0.05 or 0.5); type-in keeps any
+                    // 0.05-snapped value including negatives (e.g. -0.7 stays until +/-).
+                    next = Math.min(2, Math.max(-2, Math.round(next * 20) / 20));
+                    if (Object.is(next, -0)) {
+                        next = 0;
+                    }
                     input.value = `${parseFloat(next.toFixed(2))}`;
                     let cur = mState.getLoras();
                     cur[i].weight = next;
                     mState.setLoras(cur);
                 };
-                minus.addEventListener('click', () => setWeight((parseFloat(input.value) || 0) - 0.05));
-                plus.addEventListener('click', () => setWeight((parseFloat(input.value) || 0) + 0.05));
-                input.addEventListener('change', () => setWeight(parseFloat(input.value) || 0));
+                minus.addEventListener('click', () => setWeight((parseFloat(input.value) || 0) - weightStep));
+                plus.addEventListener('click', () => setWeight((parseFloat(input.value) || 0) + weightStep));
+                input.addEventListener('change', () => setWeight(input.value));
                 row.appendChild(weight);
                 listWrap.appendChild(row);
             }
@@ -1870,6 +1981,7 @@ class MCreate {
         addWrap.appendChild(search);
         let results = mUI.el('div', 'm-lora-results');
         addWrap.appendChild(results);
+        let archState = { 'showAll': false };
         let compatState = { 'showAll': false };
         let renderResults = () => {
             results.innerHTML = '';
@@ -1879,11 +1991,15 @@ class MCreate {
                     : mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
-            // Architecture is a soft sort for LoRAs (matching folder first), not a hard hide - other
-            // architecture LoRAs stay visible while a preset-group arch is selected. Checkpoint compat stays
-            // the hard gate: a Qwen checkpoint must not leave 17k SDXL LoRAs in a list it can never load.
-            let sorted = MCreate.sortArchFirst(this.loraList, 'LoRA');
-            let compat = this.applyModelFilter(sorted, 'LoRA', compatState, renderResults);
+            // Two gates, in order, each with its own escape hatch. Architecture is a hard folder/class
+            // filter (matching the banner: Limited to X, N hidden). Checkpoint compat is automatic and
+            // independent: a Qwen checkpoint must not leave 17k SDXL LoRAs in a list it can never load.
+            // Other-arch LoRAs (Flux/Klein under SDXL, etc.) stay hidden until the user taps show all.
+            let arch = this.applyArchFilter(this.loraList, 'LoRA', archState, renderResults);
+            if (arch.row) {
+                results.appendChild(arch.row);
+            }
+            let compat = this.applyModelFilter(arch.list, 'LoRA', compatState, renderResults);
             if (compat.row) {
                 results.appendChild(compat.row);
             }
