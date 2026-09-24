@@ -599,7 +599,7 @@ html:has(.m-body) {
    the prompt box down the screen as it progresses. That was the old behaviour: the block was display: none
    until the first tile, then ~40dvh of it appeared at the top of the panel, under the user's thumb. --- */
 .m-create-preview {
-    --m-preview-h: 30dvh;
+    --m-preview-h: 45dvh;
     background: var(--background);
     padding-bottom: 0.4rem;
     margin-bottom: 0.2rem;
