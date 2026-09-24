@@ -81,8 +81,12 @@ public class MobileEnhancementsExtension : Extension
         OtherAssets.Add("Assets/m/m_autocomplete.js");
         // Prompt Coach (docs/SimplePromptCoach-Plan.md). Registered here so it is fetchable at
         // /ExtensionFile/MobileEnhancementsExtension/Assets/m/m_coach.js; index.html is what actually orders
-        // it into the page (after TagDex, before m_create.js).
+        // it into the page (after TagDex, before m_create.js). Coach's prompt-header pill was replaced by
+        // Prompt Enhance; Coach itself remains under More.
         OtherAssets.Add("Assets/m/m_coach.js");
+        // Prompt Enhance for /simple (m_enhance.js). Same API as the desktop PromptEnhance extension;
+        // MobileEnhancements only owns the /simple chrome that calls it.
+        OtherAssets.Add("Assets/m/m_enhance.js");
         OtherAssets.Add("Assets/m/m_image_edit.js");
         OtherAssets.Add("Assets/m/m_create.js");
         OtherAssets.Add("Assets/m/m_presets.js");

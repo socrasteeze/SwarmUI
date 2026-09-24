@@ -29,8 +29,8 @@ owned here.
    | 1 | Manual override | Wins over everything. Set from the panel's profile dropdown (see "Manual profile override" below), or an override naming an unknown profile ID is a hard miss - disabled, with the bad ID in the reason, not a silent fall-through. |
    | 2 | Configured folder/filename override | A user-editable list of regexes over the model's lowercased, subfolder-relative name, loaded from `Data/PromptEnhance/overrides.json` (see "Folder/filename override config" below). Ships with `^ill/` → `illustriousxl` and `^anima/` → `anima`. |
    | 3 | Built-in filename override | The original single fallback regex, anchored on a name segment (`(^|[\/_ -])(illustrious\|noob)`). Catches Illustrious/NoobAI checkpoints outside a configured folder. |
-   | 4 | Model class ID map | `qwen-image-edit` and `qwen-image-edit-plus` both map to `qwen-image-edit-2511`. Plain `qwen-image` T2I is deliberately left unmapped - it has no profile written for it. |
-   | 5 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`, `krea-2`, `minimax-h3`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the override map/filename fallback handle IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (already covered by the class map). |
+   | 4 | Model class ID map | `qwen-image` → `qwen-image` (plain T2I, including Rapid AIO merges); `qwen-image-2.1` → `qwen-image-2.1`; `qwen-image-edit` and `qwen-image-edit-plus` both → `qwen-image-edit-2511`. |
+   | 5 | Compat class ID map | Only for compat classes that are exactly one architecture wide: `flux-2-klein-4b`, `flux-2-klein-9b`, `anima`, `krea-2`, `minimax-h3`, `qwen-image-2.1`. Never `stable-diffusion-xl-v1` (shared by IllustriousXL and vanilla SDXL - the override map/filename fallback handle IllustriousXL, vanilla SDXL has no profile) or `qwen-image` (spans edit + non-edit; plain T2I and edit stay on the class map, never this compat map). |
    | 6 | None | The Enhance button is disabled, with the reason shown in its tooltip. The panel's manual override dropdown (row 1) is always reachable from here regardless - see "Manual profile override" below. |
 
 2. **Shielding.** Before the prompt is sent to the writer, `PromptEnhanceClient.Shield` extracts every
@@ -239,8 +239,8 @@ an **Automatic** default. Selecting one persists the choice per user (same `loca
 mode control) and is sent as `profile_override` on every subsequent status check and `EnhancePrompt`
 request - both from the panel and from the auto-enhance path in `auto` mode.
 
-This is the escape hatch for a model with no automatic resolution at all (eg a plain SDXL checkpoint, or a
-plain `qwen-image` T2I model, both deliberately left unmapped): the Enhance button always opens the panel
+This is the escape hatch for a model with no automatic resolution at all (eg a plain SDXL checkpoint,
+deliberately left unmapped): the Enhance button always opens the panel
 regardless of its enabled state, so the dropdown is reachable even when automatic resolution found nothing.
 Picking a profile there re-checks status with the override included, which resolves and re-enables the
 button; if the panel was already open, it also re-sends the request immediately with the new override.
@@ -264,7 +264,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.3.0+d6d484bc`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.4.0+qwen-t2i`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 

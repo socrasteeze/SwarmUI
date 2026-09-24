@@ -377,11 +377,11 @@ class MCreate {
         genSplit.appendChild(this.genTargetButton);
         genBar.appendChild(genSplit);
         panel.appendChild(genBar);
-        // Prompt Coach entry point (m_coach.js): a slim, non-modal pill beside the heading. It never launches
-        // a wizard on model/LoRA selection - tapping it is the only way its bottom sheet opens.
+        // Prompt Enhance entry point (m_enhance.js): slim pill beside the heading, same spot Coach used to
+        // occupy. Coach (including Tags tools) remains under More > Prompt Coach.
         let promptHead = mUI.el('div', 'm-prompt-head');
         promptHead.appendChild(mUI.el('span', 'm-prompt-head-label', 'Prompt'));
-        promptHead.appendChild(mCoach.buildPill());
+        promptHead.appendChild(mEnhance.buildPill());
         panel.appendChild(promptHead);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
         this.promptBox = mUI.el('textarea', 'm-prompt-box');

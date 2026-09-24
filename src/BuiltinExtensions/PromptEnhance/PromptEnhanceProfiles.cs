@@ -68,6 +68,8 @@ public static class PromptEnhanceProfiles
         ["illustriousxl"] = "IllustriousXL",
         ["krea-2"] = "Krea 2",
         ["minimax-h3"] = "MiniMax H3",
+        ["qwen-image"] = "Qwen Image",
+        ["qwen-image-2.1"] = "Qwen Image 2.1",
         ["qwen-image-edit-2511"] = "Qwen Image Edit 2511"
     };
 
@@ -80,6 +82,8 @@ public static class PromptEnhanceProfiles
         ["illustriousxl"] = "IllustriousXL",
         ["krea-2"] = "Krea-2",
         ["minimax-h3"] = "MiniMax-H3",
+        ["qwen-image"] = "Qwen-Image",
+        ["qwen-image-2.1"] = "Qwen-Image-2.1",
         ["qwen-image-edit-2511"] = "Qwen-Image-Edit-2511"
     };
 
@@ -107,25 +111,29 @@ public static class PromptEnhanceProfiles
     /// unambiguously identify one writer target on their own.</summary>
     private static readonly Dictionary<string, string> ModelClassMap = new()
     {
+        ["qwen-image"] = "qwen-image",
+        ["qwen-image-2.1"] = "qwen-image-2.1",
         ["qwen-image-edit"] = "qwen-image-edit-2511",
         ["qwen-image-edit-plus"] = "qwen-image-edit-2511"
     };
 
     /// <summary>Maps a loaded model's <see cref="T2IModelCompatClass.ID"/> to a profile, only for compat
     /// classes that are exactly one architecture wide. Never map <c>qwen-image</c> (spans both edit and non-edit
-    /// classes, already covered by <see cref="ModelClassMap"/>) or <c>stable-diffusion-xl-v1</c> (spans
-    /// IllustriousXL and vanilla SDXL - the filename override map handles IllustriousXL, and vanilla SDXL has
-    /// no profile at all). Anima, Krea 2 and MiniMax H3 each have their own distinct compat class (<c>anima</c>,
-    /// <c>krea-2</c>, <c>minimax-h3</c>, see <c>T2IModelClassSorter.cs</c>) and so are mapped here directly rather
-    /// than via a filename guess. The H3 compat class covers both the FL2VA and Ref2VA checkpoints; the profile
-    /// itself handles the Ref2VA case.</summary>
+    /// classes - plain T2I is covered by <see cref="ModelClassMap"/> on the <c>qwen-image</c> class ID, and edit
+    /// variants stay on the edit profile) or <c>stable-diffusion-xl-v1</c> (spans IllustriousXL and vanilla SDXL
+    /// - the filename override map handles IllustriousXL, and vanilla SDXL has no profile at all). Anima, Krea 2,
+    /// MiniMax H3 and Qwen Image 2.1 each have their own distinct compat class (<c>anima</c>, <c>krea-2</c>,
+    /// <c>minimax-h3</c>, <c>qwen-image-2.1</c>, see <c>T2IModelClassSorter.cs</c>) and so are mapped here
+    /// directly rather than via a filename guess. The H3 compat class covers both the FL2VA and Ref2VA
+    /// checkpoints; the profile itself handles the Ref2VA case.</summary>
     private static readonly Dictionary<string, string> CompatClassMap = new()
     {
         ["flux-2-klein-4b"] = "flux2-klein-4b",
         ["flux-2-klein-9b"] = "flux2-klein-9b",
         ["anima"] = "anima",
         ["krea-2"] = "krea-2",
-        ["minimax-h3"] = "minimax-h3"
+        ["minimax-h3"] = "minimax-h3",
+        ["qwen-image-2.1"] = "qwen-image-2.1"
     };
 
     /// <summary>Registers a profile. Safe to call from another extension's <c>OnInit</c>. Stamps
