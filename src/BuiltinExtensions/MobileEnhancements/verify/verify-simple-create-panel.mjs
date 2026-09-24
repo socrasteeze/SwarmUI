@@ -678,6 +678,19 @@ const arch = await page.evaluate(() => {
 check('arch filter: other known group folders are hidden',
     arch == 'ill/keep.safetensors,misc/unknown.safetensors', arch);
 
+// LoRA picker keeps other-architecture rows visible: matching folder is sorted first, nothing is hidden.
+const archSort = await page.evaluate(() => {
+    mState.archFilter = 'ill';
+    let list = [
+        { name: 'qwen/other.safetensors' },
+        { name: 'ill/keep.safetensors' },
+        { name: 'anima/also.safetensors' }
+    ];
+    return MCreate.sortArchFirst(list, 'LoRA').map(m => m.name).join(',');
+});
+check('LoRA arch sort: matching folder first, other architectures still shown',
+    archSort == 'ill/keep.safetensors,qwen/other.safetensors,anima/also.safetensors', archSort);
+
 // The checkpoint's own compat class is a second, automatic gate: picking a Qwen checkpoint must not leave
 // SDXL LoRAs in a picker that can never load them, and it must not need the architecture picker to be set.
 // Unknown class is kept (unknown is not incompatible) and so is a starred model, exactly as in filterByArch.

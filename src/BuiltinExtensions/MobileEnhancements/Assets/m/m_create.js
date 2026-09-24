@@ -1670,9 +1670,12 @@ class MCreate {
      * 19.6k-LoRA library was answered with 9 of its 48 `qwen/` files, with nothing on screen saying anything
      * was missing and no search term that could reach the rest: the reported "I'm on a Qwen model but no
      * Qwen LoRAs appear". ListT2IParams already ships every LoRA name and class id at boot, uncapped and
-     * cheap, so that is the corpus and the ListModels rows are a metadata overlay on top of it. A LoRA
-     * outside the overlay is still searchable, selectable and generatable - it shows as a plain name until
-     * its metadata is in. */
+     * cheap, so that is the corpus and the ListModels rows are a metadata overlay on top of it.
+     *
+     * Titles/previews live on that overlay. A single root ListModels call only paints the first cap-budget
+     * of the whole library, so enrichLoraMetadata fetches per top-level folder (each folder gets its own
+     * cap) and mergeLoraMetadata writes titles onto the stubs. Until that lands a row is still searchable
+     * and selectable - it just shows as a plain name. */
     indexLoras(list) {
         let rich = new Map();
         for (let model of (list || [])) {
@@ -1691,12 +1694,106 @@ class MCreate {
         }
     }
 
+    /** Overlays ListModels metadata (title, preview, trigger) onto the uncapped corpus stubs. */
+    mergeLoraMetadata(files) {
+        if (!this.loraList || !this.loraMap) {
+            this.indexLoras(files);
+            return;
+        }
+        let added = false;
+        for (let model of (files || [])) {
+            let existing = this.loraMap.get(model.name) || this.loraMap.get(MState.stripModelExt(model.name));
+            if (existing) {
+                for (let prop in model) {
+                    existing[prop] = model[prop];
+                }
+                // Search corpus cached the old title-less text; drop it so the next keystroke reindexes.
+                existing._mSearchText = null;
+            }
+            else {
+                this.loraList.push(model);
+                this.loraMap.set(model.name, model);
+                this.loraMap.set(MState.stripModelExt(model.name), model);
+                added = true;
+            }
+        }
+        if (added) {
+            this.loraList.sort((a, b) => `${a.name}`.localeCompare(`${b.name}`));
+        }
+    }
+
+    /** Loads titles/previews without losing LoRAs past ModelListSanityCap.
+     * Root is fetched at depth 1 (folders + loose files), then each top-level folder is fetched with its
+     * own depth budget so a 19k library is not truncated to an arbitrary 5k slice of the root. */
+    enrichLoraMetadata(onDone) {
+        let pending = 0;
+        let anyError = false;
+        let finish = () => {
+            if (--pending > 0) {
+                return;
+            }
+            onDone(anyError);
+        };
+        let fetchPath = (path) => {
+            pending++;
+            genericRequest('ListModels', {
+                'path': path,
+                'depth': path == '' ? 1 : MCreate.ListDepth,
+                'subtype': 'LoRA',
+                'sortBy': 'Name',
+                'allowRemote': true,
+                'sortReverse': false,
+                'dataImages': false
+            }, data => {
+                this.mergeLoraMetadata(data.files || []);
+                if (path == '') {
+                    for (let folder of (data.folders || [])) {
+                        // Nested paths arrive inside the deep per-folder fetch; only enqueue top-level ones.
+                        if (`${folder}`.includes('/')) {
+                            continue;
+                        }
+                        fetchPath(folder);
+                    }
+                }
+                finish();
+            }, 0, () => {
+                anyError = true;
+                finish();
+            });
+        };
+        if (!this.loraList) {
+            this.indexLoras([]);
+        }
+        fetchPath('');
+    }
+
     /** The cached LoRA model object for a name, or a minimal stand-in before the list has loaded. */
     loraByName(name) {
         if (!this.loraMap) {
             return { 'name': name };
         }
         return this.loraMap.get(name) || this.loraMap.get(MState.stripModelExt(name)) || { 'name': name };
+    }
+
+    /** Soft architecture preference for the LoRA picker: matching-folder rows first, others still shown.
+     * Unlike filterByArch (used by the checkpoint picker), this never hides another known group - Adam still
+     * wants flux/qwen/anima LoRAs visible while an architecture is selected for presets. */
+    static sortArchFirst(list, subtype) {
+        if (!mState.archFilter) {
+            return list;
+        }
+        let filter = mState.archFilter.toLowerCase();
+        let matched = [];
+        let rest = [];
+        for (let model of list) {
+            if (MState.modelFolder(model.name).toLowerCase() == filter) {
+                matched.push(model);
+            }
+            else {
+                rest.push(model);
+            }
+        }
+        return matched.concat(rest);
     }
 
     /** LoRA bottom sheet: active LoRAs with exact 0.05-step weight pickers, add-picker from ListModels. */
@@ -1773,7 +1870,6 @@ class MCreate {
         addWrap.appendChild(search);
         let results = mUI.el('div', 'm-lora-results');
         addWrap.appendChild(results);
-        let archState = { 'showAll': false };
         let compatState = { 'showAll': false };
         let renderResults = () => {
             results.innerHTML = '';
@@ -1783,17 +1879,11 @@ class MCreate {
                     : mUI.el('div', 'm-strip-empty', 'Loading...'));
                 return;
             }
-            // Two gates, in order, each with its own escape hatch. The architecture picker is the manual one
-            // and runs first; the checkpoint's own compat class runs second and needs no picking at all -
-            // selecting a Qwen checkpoint should not leave 17k SDXL LoRAs in the list it can never load.
-            // In practice only one of the two ever has anything to say, since an arch filter that is set
-            // usually already covers what the checkpoint rules out, and a gate that hides nothing shows
-            // no row.
-            let arch = this.applyArchFilter(this.loraList, 'LoRA', archState, renderResults);
-            if (arch.row) {
-                results.appendChild(arch.row);
-            }
-            let compat = this.applyModelFilter(arch.list, 'LoRA', compatState, renderResults);
+            // Architecture is a soft sort for LoRAs (matching folder first), not a hard hide - other
+            // architecture LoRAs stay visible while a preset-group arch is selected. Checkpoint compat stays
+            // the hard gate: a Qwen checkpoint must not leave 17k SDXL LoRAs in a list it can never load.
+            let sorted = MCreate.sortArchFirst(this.loraList, 'LoRA');
+            let compat = this.applyModelFilter(sorted, 'LoRA', compatState, renderResults);
             if (compat.row) {
                 results.appendChild(compat.row);
             }
@@ -1835,17 +1925,19 @@ class MCreate {
         content.appendChild(addWrap);
         let loadLoraList = () => {
             this.loraListError = false;
+            // Uncapped boot corpus first so search works immediately; titles/previews overlay per folder.
+            this.indexLoras([]);
+            renderRows();
             renderResults();
-            genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'LoRA', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
-                this.indexLoras(data.files || []);
-                // The active rows are re-rendered too: until this lands they show a bare name, with no
-                // thumbnail and no trigger phrase, because those live on the model object not in params.
+            this.enrichLoraMetadata(failed => {
+                // Partial folder failures still leave a usable list; only flag Retry when nothing enriched.
+                if (failed && !this.loraList.some(model => model.title || model.preview_image || model.trigger_phrase)) {
+                    this.loraListError = true;
+                    showError('Could not load LoRA metadata.');
+                }
+                // Active rows re-render too: titles/thumbs/triggers live on the model object, not in params.
                 renderRows();
                 renderResults();
-            }, 0, err => {
-                this.loraListError = true;
-                renderResults();
-                showError(err);
             });
         };
         if (!this.loraList) {
