@@ -69,7 +69,7 @@ class MUI {
      * (mState.starredFirst), and a list whose order changes with nothing on screen explaining why reads as a
      * list in a random order - this is what says "these are your stars". */
     starBadge(subtype, name) {
-        return mState.isStarred(subtype, name) ? this.el('span', 'm-model-star', 'â˜…') : null;
+        return mState.isStarred(subtype, name) ? this.el('span', 'm-model-star', '\u2605') : null;
     }
 
     /** Thumbnail for a model, or null when it has no preview image. */

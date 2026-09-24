@@ -236,6 +236,20 @@ class MImages {
                 mUI.warn(`${label} failed: ${error}`);
             });
         };
+        addAction('Reuse Params', () => {
+            // Same contract as Reset Params: applyMetadata rewrites the prompt boxes via render() without
+            // an 'input' event, so clear any leftover autocomplete chips first.
+            if (typeof mAutoComplete != 'undefined') {
+                mAutoComplete.hide();
+            }
+            if (entry.metadata && mState.applyMetadata(entry.metadata)) {
+                close();
+                location.hash = 'create';
+            }
+            else {
+                mUI.warn('No readable parameters on this image.');
+            }
+        });
         addAction('Prompt Img', () => {
             let attached = this.promptPathEntry(entry.fullsrc || entry.url);
             if (attached) {

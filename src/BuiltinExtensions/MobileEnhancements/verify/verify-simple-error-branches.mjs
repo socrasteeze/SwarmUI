@@ -43,7 +43,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[TOAST]', TOAST)
     .replaceAll('[VARY]', '1');
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js', 'm_grid.js',
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_create.js', 'm_grid.js',
     'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
@@ -291,6 +291,59 @@ await actionByLabel('Star');
 const unsaved = await page.evaluate(() => ({ toast: window.__toastText(), calls: window.__calls.length }));
 check('an unsaved image reports why rather than pressing a dead button',
     unsaved.calls == 0 && `${unsaved.toast}`.includes('cannot be starred'), JSON.stringify(unsaved));
+
+// ---- History viewer: Reuse Params (restored after deb7d40c trimmed it for row wrap) ----
+await page.evaluate(() => {
+    window.__clearToast();
+    for (let overlay of document.querySelectorAll('.m-viewer')) {
+        overlay.remove();
+    }
+    mState.paramMeta = {
+        prompt: { type: 'text' },
+        negativeprompt: { type: 'text' },
+        steps: { type: 'integer' },
+        seed: { type: 'integer' }
+    };
+    mState.params = { prompt: 'old', images: '1', seed: '-1' };
+    mImages.openViewer({
+        src: 'img.png',
+        fullsrc: 'raw/img.png',
+        url: 'View/local/raw/img.png',
+        metadata: JSON.stringify({
+            sui_image_params: { prompt: 'resolved cats', negativeprompt: 'blur', steps: 28, seed: 42 },
+            sui_extra_data: { original_prompt: 'a cat', original_negativeprompt: 'blurry' }
+        })
+    }, 0);
+});
+const reuseLabels = await page.evaluate(() =>
+    [...document.querySelectorAll('.m-viewer-action')].map(b => b.textContent));
+check('viewer action row includes Reuse Params again', reuseLabels.includes('Reuse Params'), JSON.stringify(reuseLabels));
+await actionByLabel('Reuse Params');
+const reused = await page.evaluate(() => ({
+    viewerOpen: !!document.querySelector('.m-viewer'),
+    hash: location.hash,
+    prompt: mState.params.prompt,
+    negative: mState.params.negativeprompt,
+    steps: mState.params.steps,
+    toast: window.__toastText()
+}));
+check('Reuse Params loads original prompt/negative and closes the viewer',
+    !reused.viewerOpen && reused.hash == '#create' && reused.prompt == 'a cat' && reused.negative == 'blurry' && `${reused.steps}` == '28',
+    JSON.stringify(reused));
+
+await page.evaluate(() => {
+    window.__clearToast();
+    mImages.openViewer({ src: 'x', fullsrc: 'raw/x.png', url: 'View/local/raw/x.png', metadata: '' }, 0);
+});
+await actionByLabel('Reuse Params');
+const reuseEmpty = await page.evaluate(() => ({
+    viewerOpen: !!document.querySelector('.m-viewer'),
+    toast: window.__toastText(),
+    prompt: mState.params.prompt
+}));
+check('Reuse Params with no metadata warns and leaves the viewer open',
+    reuseEmpty.viewerOpen && `${reuseEmpty.toast}`.includes('No readable parameters') && reuseEmpty.prompt == 'a cat',
+    JSON.stringify(reuseEmpty));
 
 await browser.close();
 const failed = results.filter(result => !result.pass).length;

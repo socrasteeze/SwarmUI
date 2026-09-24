@@ -43,7 +43,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[TOAST]', TOAST)
     .replaceAll('[VARY]', '1');
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js', 'm_grid.js', 'm_presets.js',
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_create.js', 'm_grid.js', 'm_presets.js',
     'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
@@ -351,6 +351,64 @@ const filtered = await page.evaluate(() => {
     return [...__sheet().querySelectorAll('.m-preset-row-sub')].map(e => e.textContent);
 });
 check('a parameter the preset already sets is not offered again', !filtered.includes('sampler'), filtered.join(','));
+
+// Parameter value controls: dropdown when meta.values exist, fixed-scale picklist for refinerupscale,
+// free text otherwise. Current values outside the list are preserved as an extra option.
+const valueControls = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    window.__savedMeta = mState.paramMeta;
+    mState.paramMeta = Object.assign({}, mState.paramMeta, {
+        sampler: { name: 'Sampler', default: 'euler', values: ['euler', 'dpmpp_2m'],
+            value_names: ['Euler', 'DPM++ 2M'] },
+        refinerupscale: { name: 'Refiner Upscale', default: '1', min: 0.25, max: 8, view_max: 4,
+            step: 0.25, examples: ['1', '1.5', '2'] },
+        steps: { name: 'Steps', default: '20' }
+    });
+    mPresets.openEditor({
+        title: 'Scale Test', description: '', is_starred: false,
+        param_map: { sampler: 'euler', refinerupscale: '1.25', steps: '20' }
+    }, () => {});
+    let rows = [...__sheet().querySelectorAll('.m-preset-params .m-preset-param-row')];
+    let byKey = {};
+    for (let row of rows) {
+        let key = row.querySelector('.m-preset-param-label').title;
+        let field = row.querySelector('.m-preset-field');
+        byKey[key] = {
+            tag: field.tagName,
+            value: field.value,
+            options: field.tagName == 'SELECT'
+                ? [...field.options].map(o => o.value).join('|') : null
+        };
+    }
+    let sampler = rows.find(r => r.querySelector('.m-preset-param-label').title == 'sampler')
+        .querySelector('.m-preset-field');
+    sampler.value = 'dpmpp_2m';
+    sampler.dispatchEvent(new Event('change'));
+    let upscale = rows.find(r => r.querySelector('.m-preset-param-label').title == 'refinerupscale')
+        .querySelector('.m-preset-field');
+    upscale.value = '2';
+    upscale.dispatchEvent(new Event('change'));
+    __sheet().querySelector('.m-edit-save-button').click();
+    return byKey;
+});
+await page.waitForFunction(() => window.__calls.some(c => c.route == 'AddNewPreset' && c.args.title == 'Scale Test'));
+const scalePayload = await page.evaluate(() => {
+    mState.paramMeta = window.__savedMeta;
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return window.__calls.find(c => c.route == 'AddNewPreset' && c.args.title == 'Scale Test').args.param_map;
+});
+check('params with values render as a select', valueControls.sampler.tag == 'SELECT'
+    && valueControls.sampler.options == 'euler|dpmpp_2m', JSON.stringify(valueControls.sampler));
+check('refinerupscale is a picklist that keeps an unknown current value', valueControls.refinerupscale.tag == 'SELECT'
+    && valueControls.refinerupscale.options == '1|1.25|1.5|1.75|2|2.5|3|4'
+    && valueControls.refinerupscale.value == '1.25', JSON.stringify(valueControls.refinerupscale));
+check('free-form params stay text inputs', valueControls.steps.tag == 'INPUT', JSON.stringify(valueControls.steps));
+check('select changes are saved into the param map', scalePayload.sampler == 'dpmpp_2m'
+    && scalePayload.refinerupscale == '2' && scalePayload.steps == '20', JSON.stringify(scalePayload));
 const fl2va = await page.evaluate(() => {
     let savedModels = mState.models;
     mState.models = { 'Stable-Diffusion': [['sdxl/base.safetensors', 'stable-diffusion-xl-v1-base'], ['minimax/minimax_h3_fl2va_pruned_int8.safetensors', 'minimax-h3']] };

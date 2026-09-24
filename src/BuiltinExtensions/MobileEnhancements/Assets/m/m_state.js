@@ -30,6 +30,9 @@ class MState {
         this.modelClasses = {};
         /** subtype -> Map(strippedName -> compat class), built lazily by compatMapFor. */
         this.compatCache = {};
+        /** folder (lower) -> Set(compat class) across checkpoints+LoRAs, built lazily by folderCompatClasses.
+         * Cleared with compatCache whenever models/modelClasses reload. */
+        this.folderCompatCache = null;
         /** Wildcard file names from ListT2IParams (used by prompt autocompletion). */
         this.wildcards = [];
         /** Numeric width/height ratio backing a 'Custom' aspect selection (eg matched from a prompt image),
@@ -96,6 +99,7 @@ class MState {
         this.wildcards = data.wildcards || [];
         // Both inputs to the compat map just changed.
         this.compatCache = {};
+        this.folderCompatCache = null;
     }
 
     /** The selected model's native side length, via its model class's standard width. 0 when unknown. */
@@ -633,6 +637,37 @@ class MState {
         return classes;
     }
 
+    /** Leading-folder -> compat classes actually seen on disk (checkpoints and LoRAs that have a class).
+     * Complements presetGroups(): a LoRA folder like Klein/ with no presets still counts as a known
+     * architecture once any model in it declares a class, so Limited mode can hard-hide it. */
+    folderCompatClasses() {
+        if (this.folderCompatCache) {
+            return this.folderCompatCache;
+        }
+        let map = new Map();
+        let add = (subtype) => {
+            for (let entry of (this.models[subtype] || [])) {
+                let folder = MState.modelFolder(entry[0]).toLowerCase();
+                if (!folder) {
+                    continue;
+                }
+                let clazz = this.modelClasses[entry[1]];
+                let compat = clazz && clazz.compat_class ? clazz.compat_class : null;
+                if (!compat) {
+                    continue;
+                }
+                if (!map.has(folder)) {
+                    map.set(folder, new Set());
+                }
+                map.get(folder).add(compat);
+            }
+        };
+        add('Stable-Diffusion');
+        add('LoRA');
+        this.folderCompatCache = map;
+        return map;
+    }
+
     /** Filters a ListModels result down to the selected architecture.
      *
      * Folder prefix is the first gate, because that is how the architecture picker itself is defined (the
@@ -655,20 +690,34 @@ class MState {
         let filter = this.archFilter.toLowerCase();
         let groups = new Set(this.presetGroups().map(g => g.toLowerCase()));
         let classes = this.groupCompatClasses(this.archFilter);
-        let starred = this.starredNameSet(subtype);
+        let folderClasses = this.folderCompatClasses();
+        // Starred models are NOT exempt: Limited means Limited. A starred Flux LoRA under an ill filter
+        // used to stay on screen with a star badge and look like the filter was broken. Favourites still
+        // float to the top of whatever remains (starredFirst after this filter), and "tap to show all"
+        // restores the full list including starred other-arch rows.
         return models.filter(model => {
-            // A starred model is always shown, exactly like an active preset survives the same filter: the
-            // user explicitly pinned it, and a misclassified folder or compat class silently hiding a
-            // favourite is the worst failure this filter can produce.
-            if (starred.has(MState.starKey(model.name))) {
-                return true;
-            }
             let folder = MState.modelFolder(model.name).toLowerCase();
             if (folder == filter) {
                 return true;
             }
+            // Other known preset-group folders are out (ill vs qwen vs anima), even when untagged.
             if (folder && groups.has(folder)) {
                 return false;
+            }
+            // Folders with no presets (Klein/, Flux/ laid out by hand) still count as other-architecture
+            // once any model in them declares a class that this arch group's checkpoints never use.
+            if (folder && folderClasses.has(folder) && classes.size > 0) {
+                let observed = folderClasses.get(folder);
+                let overlap = false;
+                for (let c of observed) {
+                    if (classes.has(c)) {
+                        overlap = true;
+                        break;
+                    }
+                }
+                if (observed.size > 0 && !overlap) {
+                    return false;
+                }
             }
             if (classes.size == 0) {
                 return true;
@@ -695,19 +744,44 @@ class MState {
      * narrower gate than the architecture picker and independent of it: the picker is a manual folder/class
      * filter the user chooses, this follows whatever checkpoint is selected without being asked.
      *
-     * Unknown class is kept, exactly as in filterByArch: a model with no class is not the same as an
-     * incompatible one, and Swarm reports null for anything it could not read metadata for. Starred models
-     * are kept for the same reason they survive the arch filter - the user pinned them deliberately, and a
-     * misread class silently hiding a favourite is the worst thing this filter can do. */
+     * Folder prefix mirrors filterByArch: a LoRA in a *different* known preset group whose group's
+     * checkpoints resolve to other compat classes is out, even when its own class metadata is missing or
+     * wrong. That is what stopped Flux/Klein rows from surviving an SDXL "Limited to ..." banner just
+     * because ListT2IParams had no class for them. Untagged models outside any known group are still kept
+     * (unknown is not incompatible). Starred models are NOT exempt: Limited means Limited (same rule as
+     * filterByArch). Favourites still sort first among survivors; "tap to show all" reveals the rest. */
     filterByModelCompat(models, subtype) {
         let compat = this.activeModelCompat();
         if (!compat) {
             return models;
         }
-        let starred = this.starredNameSet(subtype);
+        let groupClasses = new Map();
+        for (let group of this.presetGroups()) {
+            groupClasses.set(group.toLowerCase(), this.groupCompatClasses(group));
+        }
+        let folderClasses = this.folderCompatClasses();
         return models.filter(model => {
-            if (starred.has(MState.starKey(model.name))) {
-                return true;
+            let folder = MState.modelFolder(model.name).toLowerCase();
+            // Preset-group folder whose checkpoints never use this compat: hard-hide (incl. untagged/wrong).
+            if (folder && groupClasses.has(folder)) {
+                let classes = groupClasses.get(folder);
+                if (classes.size > 0 && !classes.has(compat)) {
+                    return false;
+                }
+                if (classes.has(compat)) {
+                    return true;
+                }
+            }
+            // Same rule from disk evidence: Klein/Flux folders with no presets still hard-hide under an
+            // SDXL checkpoint when every classed model in that folder is a different architecture.
+            if (folder && folderClasses.has(folder)) {
+                let observed = folderClasses.get(folder);
+                if (observed.size > 0 && !observed.has(compat)) {
+                    return false;
+                }
+                if (observed.has(compat)) {
+                    return true;
+                }
             }
             let modelCompat = this.compatClassOf(subtype, model.name);
             return !modelCompat || modelCompat == compat;
