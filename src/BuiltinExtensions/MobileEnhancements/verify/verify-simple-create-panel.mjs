@@ -45,7 +45,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[VARY]', '1');
 
 /** Client modules served from the real tree. m_app.js is deliberately absent - booting needs a server. */
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,
@@ -106,7 +106,15 @@ await page.addInitScript(() => {
     window.getUserSetting = () => '';
     window.__tagDexFavorite = false;
     window.genericRequest = (route, args, callback) => {
-        if (route == 'TagDexListSources') {
+        if (route == 'ListPromptEnhanceStatus') {
+            callback({
+                pack_version: 'test',
+                profiles: [{ id: 'anima', display: 'Anima', target_model: 'Anima' }],
+                endpoints: [{ id: 'writer', kind: 'ollama', model: 'test', enabled: true, healthy: true }],
+                resolved: { profile: 'anima', reason: null, strengths: ['faithful', 'expand', 'full'] }
+            });
+        }
+        else if (route == 'TagDexListSources') {
             callback({
                 sources: [
                     { id: 'danbooru_character', label: 'Danbooru characters', kind: 'character', present: true },
@@ -942,7 +950,24 @@ check('Custom is one endpoint and preserves matched dimensions when clamped', re
 check('stepping away from Custom clears the matched ratio', restoredAspect.exited == '3:1'
     && restoredAspect.ratio == 0, JSON.stringify(restoredAspect));
 
+
+// ---- Prompt-header chrome: Enhance replaced Coach ----
+const promptChrome = await page.evaluate(() => {
+    let enhance = document.querySelector('.m-enhance-pill');
+    let coach = document.querySelector('.m-coach-pill');
+    let more = (mUI.moreItems || []).some(item => item.label == 'Prompt Coach');
+    return {
+        enhanceOnHead: !!(enhance && enhance.parentElement.classList.contains('m-prompt-head')),
+        enhanceText: enhance ? enhance.textContent : '',
+        coachPillGone: !coach,
+        moreCoach: more
+    };
+});
+check('prompt header hosts Enhance, not Coach', promptChrome.enhanceOnHead && promptChrome.coachPillGone, JSON.stringify(promptChrome));
+check('Prompt Coach remains reachable from More', promptChrome.moreCoach, JSON.stringify(promptChrome));
+
 await browser.close();
+
 
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

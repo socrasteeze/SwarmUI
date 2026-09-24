@@ -59,7 +59,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[TOAST]', TOAST)
     .replaceAll('[VARY]', '1');
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js',
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_create.js',
     'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
@@ -105,7 +105,15 @@ await page.addInitScript(() => {
     window.isValidMediaPath = () => true;
     window.permissions = { hasPermission: () => true };
     window.genericRequest = (route, args, callback) => {
-        if (route == 'GetMyUserData') {
+        if (route == 'ListPromptEnhanceStatus') {
+            callback({
+                pack_version: 'test',
+                profiles: [{ id: 'anima', display: 'Anima', target_model: 'Anima' }],
+                endpoints: [{ id: 'writer', kind: 'ollama', model: 'test', enabled: true, healthy: true }],
+                resolved: { profile: null, reason: 'No profile for this model', strengths: ['faithful', 'expand', 'full'] }
+            });
+        }
+        else if (route == 'GetMyUserData') {
             callback({ presets: [], starred_models: {} });
         }
         else if (route == 'ListT2IParams') {
@@ -132,7 +140,7 @@ await page.addInitScript(() => {
 page.on('pageerror', e => check(`no page errors (${e.message})`, false));
 
 await page.goto('http://localhost/simple');
-await page.waitForFunction(() => typeof mCreate != 'undefined' && typeof mCoach != 'undefined');
+await page.waitForFunction(() => typeof mCreate != 'undefined' && typeof mCoach != 'undefined' && typeof mEnhance != 'undefined');
 await page.evaluate(() => {
     let panel = document.querySelector('.m-panel[data-mtab="create"]');
     panel.classList.add('m-tab-active');
@@ -158,15 +166,21 @@ await page.evaluate(() => {
     });
 });
 
-// The entry point is a slim pill on the prompt heading row - not a modal, and not something model selection
-// can open by itself. Tapping it is the only route into the sheet.
+// Coach vacated the prompt-header pill for Prompt Enhance; it registers under More and opens only via
+// openSheet() (or that More row). The sheet must not auto-open on model selection.
 const entry = await page.evaluate(() => {
-    let pill = document.querySelector('.m-coach-pill');
-    return { present: !!pill, onHeadRow: !!(pill && pill.parentElement.classList.contains('m-prompt-head')),
-        sheets: document.querySelectorAll('.m-sheet').length };
+    let enhance = document.querySelector('.m-enhance-pill');
+    let coachPill = document.querySelector('.m-coach-pill');
+    let more = (mUI.moreItems || []).some(item => item.label == 'Prompt Coach');
+    return {
+        enhanceOnHead: !!(enhance && enhance.parentElement.classList.contains('m-prompt-head')),
+        coachPillGone: !coachPill,
+        moreRegistered: more,
+        sheets: document.querySelectorAll('.m-sheet').length
+    };
 });
-check('the coach entry point is a pill on the prompt heading row and opens nothing by itself',
-    entry.present && entry.onHeadRow && entry.sheets == 0, JSON.stringify(entry));
+check('Enhance owns the prompt-header pill; Coach is under More and opens nothing by itself',
+    entry.enhanceOnHead && entry.coachPillGone && entry.moreRegistered && entry.sheets == 0, JSON.stringify(entry));
 
 // ---- 1. Profile resolution: Anima official name vs a generic (non-Anima) checkpoint ----
 const officialResolve = await page.evaluate(() => {
@@ -267,7 +281,7 @@ await page.evaluate(() => {
     mCoach.setProfileOverride('anima-base');
     mState.params['prompt'] = 'a cat, sitting';
 });
-await page.click('.m-coach-pill');
+await page.evaluate(() => mCoach.openSheet());
 await page.waitForSelector('.m-coach-sheet .m-coach-apply-button');
 let dialogText = '';
 page.once('dialog', async dialog => {

@@ -148,6 +148,47 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(reason, Is.Null);
     }
 
+    /// <summary>Plain Qwen Image T2I (including Rapid AIO merges classified as <c>qwen-image</c>) resolves
+    /// through <c>ModelClassMap</c> to the Qwen Image writer profile — not the edit profile.</summary>
+    [Test]
+    public void Resolve_ModelClassMap_QwenImageT2IResolves()
+    {
+        PromptEnhanceProfiles.Register(new("qwen-image", "Qwen Image", "Qwen-Image", "qwen-image system text"));
+        PromptEnhanceProfiles.Register(new("qwen-image-edit-2511", "Qwen Image Edit 2511", "Qwen-Image-Edit-2511", "edit system text"));
+        T2IModel model = MakeModel("qwen/Qwen-Rapid-AIO-NSFW-v19.safetensors", "qwen-image", "qwen-image");
+        PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+        Assert.That(resolved?.ID, Is.EqualTo("qwen-image"));
+        Assert.That(reason, Is.Null);
+    }
+
+    /// <summary>Qwen Image Edit Plus still resolves to the edit profile even though it shares the
+    /// <c>qwen-image</c> compat class with plain T2I — proving we did not map that compat class.</summary>
+    [Test]
+    public void Resolve_ModelClassMap_QwenImageEditStillUsesEditProfile()
+    {
+        PromptEnhanceProfiles.Register(new("qwen-image", "Qwen Image", "Qwen-Image", "qwen-image system text"));
+        PromptEnhanceProfiles.Register(new("qwen-image-edit-2511", "Qwen Image Edit 2511", "Qwen-Image-Edit-2511", "edit system text"));
+        T2IModel model = MakeModel("qwen/qwenImageEdit2511_bf16.safetensors", "qwen-image-edit-plus", "qwen-image");
+        PromptEnhanceProfile resolved = PromptEnhanceProfiles.Resolve(model, null, out string reason);
+        Assert.That(resolved?.ID, Is.EqualTo("qwen-image-edit-2511"));
+        Assert.That(reason, Is.Null);
+    }
+
+    /// <summary>Qwen Image 2.1 resolves through both its own class ID and its exclusive compat class.</summary>
+    [Test]
+    public void Resolve_QwenImage21_ResolvesViaClassAndCompat()
+    {
+        PromptEnhanceProfiles.Register(new("qwen-image-2.1", "Qwen Image 2.1", "Qwen-Image-2.1", "qwen21 system text"));
+        T2IModel byClass = MakeModel("qwen/qwen_image_2.1_bf16.safetensors", "qwen-image-2.1", "qwen-image-2.1");
+        PromptEnhanceProfile resolvedClass = PromptEnhanceProfiles.Resolve(byClass, null, out string reasonClass);
+        Assert.That(resolvedClass?.ID, Is.EqualTo("qwen-image-2.1"));
+        Assert.That(reasonClass, Is.Null);
+        T2IModel byCompatOnly = MakeModel("qwen/some_qwen21_variant.safetensors", "qwen-image-2.1-variant", "qwen-image-2.1");
+        PromptEnhanceProfile resolvedCompat = PromptEnhanceProfiles.Resolve(byCompatOnly, null, out string reasonCompat);
+        Assert.That(resolvedCompat?.ID, Is.EqualTo("qwen-image-2.1"));
+        Assert.That(reasonCompat, Is.Null);
+    }
+
     /// <summary>MiniMax H3 has its own compat class, so both its FL2VA and Ref2VA checkpoints resolve through
     /// <c>CompatClassMap</c>, and the profile is flagged as a video profile.</summary>
     [Test]

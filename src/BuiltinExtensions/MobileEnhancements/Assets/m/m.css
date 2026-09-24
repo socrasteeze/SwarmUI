@@ -986,8 +986,8 @@ html:has(.m-body) {
     margin-right: -0.2rem;
 }
 
-/* Prompt Coach entry point (m_coach.js): a heading row with the "Prompt" label and the coach pill on the
-   same line, mirroring the plan's `Prompt: Anima Aesthetic · Tags   2 advisories ›` mock. */
+/* Prompt heading row: label + Prompt Enhance pill (m_enhance.js). Coach used to live here; it moved to
+   More > Prompt Coach so this slot could host Enhance. */
 .m-prompt-head {
     display: flex;
     align-items: center;
@@ -1209,6 +1209,120 @@ html:has(.m-body) {
     border-radius: 0.5rem;
     padding: 0.4rem 0.6rem;
     min-height: 40px;
+}
+
+
+/* Prompt Enhance entry (m_enhance.js): same heading-row slot Coach vacated. Disabled state stays tappable
+   so the sheet (and its profile override) remains reachable when auto-resolution finds nothing. */
+.m-enhance-pill {
+    background: var(--background-panel);
+    color: var(--text-soft);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    padding: 0.25rem 0.7rem;
+    font-size: 12px;
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-height: 32px;
+}
+.m-enhance-pill-disabled {
+    opacity: 0.75;
+}
+.m-enhance-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    max-height: 75vh;
+    overflow-y: auto;
+}
+.m-enhance-title {
+    font-weight: bold;
+    font-size: 16px;
+}
+.m-enhance-status {
+    color: var(--text-soft);
+    font-size: 12px;
+}
+.m-enhance-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.m-enhance-label {
+    color: var(--text-soft);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.m-enhance-select {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    font-size: max(16px, 100%);
+    min-height: 40px;
+}
+.m-enhance-preview {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    font-size: max(16px, 100%);
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 8rem;
+}
+.m-enhance-notes {
+    color: var(--text-soft);
+    font-size: 12px;
+    white-space: pre-wrap;
+}
+.m-enhance-conflict {
+    color: #fff;
+    background: #a33;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    font-size: 13px;
+    white-space: pre-wrap;
+}
+.m-enhance-passthrough {
+    color: var(--text-soft);
+    background: var(--background-panel);
+    border: 1px dashed var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    font-size: 13px;
+}
+.m-enhance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.m-enhance-apply {
+    background: var(--emphasis);
+    color: var(--emphasis-text, #fff);
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.8rem;
+    min-height: 40px;
+    font-size: 14px;
+}
+.m-enhance-apply-disabled {
+    opacity: 0.45;
+}
+.m-enhance-secondary {
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.8rem;
+    min-height: 40px;
+    font-size: 14px;
 }
 
 /* Sits above the prompt box, in normal flow. It used to be sticky to the bottom of the panel, which put it

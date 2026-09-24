@@ -545,8 +545,7 @@ function check(name, pass, detail) {
         button: makeFakeElement(),
         buttonEnabled: true
     });
-    // Automatic resolution finds nothing - eg one of the plain-SDXL or qwen-image checkpoints outside any
-    // folder/class map.
+    // Automatic resolution finds nothing - eg a plain SDXL checkpoint outside any folder/class map.
     host.applyStatusToButton({
         profiles: [{ id: 'illustriousxl', display: 'IllustriousXL', target_model: 'IllustriousXL' }],
         endpoints: [{ id: 'writer', kind: 'ollama', model: 'm', enabled: true, healthy: true }],

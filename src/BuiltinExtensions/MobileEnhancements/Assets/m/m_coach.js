@@ -1365,3 +1365,8 @@ class MCoach {
 }
 
 mCoach = new MCoach();
+// Coach vacated the prompt-header pill for Prompt Enhance; keep the sheet reachable from More so Tags
+// tools (normalize / ordered draft) and profile advisories are not orphaned.
+if (typeof mUI != 'undefined' && mUI.registerMoreItem) {
+    mUI.registerMoreItem('Prompt Coach', () => mCoach.openSheet());
+}
