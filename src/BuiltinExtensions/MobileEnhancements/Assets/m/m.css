@@ -11,9 +11,13 @@
    bars - no fixed body, no overflow:hidden shell, no JS layout engine. */
 
 /* Clamp the document itself, not only .m-body: overflow-x on body alone can still leave html/scrollWidth
-   wider than the visual viewport, which is the other documented path to iOS focus-zoom (shrink-to-fit). */
+   wider than the visual viewport, which is the other documented path to iOS focus-zoom (shrink-to-fit).
+   clip, not hidden: hidden on both html and body stops body's overflow propagating to the viewport, which
+   turns body into its own nested scroll container (overflow-y computes to auto) that iOS lets you drag
+   sideways. clip clamps without creating a scroll container. hidden stays first as the pre-iOS-16 fallback. */
 html:has(.m-body) {
     overflow-x: hidden;
+    overflow-x: clip;
     max-width: 100%;
 }
 
@@ -39,6 +43,7 @@ html:has(.m-body) {
        separate way iOS ends up scaling on focus. The panels and strips all scroll inside themselves, so
        nothing here should ever overflow sideways - this makes that structural rather than a hope. */
     overflow-x: hidden;
+    overflow-x: clip;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
 }
@@ -231,6 +236,10 @@ html:has(.m-body) {
     display: none;
     height: 100%;
     overflow-y: auto;
+    /* Explicit, because overflow-y: auto alone computes overflow-x to auto as well: then any child even 1px
+       too wide (iOS sizes selects and ellipsized text differently from Chromium) lets the whole panel be
+       dragged sideways on iOS. Panels only ever scroll vertically; the strips inside scroll themselves. */
+    overflow-x: hidden;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     padding: 0.5rem 0.7rem;
@@ -590,7 +599,7 @@ html:has(.m-body) {
    the prompt box down the screen as it progresses. That was the old behaviour: the block was display: none
    until the first tile, then ~40dvh of it appeared at the top of the panel, under the user's thumb. --- */
 .m-create-preview {
-    --m-preview-h: 24dvh;
+    --m-preview-h: 30dvh;
     background: var(--background);
     padding-bottom: 0.4rem;
     margin-bottom: 0.2rem;
@@ -659,11 +668,27 @@ html:has(.m-body) {
     display: none;
 }
 .m-resolved-label {
+    display: block;
+    width: 100%;
+    min-height: 32px;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
     color: var(--text-soft);
-    margin-bottom: 0.2rem;
+}
+.m-resolved-label::before {
+    content: '\25BE\00a0';
+}
+.m-resolved-collapsed .m-resolved-label::before {
+    content: '\25B8\00a0';
+}
+.m-resolved-collapsed .m-resolved-text,
+.m-resolved-collapsed .m-resolved-wildcards {
+    display: none;
 }
 .m-resolved-text {
     /* Selectable so the fully-resolved text can be copied out for comparison - the whole point of this

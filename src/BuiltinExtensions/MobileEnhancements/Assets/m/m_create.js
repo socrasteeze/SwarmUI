@@ -62,7 +62,29 @@ class MCreate {
      * previewWrap so it is its own block in normal flow, appearing once below the images. */
     buildResolvedPrompt() {
         this.resolvedWrap = mUI.el('div', 'm-resolved-prompt m-resolved-empty');
-        this.resolvedWrap.appendChild(mUI.el('div', 'm-resolved-label', 'Resolved prompt'));
+        // The label doubles as the collapse toggle. Collapsed by default so the readout costs one line under
+        // the canvas; the choice persists per device.
+        let collapsed = true;
+        try {
+            collapsed = localStorage.getItem('m_client_resolved_collapsed') != '0';
+        }
+        catch (e) { /* ignore */ }
+        let toggle = mUI.el('button', 'm-resolved-label', 'Resolved prompt');
+        toggle.type = 'button';
+        let applyCollapsed = () => {
+            this.resolvedWrap.classList.toggle('m-resolved-collapsed', collapsed);
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        };
+        toggle.addEventListener('click', () => {
+            collapsed = !collapsed;
+            applyCollapsed();
+            try {
+                localStorage.setItem('m_client_resolved_collapsed', collapsed ? '1' : '0');
+            }
+            catch (e) { /* ignore */ }
+        });
+        this.resolvedWrap.appendChild(toggle);
+        applyCollapsed();
         this.resolvedText = mUI.el('div', 'm-resolved-text');
         this.resolvedWrap.appendChild(this.resolvedText);
         this.resolvedWildcards = mUI.el('div', 'm-resolved-wildcards');
