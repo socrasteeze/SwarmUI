@@ -195,7 +195,10 @@ class MTagDexClass {
 
     /** Resolves and atomically applies one library recipe to /simple state. */
     applyLibraryVariant(variant) {
-        genericRequest('TagDexLibraryResolve', { variantId: variant.id, revision: variant.revision, model: mState.params['model'] || '' }, data => {
+        // The model a generation would actually use: a preset that sets the model leaves params['model'] empty, and
+        // resolving against nothing reported every variant as incompatible.
+        let effectiveModel = mState.buildGenInput()['model'] || '';
+        genericRequest('TagDexLibraryResolve', { variantId: variant.id, revision: variant.revision, model: effectiveModel }, data => {
             let missing = (data.loras || []).filter(lora => lora.status == 'not_downloaded');
             let unverified = (data.loras || []).filter(lora => lora.status == 'unverified');
             if (missing.length > 0) {
@@ -206,7 +209,10 @@ class MTagDexClass {
                 mUI.warn(`${unverified.length} LoRA(s) need identity verification.`);
                 return;
             }
-            if (!data.ready) {
+            // A prompt-only variant (no LoRAs, no checkpoint) has nothing to check against the model, so an
+            // unverified checkpoint - no model chosen yet - must not block it.
+            let promptOnly = (data.loras || []).length == 0 && !variant.data.recipe.checkpoint;
+            if (!data.ready && !(promptOnly && data.checkpoint_status == 'unverified')) {
                 mUI.warn(data.checkpoint_status == 'incompatible' ? 'Checkpoint Incompatible.' : 'Model stack is incompatible.');
                 return;
             }

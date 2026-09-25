@@ -132,7 +132,9 @@ await page.addInitScript(() => {
             callback({ ok: true, record: { id: args.id, revision: 'r1', data: { name: args.id == 'lib1' ? 'Aria (Robot)' : 'Solo', series: '' } }, variants });
         }
         else if (route == 'TagDexLibraryResolve') {
-            callback({ ok: true, ready: true, loras: [] });
+            // Mirrors the server: without a model the checkpoint cannot be verified, so the stack is not ready.
+            window.__resolveModel = args.model;
+            callback({ ok: true, ready: !!args.model, checkpoint_status: args.model ? 'ready' : 'unverified', loras: [] });
         }
         else if (route == 'TagDexLibraryCharacters') {
             let rows = [{ id: 'lib1', data: { name: 'Aria (Robot)', series: 'Zenless Zone Zero', archived: false } },
@@ -310,10 +312,27 @@ const libraryCard = await page.evaluate(async () => {
         soloStar: solo ? solo.querySelector('.m-tagdex-favorite-button').textContent : null,
         wideButtons: tab.querySelectorAll('.m-tagdex-browse-results .m-wide-button').length
     };
+    // The model comes from an active preset, the usual case: params['model'] itself is empty.
+    let savedPresets = [mState.presets, mState.activePresets, mState.params['model']];
+    delete mState.params['model'];
+    mState.presets = [{ title: 'anima/Turbo', param_map: { model: 'anima/krakenNOIR_v6' } }];
+    mState.activePresets = ['anima/Turbo'];
     mState.params['prompt'] = '1girl';
     aria.querySelector('.m-tagdex-card-main').click();
     await wait();
     out.prompt = mState.params['prompt'];
+    out.resolveModel = window.__resolveModel;
+    // No model at all: a prompt-only variant still applies.
+    mState.presets = [];
+    mState.activePresets = [];
+    mState.params['prompt'] = '1girl';
+    aria.querySelector('.m-tagdex-card-main').click();
+    await wait();
+    out.promptNoModel = mState.params['prompt'];
+    [mState.presets, mState.activePresets] = savedPresets;
+    if (savedPresets[2]) {
+        mState.params['model'] = savedPresets[2];
+    }
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
     }
@@ -340,6 +359,8 @@ check('added-character stars show the library favorite', libraryCard.ariaStar ==
     JSON.stringify(libraryCard));
 check('tapping an added character adds its variant to the prompt', libraryCard.prompt == '1girl, ariarobzzz, robot joints',
     JSON.stringify(libraryCard));
+check('applying resolves against the model a preset sets', libraryCard.resolveModel == 'anima/krakenNOIR_v6', JSON.stringify(libraryCard));
+check('a prompt-only variant applies even with no model chosen', libraryCard.promptNoModel == '1girl, ariarobzzz, robot joints', JSON.stringify(libraryCard));
 check('tapping a character with no variant opens its variants to add one', libraryCard.soloOpened == 'Solo', JSON.stringify(libraryCard));
 
 // ---- Add Character sheet: themed like the other /simple sheets, no Archived box on a new character ----
