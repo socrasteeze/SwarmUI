@@ -336,8 +336,17 @@ class MState {
      * <segment:/<object:/<region: tag, with the tag block re-appended, matching the genpage behavior.
      * loras/loraweights concat onto existing values instead of replacing. Everything else overwrites. */
     applyPresetMap(input, paramMap) {
+        // lorasectionconfinement is index-aligned with loras, so it is rebuilt after the loop from both sides,
+        // each padded with '0' (Full) to its own LoRA count.
+        let beforeLoras = MState.toList(input['loras']).length;
+        let beforeConf = MState.toList(input['lorasectionconfinement']);
+        let addedLoras = MState.toList(paramMap['loras']).length;
+        let addedConf = MState.toList(paramMap['lorasectionconfinement']);
         for (let key in paramMap) {
             let val = paramMap[key];
+            if (key == 'lorasectionconfinement') {
+                continue;
+            }
             if (typeof val == 'string' && val.includes('{value}')) {
                 let curVal = `${input[key] ?? ''}`;
                 let tagIndex = -1;
@@ -362,6 +371,16 @@ class MState {
             else {
                 input[key] = val;
             }
+        }
+        if (beforeConf.length > 0 || addedConf.length > 0) {
+            let pad = (list, count) => {
+                let out = list.slice(0, count);
+                while (out.length < count) {
+                    out.push('0');
+                }
+                return out;
+            };
+            input['lorasectionconfinement'] = pad(beforeConf, beforeLoras).concat(pad(addedConf, addedLoras));
         }
     }
 
@@ -481,11 +500,20 @@ class MState {
                         if (weights.length > i) {
                             weights.splice(i, 1);
                         }
+                        if (confinements.length > i) {
+                            confinements.splice(i, 1);
+                        }
                     }
                 }
                 meta.loras = loras;
                 meta.loraweights = weights;
-                delete meta.lorasectionconfinement;
+                // Keep each remaining LoRA's section (Base/Refine); all-Full or misaligned lists are dropped.
+                if (confinements.length == loras.length && confinements.some(c => `${c}` != '0')) {
+                    meta.lorasectionconfinement = confinements;
+                }
+                else {
+                    delete meta.lorasectionconfinement;
+                }
             }
             if (!meta.aspectratio && meta.width && meta.height) {
                 meta.aspectratio = 'Custom';
@@ -859,11 +887,14 @@ class MState {
         return list.slice().sort((a, b) => (hit(b.name) ? 1 : 0) - (hit(a.name) ? 1 : 0));
     }
 
-    /** Active LoRAs as [{name, weight}] from the index-aligned params arrays. */
+    /** Active LoRAs as [{name, weight, confinement}] from the index-aligned params arrays. confinement is the
+     * section ID string: '0' Full (every section), '5' Base only, '1' Refiner only. */
     getLoras() {
         let names = MState.toList(this.params['loras']);
         let weights = MState.toList(this.params['loraweights']);
-        return names.map((name, i) => ({ 'name': name, 'weight': weights.length > i ? parseFloat(weights[i]) || 1 : 1 }));
+        let confinements = MState.toList(this.params['lorasectionconfinement']);
+        return names.map((name, i) => ({ 'name': name, 'weight': weights.length > i ? parseFloat(weights[i]) || 1 : 1,
+            'confinement': confinements.length > i && `${confinements[i]}` != '' ? `${confinements[i]}` : '0' }));
     }
 
     /** Writes [{name, weight}] back into the params arrays (or removes them when empty). */
@@ -871,10 +902,19 @@ class MState {
         if (loras.length == 0) {
             delete this.params['loras'];
             delete this.params['loraweights'];
+            delete this.params['lorasectionconfinement'];
         }
         else {
             this.params['loras'] = loras.map(l => l.name);
             this.params['loraweights'] = loras.map(l => `${l.weight}`);
+            // Only sent when something is confined, so an all-Full stack produces the same request as before.
+            let confinements = loras.map(l => `${l.confinement ?? '0'}`);
+            if (confinements.some(c => c != '0')) {
+                this.params['lorasectionconfinement'] = confinements;
+            }
+            else {
+                delete this.params['lorasectionconfinement'];
+            }
         }
         this.changed();
     }

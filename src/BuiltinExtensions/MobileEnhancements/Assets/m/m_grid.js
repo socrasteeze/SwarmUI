@@ -153,6 +153,7 @@ class MGrid {
         if (this.valuesFor('loras').length > 0) {
             delete base['loras'];
             delete base['loraweights'];
+            delete base['lorasectionconfinement'];
         }
         return base;
     }

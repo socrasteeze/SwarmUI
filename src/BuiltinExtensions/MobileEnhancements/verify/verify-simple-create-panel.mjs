@@ -342,6 +342,50 @@ check('ListModels rows still enrich the models they cover',
 await page.click('.m-lora-weight-picker .m-lora-weight-button:last-child');
 const loraWeight = await page.evaluate(() => ({ state: mState.getLoras()[0].weight, shown: document.querySelector('.m-lora-weight-input').value }));
 check('LoRA plus advances exactly 0.05', loraWeight.state == 0.25 && loraWeight.shown == '0.25', JSON.stringify(loraWeight));
+// Section chip left of the strength: Full -> Base -> Refine, fixed width, sent as lorasectionconfinement.
+const loraSection = await page.evaluate(() => {
+    let chip = document.querySelector('.m-lora-weight-picker .m-lora-section-chip');
+    let widths = [];
+    let labels = [];
+    for (let i = 0; i < 4; i++) {
+        labels.push(chip.textContent);
+        widths.push(Math.round(chip.getBoundingClientRect().width));
+        if (i < 3) {
+            chip.click();
+        }
+    }
+    let row = chip.parentElement;
+    let order = [...row.children].map(c => c.className.split(' ')[0]);
+    chip.click();
+    let baseSent = mState.buildGenInput()['lorasectionconfinement'];
+    chip.click();
+    chip.click();
+    let fullSent = mState.buildGenInput()['lorasectionconfinement'];
+    return { labels, widths, order, baseSent, fullSent };
+});
+check('LoRA section chip cycles Full, Base, Refine and back', loraSection.labels.join('|') == 'Full|Base|Refine|Full', JSON.stringify(loraSection));
+check('LoRA section chip keeps its width and sits left of the strength', new Set(loraSection.widths).size == 1
+    && loraSection.order.join(',') == 'm-lora-section-chip,m-lora-weight-button,m-lora-weight-input,m-lora-weight-button', JSON.stringify(loraSection));
+check('Base is sent as section 5; an all-Full stack sends nothing extra', JSON.stringify(loraSection.baseSent) == '["5"]'
+    && loraSection.fullSent === undefined, JSON.stringify(loraSection));
+const loraSectionMerge = await page.evaluate(() => {
+    let input = { loras: ['a', 'b'], loraweights: ['1', '1'], lorasectionconfinement: ['5', '0'] };
+    mState.applyPresetMap(input, { loras: 'c', loraweights: '0.8' });
+    let second = { loras: ['a'], loraweights: ['1'] };
+    mState.applyPresetMap(second, { loras: 'p,q', loraweights: '1,1', lorasectionconfinement: '1,0' });
+    let savedMeta = mState.paramMeta;
+    mState.paramMeta = Object.assign({}, savedMeta, { loras: {}, loraweights: {}, lorasectionconfinement: {} });
+    let savedParams = JSON.parse(JSON.stringify(mState.params));
+    mState.applyMetadata({ sui_image_params: { prompt: 'x', loras: ['a', 'b', 'c'], loraweights: ['1', '1', '1'], lorasectionconfinement: ['5', '-1', '1'] } });
+    let reused = mState.getLoras().map(l => `${l.name}:${l.confinement}`).join(',');
+    mState.paramMeta = savedMeta;
+    mState.params = savedParams;
+    mState.changed();
+    return { first: input.lorasectionconfinement, second: second.lorasectionconfinement, reused };
+});
+check('preset LoRAs keep sections aligned with the merged list', JSON.stringify(loraSectionMerge.first) == '["5","0","0"]'
+    && JSON.stringify(loraSectionMerge.second) == '["0","1","0"]', JSON.stringify(loraSectionMerge));
+check('reusing an image keeps each LoRA section, minus prompt LoRAs', loraSectionMerge.reused == 'a:5,c:1', JSON.stringify(loraSectionMerge));
 const loraStepUi = await page.evaluate(() => {
     let toggle = document.querySelector('.m-lora-step-toggle');
     let buttons = [...toggle.querySelectorAll('.m-seg-button')].map(b => ({
@@ -381,7 +425,7 @@ const loraHalf = await page.evaluate(() => ({
 check('LoRA plus with step 0.5 advances from typed negative',
     loraHalf.state == -0.2 && loraHalf.shown == '-0.2' && loraHalf.selected && loraHalf.stored == '0.5',
     JSON.stringify(loraHalf));
-await page.click('.m-lora-weight-picker .m-lora-weight-button:first-child');
+await page.click('.m-lora-weight-picker .m-lora-section-chip + .m-lora-weight-button');
 const loraMinus = await page.evaluate(() => ({
     state: mState.getLoras()[0].weight,
     shown: document.querySelector('.m-lora-weight-input').value
