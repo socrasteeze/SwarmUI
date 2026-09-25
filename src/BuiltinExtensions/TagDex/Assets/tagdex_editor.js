@@ -71,7 +71,15 @@ class TagDexLibraryEditorClass {
             }
             genericRequest('TagDexLibrarySave', { action: record ? 'update_character' : 'create_character', id: record?.id || '', body: body }, data => {
                 opened.close();
-                saved(data.record);
+                if (record || !data.record) {
+                    saved(data.record);
+                    return;
+                }
+                // New characters start favorited, so they show under the Characters tab's favorites filter.
+                // A failed favorite still counts as a saved character.
+                let favorite = { target_kind: 'character', target_id: data.record.id, favorited: true };
+                genericRequest('TagDexLibrarySave', { action: 'favorite', id: '', body: favorite },
+                    () => saved(data.record), 0, () => saved(data.record));
             });
         });
     }

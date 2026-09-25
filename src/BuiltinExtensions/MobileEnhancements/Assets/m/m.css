@@ -2235,16 +2235,11 @@ html:has(.m-body) {
     color: var(--text-soft);
     font-size: 12px;
 }
+/* No inner scroll: the sheet scrolls as one, with Save/Cancel pinned after everything. A capped inner list used
+   to end behind the pinned bar, leaving its last parameter unreachable. */
 .m-preset-params {
     display: flex;
     flex-direction: column;
-    max-height: 40vh;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: none;
-}
-.m-preset-params::-webkit-scrollbar {
-    display: none;
 }
 /* Always-present FL2VA video fields in the preset editor. Collapsed unless the preset already sets one. */
 .m-preset-video > summary {

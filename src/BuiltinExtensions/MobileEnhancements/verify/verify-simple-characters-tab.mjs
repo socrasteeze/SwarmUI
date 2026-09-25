@@ -115,6 +115,17 @@ await page.addInitScript(() => {
         else if (route == 'GetMyUserData') {
             callback({ presets: [], starred_models: {} });
         }
+        else if (route == 'TagDexLibraryReview' && args.view == 'favorites') {
+            callback({ ok: true, results: [{ data: { target_kind: 'character', target_id: 'lib1', favorited: true } }] });
+        }
+        else if (route == 'TagDexLibrarySave') {
+            if (args.action == 'create_character') {
+                callback({ ok: true, record: { id: 'libNew', revision: 'r1', data: args.body.data } });
+            }
+            else {
+                callback({ ok: true, record: { id: 'fav', data: args.body } });
+            }
+        }
         else if (route == 'TagDexLibraryCharacters') {
             let rows = [{ id: 'lib1', data: { name: 'Aria (Robot)', series: 'Zenless Zone Zero', archived: false } },
                 { id: 'lib2', data: { name: 'Solo', series: '', archived: false } }]
@@ -156,13 +167,21 @@ await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tag
 
 // The tab opens on favorites (only char_007 is starred); one tap on the filter shows everything.
 const opening = await page.evaluate(() => ({
+    view: document.querySelector('.m-tagdex-tab .m-tagdex-source').value,
+    viewLabel: document.querySelector('.m-tagdex-tab .m-tagdex-source').selectedOptions[0].textContent,
+    pinned: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-row')].map(e => e.textContent),
     pressed: document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').getAttribute('aria-pressed'),
     cards: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-card-name')].map(e => e.textContent)
 }));
+check('the Characters tab opens on All Characters with favorited added characters pinned',
+    opening.view == '__all__' && opening.viewLabel == 'All Characters'
+    && opening.pinned.join('|') == 'Aria (Robot) · Zenless Zone Zero', JSON.stringify(opening));
 check('the Characters tab opens on favorites', opening.pressed == 'true' && opening.cards.length == 1
     && opening.cards[0] == "Char 7", JSON.stringify(opening));
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').click());
 await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
+const unfiltered = await page.evaluate(() => [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-row')].length);
+check('with favorites off, every added character is pinned', unfiltered == 2, `${unfiltered} pinned`);
 
 const firstPage = await page.evaluate(() => ({
     cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length,
@@ -287,6 +306,26 @@ const addCharacter = await page.evaluate(async () => {
     }
     return out;
 });
+const autoFavorite = await page.evaluate(async () => {
+    window.__requests = [];
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    let savedRecord = null;
+    tagDexLibraryEditor.character(null, true, record => savedRecord = record);
+    let sheet = [...document.querySelectorAll('.m-sheet')].pop();
+    sheet.querySelector('.tagdex-editor-field input').value = 'New One';
+    sheet.querySelector('.tagdex-editor-form').requestSubmit();
+    await new Promise(r => setTimeout(r, 200));
+    let fav = window.__requests.find(r => r.route == 'TagDexLibrarySave' && r.args.action == 'favorite');
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return { fav: fav ? fav.args.body : null, saved: savedRecord ? savedRecord.id : null };
+});
+check('a new character is favorited as soon as it is created', autoFavorite.fav && autoFavorite.fav.target_id == 'libNew'
+    && autoFavorite.fav.favorited === true && autoFavorite.fav.target_kind == 'character' && autoFavorite.saved == 'libNew',
+    JSON.stringify(autoFavorite));
 check('Add Character has no Archived box; editing explains it', addCharacter.labels.join('|') == 'Name|Series'
     && addCharacter.editLabels.some(l => l.startsWith('Archived (hidden')), JSON.stringify(addCharacter));
 check('Add Character matches the /simple sheets', addCharacter.titleSize == '15px' && addCharacter.saveBg == addCharacter.emphasisRgb
