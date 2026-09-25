@@ -436,6 +436,57 @@
     justify-content: flex-end;
 }
 
+/* /simple: the editor opens in an m-sheet, which already styles its inputs. These rules bring the rest in
+   line with the other sheets (preset editor, image editor): sheet-sized title, soft field labels, 44px fields,
+   and the same Save/Cancel pair instead of the browser's default buttons. Scoped to .m-sheet so the Genpage
+   dialog is unchanged. */
+.m-sheet .tagdex-editor {
+    padding: 0;
+    max-height: none;
+    overflow: visible;
+}
+.m-sheet .tagdex-editor h3 {
+    font-weight: bold;
+    font-size: 15px;
+}
+.m-sheet .tagdex-editor-field > span {
+    font-weight: normal;
+    font-size: 12px;
+    color: var(--text-soft);
+}
+.m-sheet .tagdex-editor-field input:not([type="checkbox"]),
+.m-sheet .tagdex-editor-stack input {
+    min-height: 44px;
+    padding: 0.5rem;
+}
+.m-sheet .tagdex-editor-field input[type="checkbox"] {
+    width: 1.4rem;
+    height: 1.4rem;
+    accent-color: var(--emphasis);
+}
+.m-sheet .tagdex-editor button {
+    min-height: 44px;
+    padding: 0 0.9rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+    background: var(--background-panel);
+    color: var(--text);
+}
+.m-sheet .tagdex-editor-actions {
+    gap: 0.4rem;
+}
+.m-sheet .tagdex-editor-actions button {
+    flex: 1 1 0;
+    min-height: 46px;
+}
+.m-sheet .tagdex-editor-actions button[type="submit"] {
+    order: 2;
+    background: var(--emphasis);
+    color: var(--emphasis-text, #fff);
+    border: none;
+    font-weight: bold;
+}
+
 .tagdex-editor-conflicts pre {
     max-height: 14rem;
     overflow: auto;

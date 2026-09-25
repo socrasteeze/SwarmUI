@@ -303,7 +303,6 @@ class MPresets {
             });
         });
         actions.appendChild(save);
-        content.appendChild(actions);
         if (preset) {
             let extra = mUI.el('div', 'm-preset-param-actions');
             let duplicate = mUI.el('button', 'm-preset-small-button', 'Duplicate');
@@ -337,7 +336,12 @@ class MPresets {
             });
             content.appendChild(remove);
         }
+        // Last, so the sticky Save/Cancel bar (m.css) never sits over Duplicate/Delete.
+        content.appendChild(actions);
         let close = mUI.openSheet(content);
+        for (let area of content.querySelectorAll('.m-preset-textarea')) {
+            area.mGrow();
+        }
         return close;
     }
 
@@ -418,13 +422,31 @@ class MPresets {
             select.addEventListener('change', () => onCommit(select.value));
             return select;
         }
-        let input = mUI.el('input', 'm-preset-field');
-        input.type = 'text';
+        let multiline = meta && (meta.view_type == 'prompt' || meta.view_type == 'big');
+        let input = mUI.el(multiline ? 'textarea' : 'input', multiline ? 'm-preset-field m-preset-textarea' : 'm-preset-field');
+        if (!multiline) {
+            input.type = 'text';
+        }
         input.value = current;
         if (opts.placeholder) {
             input.placeholder = opts.placeholder;
         }
-        input.addEventListener('input', () => onCommit(input.value));
+        let grow = () => {
+            input.style.height = 'auto';
+            input.style.height = `${input.scrollHeight + 2}px`;
+        };
+        input.addEventListener('input', () => {
+            onCommit(input.value);
+            if (multiline) {
+                grow();
+            }
+        });
+        if (multiline) {
+            // scrollHeight is 0 while detached, so openEditor calls this once the sheet is in the DOM. The
+            // frame callback covers rows re-rendered later (Add parameter, remove).
+            input.mGrow = grow;
+            requestAnimationFrame(grow);
+        }
         return input;
     }
     fl2vaSuggestion(key) {

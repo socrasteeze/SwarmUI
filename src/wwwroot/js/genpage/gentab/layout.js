@@ -144,6 +144,12 @@ class GenTabLayout {
         this.bottomBarDrag = false;
         this.imageEditorSizeBarDrag = false;
         this.isSmallWindow = this.mobileDesktopLayout == 'auto' ? window.innerWidth < 768 : this.mobileDesktopLayout == 'mobile';
+        // The saved choice is applied above but was never shown: the selector always rendered its default
+        // 'Auto', so a saved 'Mobile' looked lost on every reload.
+        let layoutSelector = document.getElementById('mobile_desktop_layout_selector');
+        if (layoutSelector) {
+            layoutSelector.value = this.mobileDesktopLayout;
+        }
         this.antiDup = false;
         this.reapplyScheduled = false;
         this.swipeStartX = -1;

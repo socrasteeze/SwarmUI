@@ -419,6 +419,50 @@ const fl2va = await page.evaluate(() => {
 check('FL2VA suggestions pick the FL2VA model, the documented frame count, and nothing for other params',
     fl2va.model == 'minimax/minimax_h3_fl2va_pruned_int8.safetensors' && fl2va.frames == '124' && fl2va.other == '',
     JSON.stringify(fl2va));
+// Prompt-type params edit in a multi-line box sized to its text, and Save/Cancel stay on screen however long
+// the parameter list is (the sheet itself scrolls, so they used to sit below the fold).
+const longForm = await page.evaluate(async () => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    let saved = mState.paramMeta;
+    let meta = { prompt: { name: 'Prompt', view_type: 'prompt' }, negativeprompt: { name: 'Negative Prompt', view_type: 'prompt' } };
+    let map = {
+        prompt: '{value}, ' + Array.from({ length: 12 }, (_, i) => `style tag number ${i}`).join(', '),
+        negativeprompt: 'worst quality, low quality, blurry, {value}'
+    };
+    for (let i = 0; i < 30; i++) {
+        meta[`extra${i}`] = { name: `Extra ${i}` };
+        map[`extra${i}`] = `${i}`;
+    }
+    mState.paramMeta = Object.assign({}, saved, meta);
+    mPresets.openEditor({ title: 'Long Form', description: '', is_starred: false, param_map: map }, () => {});
+    await new Promise(r => setTimeout(r, 400));
+    let sheet = document.querySelector('.m-sheet');
+    let content = sheet.querySelector('.m-preset-sheet');
+    let fieldFor = key => [...content.querySelectorAll('.m-preset-param-row')]
+        .find(r => r.querySelector('.m-preset-param-label').title == key).querySelector('.m-preset-field');
+    let prompt = fieldFor('prompt');
+    let bar = content.querySelector('.m-edit-actions');
+    sheet.scrollTop = 0;
+    let s = sheet.getBoundingClientRect(), b = bar.getBoundingClientRect();
+    let out = {
+        tag: prompt.tagName, negTag: fieldFor('negativeprompt').tagName, stepsTag: fieldFor('extra0').tagName,
+        fits: prompt.scrollHeight <= prompt.clientHeight + 2, lines: Math.round(prompt.clientHeight),
+        scrolls: sheet.scrollHeight > sheet.clientHeight + 200,
+        barVisible: b.top >= s.top && b.bottom <= s.bottom, barLast: content.lastElementChild == bar
+    };
+    mState.paramMeta = saved;
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return out;
+});
+check('prompt-type params edit in a multi-line box', longForm.tag == 'TEXTAREA' && longForm.negTag == 'TEXTAREA'
+    && longForm.stepsTag == 'INPUT', JSON.stringify(longForm));
+check('the prompt box grows to show its whole value', longForm.fits && longForm.lines > 60, JSON.stringify(longForm));
+check('Save/Cancel stay visible at the top of a long, scrolling editor', longForm.scrolls && longForm.barVisible
+    && longForm.barLast, JSON.stringify(longForm));
 // The Video section is always in the editor for advertised video params: empty fields with the suggestion as a
 // placeholder, and only what the user types is saved. The save is failed on purpose so the preset list that the
 // delete checks below compare against is left unchanged.

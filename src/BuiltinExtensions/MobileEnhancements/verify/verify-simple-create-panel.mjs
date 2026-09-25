@@ -1157,6 +1157,40 @@ check('Models toggle is Checkpoints | LoRAs', toggle.labels == 'Checkpoints|LoRA
 check('Models toggle spans the panel content width', toggle.full, JSON.stringify(toggle));
 check('Models toggle buttons are equal halves', toggle.even, JSON.stringify(toggle));
 
+// Models-tab search covers every folder of the subtype, not just the one being browsed.
+const modelSearch = await page.evaluate(async () => {
+    mCreate.modelList = [
+        { name: 'anima/Kraken_NOIR.safetensors' }, { name: 'ill/deep/nested/Kraken_Old.safetensors' },
+        { name: 'qwen/Other.safetensors' }
+    ];
+    mCreate.loraList = [{ name: 'qwen/edit/cev2.safetensors', title: 'Consistency Edit V2' }, { name: 'ill/Other.safetensors' }];
+    let wait = () => new Promise(r => setTimeout(r, 300));
+    let search = document.querySelector('.m-models-search');
+    let names = () => [...document.querySelectorAll('.m-model-grid .m-model-card')].map(c => c.textContent);
+    search.value = 'kraken';
+    search.dispatchEvent(new Event('input'));
+    await wait();
+    let ckpt = { names: names(), chipsHidden: document.querySelector('.m-folder-chips').style.display == 'none',
+        count: (document.querySelector('.m-models-search-count') || {}).textContent, placeholder: search.placeholder };
+    document.querySelector('.m-models-toggle .m-seg-button[data-subtype="LoRA"]').click();
+    await wait();
+    search.value = 'consistency';
+    search.dispatchEvent(new Event('input'));
+    await wait();
+    let lora = { names: names(), placeholder: search.placeholder };
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    await wait();
+    return { ckpt, lora, chipsBack: document.querySelector('.m-folder-chips').style.display == '' };
+});
+check('Models search finds checkpoints in every folder', modelSearch.ckpt.names.length == 2
+    && modelSearch.ckpt.names.some(n => n.includes('Kraken_Old')) && modelSearch.ckpt.chipsHidden
+    && /2 checkpoints/.test(modelSearch.ckpt.count), JSON.stringify(modelSearch.ckpt));
+check('Models search follows the LoRA toggle and matches titles', modelSearch.lora.names.length >= 1
+    && modelSearch.lora.names.every(n => /consistency/i.test(n)) && /LoRAs/.test(modelSearch.lora.placeholder),
+    JSON.stringify(modelSearch.lora));
+check('clearing the Models search returns to folder browsing', modelSearch.chipsBack, JSON.stringify(modelSearch));
+
 const bars = await page.evaluate(() => {
     let panel = getComputedStyle(document.querySelector('.m-panel'));
     let sheetRule = [...document.styleSheets].some(s => {

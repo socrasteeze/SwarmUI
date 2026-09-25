@@ -114,7 +114,10 @@ class MTagDexClass {
         }
         let script = document.createElement('script');
         script.className = 'tagdex-editor-loader';
-        script.src = '/ExtensionFile/TagDexExtension/Assets/tagdex_editor.js';
+        // Carry this script's own ?vary= token. Without it the editor is served with a one-day cache and a
+        // changed editor stays stale on the phone long after a restart.
+        let own = document.querySelector('script[src*="/m_tagdex.js"]');
+        script.src = '/ExtensionFile/TagDexExtension/Assets/tagdex_editor.js' + (own ? new URL(own.src).search : '');
         script.addEventListener('load', callback, { once: true });
         document.head.appendChild(script);
     }
@@ -419,7 +422,8 @@ class MTagDexClass {
         search.setAttribute('aria-label', 'Search characters and artists');
         controls.appendChild(search);
         let favorites = mUI.el('button', 'm-tagdex-favorite-filter', '\u2605 Favorites');
-        favorites.setAttribute('aria-pressed', 'false');
+        // The tab opens on favorites: it is where pinned characters get picked from. One tap shows everything.
+        favorites.setAttribute('aria-pressed', 'true');
         favorites.title = 'Show favorites only';
         wrap.appendChild(controls);
         // Second row: the filter and the layout toggle. Kept off the picker/search row so neither shrinks
@@ -446,7 +450,7 @@ class MTagDexClass {
         pager.style.display = 'none';
         wrap.appendChild(pager);
         panel.appendChild(wrap);
-        let ctx = { 'sources': [], 'source': '', 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': false, 'sortBy': this.sortMode() };
+        let ctx = { 'sources': [], 'source': '', 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': true, 'sortBy': this.sortMode() };
         let runSearch;
         let render = (records) => {
             results.innerHTML = '';

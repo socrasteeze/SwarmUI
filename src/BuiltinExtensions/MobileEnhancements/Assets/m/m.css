@@ -2077,6 +2077,15 @@ html:has(.m-body) {
     flex: 1 1 50%;
     min-width: 0;
 }
+.m-models-search {
+    margin: 0 0 0.5rem 0;
+    min-height: 44px;
+    font-size: max(16px, 100%);
+}
+/* The count/truncation note spans the grid instead of sitting in one card-sized cell. */
+.m-models-search-count {
+    grid-column: 1 / -1;
+}
 .m-model-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
@@ -2143,6 +2152,30 @@ html:has(.m-body) {
     /* Restated rather than inherited, for the same reason .m-prompt-box restates it: below 16px iOS zooms the
        page on focus, and this sheet is nothing but focusable fields. */
     font-size: max(16px, 100%);
+}
+/* Prompt-type values (prompt, negative prompt) are long comma lists; a one-line input showed a few words at a
+   time. Grows with its content (m_presets.js sets the height), capped so it cannot push Save off the sheet. */
+.m-preset-textarea {
+    display: block;
+    min-height: 4.5em;
+    max-height: 40dvh;
+    line-height: 1.35;
+    font-family: inherit;
+    resize: vertical;
+    overflow-y: auto;
+}
+/* The sheet itself is the scroll container, so a long parameter list used to put Save and Cancel below the
+   fold. Sticky pins them to the sheet's visible bottom edge while the rest scrolls behind them. Sticky stops at
+   the sheet's bottom padding, so the shadow paints that strip in the panel color; the bar is the sheet's last
+   child, so the shadow only ever covers that padding. */
+.m-preset-sheet > .m-edit-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: var(--background-panel);
+    box-shadow: 0 calc(0.8rem + var(--m-safe-bottom)) 0 var(--background-panel);
+    padding: 0.4rem 0;
+    margin-bottom: 0;
 }
 .m-preset-new-button {
     width: 100%;
