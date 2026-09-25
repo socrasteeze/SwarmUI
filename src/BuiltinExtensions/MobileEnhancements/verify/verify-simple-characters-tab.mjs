@@ -126,6 +126,14 @@ await page.addInitScript(() => {
                 callback({ ok: true, record: { id: 'fav', data: args.body } });
             }
         }
+        else if (route == 'TagDexLibraryCharacter') {
+            let variants = args.id == 'lib1' ? [{ id: 'v1', revision: 'r1',
+                data: { name: 'Robot', archived: false, recipe: { prompt: 'ariarobzzz, robot joints', negative_prompt: '', checkpoint: '', loras: [] } } }] : [];
+            callback({ ok: true, record: { id: args.id, revision: 'r1', data: { name: args.id == 'lib1' ? 'Aria (Robot)' : 'Solo', series: '' } }, variants });
+        }
+        else if (route == 'TagDexLibraryResolve') {
+            callback({ ok: true, ready: true, loras: [] });
+        }
         else if (route == 'TagDexLibraryCharacters') {
             let rows = [{ id: 'lib1', data: { name: 'Aria (Robot)', series: 'Zenless Zone Zero', archived: false } },
                 { id: 'lib2', data: { name: 'Solo', series: '', archived: false } }]
@@ -163,15 +171,15 @@ await page.evaluate(() => {
     location.hash = 'characters';
     mUI.applyHash();
 });
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length > 0);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length > 0);
 
 // The tab opens on favorites (only char_007 is starred); one tap on the filter shows everything.
 const opening = await page.evaluate(() => ({
     view: document.querySelector('.m-tagdex-tab .m-tagdex-source').value,
     viewLabel: document.querySelector('.m-tagdex-tab .m-tagdex-source').selectedOptions[0].textContent,
-    pinned: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-row')].map(e => e.textContent),
+    pinned: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-card')].map(e => [...e.querySelectorAll('.m-tagdex-card-name, .m-tagdex-card-sub')].map(x => x.textContent).join(' · ')),
     pressed: document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').getAttribute('aria-pressed'),
-    cards: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-card-name')].map(e => e.textContent)
+    cards: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name')].map(e => e.textContent)
 }));
 check('the Characters tab opens on All Characters with favorited added characters pinned',
     opening.view == '__all__' && opening.viewLabel == 'All Characters'
@@ -179,17 +187,17 @@ check('the Characters tab opens on All Characters with favorited added character
 check('the Characters tab opens on favorites', opening.pressed == 'true' && opening.cards.length == 1
     && opening.cards[0] == "Char 7", JSON.stringify(opening));
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').click());
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
-const unfiltered = await page.evaluate(() => [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-row')].length);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
+const unfiltered = await page.evaluate(() => [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-card')].length);
 check('with favorites off, every added character is pinned', unfiltered == 2, `${unfiltered} pinned`);
 
 const firstPage = await page.evaluate(() => ({
-    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length,
+    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length,
     status: document.querySelector('.m-tagdex-tab .m-tagdex-browse-status').textContent,
     label: document.querySelector('.m-tagdex-page-label').textContent,
     prevDisabled: document.querySelector('.m-tagdex-pager .m-tagdex-page-button').disabled,
     pagerVisible: document.querySelector('.m-tagdex-pager').style.display != 'none',
-    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card-name').textContent,
+    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name').textContent,
 }));
 check('page one holds exactly one bounded page of cards', firstPage.cards == 50, `${firstPage.cards} cards`);
 check('status names the window and the total', firstPage.status.includes('1') && firstPage.status.includes('50') && firstPage.status.includes('120'), firstPage.status);
@@ -200,21 +208,21 @@ const nextButton = '.m-tagdex-pager .m-tagdex-page-button:last-of-type';
 await page.click(nextButton);
 await page.waitForFunction(() => document.querySelector('.m-tagdex-page-label').textContent.trim() == '2 / 3');
 const pageTwo = await page.evaluate(() => ({
-    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card-name').textContent,
+    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name').textContent,
     prevDisabled: document.querySelector('.m-tagdex-pager .m-tagdex-page-button').disabled,
 }));
 check('Next fetches the next offset, not a longer list', pageTwo.firstName == 'Char 50' && !pageTwo.prevDisabled, pageTwo.firstName);
 await page.click(nextButton);
 await page.waitForFunction(() => document.querySelector('.m-tagdex-page-label').textContent.trim() == '3 / 3');
 const lastPage = await page.evaluate(() => ({
-    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length,
+    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length,
     nextDisabled: document.querySelector('.m-tagdex-pager .m-tagdex-page-button:last-of-type').disabled,
 }));
 check('the last page holds the remainder and Next is disabled', lastPage.cards == 20 && lastPage.nextDisabled, `${lastPage.cards} cards`);
 
 // ---- Search resets to page one ----
 await page.fill('.m-tagdex-tab .m-tagdex-search', 'char_01');
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 10);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 10);
 const searched = await page.evaluate(() => ({
     status: document.querySelector('.m-tagdex-tab .m-tagdex-browse-status').textContent,
     pagerVisible: document.querySelector('.m-tagdex-pager').style.display != 'none',
@@ -234,10 +242,10 @@ await page.evaluate(() => {
 });
 await page.waitForFunction(() => document.querySelector('.m-tagdex-page-label').textContent.trim() == '1 / 2');
 await page.click(nextButton);
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 1
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 1
     && document.querySelector('.m-tagdex-page-label').textContent.trim() == '2 / 2');
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-favorite-button').click());
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
 const clamped = await page.evaluate(() => ({
     label: document.querySelector('.m-tagdex-page-label').textContent.trim(),
     pagerVisible: document.querySelector('.m-tagdex-pager').style.display != 'none',
@@ -248,7 +256,7 @@ await page.evaluate(() => {
     window.__favorites = new Set(['char_007']);
     document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click());
 });
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
 
 // ---- My Library: every added character, no favorites filter or sort ----
 const libraryList = await page.evaluate(async () => {
@@ -260,7 +268,7 @@ const libraryList = await page.evaluate(async () => {
     let tab = document.querySelector('.m-tagdex-tab');
     let out = {
         option: libOption ? libOption.textContent : null,
-        rows: [...tab.querySelectorAll('.m-tagdex-library-row')].map(b => b.textContent),
+        rows: [...tab.querySelectorAll('.m-tagdex-library-card')].map(e => [...e.querySelectorAll('.m-tagdex-card-name, .m-tagdex-card-sub')].map(x => x.textContent).join(' · ')),
         status: tab.querySelector('.m-tagdex-browse-status').textContent,
         favoritesHidden: tab.querySelector('.m-tagdex-favorite-filter').style.display == 'none',
         pagerHidden: tab.querySelector('.m-tagdex-pager').style.display == 'none'
@@ -276,6 +284,63 @@ check('My Library lists every added character, unfiltered', libraryList.rows.len
     && libraryList.rows[0] == 'Aria (Robot) · Zenless Zone Zero' && libraryList.favoritesHidden && libraryList.pagerHidden
     && libraryList.status == '2 characters', JSON.stringify(libraryList));
 check('switching back to a dataset restores the favorites filter', libraryList.favoritesBack, JSON.stringify(libraryList));
+
+// ---- Added characters are cards like the dataset ones: tap applies, ... opens variants, star is the favorite ----
+const libraryCard = await page.evaluate(async () => {
+    let wait = () => new Promise(r => setTimeout(r, 200));
+    let tab = document.querySelector('.m-tagdex-tab');
+    let source = tab.querySelector('.m-tagdex-source');
+    let startSource = source.value;
+    let startPressed = tab.querySelector('.m-tagdex-favorite-filter').getAttribute('aria-pressed');
+    source.value = '__all__';
+    source.dispatchEvent(new Event('change'));
+    await wait();
+    if (tab.querySelector('.m-tagdex-favorite-filter').getAttribute('aria-pressed') == 'true') {
+        tab.querySelector('.m-tagdex-favorite-filter').click();
+        await wait();
+    }
+    let cards = [...tab.querySelectorAll('.m-tagdex-library-card')];
+    let aria = cards.find(c => c.querySelector('.m-tagdex-card-name').textContent == 'Aria (Robot)');
+    let solo = cards.find(c => c.querySelector('.m-tagdex-card-name').textContent == 'Solo');
+    let out = {
+        count: aria ? aria.querySelector('.m-tagdex-card-count').textContent : null,
+        hasImage: !!(aria && aria.querySelector('.m-tagdex-card-image')),
+        details: aria ? aria.querySelector('.m-tagdex-alltags-button').textContent : null,
+        ariaStar: aria ? aria.querySelector('.m-tagdex-favorite-button').textContent : null,
+        soloStar: solo ? solo.querySelector('.m-tagdex-favorite-button').textContent : null,
+        wideButtons: tab.querySelectorAll('.m-tagdex-browse-results .m-wide-button').length
+    };
+    mState.params['prompt'] = '1girl';
+    aria.querySelector('.m-tagdex-card-main').click();
+    await wait();
+    out.prompt = mState.params['prompt'];
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    solo.querySelector('.m-tagdex-card-main').click();
+    await wait();
+    let sheet = [...document.querySelectorAll('.m-sheet')].pop();
+    out.soloOpened = sheet ? sheet.querySelector('.m-sheet-title').textContent : null;
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    // Leave the tab exactly as the following checks expect it.
+    source.value = startSource;
+    source.dispatchEvent(new Event('change'));
+    await wait();
+    if (tab.querySelector('.m-tagdex-favorite-filter').getAttribute('aria-pressed') != startPressed) {
+        tab.querySelector('.m-tagdex-favorite-filter').click();
+        await wait();
+    }
+    return out;
+});
+check('added characters render as cards like the dataset ones', libraryCard.count == 'Your character' && libraryCard.hasImage
+    && libraryCard.details == '⋯' && libraryCard.wideButtons == 0, JSON.stringify(libraryCard));
+check('added-character stars show the library favorite', libraryCard.ariaStar == '★' && libraryCard.soloStar == '☆',
+    JSON.stringify(libraryCard));
+check('tapping an added character adds its variant to the prompt', libraryCard.prompt == '1girl, ariarobzzz, robot joints',
+    JSON.stringify(libraryCard));
+check('tapping a character with no variant opens its variants to add one', libraryCard.soloOpened == 'Solo', JSON.stringify(libraryCard));
 
 // ---- Add Character sheet: themed like the other /simple sheets, no Archived box on a new character ----
 const addCharacter = await page.evaluate(async () => {
@@ -334,14 +399,14 @@ check('the editor script is loaded with the page version token', /\?vary=/.test(
 
 // ---- Favorites filter ----
 await page.evaluate(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click()));
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 1);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 1);
 const favorites = await page.evaluate(() => ({
-    name: document.querySelector('.m-tagdex-tab .m-tagdex-card-name').textContent,
+    name: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name').textContent,
     starred: document.querySelector('.m-tagdex-tab .m-tagdex-favorite-button').textContent,
 }));
 check('favorites filter shows only starred rows, marked as starred', favorites.name == 'Char 7' && favorites.starred == '★', JSON.stringify(favorites));
 await page.evaluate(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click()));
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
 
 // ---- Card tap inserts the trigger into the Create prompt ----
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-card-main').click());
