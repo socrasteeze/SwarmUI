@@ -457,7 +457,7 @@ class MTagDexClass {
         let render = (records, pinned) => {
             results.innerHTML = '';
             for (let character of pinned) {
-                results.appendChild(this.buildLibraryRow(character));
+                results.appendChild(this.buildLibraryCard(character, () => runSearch()));
             }
             let dataset = datasetFor();
             for (let i = 0; i < records.length; i++) {
@@ -621,28 +621,89 @@ class MTagDexClass {
         });
     }
 
-    /** One custom-library character as a tappable row that opens its variants. */
-    buildLibraryRow(character) {
-        let button = mUI.el('button', 'm-wide-button m-tagdex-library-row',
-            character.data.series ? `${character.data.name} \u00b7 ${character.data.series}` : character.data.name);
-        button.addEventListener('click', () => this.openLibraryCharacter(character.id));
-        return button;
+    /** One custom-library character, laid out like a dataset card. Tapping it adds the character to the prompt
+     * by applying its first variant (prompt tags + LoRAs); the ... button opens its variants and editor; the star
+     * is the library favorite. A character with no variant yet opens its variants so one can be added. */
+    buildLibraryCard(character, onFavoriteRemoved) {
+        let name = character.data.name;
+        let row = mUI.el('div', 'm-tagdex-card m-tagdex-library-card');
+        let main = mUI.el('button', 'm-tagdex-card-main');
+        main.setAttribute('aria-label', `Add ${name}`);
+        let image = document.createElement('img');
+        image.className = 'm-tagdex-card-image';
+        image.src = 'imgs/model_placeholder.jpg';
+        image.alt = '';
+        main.appendChild(image);
+        let textWrap = mUI.el('span', 'm-tagdex-card-text');
+        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-name', name));
+        if (character.data.series) {
+            textWrap.appendChild(mUI.el('span', 'm-tagdex-card-sub', character.data.series));
+        }
+        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-count', 'Your character'));
+        main.appendChild(textWrap);
+        main.addEventListener('click', () => {
+            genericRequest('TagDexLibraryCharacter', { id: character.id }, data => {
+                let variants = (data.variants || []).filter(variant => !variant.conflict && !(variant.data && variant.data.archived));
+                if (variants.length == 0) {
+                    mUI.note(`${name} has no variant yet - add one with its tags and LoRAs.`);
+                    this.openLibraryCharacter(character.id);
+                    return;
+                }
+                this.applyLibraryVariant(variants[0]);
+            }, 0, error => mUI.warn(`${name}: ${error}`));
+        });
+        row.appendChild(main);
+        let details = mUI.el('button', 'm-tagdex-alltags-button', '\u22ef');
+        details.setAttribute('aria-label', `${name} variants and edit`);
+        details.title = 'Variants and edit';
+        details.addEventListener('click', () => this.openLibraryCharacter(character.id));
+        row.appendChild(details);
+        let favorited = character._favorited == true;
+        let favorite = mUI.el('button', `m-tagdex-favorite-button${favorited ? ' m-tagdex-favorite-active' : ''}`, favorited ? '\u2605' : '\u2606');
+        let paint = () => {
+            favorite.classList.toggle('m-tagdex-favorite-active', favorited);
+            favorite.textContent = favorited ? '\u2605' : '\u2606';
+            favorite.setAttribute('aria-label', favorited ? 'Remove Favorite' : 'Add Favorite');
+            favorite.setAttribute('aria-pressed', `${favorited}`);
+            favorite.title = favorited ? 'Remove from favorites' : 'Add to favorites';
+        };
+        paint();
+        favorite.addEventListener('click', () => {
+            favorite.disabled = true;
+            let want = !favorited;
+            genericRequest('TagDexLibrarySave', { action: 'favorite', id: '', body: { target_kind: 'character', target_id: character.id, favorited: want } }, () => {
+                favorite.disabled = false;
+                favorited = want;
+                character._favorited = want;
+                paint();
+                if (!want && onFavoriteRemoved) {
+                    onFavoriteRemoved();
+                }
+            }, 0, error => {
+                favorite.disabled = false;
+                mUI.warn(`Favorite failed: ${error}`);
+            });
+        });
+        row.appendChild(favorite);
+        return row;
     }
 
-    /** Library characters to pin in All Characters: every match, or only favorited ones when the favorites
-     * filter is on. Any failure yields an empty list rather than blocking the dataset results. */
+    /** Library characters for the Characters tab, each marked with its library favorite (_favorited). With
+     * favoritesOnly, only favorited ones. Any failure yields an empty list rather than blocking the dataset
+     * results; a failed favorites read just shows every star empty. */
     loadPinnedLibrary(q, favoritesOnly, callback) {
         this.loadAllLibraryCharacters(q, data => {
             let rows = data.results || [];
-            if (!favoritesOnly) {
-                callback(rows);
-                return;
-            }
+            let done = ids => {
+                for (let character of rows) {
+                    character._favorited = ids.has(character.id);
+                }
+                callback(favoritesOnly ? rows.filter(character => character._favorited) : rows);
+            };
             genericRequest('TagDexLibraryReview', { view: 'favorites' }, favs => {
-                let ids = new Set((favs.results || []).filter(record => record.data && record.data.target_kind == 'character'
-                    && record.data.favorited).map(record => record.data.target_id));
-                callback(rows.filter(character => ids.has(character.id)));
-            }, 0, () => callback([]));
+                done(new Set((favs.results || []).filter(record => record.data && record.data.target_kind == 'character'
+                    && record.data.favorited).map(record => record.data.target_id)));
+            }, 0, () => done(new Set()));
         }, () => callback([]));
     }
 
@@ -652,22 +713,15 @@ class MTagDexClass {
         let token = ++ctx.token;
         pager.style.display = 'none';
         status.textContent = 'Loading...';
-        this.loadAllLibraryCharacters(q, data => {
+        this.loadPinnedLibrary(q, false, rows => {
             if (token != ctx.token) {
                 return;
             }
             results.innerHTML = '';
-            let rows = data.results || [];
             for (let character of rows) {
-                results.appendChild(this.buildLibraryRow(character));
+                results.appendChild(this.buildLibraryCard(character, null));
             }
             status.textContent = rows.length == 0 ? 'No library characters. Add one from More > Add Character.' : `${rows.length} characters`;
-        }, error => {
-            if (token != ctx.token) {
-                return;
-            }
-            results.innerHTML = '';
-            status.textContent = `Could not load the library: ${error}`;
         });
     }
 

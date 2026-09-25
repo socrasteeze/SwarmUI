@@ -853,17 +853,29 @@ class MCreate {
     /** Search filter shared by both pickers: matches the file name, the folder path, the metadata title,
      * and the trigger phrase, so a LoRA can be found by the word you actually type into prompts. */
     static filterModels(list, term) {
-        let low = `${term || ''}`.toLowerCase().trim();
-        if (!low) {
+        // Every word must appear somewhere, in any order: "aria zen" finds "Aria 爱芮 4 Outfits - Zenless Zone
+        // Zero". Separators in file names (_ - / . () [] ,) count as spaces on both sides.
+        let words = MCreate.searchWords(term);
+        if (words.length == 0) {
             return list;
         }
         return list.filter(model => {
-            // A phone should lowercase each 18K-LoRA search corpus once, not once per model per keystroke.
+            // A phone should normalize each 18K-LoRA search corpus once, not once per model per keystroke.
             if (model._mSearchText == null) {
-                model._mSearchText = `${model.name || ''} ${model.title || ''} ${model.trigger_phrase || ''}`.toLowerCase();
+                model._mSearchText = ` ${MCreate.searchWords(`${model.name || ''} ${model.title || ''} ${model.trigger_phrase || ''}`).join(' ')} `;
             }
-            return model._mSearchText.includes(low);
+            for (let word of words) {
+                if (!model._mSearchText.includes(word)) {
+                    return false;
+                }
+            }
+            return true;
         });
+    }
+
+    /** Lowercased search words, split on whitespace and file-name punctuation. */
+    static searchWords(text) {
+        return `${text || ''}`.toLowerCase().split(/[\s_\-\/\\.,;:()\[\]{}|'"]+/).filter(word => word.length > 0);
     }
 
     /** Narrows a picker list to the selected architecture and builds the row that explains what happened.
@@ -2058,6 +2070,19 @@ class MCreate {
                 }
             }
             results.appendChild(this.buildCountRow(shown, matches.length, 'LoRAs'));
+            // A search that only misses because of the arch/compat filters says so, instead of "no match".
+            if (search.value.trim() && compat.list.length != this.loraList.length) {
+                let hidden = MCreate.filterModels(this.loraList, search.value).filter(m => !active.has(MState.stripModelExt(m.name))).length - matches.length;
+                if (hidden > 0) {
+                    let reveal = mUI.el('button', 'm-arch-note', `${hidden} more match${hidden == 1 ? '' : 'es'} outside the filters - tap to show all`);
+                    reveal.addEventListener('click', () => {
+                        archState.showAll = true;
+                        compatState.showAll = true;
+                        renderResults();
+                    });
+                    results.appendChild(reveal);
+                }
+            }
         };
         search.addEventListener('input', renderResults);
         content.appendChild(addWrap);

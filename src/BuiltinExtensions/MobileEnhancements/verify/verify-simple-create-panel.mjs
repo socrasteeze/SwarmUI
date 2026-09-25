@@ -926,6 +926,42 @@ check('show-all: unfiltered list still contains starred other-arch LoRAs',
 check('starredFirst still lifts favourites among survivors (only ill/keep left)',
     starredLimited.sorted == 'ill/keep.safetensors', JSON.stringify(starredLimited));
 
+// Search matches every word in any order across name/title/trigger, and says when the filters hide a match.
+const wordSearch = await page.evaluate(async () => {
+    let list = [
+        { name: 'anima/Aria 爱芮 4 Outfits — Zenless Zone Zero [Anima+Illustrious].safetensors', title: 'lora' },
+        { name: 'anima/aria-nikke-richy-v1_anima.safetensors' },
+        { name: 'anima/Other.safetensors', title: 'Zenless style', trigger_phrase: 'xyzhumzzz' }
+    ];
+    let names = term => MCreate.filterModels(list, term).map(m => m.name.split('/')[1].slice(0, 12));
+    let out = { ariaZen: names('Aria zen'), zenAria: names('zen aria'), nikke: names('aria_nikke'), trigger: names('xyzhum') };
+    // The ill filter from the checks above is still active; a flux-folder match must surface as a hint.
+    mCreate.loraList = [{ name: 'ill/keep.safetensors' }, { name: 'flux/Aria_Zenless.safetensors' }];
+    mCreate.loraMap = new Map();
+    for (let m of mCreate.loraList) {
+        mCreate.loraMap.set(m.name, m);
+    }
+    mCreate.openLoraSheet();
+    let sheet = [...document.querySelectorAll('.m-sheet')].pop();
+    let search = sheet.querySelector('.m-lora-search');
+    search.value = 'aria zen';
+    search.dispatchEvent(new Event('input'));
+    let hint = [...sheet.querySelectorAll('.m-arch-note')].map(e => e.textContent).find(t => t.includes('outside the filters'));
+    out.hint = hint || null;
+    if (hint) {
+        [...sheet.querySelectorAll('.m-arch-note')].find(e => e.textContent == hint).click();
+        out.afterReveal = [...sheet.querySelectorAll('.m-model-result')].length;
+    }
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return out;
+});
+check('LoRA search matches every word in any order', wordSearch.ariaZen.length == 1 && wordSearch.zenAria.length == 1
+    && wordSearch.nikke.length == 1 && wordSearch.trigger.length == 1, JSON.stringify(wordSearch));
+check('a search the filters hide says so and can reveal it', wordSearch.hint == '1 more match outside the filters - tap to show all'
+    && wordSearch.afterReveal == 1, JSON.stringify(wordSearch));
+
 await page.evaluate(() => {
     mState.starredModels = {};
     mState.loadParamMeta({ list: [], models: {}, model_classes: {} });
