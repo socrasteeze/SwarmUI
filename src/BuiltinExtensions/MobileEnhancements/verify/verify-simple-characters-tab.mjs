@@ -115,6 +115,12 @@ await page.addInitScript(() => {
         else if (route == 'GetMyUserData') {
             callback({ presets: [], starred_models: {} });
         }
+        else if (route == 'TagDexLibraryCharacters') {
+            let rows = [{ id: 'lib1', data: { name: 'Aria (Robot)', series: 'Zenless Zone Zero', archived: false } },
+                { id: 'lib2', data: { name: 'Solo', series: '', archived: false } }]
+                .filter(row => !args.q || row.data.name.toLowerCase().includes(args.q.toLowerCase()));
+            callback({ ok: true, total: rows.length, results: rows });
+        }
     };
     window.makeWSRequest = () => null;
     window.getSession = () => {};
@@ -224,6 +230,33 @@ await page.evaluate(() => {
     document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click());
 });
 await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
+
+// ---- My Library: every added character, no favorites filter or sort ----
+const libraryList = await page.evaluate(async () => {
+    let source = document.querySelector('.m-tagdex-tab .m-tagdex-source');
+    let libOption = [...source.options].find(o => o.value == '__library__');
+    source.value = '__library__';
+    source.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 200));
+    let tab = document.querySelector('.m-tagdex-tab');
+    let out = {
+        option: libOption ? libOption.textContent : null,
+        rows: [...tab.querySelectorAll('.m-tagdex-library-row')].map(b => b.textContent),
+        status: tab.querySelector('.m-tagdex-browse-status').textContent,
+        favoritesHidden: tab.querySelector('.m-tagdex-favorite-filter').style.display == 'none',
+        pagerHidden: tab.querySelector('.m-tagdex-pager').style.display == 'none'
+    };
+    source.value = 'danbooru_character';
+    source.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 200));
+    out.favoritesBack = tab.querySelector('.m-tagdex-favorite-filter').style.display == '';
+    return out;
+});
+check('Characters tab offers a My Library list', !!libraryList.option, JSON.stringify(libraryList));
+check('My Library lists every added character, unfiltered', libraryList.rows.length == 2
+    && libraryList.rows[0] == 'Aria (Robot) · Zenless Zone Zero' && libraryList.favoritesHidden && libraryList.pagerHidden
+    && libraryList.status == '2 characters', JSON.stringify(libraryList));
+check('switching back to a dataset restores the favorites filter', libraryList.favoritesBack, JSON.stringify(libraryList));
 
 // ---- Add Character sheet: themed like the other /simple sheets, no Archived box on a new character ----
 const addCharacter = await page.evaluate(async () => {

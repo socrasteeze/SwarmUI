@@ -472,6 +472,14 @@ class MTagDexClass {
             next.disabled = ctx.offset + ctx.pageSize >= ctx.total;
         };
         runSearch = () => {
+            let isLibrary = ctx.source == MTagDexClass.LibrarySource;
+            // Favorites and sort belong to the datasets; the library list is always every character you added.
+            favorites.style.display = isLibrary ? 'none' : '';
+            sortSelect.style.display = isLibrary ? 'none' : '';
+            if (isLibrary) {
+                this.renderLibraryList(ctx, search.value.trim(), results, status, pager);
+                return;
+            }
             if (!ctx.source) {
                 results.innerHTML = '';
                 status.textContent = 'No datasets. Download one from More.';
@@ -524,7 +532,9 @@ class MTagDexClass {
         source.addEventListener('change', () => {
             ctx.source = source.value;
             // Re-gate before searching: a dataset without scores must not keep a score sort selected.
-            this.syncSortOptions(sortSelect, ctx);
+            if (ctx.source != MTagDexClass.LibrarySource) {
+                this.syncSortOptions(sortSelect, ctx);
+            }
             restart();
         });
         sortSelect.addEventListener('change', () => {
@@ -558,11 +568,46 @@ class MTagDexClass {
                 option.textContent = ctx.sources[i].label;
                 source.appendChild(option);
             }
+            // Characters added through Add Character live in the custom library, not in any dataset.
+            let library = document.createElement('option');
+            library.value = MTagDexClass.LibrarySource;
+            library.textContent = 'My Library (all added characters)';
+            source.appendChild(library);
             let preferred = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id)) : '';
-            ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : '');
+            ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : MTagDexClass.LibrarySource);
             source.value = ctx.source;
-            this.syncSortOptions(sortSelect, ctx);
+            if (ctx.source != MTagDexClass.LibrarySource) {
+                this.syncSortOptions(sortSelect, ctx);
+            }
             runSearch();
+        });
+    }
+
+    /** Lists every custom-library character (unfiltered, unpaged: the library is operator-sized) into the
+     * Characters tab. Tapping one opens its variants, same as More > My Library. */
+    renderLibraryList(ctx, q, results, status, pager) {
+        let token = ++ctx.token;
+        pager.style.display = 'none';
+        status.textContent = 'Loading...';
+        this.loadAllLibraryCharacters(q, data => {
+            if (token != ctx.token) {
+                return;
+            }
+            results.innerHTML = '';
+            let rows = data.results || [];
+            for (let character of rows) {
+                let button = mUI.el('button', 'm-wide-button m-tagdex-library-row',
+                    character.data.series ? `${character.data.name} · ${character.data.series}` : character.data.name);
+                button.addEventListener('click', () => this.openLibraryCharacter(character.id));
+                results.appendChild(button);
+            }
+            status.textContent = rows.length == 0 ? 'No library characters. Add one from More > Add Character.' : `${rows.length} characters`;
+        }, error => {
+            if (token != ctx.token) {
+                return;
+            }
+            results.innerHTML = '';
+            status.textContent = `Could not load the library: ${error}`;
         });
     }
 
@@ -722,6 +767,9 @@ class MTagDexClass {
     /** Sort modes offered on the compact surfaces, mirroring the genpage tab's dropdown so the same dataset
      * sorts the same way on both. Values are the server's (`TagDexSearch.Run`); `scored` and `character` mark the
      * ones that only apply to some datasets, exactly as the genpage gates them. */
+    /** Characters-tab list value for the custom library (not a dataset id, so it can never collide with one). */
+    static LibrarySource = '__library__';
+
     static SortModes = [
         { 'value': 'relevance', 'label': 'Best Match' },
         { 'value': 'count', 'label': 'Most Posts' },
