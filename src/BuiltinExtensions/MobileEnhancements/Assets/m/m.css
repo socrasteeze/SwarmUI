@@ -1535,7 +1535,7 @@ html:has(.m-body) {
 }
 .m-lora-weight-picker {
     display: grid;
-    grid-template-columns: 44px minmax(4rem, 1fr) 44px;
+    grid-template-columns: 4.6rem 44px minmax(4rem, 1fr) 44px;
     align-items: center;
     margin-top: 0.3rem;
     border: 1px solid var(--border-color);
@@ -1551,8 +1551,24 @@ html:has(.m-body) {
     color: var(--text);
     font-size: 20px;
 }
-.m-lora-weight-button:first-child {
+.m-lora-weight-button:first-child,
+.m-lora-section-chip + .m-lora-weight-button {
     border-right: 1px solid var(--border-color);
+}
+/* Full / Base / Refine: which generation section the LoRA applies to. Fixed column width (the grid above) so the
+   row does not shift as the label cycles; highlighted when the LoRA is confined to one section. */
+.m-lora-section-chip {
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    border-right: 1px solid var(--border-color);
+    background: var(--background-panel);
+    color: var(--text-soft);
+    font-size: 13px;
+}
+.m-lora-section-chip.m-lora-section-confined {
+    color: var(--emphasis);
+    font-weight: bold;
 }
 .m-lora-weight-button:last-child {
     border-left: 1px solid var(--border-color);

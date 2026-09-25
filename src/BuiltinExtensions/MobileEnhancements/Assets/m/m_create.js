@@ -824,6 +824,16 @@ class MCreate {
      * did not exist as far as the picker was concerned. */
     static ListDepth = 32;
 
+    /** LoRA section chip values, in tap order: [section ID, label]. IDs are Swarm's section IDs
+     * (T2IParamInput.SectionID_*): 0 every section, 5 base only, 1 refiner only. */
+    static LoraSections = [['0', 'Full'], ['5', 'Base'], ['1', 'Refine']];
+
+    /** Chip label for a LoRA's section ID; IDs outside the cycle (eg video sections set by Genpage) show as-is. */
+    static loraSectionLabel(confinement) {
+        let entry = MCreate.LoraSections.find(item => item[0] == `${confinement}`);
+        return entry ? entry[1] : `S${confinement}`;
+    }
+
     /** How many rows a picker renders at once. Truncation is reported rather than silent - see buildCountRow. */
     static ListCap = 120;
 
@@ -1966,6 +1976,22 @@ class MCreate {
                 top.appendChild(remove);
                 row.appendChild(top);
                 let weight = mUI.el('div', 'm-lora-weight-picker');
+                // Section chip: which part of the generation the LoRA applies to. Tapping cycles Full -> Base ->
+                // Refine. Fixed width so the row never shifts as the label changes.
+                let section = mUI.el('button', 'm-lora-section-chip', MCreate.loraSectionLabel(loras[i].confinement));
+                section.setAttribute('aria-label', `${mUI.modelName(loras[i].name)} applies to: ${MCreate.loraSectionLabel(loras[i].confinement)}. Tap to change.`);
+                section.addEventListener('click', () => {
+                    let cur = mState.getLoras();
+                    let order = MCreate.LoraSections.map(entry => entry[0]);
+                    let at = order.indexOf(cur[i].confinement);
+                    cur[i].confinement = order[(at + 1) % order.length];
+                    mState.setLoras(cur);
+                    section.textContent = MCreate.loraSectionLabel(cur[i].confinement);
+                    section.setAttribute('aria-label', `${mUI.modelName(cur[i].name)} applies to: ${section.textContent}. Tap to change.`);
+                    section.classList.toggle('m-lora-section-confined', cur[i].confinement != '0');
+                });
+                section.classList.toggle('m-lora-section-confined', loras[i].confinement != '0');
+                weight.appendChild(section);
                 let minus = mUI.el('button', 'm-lora-weight-button', '−');
                 minus.setAttribute('aria-label', `Decrease ${mUI.modelName(loras[i].name)} weight`);
                 weight.appendChild(minus);
