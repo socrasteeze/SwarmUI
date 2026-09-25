@@ -200,6 +200,10 @@ class TagDexLibraryEditorClass {
                 return;
             }
             formError.textContent = '';
+            // Booru tags like "aria (robot)" must reach the text encoder as "aria \(robot\)", or the parens are
+            // read as emphasis and the tag no longer matches. Written back so the saved text is what you see.
+            promptBox.value = this.escapePromptParens(promptBox.value);
+            negative.value = this.escapePromptParens(negative.value);
             let characterId = record?.data.character_id || character.id;
             let data = { character_id: characterId, name: name.value.trim(), recipe: { prompt: promptBox.value,
                 negative_prompt: negative.value, base_family: family.value.trim(), checkpoint: checkpoint.value.trim(), loras: loras },
@@ -214,6 +218,52 @@ class TagDexLibraryEditorClass {
                 saved(response.record);
             });
         });
+    }
+
+    /** Escapes literal parentheses in prompt text: "aria (robot)" -> "aria \(robot\)". Kept as-is: weight groups
+     * "(tag:1.2)" (anything nested inside them is still escaped), parens that are already escaped, and anything
+     * inside <...> prompt tags such as <lora:...> or <segment:...>. Unbalanced parens are escaped. */
+    escapePromptParens(text) {
+        let chars = [...`${text || ''}`];
+        let escape = new Set();
+        let open = [];
+        let pairs = [];
+        let angle = 0;
+        for (let i = 0; i < chars.length; i++) {
+            let c = chars[i];
+            if (c == '\\') {
+                i++;
+                continue;
+            }
+            if (c == '<') {
+                angle++;
+            }
+            else if (c == '>' && angle > 0) {
+                angle--;
+            }
+            else if (angle == 0 && c == '(') {
+                open.push(i);
+            }
+            else if (angle == 0 && c == ')') {
+                if (open.length > 0) {
+                    pairs.push([open.pop(), i]);
+                }
+                else {
+                    escape.add(i);
+                }
+            }
+        }
+        for (let i of open) {
+            escape.add(i);
+        }
+        let weight = /:\s*[+-]?(\d+(\.\d*)?|\.\d+)\s*$/;
+        for (let [start, end] of pairs) {
+            if (!weight.test(chars.slice(start + 1, end).join(''))) {
+                escape.add(start);
+                escape.add(end);
+            }
+        }
+        return chars.map((c, i) => escape.has(i) ? `\\${c}` : c).join('');
     }
 
     /** Creates a compact action button. */

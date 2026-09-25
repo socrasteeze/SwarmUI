@@ -391,6 +391,39 @@ const autoFavorite = await page.evaluate(async () => {
 check('a new character is favorited as soon as it is created', autoFavorite.fav && autoFavorite.fav.target_id == 'libNew'
     && autoFavorite.fav.favorited === true && autoFavorite.fav.target_kind == 'character' && autoFavorite.saved == 'libNew',
     JSON.stringify(autoFavorite));
+// Variant prompts are saved with literal parens escaped; weights, <tags> and existing escapes are kept.
+const variantEscape = await page.evaluate(async () => {
+    let B = String.fromCharCode(92);
+    let cases = [
+        ['aria (robot)', `aria ${B}(robot${B})`],
+        [`aria ${B}(robot${B})`, `aria ${B}(robot${B})`],
+        ['(aria (robot):1.1), (masterpiece:1.2)', `(aria ${B}(robot${B}):1.1), (masterpiece:1.2)`],
+        ['<lora:x (v2):0.8> smile (open mouth)', `<lora:x (v2):0.8> smile ${B}(open mouth${B})`],
+        ['a (b', `a ${B}(b`]
+    ];
+    let bad = cases.filter(([input, want]) => tagDexLibraryEditor.escapePromptParens(input) !== want).map(c => c[0]);
+    window.__requests = [];
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    tagDexLibraryEditor.variant({ id: 'lib1' }, null, true, () => {});
+    let sheet = [...document.querySelectorAll('.m-sheet')].pop();
+    sheet.querySelector('.tagdex-editor-field input').value = 'Robot';
+    let areas = sheet.querySelectorAll('.tagdex-editor-field textarea');
+    areas[0].value = 'ariarobzzz, aria (robot), (glowing eyes:1.2)';
+    areas[1].value = 'bad hands (extra fingers)';
+    sheet.querySelector('.tagdex-editor-form').requestSubmit();
+    await new Promise(r => setTimeout(r, 200));
+    let save = window.__requests.find(r => r.route == 'TagDexLibrarySave' && r.args.action == 'create_variant');
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return { bad, prompt: save ? save.args.body.data.recipe.prompt : null, negative: save ? save.args.body.data.recipe.negative_prompt : null };
+});
+check('prompt paren escaping keeps weights, tags and existing escapes', variantEscape.bad.length == 0, JSON.stringify(variantEscape.bad));
+check('saving a variant escapes its prompt and negative prompt',
+    variantEscape.prompt == String.raw`ariarobzzz, aria \(robot\), (glowing eyes:1.2)` && variantEscape.negative == String.raw`bad hands \(extra fingers\)`,
+    JSON.stringify(variantEscape));
 check('Add Character has no Archived box; editing explains it', addCharacter.labels.join('|') == 'Name|Series'
     && addCharacter.editLabels.some(l => l.startsWith('Archived (hidden')), JSON.stringify(addCharacter));
 check('Add Character matches the /simple sheets', addCharacter.titleSize == '15px' && addCharacter.saveBg == addCharacter.emphasisRgb
