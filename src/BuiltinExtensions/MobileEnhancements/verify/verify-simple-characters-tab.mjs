@@ -35,12 +35,13 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[TOAST]', TOAST)
     .replaceAll('[VARY]', '1');
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/ExtensionFile/TagDexExtension/Assets/tagdex_core.js': `${TAGDEX}/tagdex_core.js`,
     '/ExtensionFile/TagDexExtension/Assets/m_tagdex.js': `${TAGDEX}/m_tagdex.js`,
     '/ExtensionFile/TagDexExtension/Assets/m_tagdex.css': `${TAGDEX}/m_tagdex.css`,
+    '/ExtensionFile/TagDexExtension/Assets/tagdex_editor.js': `${TAGDEX}/tagdex_editor.js`,
 };
 for (const file of CLIENT) {
     FILES[`/ExtensionFile/MobileEnhancementsExtension/Assets/m/${file}`] = `${M}/${file}`;
@@ -147,6 +148,16 @@ await page.evaluate(() => {
 });
 await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length > 0);
 
+// The tab opens on favorites (only char_007 is starred); one tap on the filter shows everything.
+const opening = await page.evaluate(() => ({
+    pressed: document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').getAttribute('aria-pressed'),
+    cards: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-card-name')].map(e => e.textContent)
+}));
+check('the Characters tab opens on favorites', opening.pressed == 'true' && opening.cards.length == 1
+    && opening.cards[0] == "Char 7", JSON.stringify(opening));
+await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').click());
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
+
 const firstPage = await page.evaluate(() => ({
     cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length,
     status: document.querySelector('.m-tagdex-tab .m-tagdex-browse-status').textContent,
@@ -213,6 +224,41 @@ await page.evaluate(() => {
     document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click());
 });
 await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card').length == 50);
+
+// ---- Add Character sheet: themed like the other /simple sheets, no Archived box on a new character ----
+const addCharacter = await page.evaluate(async () => {
+    document.documentElement.style.setProperty('--emphasis', 'rgb(1, 2, 3)');
+    await new Promise(resolve => mTagDex.ensureLibraryEditor(() => { tagDexLibraryEditor.character(null, true, () => {}); resolve(); }));
+    await new Promise(r => setTimeout(r, 300));
+    let sheet = [...document.querySelectorAll('.m-sheet')].pop();
+    let save = sheet.querySelector('.tagdex-editor-actions button[type="submit"]');
+    // The harness loads no theme stylesheet, so pin the theme color to a known value to compare against.
+    document.documentElement.style.setProperty('--emphasis', 'rgb(1, 2, 3)');
+    let emphasisRgb = 'rgb(1, 2, 3)';
+    let out = {
+        labels: [...sheet.querySelectorAll('.tagdex-editor-field > span')].map(e => e.textContent),
+        titleSize: getComputedStyle(sheet.querySelector('.tagdex-editor h3')).fontSize,
+        saveBg: getComputedStyle(save).backgroundColor, emphasisRgb,
+        saveHeight: Math.round(save.getBoundingClientRect().height),
+        nameAutocomplete: sheet.querySelector('.tagdex-editor-field input').autocomplete,
+        loaderSrc: document.querySelector('.tagdex-editor-loader').getAttribute('src')
+    };
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    tagDexLibraryEditor.character({ id: 'c1', revision: 'r1', data: { name: 'Aria', series: '', archived: false } }, true, () => {});
+    await new Promise(r => setTimeout(r, 200));
+    out.editLabels = [...document.querySelectorAll('.m-sheet .tagdex-editor-field > span')].map(e => e.textContent);
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return out;
+});
+check('Add Character has no Archived box; editing explains it', addCharacter.labels.join('|') == 'Name|Series'
+    && addCharacter.editLabels.some(l => l.startsWith('Archived (hidden')), JSON.stringify(addCharacter));
+check('Add Character matches the /simple sheets', addCharacter.titleSize == '15px' && addCharacter.saveBg == addCharacter.emphasisRgb
+    && addCharacter.saveHeight >= 44 && addCharacter.nameAutocomplete == 'off', JSON.stringify(addCharacter));
+check('the editor script is loaded with the page version token', /\?vary=/.test(addCharacter.loaderSrc), addCharacter.loaderSrc);
 
 // ---- Favorites filter ----
 await page.evaluate(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click()));

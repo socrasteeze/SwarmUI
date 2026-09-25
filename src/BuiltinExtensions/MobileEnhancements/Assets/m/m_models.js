@@ -25,6 +25,16 @@ class MModels {
         }
         panel.appendChild(toggle);
         this.toggle = toggle;
+        // Searches the whole subtype, not the current folder: the point is finding a model without knowing
+        // which folder it is in. Reuses the Create-tab picker lists, so both surfaces match the same way.
+        this.search = document.createElement('input');
+        this.search.type = 'search';
+        this.search.className = 'm-lora-search m-models-search';
+        this.search.addEventListener('input', () => {
+            clearTimeout(this.searchTimer);
+            this.searchTimer = setTimeout(() => this.refresh(), 150);
+        });
+        panel.appendChild(this.search);
         this.folderChips = mUI.el('div', 'm-folder-chips');
         panel.appendChild(this.folderChips);
         this.grid = mUI.el('div', 'm-model-grid');
@@ -41,6 +51,13 @@ class MModels {
         for (let btn of this.toggle.querySelectorAll('.m-seg-button')) {
             btn.classList.toggle('m-selected', btn.dataset.subtype == this.subtype);
         }
+        let isLora = this.subtype == 'LoRA';
+        this.search.placeholder = isLora ? 'Search all LoRAs' : 'Search all checkpoints';
+        if (this.search.value.trim()) {
+            this.renderSearch();
+            return;
+        }
+        this.folderChips.style.display = '';
         this.grid.innerHTML = '';
         this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
         genericRequest('ListModels', { 'path': this.folder, 'depth': 1, 'subtype': this.subtype, 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
@@ -57,6 +74,67 @@ class MModels {
                 this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
             }
         }, 0, err => {
+            mUI.warn(`Could not list models: ${err}`);
+        });
+    }
+
+    /** Search results across every folder of the current subtype, capped like the Create-tab pickers. The
+     * lists are loaded on first search and cached on mCreate, which the pickers share. */
+    renderSearch() {
+        this.folderChips.style.display = 'none';
+        this.grid.innerHTML = '';
+        let isLora = this.subtype == 'LoRA';
+        let list = isLora ? mCreate.loraList : mCreate.modelList;
+        if (!list) {
+            this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
+            this.loadSearchList();
+            return;
+        }
+        let matches = mState.starredFirst(MCreate.filterModels(list, this.search.value), this.subtype);
+        let shown = 0;
+        for (let model of matches) {
+            if (shown >= MCreate.ListCap) {
+                break;
+            }
+            this.grid.appendChild(this.buildCard(model));
+            shown++;
+        }
+        let count = mCreate.buildCountRow(shown, matches.length, isLora ? 'LoRAs' : 'checkpoints');
+        count.classList.add('m-models-search-count');
+        this.grid.appendChild(count);
+    }
+
+    /** Loads the list the current search needs, once, then redraws if the search is still showing. */
+    loadSearchList() {
+        let redraw = () => {
+            if (this.search.value.trim()) {
+                this.refresh();
+            }
+        };
+        if (this.subtype == 'LoRA') {
+            if (this.loadingLoras) {
+                return;
+            }
+            this.loadingLoras = true;
+            // The uncapped name list is searchable immediately; titles and triggers fill in as folders land.
+            mCreate.indexLoras([]);
+            redraw();
+            mCreate.enrichLoraMetadata(() => {
+                this.loadingLoras = false;
+                redraw();
+            });
+            return;
+        }
+        if (this.loadingModels) {
+            return;
+        }
+        this.loadingModels = true;
+        genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'Stable-Diffusion', 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
+            this.loadingModels = false;
+            mCreate.modelList = data.files || [];
+            redraw();
+        }, 0, err => {
+            this.loadingModels = false;
             mUI.warn(`Could not list models: ${err}`);
         });
     }

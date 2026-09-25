@@ -37,12 +37,20 @@ class TagDexLibraryEditorClass {
         let name = document.createElement('input');
         name.required = true;
         name.value = record?.data.name || '';
+        // Without this iOS offers "AutoFill Contact" on a field labelled Name.
+        name.autocomplete = 'off';
         let series = document.createElement('input');
         series.value = record?.data.series || '';
+        series.autocomplete = 'off';
         let archived = document.createElement('input');
         archived.type = 'checkbox';
         archived.checked = record?.data.archived || false;
-        form.append(this.field('Name', name), this.field('Series', series), this.field('Archived', archived));
+        form.append(this.field('Name', name), this.field('Series', series));
+        // Archiving hides an existing character from lists and blocks applying it, without deleting it. A new
+        // character has nothing to hide yet, so the box only appears when editing.
+        if (record) {
+            form.append(this.field('Archived (hidden from lists, cannot be applied)', archived));
+        }
         let actions = document.createElement('div');
         actions.className = 'tagdex-editor-actions';
         let save = document.createElement('button');
