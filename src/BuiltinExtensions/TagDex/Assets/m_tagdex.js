@@ -452,20 +452,27 @@ class MTagDexClass {
         panel.appendChild(wrap);
         let ctx = { 'sources': [], 'source': '', 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': true, 'sortBy': this.sortMode() };
         let runSearch;
-        let render = (records) => {
+        // The dataset a search actually runs against: All Characters searches the character dataset.
+        let datasetFor = () => ctx.source == MTagDexClass.AllSource ? ctx.characterSource : ctx.source;
+        let render = (records, pinned) => {
             results.innerHTML = '';
-            for (let i = 0; i < records.length; i++) {
-                results.appendChild(this.buildBrowseRow(records[i], ctx.source, () => runSearch()));
+            for (let character of pinned) {
+                results.appendChild(this.buildLibraryRow(character));
             }
-            if (records.length == 0) {
+            let dataset = datasetFor();
+            for (let i = 0; i < records.length; i++) {
+                results.appendChild(this.buildBrowseRow(records[i], dataset, () => runSearch()));
+            }
+            if (records.length == 0 && pinned.length == 0) {
                 results.appendChild(mUI.el('div', 'm-strip-empty', ctx.favoritesOnly ? 'No favorites yet - star characters to pin them here.' : 'No matches.'));
             }
             let first = ctx.offset + 1;
             let last = ctx.offset + records.length;
             let pages = Math.max(1, Math.ceil(ctx.total / ctx.pageSize));
             let page = Math.floor(ctx.offset / ctx.pageSize) + 1;
-            status.textContent = ctx.total == 0 ? '0 matches'
-                : `${first.toLocaleString()}\u2013${last.toLocaleString()} of ${ctx.total.toLocaleString()}`;
+            let added = pinned.length > 0 ? ` \u00b7 ${pinned.length} added` : '';
+            status.textContent = (ctx.total == 0 ? '0 matches'
+                : `${first.toLocaleString()}\u2013${last.toLocaleString()} of ${ctx.total.toLocaleString()}`) + added;
             pageLabel.textContent = `${page} / ${pages}`;
             pager.style.display = ctx.total > ctx.pageSize ? '' : 'none';
             prev.disabled = ctx.offset <= 0;
@@ -473,14 +480,16 @@ class MTagDexClass {
         };
         runSearch = () => {
             let isLibrary = ctx.source == MTagDexClass.LibrarySource;
+            let isAll = ctx.source == MTagDexClass.AllSource;
             // Favorites and sort belong to the datasets; the library list is always every character you added.
             favorites.style.display = isLibrary ? 'none' : '';
             sortSelect.style.display = isLibrary ? 'none' : '';
-            if (isLibrary) {
+            let dataset = datasetFor();
+            if (isLibrary || (isAll && !dataset)) {
                 this.renderLibraryList(ctx, search.value.trim(), results, status, pager);
                 return;
             }
-            if (!ctx.source) {
+            if (!dataset) {
                 results.innerHTML = '';
                 status.textContent = 'No datasets. Download one from More.';
                 pager.style.display = 'none';
@@ -488,16 +497,13 @@ class MTagDexClass {
             }
             let token = ++ctx.token;
             status.textContent = 'Searching...';
-            genericRequest('TagDexSearchEntries', {
-                'source': ctx.source,
-                'search': search.value.trim(),
-                'sortBy': ctx.sortBy || 'relevance',
-                'offset': ctx.offset,
-                'limit': ctx.pageSize,
-                'withFolders': false,
-                'favoritesOnly': ctx.favoritesOnly
-            }, data => {
-                if (token != ctx.token) {
+            // All Characters pins your added characters above page one of the dataset. With the favorites filter
+            // on, only the favorited ones - and new characters are favorited when they are created.
+            let wantPinned = isAll && ctx.offset == 0;
+            let pinned = wantPinned ? null : [];
+            let data = null;
+            let finish = () => {
+                if (token != ctx.token || data == null || pinned == null) {
                     return;
                 }
                 if (data.missing_data) {
@@ -514,7 +520,26 @@ class MTagDexClass {
                     runSearch();
                     return;
                 }
-                render(data.results || []);
+                render(data.results || [], pinned);
+            };
+            if (wantPinned) {
+                // A library that cannot be reached must not take the dataset results down with it.
+                this.loadPinnedLibrary(search.value.trim(), ctx.favoritesOnly, rows => {
+                    pinned = rows;
+                    finish();
+                });
+            }
+            genericRequest('TagDexSearchEntries', {
+                'source': dataset,
+                'search': search.value.trim(),
+                'sortBy': ctx.sortBy || 'relevance',
+                'offset': ctx.offset,
+                'limit': ctx.pageSize,
+                'withFolders': false,
+                'favoritesOnly': ctx.favoritesOnly
+            }, response => {
+                data = response;
+                finish();
             }, 0, error => {
                 if (token != ctx.token) {
                     return;
@@ -525,6 +550,16 @@ class MTagDexClass {
                 mUI.warn(`TagDex: ${error}`);
             });
         };
+        // syncSortOptions gates by the dataset actually searched, which for All Characters is not ctx.source.
+        let syncSort = () => {
+            let dataset = datasetFor();
+            if (!dataset || ctx.source == MTagDexClass.LibrarySource) {
+                return;
+            }
+            let view = { 'sources': ctx.sources, 'source': dataset, 'sortBy': ctx.sortBy };
+            this.syncSortOptions(sortSelect, view);
+            ctx.sortBy = view.sortBy;
+        };
         let restart = () => {
             ctx.offset = 0;
             runSearch();
@@ -532,9 +567,7 @@ class MTagDexClass {
         source.addEventListener('change', () => {
             ctx.source = source.value;
             // Re-gate before searching: a dataset without scores must not keep a score sort selected.
-            if (ctx.source != MTagDexClass.LibrarySource) {
-                this.syncSortOptions(sortSelect, ctx);
-            }
+            syncSort();
             restart();
         });
         sortSelect.addEventListener('change', () => {
@@ -562,6 +595,14 @@ class MTagDexClass {
         this.fetchSources((sources, prefs) => {
             ctx.sources = sources.filter(item => item.present);
             source.innerHTML = '';
+            // All Characters is the default view: the character dataset plus everything you added.
+            let preferredCharacter = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id && item.kind == 'character')) : '';
+            let firstCharacter = ctx.sources.find(item => item.kind == 'character');
+            ctx.characterSource = preferredCharacter || (firstCharacter ? firstCharacter.id : '');
+            let all = document.createElement('option');
+            all.value = MTagDexClass.AllSource;
+            all.textContent = 'All Characters';
+            source.appendChild(all);
             for (let i = 0; i < ctx.sources.length; i++) {
                 let option = document.createElement('option');
                 option.value = ctx.sources[i].id;
@@ -573,14 +614,36 @@ class MTagDexClass {
             library.value = MTagDexClass.LibrarySource;
             library.textContent = 'My Library (all added characters)';
             source.appendChild(library);
-            let preferred = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id)) : '';
-            ctx.source = preferred || (ctx.sources.length > 0 ? ctx.sources[0].id : MTagDexClass.LibrarySource);
+            ctx.source = MTagDexClass.AllSource;
             source.value = ctx.source;
-            if (ctx.source != MTagDexClass.LibrarySource) {
-                this.syncSortOptions(sortSelect, ctx);
-            }
+            syncSort();
             runSearch();
         });
+    }
+
+    /** One custom-library character as a tappable row that opens its variants. */
+    buildLibraryRow(character) {
+        let button = mUI.el('button', 'm-wide-button m-tagdex-library-row',
+            character.data.series ? `${character.data.name} \u00b7 ${character.data.series}` : character.data.name);
+        button.addEventListener('click', () => this.openLibraryCharacter(character.id));
+        return button;
+    }
+
+    /** Library characters to pin in All Characters: every match, or only favorited ones when the favorites
+     * filter is on. Any failure yields an empty list rather than blocking the dataset results. */
+    loadPinnedLibrary(q, favoritesOnly, callback) {
+        this.loadAllLibraryCharacters(q, data => {
+            let rows = data.results || [];
+            if (!favoritesOnly) {
+                callback(rows);
+                return;
+            }
+            genericRequest('TagDexLibraryReview', { view: 'favorites' }, favs => {
+                let ids = new Set((favs.results || []).filter(record => record.data && record.data.target_kind == 'character'
+                    && record.data.favorited).map(record => record.data.target_id));
+                callback(rows.filter(character => ids.has(character.id)));
+            }, 0, () => callback([]));
+        }, () => callback([]));
     }
 
     /** Lists every custom-library character (unfiltered, unpaged: the library is operator-sized) into the
@@ -596,10 +659,7 @@ class MTagDexClass {
             results.innerHTML = '';
             let rows = data.results || [];
             for (let character of rows) {
-                let button = mUI.el('button', 'm-wide-button m-tagdex-library-row',
-                    character.data.series ? `${character.data.name} · ${character.data.series}` : character.data.name);
-                button.addEventListener('click', () => this.openLibraryCharacter(character.id));
-                results.appendChild(button);
+                results.appendChild(this.buildLibraryRow(character));
             }
             status.textContent = rows.length == 0 ? 'No library characters. Add one from More > Add Character.' : `${rows.length} characters`;
         }, error => {
@@ -769,6 +829,9 @@ class MTagDexClass {
      * ones that only apply to some datasets, exactly as the genpage gates them. */
     /** Characters-tab list value for the custom library (not a dataset id, so it can never collide with one). */
     static LibrarySource = '__library__';
+
+    /** Characters-tab list value for the character dataset plus the custom library (the default view). */
+    static AllSource = '__all__';
 
     static SortModes = [
         { 'value': 'relevance', 'label': 'Best Match' },

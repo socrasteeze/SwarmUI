@@ -452,6 +452,13 @@ const longForm = await page.evaluate(async () => {
         scrolls: sheet.scrollHeight > sheet.clientHeight + 200,
         barVisible: b.top >= s.top && b.bottom <= s.bottom, barLast: content.lastElementChild == bar
     };
+    // Scrolled to the end, the last parameter must sit above the pinned bar, not under it.
+    sheet.scrollTop = sheet.scrollHeight;
+    await new Promise(r => setTimeout(r, 50));
+    let params = content.querySelector('.m-preset-params');
+    let lastRow = [...params.querySelectorAll('.m-preset-param-row')].pop();
+    out.lastRowClear = lastRow.getBoundingClientRect().bottom <= bar.getBoundingClientRect().top + 1;
+    out.paramsNotNested = params.scrollHeight <= params.clientHeight + 1;
     mState.paramMeta = saved;
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
@@ -461,6 +468,7 @@ const longForm = await page.evaluate(async () => {
 check('prompt-type params edit in a multi-line box', longForm.tag == 'TEXTAREA' && longForm.negTag == 'TEXTAREA'
     && longForm.stepsTag == 'INPUT', JSON.stringify(longForm));
 check('the prompt box grows to show its whole value', longForm.fits && longForm.lines > 60, JSON.stringify(longForm));
+check('scrolled to the end, the last parameter is not under Save/Cancel', longForm.lastRowClear && longForm.paramsNotNested, JSON.stringify(longForm));
 check('Save/Cancel stay visible at the top of a long, scrolling editor', longForm.scrolls && longForm.barVisible
     && longForm.barLast, JSON.stringify(longForm));
 // The Video section is always in the editor for advertised video params: empty fields with the suggestion as a
