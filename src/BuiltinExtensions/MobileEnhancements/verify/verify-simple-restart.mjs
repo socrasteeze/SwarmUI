@@ -96,9 +96,9 @@ async function freshRow() {
 }
 
 check('the More panel has a Restart Server row', await freshRow());
-check('it is distinct from the client-side Force update row', await page.evaluate(() => {
+check('it is distinct from the client-side Clear Cache row', await page.evaluate(() => {
     let labels = [...document.querySelectorAll('.m-more-item')].map(r => r.textContent);
-    return labels.includes('Restart Server') && labels.some(l => l.startsWith('Force update'));
+    return labels.includes('Restart Server') && labels.some(l => l == 'Clear Cache');
 }));
 
 // ---- Permission gate ----

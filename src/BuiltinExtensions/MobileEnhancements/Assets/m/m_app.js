@@ -108,14 +108,14 @@ class MApp {
             });
         });
         addRow('Reset mobile client state', clear);
-        let hardRefresh = mUI.el('button', 'm-more-item', 'Force update (clear app cache)');
+        let hardRefresh = mUI.el('button', 'm-more-item', 'Clear Cache');
         hardRefresh.addEventListener('click', () => {
             mUI.confirm('Delete the cached app files and reload? Your prompt and settings are kept.', () => {
                 this.hardRefresh();
             });
         });
-        addRow('Force update (clear app cache)', hardRefresh);
-        // Restart the SERVER - deliberately distinct from "Force update" above, which only ever touches this
+        addRow('Clear Cache', hardRefresh);
+        // Restart the SERVER - deliberately distinct from "Clear Cache" above, which only ever touches this
         // browser (caches + service worker). The two are not interchangeable: a Release-build server reads
         // every /simple, MobileEnhancements and TagDex asset from disk ONCE and serves that copy for its whole
         // life (WebServer.ViewExtensionScript's GetLazy branch), so an edited or newly added asset is invisible
@@ -171,7 +171,7 @@ class MApp {
                 hadController = true;
                 return;
             }
-            mUI.note('Update ready - reopen the app, or use More > Force update.');
+            mUI.note('Update ready - reopen the app, or use More > Clear Cache.');
         });
     }
 
