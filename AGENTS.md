@@ -202,6 +202,16 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-25 (live Windows box): manual upstream check and backend update (user asked "Sync upstream", then "update the backend").
+  - **Upstream:** `git fetch upstream` showed `upstream/master` still at `e2c35f35` ("Qwen 2.1 lora support"), already merged. `merge-base --is-ancestor` was true, so there were 0 incoming commits and no merge.
+  - **Remotes and identity:** `origin` points to `socrasteeze/SwarmUI`. The `upstream` push URL is pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Identity is `socrasteeze <socradeez@gmail.com>`.
+  - **Backend:**
+    - **Fast-forwarded:** `custom_nodes/comfyui-manager` `9002c327` -> `9c29dc68` (6 commits, node-list DB only). `custom_nodes/rgthree-comfy` `2c5342a` -> `449c58f` (6 commits: Image Comparer output, fast-group toggle restrictions, logo route fix).
+    - **Already current:** bundled ComfyUI `master` and all other clean DLNodes and custom_nodes.
+    - **Skipped, dirty:** DLNode `ComfyUI-ReActor` (17 behind, modified `nodes.py`). DLNode `ComfyUI-TeaCache` (modified `nodes.py`). custom_node `ComfyUI-WD14-Tagger` (modified `requirements.txt`). custom_node `ComfyUI-RMBG` (modified `requirements.txt`).
+    - **Dependencies:** no requirements changed and no pip install ran, so the GPU acceleration check was not applicable.
+    - **Timing:** the fast-forwards landed after ComfyUI had loaded. The user restarted the ComfyUI backend, and the reload was confirmed through `object_info`: 2,322 nodes, including 24 rgthree nodes, with no import errors.
+
 - 2026-09-24 (live Windows box) - manual sync (user asked: sync upstream, FF nodes, clean push). Working tree had one uncommitted change (`m.css` `--m-preview-h: 30dvh` -> `45dvh`, a leftover tweak on top of the last commit); user chose to commit it first (`7a4fc8d9`), then the sync proceeded on a clean tree. `git pull --ff-only origin main` - already up to date (0/0). Remotes correct: `origin` -> `socrasteeze/SwarmUI`, `upstream` fetch -> `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Identity `socrasteeze <socradeez@gmail.com>`. `git fetch upstream`; upstream default branch `master`. Incoming 1 commit `96a4c3d1..e2c35f35`: `e2c35f35` "Qwen 2.1 lora support (#1552)" - 5 lines in `T2IModelClassSorter.cs` (new `isQwenImage21Lora` detector + `qwen-image-2.1/lora` `Register` block), purely additive, no overlap with fork entries in that file. Merged `git merge upstream/master --no-edit` (`d6efd1f1`) - auto-merged, zero conflicts. `dotnet build src/SwarmUI.csproj --configuration Release` - 0 warnings, 0 errors. `dotnet format SwarmUI.sln --verify-no-changes` - clean.
 
   Backend/custom_nodes review (live `dlbackend/` present on this box):
