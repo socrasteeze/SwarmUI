@@ -202,6 +202,12 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-26 (live Windows box): backend node fast-forward only (user asked "FF any custom nodes", then "clean push"). No SwarmUI source changed; upstream not re-checked this run.
+  - **Fast-forwarded:** DLNode `ComfyUI-ConditioningKrea2Rebalance` `6984edb` -> `53c147c` (3 commits, `README.md` and `pyproject.toml` only).
+  - **Already current:** bundled ComfyUI and all other clean DLNodes and custom_nodes.
+  - **Skipped, dirty:** DLNode `ComfyUI-ReActor` (17 behind, modified `nodes.py`).
+  - **Dependencies:** no requirements changed and no pip install ran, so the GPU acceleration check was not applicable. No backend restart needed.
+
 - 2026-09-25 (live Windows box): manual upstream check and backend update (user asked "Sync upstream", then "update the backend").
   - **Upstream:** `git fetch upstream` showed `upstream/master` still at `e2c35f35` ("Qwen 2.1 lora support"), already merged. `merge-base --is-ancestor` was true, so there were 0 incoming commits and no merge.
   - **Remotes and identity:** `origin` points to `socrasteeze/SwarmUI`. The `upstream` push URL is pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Identity is `socrasteeze <socradeez@gmail.com>`.
