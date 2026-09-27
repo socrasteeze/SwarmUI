@@ -202,6 +202,12 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-09-26 (second run, live Windows box): backend fast-forward only (user asked "FF any custom nodes", then "clean push"). No SwarmUI source changed; upstream not re-checked this run.
+  - **Fast-forwarded:** bundled ComfyUI `dlbackend/comfy/ComfyUI` `79be670e2` -> `4ef23c34d` (3 commits: Qwen-Image 2.1 tiny VAE, ID-V2V for Wan, a regression fix). 9 Python files; `requirements.txt` unchanged.
+  - **Already current:** all clean DLNodes and custom_nodes.
+  - **Skipped, dirty:** DLNode `ComfyUI-ReActor` (17 behind, modified `nodes.py`).
+  - **Dependencies:** no pip install ran. `check-gpu-accel.bat` not run (lives outside the repo); no dependency change, so onnxruntime is not expected to be affected. The ComfyUI backend needs a restart to load the new code.
+
 - 2026-09-26 (live Windows box): backend node fast-forward only (user asked "FF any custom nodes", then "clean push"). No SwarmUI source changed; upstream not re-checked this run.
   - **Fast-forwarded:** DLNode `ComfyUI-ConditioningKrea2Rebalance` `6984edb` -> `53c147c` (3 commits, `README.md` and `pyproject.toml` only).
   - **Already current:** bundled ComfyUI and all other clean DLNodes and custom_nodes.
