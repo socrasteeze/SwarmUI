@@ -87,6 +87,17 @@ class MTagDexClass {
             return results;
         });
         mAutoComplete.registerAltPrefix('char', 'character');
+        let modes = (prefix) => {
+            let out = [];
+            for (let mode of ['favorite', 'random']) {
+                if (mode.startsWith((prefix || '').toLowerCase())) {
+                    out.push(mode);
+                }
+            }
+            return out.length ? out : ['\nUse "favorite" or "random".'];
+        };
+        mAutoComplete.registerPrefix('characters', 'Random female character with all her tags', modes);
+        mAutoComplete.registerPrefix('artists', 'Random artist tag', modes);
     }
 
     /** Adds the dataset row to the More tab. Separate from install(): that one bails when MAutoComplete is absent,

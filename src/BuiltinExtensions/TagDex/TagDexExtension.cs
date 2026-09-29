@@ -44,6 +44,7 @@ public partial class TagDexExtension : Extension
         OtherAssets.Add("Assets/m_tagdex.css");
         OtherAssets.Add("Assets/tagdex_editor.js");
         TagDexData.Init();
+        TagDexPromptTags.Register();
         API.RegisterAPICall(TagDexListSources, false, PermUseTagDex);
         API.RegisterAPICall(TagDexSearchEntries, false, PermUseTagDex);
         API.RegisterAPICall(TagDexGetFacets, false, PermUseTagDex);
