@@ -72,7 +72,9 @@ public static class TagDexPromptTags
         List<TagDexEntry> pool = [];
         foreach (TagDexSource source in TagDexData.Sources)
         {
-            if (source.Kind != kind || !TagDexData.IsPresent(source))
+            // Custom characters are picked by hand from their card, never at random: they carry no post count and
+            // their tag line lives in Trigger, which Format does not use.
+            if (source.Kind != kind || source.Format == TagDexFormat.Custom || !TagDexData.IsPresent(source))
             {
                 continue;
             }

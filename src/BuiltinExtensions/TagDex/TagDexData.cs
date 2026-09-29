@@ -12,7 +12,9 @@ public enum TagDexFormat
     /// <summary>A noob-wiki style CSV.</summary>
     Csv,
     /// <summary>The anima-styles gallery's <c>data.js</c>: a single <c>const galleryData = [...]</c> JSON array.</summary>
-    AnimaStyles
+    AnimaStyles,
+    /// <summary>The user's own characters, one JSON file written by <see cref="TagDexCustom"/>.</summary>
+    Custom
 }
 
 /// <summary>Static description of one dataset.</summary>
@@ -25,7 +27,12 @@ public enum TagDexFormat
 public record class TagDexSource(string ID, TagDexKind Kind, string Label, string Url, string PostUrlPrefix, TagDexFormat Format = TagDexFormat.Csv)
 {
     /// <summary>The metadata filename this dataset loads from.</summary>
-    public string FileName => Format == TagDexFormat.AnimaStyles ? $"{ID}.js" : $"{ID}.csv";
+    public string FileName => Format switch
+    {
+        TagDexFormat.AnimaStyles => $"{ID}.js",
+        TagDexFormat.Custom => $"{ID}.json",
+        _ => $"{ID}.csv"
+    };
 
     /// <summary>Whether this dataset can be fetched by the in-app downloader.</summary>
     public bool IsDownloadable => Url is not null;
@@ -65,9 +72,14 @@ public class TagDexList
     /// <summary>Last-write timestamp of the source file when it was loaded, for staleness detection.</summary>
     public long FileModifiedUtc;
 
-    /// <summary>Rebuilds the booru link for an entry, which is not stored per-row.</summary>
+    /// <summary>Rebuilds the booru link for an entry, which is not stored per-row. Null for a dataset with no booru
+    /// counterpart (the user's own characters).</summary>
     public string UrlFor(in TagDexEntry entry)
     {
+        if (Source.PostUrlPrefix is null)
+        {
+            return null;
+        }
         return $"{Source.PostUrlPrefix}{Uri.EscapeDataString(entry.Name)}";
     }
 }
@@ -99,7 +111,10 @@ public static class TagDexData
         // post_count >= 45) that ships a 512x768 style reference for every single row, plus uniqueness and quality
         // scores the raw CSV has no equivalent for. 97.4% of it cross-references danbooru_artist.
         new("anima_styles", TagDexKind.Artist, "Anima Styles (local)", null,
-            "https://danbooru.donmai.us/posts?tags=", TagDexFormat.AnimaStyles)
+            "https://danbooru.donmai.us/posts?tags=", TagDexFormat.AnimaStyles),
+        // The user's own characters: tags plus optional attached LoRAs, created in the UI. Not downloadable and
+        // with no booru link. Last, so it never becomes the default dataset ahead of a real one.
+        new("custom_character", TagDexKind.Character, "My Characters", null, null, TagDexFormat.Custom)
     ];
 
     /// <summary>Booru meta tags that masquerade as artists. Left in place they dominate any count-sorted artist
@@ -285,6 +300,10 @@ public static class TagDexData
         if (source.Format == TagDexFormat.AnimaStyles)
         {
             return TagDexAnimaStyles.Parse(source, minCount);
+        }
+        if (source.Format == TagDexFormat.Custom)
+        {
+            return TagDexCustom.Parse(source, minCount);
         }
         string path = PathFor(source);
         long startTicks = Environment.TickCount64;

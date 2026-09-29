@@ -356,9 +356,9 @@
     white-space: normal;
     overflow-wrap: anywhere;
 }
-+
+
 .tagdex-editor-dialog {
-    width: min(56rem, calc(100vw - 2rem));
+    width: min(40rem, calc(100vw - 2rem));
     max-height: calc(100vh - 2rem);
     padding: 0;
     border: 1px solid var(--shadow);
@@ -396,21 +396,10 @@
 }
 
 .tagdex-editor-field input,
-.tagdex-editor-field textarea,
-.tagdex-editor-stack input {
+.tagdex-editor-field textarea {
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
-}
-
-.tagdex-editor-field input[type="checkbox"] {
-    width: auto;
-    justify-self: start;
-}
-
-.tagdex-editor-error {
-    min-height: 1.25rem;
-    color: var(--danger, #d55);
 }
 
 .tagdex-editor-field textarea {
@@ -418,22 +407,72 @@
     resize: vertical;
 }
 
-.tagdex-editor-lora,
-.tagdex-editor-result,
-.tagdex-editor-actions {
+.tagdex-editor-error {
+    min-height: 1.25rem;
+    color: var(--danger, #d55);
+}
+
+.tagdex-editor-lora-list {
     display: grid;
-    grid-template-columns: minmax(8rem, 1fr) auto auto auto auto;
+    gap: 0.5rem;
+}
+
+.tagdex-editor-lora {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.5rem;
+    border: 1px solid var(--shadow);
+    border-radius: 0.35rem;
+}
+
+.tagdex-editor-lora-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 5.5rem auto;
     gap: 0.35rem;
     align-items: center;
 }
 
-.tagdex-editor-result {
-    grid-template-columns: minmax(8rem, 1fr) auto;
+.tagdex-editor-lora input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.tagdex-editor-suggest {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    max-height: 7rem;
+    overflow: auto;
+}
+
+.tagdex-editor-suggest[hidden] {
+    display: none;
+}
+
+.tagdex-editor-suggest-item {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tagdex-editor-add {
+    justify-self: start;
 }
 
 .tagdex-editor-actions {
     display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
     justify-content: flex-end;
+    align-items: center;
+}
+
+.tagdex-editor-delete {
+    order: -1;
+    margin-right: auto;
+    color: var(--danger, #d55);
 }
 
 /* /simple: the editor opens in an m-sheet, which already styles its inputs. These rules bring the rest in
@@ -454,15 +493,10 @@
     font-size: 12px;
     color: var(--text-soft);
 }
-.m-sheet .tagdex-editor-field input:not([type="checkbox"]),
-.m-sheet .tagdex-editor-stack input {
+.m-sheet .tagdex-editor-field input,
+.m-sheet .tagdex-editor-lora input {
     min-height: 44px;
     padding: 0.5rem;
-}
-.m-sheet .tagdex-editor-field input[type="checkbox"] {
-    width: 1.4rem;
-    height: 1.4rem;
-    accent-color: var(--emphasis);
 }
 .m-sheet .tagdex-editor button {
     min-height: 44px;
@@ -471,6 +505,13 @@
     border: 1px solid var(--border-color);
     background: var(--background-panel);
     color: var(--text);
+}
+.m-sheet .tagdex-editor-lora-remove {
+    min-width: 44px;
+    padding: 0;
+}
+.m-sheet .tagdex-editor-delete {
+    color: var(--red, #d55);
 }
 .m-sheet .tagdex-editor-actions {
     gap: 0.4rem;
@@ -486,21 +527,24 @@
     border: none;
     font-weight: bold;
 }
-
-.tagdex-editor-conflicts pre {
-    max-height: 14rem;
-    overflow: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
+.m-sheet .tagdex-editor-actions .tagdex-editor-delete {
+    order: 3;
+    margin-right: 0;
 }
 
-@media (max-width: 520px) {
-    .tagdex-editor-lora {
-        grid-template-columns: 1fr auto;
-    }
+/* The edit button on a custom character card reuses the round alltags button. In a grid tile that button floats
+   at the top-left, where a card with LoRA tags also has its trigger-only button, so the edit button drops below it. */
+.m-tagdex-grid .m-tagdex-edit-button {
+    top: calc(0.5rem + 48px);
+}
 
-    .tagdex-editor-lora > span {
-        grid-column: 1 / -1;
-        overflow-wrap: anywhere;
-    }
+/* The "+ Add" button beside the Favorites filter. */
+.m-tagdex-add-button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text);
 }

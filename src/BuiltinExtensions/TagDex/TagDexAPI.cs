@@ -108,6 +108,7 @@ public partial class TagDexExtension
                 ["url"] = source.Url,
                 ["downloadable"] = source.IsDownloadable,
                 ["scored"] = source.Format == TagDexFormat.AnimaStyles,
+                ["custom"] = source.Format == TagDexFormat.Custom,
                 ["present"] = present,
                 ["loaded"] = list is not null,
                 ["rows"] = list?.Entries.Length ?? 0,
@@ -162,8 +163,9 @@ public partial class TagDexExtension
         TagDexPrefs prefs = TagDexPrefs.For(session);
         HashSet<string> favorites = TagDexFavorites.For(session);
         HashSet<string> favoriteNames = TagDexFavorites.ForSource(favorites, source);
-        TagDexQuery query = TagDexSearch.BuildQuery(search, copyright, hairColor, hairLength, eyeColor, gender,
-            minCount < 0 ? prefs.DisplayMinCount : minCount);
+        // Custom characters have no post count, so the count floor would hide every one of them.
+        int floor = list.Source.Format == TagDexFormat.Custom ? 0 : (minCount < 0 ? prefs.DisplayMinCount : minCount);
+        TagDexQuery query = TagDexSearch.BuildQuery(search, copyright, hairColor, hairLength, eyeColor, gender, floor);
         query.FavoritesOnly = favoritesOnly;
         query.FavoriteNames = favoriteNames;
         long start = Environment.TickCount64;
@@ -468,13 +470,24 @@ public partial class TagDexExtension
             ["trigger"] = entry.Trigger,
             ["count"] = entry.Count,
             ["solo_count"] = entry.SoloCount,
-            ["url"] = list.UrlFor(in entry),
             ["kind"] = list.Source.Kind == TagDexKind.Character ? "character" : "artist"
         };
+        string url = list.UrlFor(in entry);
+        if (url is not null)
+        {
+            result["url"] = url;
+        }
+        TagDexCustomCharacter custom = list.Source.Format == TagDexFormat.Custom ? TagDexCustom.RecordFor(entry.Name) : null;
+        if (custom is not null)
+        {
+            // The user's own casing and series text, and the raw record so the editor can load it.
+            result["display"] = custom.Name;
+            result["custom"] = TagDexCustom.ToJson(custom);
+        }
         if (entry.Copyright is not null)
         {
             result["copyright"] = entry.Copyright;
-            result["copyright_display"] = TagDexNames.Humanize(entry.Copyright);
+            result["copyright_display"] = custom is not null ? entry.Copyright : TagDexNames.Humanize(entry.Copyright);
         }
         if (entry.CoreTags is not null)
         {

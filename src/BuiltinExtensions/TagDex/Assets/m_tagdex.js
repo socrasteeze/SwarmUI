@@ -107,14 +107,12 @@ class MTagDexClass {
             return;
         }
         mUI.registerMoreItem('TagDex Datasets', () => this.openDatasetSheet());
-        mUI.registerMoreItem('My Library', () => this.openLibrarySheet());
-        mUI.registerMoreItem('Add Character', () => this.ensureLibraryEditor(() => this.editLibraryCharacter(null)));
-        mUI.registerMoreItem('Conflict Review', () => this.ensureLibraryEditor(() => tagDexLibraryEditor.review(true, () => mUI.note('Conflict resolved.'))));
+        mUI.registerMoreItem('Add Character', () => this.editCharacter(null));
     }
 
     /** Loads the shared editor asset on /simple without exposing configuration. */
-    ensureLibraryEditor(callback) {
-        if (typeof tagDexLibraryEditor != 'undefined') {
+    ensureCharacterEditor(callback) {
+        if (typeof tagDexCharacterEditor != 'undefined') {
             callback();
             return;
         }
@@ -133,279 +131,25 @@ class MTagDexClass {
         document.head.appendChild(script);
     }
 
-    /** Opens the local replicated character library on /simple. */
-    openLibrarySheet() {
-        let content = mUI.el('div', 'm-tagdex-browse-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'My Library'));
-        let search = document.createElement('input');
-        search.type = 'search';
-        search.placeholder = 'Search';
-        search.className = 'm-tagdex-search';
-        search.setAttribute('aria-label', 'Search library');
-        let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
-        let results = mUI.el('div', 'm-tagdex-browse-results');
-        content.append(search, status, results);
-        mUI.openSheet(content);
-        let timer = null;
-        let load = () => this.loadAllLibraryCharacters(search.value, data => {
-            results.innerHTML = '';
-            for (let character of data.results || []) {
-                let button = mUI.el('button', 'm-wide-button', character.data.series ? `${character.data.name} · ${character.data.series}` : character.data.name);
-                button.addEventListener('click', () => this.openLibraryCharacter(character.id));
-                results.appendChild(button);
-            }
-            status.textContent = (data.results || []).length == 0 ? 'No library characters found.' : `${data.total} characters`;
-        }, error => status.textContent = error);
-        search.addEventListener('input', () => {
-            clearTimeout(timer);
-            timer = setTimeout(load, 250);
-        });
-        load();
-    }
-
-    /** Loads every bounded custom-library character page. */
-    loadAllLibraryCharacters(q, callback, error, offset = 0, rows = []) {
-        genericRequest('TagDexLibraryCharacters', { q: q, offset: offset, limit: 250 }, data => {
-            rows.push(...(data.results || []));
-            if (rows.length < (data.total || 0) && (data.results || []).length > 0) {
-                this.loadAllLibraryCharacters(q, callback, error, rows.length, rows);
-                return;
-            }
-            callback({ ...data, results: rows });
-        }, 0, error);
-    }
-
-    /** Opens all variants for one library character. */
-    openLibraryCharacter(id) {
-        genericRequest('TagDexLibraryCharacter', { id: id }, data => {
-            let content = mUI.el('div', 'm-tagdex-browse-sheet');
-            content.appendChild(mUI.el('div', 'm-sheet-title', data.record.data.name));
-            let editCharacter = mUI.el('button', 'm-wide-button', 'Edit Character');
-            editCharacter.addEventListener('click', () => this.editLibraryCharacter(data.record));
-            content.appendChild(editCharacter);
-            for (let variant of data.variants || []) {
-                let row = mUI.el('div', 'm-tagdex-card');
-                row.appendChild(mUI.el('div', 'm-tagdex-card-name', variant.data.name));
-                let apply = mUI.el('button', 'm-tagdex-action', 'Apply');
-                apply.addEventListener('click', () => this.applyLibraryVariant(variant));
-                let gallery = mUI.el('button', 'm-tagdex-action', 'Gallery');
-                gallery.addEventListener('click', () => this.openLibraryGallery(variant));
-                let edit = mUI.el('button', 'm-tagdex-action', 'Edit');
-                edit.addEventListener('click', () => this.editLibraryVariant(null, variant));
-                let clone = mUI.el('button', 'm-tagdex-action', 'Clone');
-                clone.addEventListener('click', () => this.ensureLibraryEditor(() => tagDexLibraryEditor.variant(null, variant, true, () => mUI.note('Variant cloned.'), true)));
-                row.append(apply, gallery, edit, clone);
-                content.appendChild(row);
-            }
-            let add = mUI.el('button', 'm-wide-button', 'Add Variant');
-            add.addEventListener('click', () => this.editLibraryVariant(data.record, null));
-            content.appendChild(add);
-            mUI.openSheet(content);
-        }, 0, error => mUI.warn(error));
-    }
-
-    /** Resolves and atomically applies one library recipe to /simple state. */
-    applyLibraryVariant(variant) {
-        // The model a generation would actually use: a preset that sets the model leaves params['model'] empty, and
-        // resolving against nothing reported every variant as incompatible.
-        let effectiveModel = mState.buildGenInput()['model'] || '';
-        genericRequest('TagDexLibraryResolve', { variantId: variant.id, revision: variant.revision, model: effectiveModel }, data => {
-            let missing = (data.loras || []).filter(lora => lora.status == 'not_downloaded');
-            let unverified = (data.loras || []).filter(lora => lora.status == 'unverified');
-            if (missing.length > 0) {
-                this.openLibraryDownloads(variant, missing);
-                return;
-            }
-            if (unverified.length > 0) {
-                mUI.warn(`${unverified.length} LoRA(s) need identity verification.`);
-                return;
-            }
-            // A prompt-only variant (no LoRAs, no checkpoint) has nothing to check against the model, so an
-            // unverified checkpoint - no model chosen yet - must not block it.
-            let promptOnly = (data.loras || []).length == 0 && !variant.data.recipe.checkpoint;
-            if (!data.ready && !(promptOnly && data.checkpoint_status == 'unverified')) {
-                mUI.warn(data.checkpoint_status == 'incompatible' ? 'Checkpoint Incompatible.' : 'Model stack is incompatible.');
-                return;
-            }
-            let current = mState.getLoras();
-            let normalize = name => `${name || ''}`.replace(/\.safetensors$/i, '');
-            for (let lora of data.loras || []) {
-                let logicalName = normalize(lora.logical_name);
-                let found = current.find(existing => normalize(existing.name) == logicalName);
-                if (found && found.weight != lora.weight) {
-                    mUI.warn(`Weight conflict for ${lora.name}.`);
-                    return;
-                }
-                if (!found) {
-                    current.push({ name: logicalName, weight: lora.weight });
-                }
-            }
-            let recipe = variant.data.recipe;
-            let append = (currentValue, addition) => {
-                let currentText = `${currentValue || ''}`.trim();
-                let addedText = `${addition || ''}`.trim();
-                if (!addedText || currentText == addedText || currentText.endsWith(`, ${addedText}`)) {
-                    return currentText || addedText;
-                }
-                return currentText ? `${currentText}, ${addedText}` : addedText;
-            };
-            mState.params['prompt'] = append(mState.params['prompt'], recipe.prompt);
-            mState.params['negativeprompt'] = append(mState.params['negativeprompt'], recipe.negative_prompt);
-            if (recipe.checkpoint) {
-                mState.params['model'] = recipe.checkpoint;
-            }
-            mState.setLoras(current);
-            mUI.note(`${variant.data.name} applied.`);
-        }, 0, error => mUI.warn(error));
-    }
-
-    /** Opens explicit progress and cancel controls for unresolved LoRAs. */
-    openLibraryDownloads(variant, missing) {
-        let content = mUI.el('div', 'm-tagdex-browse-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'Downloads'));
-        for (let lora of missing) {
-            let row = mUI.el('div', 'm-tagdex-card');
-            let status = mUI.el('div', 'm-tagdex-card-name', `${lora.name} · Not Downloaded`);
-            let button = mUI.el('button', 'm-tagdex-action', 'Download');
-            let socket = null;
-            let downloaded = false;
-            button.addEventListener('click', () => {
-                if (downloaded) {
-                    this.applyLibraryVariant(variant);
-                    return;
-                }
-                if (socket) {
-                    socket.send('{"signal":"cancel"}');
-                    return;
-                }
-                socket = makeWSRequest('TagDexLibraryAcquire', { archiveSha256: lora.archive_sha256, name: lora.name, version: lora.version || '' }, data => {
-                    if (data.current_percent != null) {
-                        status.textContent = `${lora.name} · ${Math.round(data.current_percent * 100)}%`;
-                        button.textContent = 'Cancel';
-                    }
-                    if (data.success) {
-                        socket = null;
-                        downloaded = true;
-                        status.textContent = `${lora.name} · Downloaded`;
-                        button.textContent = 'Check';
-                    }
-                }, 0, error => {
-                    socket = null;
-                    button.textContent = 'Retry';
-                    mUI.warn(error);
-                });
-            });
-            row.append(status, button);
-            content.appendChild(row);
+    /** Opens the editor to add a character (`custom` null) or edit one (`custom` is a card's `custom` record).
+     * `done` runs after a save or delete; without it the Characters tab, if it has been built, reloads itself. */
+    editCharacter(custom, done = null) {
+        if (typeof permissions != 'undefined' && permissions.hasPermission && !permissions.hasPermission('tagdex_manage')) {
+            mUI.warn('Adding and editing characters needs the TagDex manage permission.');
+            return;
         }
-        mUI.openSheet(content);
-    }
-
-    /** Opens every gallery image and lets the user add one as a reference. */
-    openLibraryGallery(variant) {
-        genericRequest('TagDexLibraryVariant', { id: variant.id }, data => {
-            let content = mUI.el('div', 'm-tagdex-browse-sheet');
-            content.appendChild(mUI.el('div', 'm-sheet-title', 'Gallery'));
-            let grid = mUI.el('div', 'm-tagdex-grid m-tagdex-grid-2');
-            for (let image of data.images || []) {
-                let item = mUI.el('div', 'm-tagdex-card');
-                let button = mUI.el('button', 'm-tagdex-card', 'Loading...');
-                genericRequest('TagDexLibraryImage', { sha: image.data.thumb_sha256, mime: image.data.mime }, loaded => {
-                    button.innerHTML = '';
-                    let preview = document.createElement('img');
-                    preview.className = 'm-tagdex-card-image';
-                    preview.src = loaded.image;
-                    preview.alt = image.data.caption || variant.data.name;
-                    button.appendChild(preview);
-                });
-                button.addEventListener('click', () => genericRequest('TagDexLibraryImage', { sha: image.data.blob_sha256, mime: image.data.mime }, loaded => {
-                    mState.params['promptimages'] = [loaded.image];
-                    mState.changed();
-                    mUI.note('Reference added.');
-                }));
-                let cover = mUI.el('button', 'm-tagdex-action', 'Set Cover');
-                cover.addEventListener('click', () => {
-                    let updated = JSON.parse(JSON.stringify(variant.data));
-                    updated.cover_image_id = image.id;
-                    genericRequest('TagDexLibrarySave', { action: 'update_variant', id: variant.id, body: { base_revision: variant.revision, data: updated } }, result => {
-                        variant = result.record;
-                        mUI.note('Cover updated.');
-                    }, 0, error => mUI.warn(error));
-                });
-                item.append(button, cover);
-                grid.appendChild(item);
+        this.ensureCharacterEditor(() => tagDexCharacterEditor.edit(custom, true, result => {
+            mUI.note(result.action == 'deleted' ? 'Character deleted.' : 'Character saved.');
+            // The typeahead index is built from the dataset files, so it is stale now.
+            if (typeof tagDexCore != 'undefined') {
+                tagDexCore.status = 'unloaded';
+                tagDexCore.shards = [];
             }
-            content.appendChild(grid);
-            let upload = document.createElement('input');
-            upload.type = 'file';
-            upload.accept = 'image/png,image/jpeg,image/webp';
-            upload.setAttribute('aria-label', 'Upload Image');
-            upload.addEventListener('change', () => {
-                let file = upload.files[0];
-                if (!file) {
-                    return;
-                }
-                let reader = new FileReader();
-                reader.onload = () => genericRequest('TagDexLibrarySave', { action: 'upload_image', id: variant.id, body: {
-                    image: reader.result, caption: '', recipe_revision: null, recipe_snapshot: null
-                } }, () => mUI.note('Image uploaded.'), 0, error => mUI.warn(error));
-                reader.readAsDataURL(file);
-            });
-            content.appendChild(upload);
-            let generate = mUI.el('button', 'm-wide-button', 'Generate Reference');
-            generate.addEventListener('click', () => this.generateLibraryReference(variant, content, generate));
-            content.appendChild(generate);
-            mUI.openSheet(content);
-        }, 0, error => mUI.warn(error));
-    }
-
-    /** Starts and polls one authoritative local-AnimaDex reference job. */
-    generateLibraryReference(variant, content, button) {
-        button.disabled = true;
-        button.textContent = 'Starting';
-        genericRequest('TagDexLibraryStartGenerate', { variantId: variant.id, revision: variant.revision }, data => {
-            let polls = 0;
-            let poll = () => {
-                if (!content.isConnected || polls++ > 600) {
-                    return;
-                }
-                genericRequest('TagDexLibraryJob', { jobId: data.job_id }, job => {
-                    let status = job.status || 'running';
-                    button.textContent = status == 'running' || status == 'queued' ? 'Generating' : status;
-                    if (status == 'completed' || status == 'done' || status == 'succeeded') {
-                        mUI.note('Reference generated.');
-                        this.openLibraryGallery(variant);
-                    }
-                    else if (status == 'failed' || status == 'error' || status == 'cancelled') {
-                        button.disabled = false;
-                        button.textContent = 'Retry';
-                        mUI.warn(job.error || 'Reference generation failed.');
-                    }
-                    else {
-                        setTimeout(poll, 1000);
-                    }
-                }, 0, error => {
-                    button.disabled = false;
-                    button.textContent = 'Retry';
-                    mUI.warn(error);
-                });
-            };
-            poll();
-        }, 0, error => {
-            button.disabled = false;
-            button.textContent = 'Retry';
-            mUI.warn(error);
-        });
-    }
-
-    /** Creates or updates one character. */
-    editLibraryCharacter(record) {
-        this.ensureLibraryEditor(() => tagDexLibraryEditor.character(record, true, () => mUI.note('Character saved.')));
-    }
-
-    /** Creates or updates one ordered variant recipe. */
-    editLibraryVariant(character, record) {
-        this.ensureLibraryEditor(() => tagDexLibraryEditor.variant(character, record, true, () => mUI.note('Variant saved.')));
+            let after = done || this.tabReload;
+            if (after) {
+                after(result);
+            }
+        }));
     }
 
     /** Registers the Characters tab in the bottom nav. Runs at script load, before m_app.js wires the
@@ -438,7 +182,7 @@ class MTagDexClass {
         search.className = 'm-tagdex-search';
         search.setAttribute('aria-label', 'Search characters and artists');
         controls.appendChild(search);
-        let favorites = mUI.el('button', 'm-tagdex-favorite-filter', '\u2605 Favorites');
+        let favorites = mUI.el('button', 'm-tagdex-favorite-filter', '★ Favorites');
         // The tab opens on favorites: it is where pinned characters get picked from. One tap shows everything.
         favorites.setAttribute('aria-pressed', 'true');
         favorites.title = 'Show favorites only';
@@ -449,6 +193,10 @@ class MTagDexClass {
         filterRow.appendChild(favorites);
         let sortSelect = this.buildSortSelect();
         filterRow.appendChild(sortSelect);
+        let add = mUI.el('button', 'm-tagdex-add-button', '+ Add');
+        add.setAttribute('aria-label', 'Add a character of your own');
+        add.title = 'Add a character of your own';
+        filterRow.appendChild(add);
         let status = mUI.el('div', 'm-tagdex-browse-status', 'Loading...');
         let results = mUI.el('div', 'm-tagdex-browse-results');
         filterRow.appendChild(this.buildViewToggle(results));
@@ -456,10 +204,10 @@ class MTagDexClass {
         wrap.appendChild(status);
         wrap.appendChild(results);
         let pager = mUI.el('div', 'm-tagdex-pager');
-        let prev = mUI.el('button', 'm-tagdex-page-button', '\u2039 Prev');
+        let prev = mUI.el('button', 'm-tagdex-page-button', '‹ Prev');
         prev.setAttribute('aria-label', 'Previous page');
         let pageLabel = mUI.el('span', 'm-tagdex-page-label', '');
-        let next = mUI.el('button', 'm-tagdex-page-button', 'Next \u203A');
+        let next = mUI.el('button', 'm-tagdex-page-button', 'Next ›');
         next.setAttribute('aria-label', 'Next page');
         pager.appendChild(prev);
         pager.appendChild(pageLabel);
@@ -467,14 +215,14 @@ class MTagDexClass {
         pager.style.display = 'none';
         wrap.appendChild(pager);
         panel.appendChild(wrap);
-        let ctx = { 'sources': [], 'source': '', 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': true, 'sortBy': this.sortMode() };
+        let ctx = { 'sources': [], 'source': '', 'characterSource': '', 'customPresent': false, 'offset': 0, 'pageSize': 50, 'total': 0, 'token': 0, 'timer': null, 'favoritesOnly': true, 'sortBy': this.sortMode() };
         let runSearch;
         // The dataset a search actually runs against: All Characters searches the character dataset.
         let datasetFor = () => ctx.source == MTagDexClass.AllSource ? ctx.characterSource : ctx.source;
         let render = (records, pinned) => {
             results.innerHTML = '';
-            for (let character of pinned) {
-                results.appendChild(this.buildLibraryCard(character, () => runSearch()));
+            for (let i = 0; i < pinned.length; i++) {
+                results.appendChild(this.buildBrowseRow(pinned[i], MTagDexClass.CustomSource, () => runSearch()));
             }
             let dataset = datasetFor();
             for (let i = 0; i < records.length; i++) {
@@ -487,26 +235,20 @@ class MTagDexClass {
             let last = ctx.offset + records.length;
             let pages = Math.max(1, Math.ceil(ctx.total / ctx.pageSize));
             let page = Math.floor(ctx.offset / ctx.pageSize) + 1;
-            let added = pinned.length > 0 ? ` \u00b7 ${pinned.length} added` : '';
+            let yours = pinned.length > 0 ? ` · ${pinned.length} of yours` : '';
             status.textContent = (ctx.total == 0 ? '0 matches'
-                : `${first.toLocaleString()}\u2013${last.toLocaleString()} of ${ctx.total.toLocaleString()}`) + added;
+                : `${first.toLocaleString()}–${last.toLocaleString()} of ${ctx.total.toLocaleString()}`) + yours;
             pageLabel.textContent = `${page} / ${pages}`;
             pager.style.display = ctx.total > ctx.pageSize ? '' : 'none';
             prev.disabled = ctx.offset <= 0;
             next.disabled = ctx.offset + ctx.pageSize >= ctx.total;
         };
         runSearch = () => {
-            let isLibrary = ctx.source == MTagDexClass.LibrarySource;
             let isAll = ctx.source == MTagDexClass.AllSource;
-            // Favorites and sort belong to the datasets; the library list is always every character you added.
-            favorites.style.display = isLibrary ? 'none' : '';
-            sortSelect.style.display = isLibrary ? 'none' : '';
             let dataset = datasetFor();
-            if (isLibrary || (isAll && !dataset)) {
-                this.renderLibraryList(ctx, search.value.trim(), results, status, pager);
-                return;
-            }
-            if (!dataset) {
+            // All Characters with no character dataset downloaded still lists your own characters.
+            let customOnly = isAll && !dataset && ctx.customPresent;
+            if (!dataset && !customOnly) {
                 results.innerHTML = '';
                 status.textContent = 'No datasets. Download one from More.';
                 pager.style.display = 'none';
@@ -514,11 +256,11 @@ class MTagDexClass {
             }
             let token = ++ctx.token;
             status.textContent = 'Searching...';
-            // All Characters pins your added characters above page one of the dataset. With the favorites filter
+            // All Characters pins your own characters above page one of the dataset. With the favorites filter
             // on, only the favorited ones - and new characters are favorited when they are created.
-            let wantPinned = isAll && ctx.offset == 0;
+            let wantPinned = isAll && ctx.customPresent && ctx.offset == 0;
             let pinned = wantPinned ? null : [];
-            let data = null;
+            let data = customOnly ? { 'results': [], 'total': 0 } : null;
             let finish = () => {
                 if (token != ctx.token || data == null || pinned == null) {
                     return;
@@ -540,11 +282,15 @@ class MTagDexClass {
                 render(data.results || [], pinned);
             };
             if (wantPinned) {
-                // A library that cannot be reached must not take the dataset results down with it.
-                this.loadPinnedLibrary(search.value.trim(), ctx.favoritesOnly, rows => {
+                // A failure here must not take the dataset results down with it.
+                this.loadPinnedCustom(search.value.trim(), ctx.favoritesOnly, rows => {
                     pinned = rows;
                     finish();
                 });
+            }
+            if (customOnly) {
+                finish();
+                return;
             }
             genericRequest('TagDexSearchEntries', {
                 'source': dataset,
@@ -570,7 +316,7 @@ class MTagDexClass {
         // syncSortOptions gates by the dataset actually searched, which for All Characters is not ctx.source.
         let syncSort = () => {
             let dataset = datasetFor();
-            if (!dataset || ctx.source == MTagDexClass.LibrarySource) {
+            if (!dataset) {
                 return;
             }
             let view = { 'sources': ctx.sources, 'source': dataset, 'sortBy': ctx.sortBy };
@@ -609,137 +355,62 @@ class MTagDexClass {
         };
         prev.addEventListener('click', () => flip(-1));
         next.addEventListener('click', () => flip(1));
-        this.fetchSources((sources, prefs) => {
-            ctx.sources = sources.filter(item => item.present);
-            source.innerHTML = '';
-            // All Characters is the default view: the character dataset plus everything you added.
-            let preferredCharacter = prefs && prefs.active_sources ? prefs.active_sources.find(id => ctx.sources.some(item => item.id == id && item.kind == 'character')) : '';
-            let firstCharacter = ctx.sources.find(item => item.kind == 'character');
-            ctx.characterSource = preferredCharacter || (firstCharacter ? firstCharacter.id : '');
-            let all = document.createElement('option');
-            all.value = MTagDexClass.AllSource;
-            all.textContent = 'All Characters';
-            source.appendChild(all);
-            for (let i = 0; i < ctx.sources.length; i++) {
-                let option = document.createElement('option');
-                option.value = ctx.sources[i].id;
-                option.textContent = ctx.sources[i].label;
-                source.appendChild(option);
-            }
-            // Characters added through Add Character live in the custom library, not in any dataset.
-            let library = document.createElement('option');
-            library.value = MTagDexClass.LibrarySource;
-            library.textContent = 'My Library (all added characters)';
-            source.appendChild(library);
-            ctx.source = MTagDexClass.AllSource;
-            source.value = ctx.source;
-            syncSort();
-            runSearch();
-        });
-    }
-
-    /** One custom-library character, laid out like a dataset card. Tapping it adds the character to the prompt
-     * by applying its first variant (prompt tags + LoRAs); the ... button opens its variants and editor; the star
-     * is the library favorite. A character with no variant yet opens its variants so one can be added. */
-    buildLibraryCard(character, onFavoriteRemoved) {
-        let name = character.data.name;
-        let row = mUI.el('div', 'm-tagdex-card m-tagdex-library-card');
-        let main = mUI.el('button', 'm-tagdex-card-main');
-        main.setAttribute('aria-label', `Add ${name}`);
-        let image = document.createElement('img');
-        image.className = 'm-tagdex-card-image';
-        image.src = 'imgs/model_placeholder.jpg';
-        image.alt = '';
-        main.appendChild(image);
-        let textWrap = mUI.el('span', 'm-tagdex-card-text');
-        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-name', name));
-        if (character.data.series) {
-            textWrap.appendChild(mUI.el('span', 'm-tagdex-card-sub', character.data.series));
-        }
-        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-count', 'Your character'));
-        main.appendChild(textWrap);
-        main.addEventListener('click', () => {
-            genericRequest('TagDexLibraryCharacter', { id: character.id }, data => {
-                let variants = (data.variants || []).filter(variant => !variant.conflict && !(variant.data && variant.data.archived));
-                if (variants.length == 0) {
-                    mUI.note(`${name} has no variant yet - add one with its tags and LoRAs.`);
-                    this.openLibraryCharacter(character.id);
-                    return;
+        // (Re)reads the dataset list and rebuilds the picker. `keep` holds the current selection across a reload.
+        let loadSources = (keep, afterLoad) => {
+            this.fetchSources((sources, prefs) => {
+                ctx.sources = sources.filter(item => item.present);
+                ctx.customPresent = ctx.sources.some(item => item.custom);
+                source.innerHTML = '';
+                // All Characters is the default view: the character dataset plus your own characters. Your own
+                // characters are a dataset in their own right, so the dataset it searches must be a real one.
+                let real = ctx.sources.filter(item => item.kind == 'character' && !item.custom);
+                let preferredCharacter = prefs && prefs.active_sources ? prefs.active_sources.find(id => real.some(item => item.id == id)) : '';
+                ctx.characterSource = preferredCharacter || (real.length > 0 ? real[0].id : '');
+                let all = document.createElement('option');
+                all.value = MTagDexClass.AllSource;
+                all.textContent = 'All Characters';
+                source.appendChild(all);
+                for (let i = 0; i < ctx.sources.length; i++) {
+                    let option = document.createElement('option');
+                    option.value = ctx.sources[i].id;
+                    option.textContent = ctx.sources[i].label;
+                    source.appendChild(option);
                 }
-                this.applyLibraryVariant(variants[0]);
-            }, 0, error => mUI.warn(`${name}: ${error}`));
-        });
-        row.appendChild(main);
-        let details = mUI.el('button', 'm-tagdex-alltags-button', '\u22ef');
-        details.setAttribute('aria-label', `${name} variants and edit`);
-        details.title = 'Variants and edit';
-        details.addEventListener('click', () => this.openLibraryCharacter(character.id));
-        row.appendChild(details);
-        let favorited = character._favorited == true;
-        let favorite = mUI.el('button', `m-tagdex-favorite-button${favorited ? ' m-tagdex-favorite-active' : ''}`, favorited ? '\u2605' : '\u2606');
-        let paint = () => {
-            favorite.classList.toggle('m-tagdex-favorite-active', favorited);
-            favorite.textContent = favorited ? '\u2605' : '\u2606';
-            favorite.setAttribute('aria-label', favorited ? 'Remove Favorite' : 'Add Favorite');
-            favorite.setAttribute('aria-pressed', `${favorited}`);
-            favorite.title = favorited ? 'Remove from favorites' : 'Add to favorites';
-        };
-        paint();
-        favorite.addEventListener('click', () => {
-            favorite.disabled = true;
-            let want = !favorited;
-            genericRequest('TagDexLibrarySave', { action: 'favorite', id: '', body: { target_kind: 'character', target_id: character.id, favorited: want } }, () => {
-                favorite.disabled = false;
-                favorited = want;
-                character._favorited = want;
-                paint();
-                if (!want && onFavoriteRemoved) {
-                    onFavoriteRemoved();
+                let stillThere = keep && (ctx.source == MTagDexClass.AllSource || ctx.sources.some(item => item.id == ctx.source));
+                ctx.source = stillThere ? ctx.source : MTagDexClass.AllSource;
+                source.value = ctx.source;
+                syncSort();
+                if (afterLoad) {
+                    afterLoad();
                 }
-            }, 0, error => {
-                favorite.disabled = false;
-                mUI.warn(`Favorite failed: ${error}`);
+                restart();
             });
-        });
-        row.appendChild(favorite);
-        return row;
-    }
-
-    /** Library characters for the Characters tab, each marked with its library favorite (_favorited). With
-     * favoritesOnly, only favorited ones. Any failure yields an empty list rather than blocking the dataset
-     * results; a failed favorites read just shows every star empty. */
-    loadPinnedLibrary(q, favoritesOnly, callback) {
-        this.loadAllLibraryCharacters(q, data => {
-            let rows = data.results || [];
-            let done = ids => {
-                for (let character of rows) {
-                    character._favorited = ids.has(character.id);
+        };
+        // Called after a character was added, edited or deleted. The first save is what makes My Characters a
+        // present dataset, so the picker is rebuilt; a save clears the search so the new card is not filtered out.
+        this.tabReload = result => {
+            loadSources(true, () => {
+                if (result && result.action == 'saved') {
+                    search.value = '';
                 }
-                callback(favoritesOnly ? rows.filter(character => character._favorited) : rows);
-            };
-            genericRequest('TagDexLibraryReview', { view: 'favorites' }, favs => {
-                done(new Set((favs.results || []).filter(record => record.data && record.data.target_kind == 'character'
-                    && record.data.favorited).map(record => record.data.target_id)));
-            }, 0, () => done(new Set()));
-        }, () => callback([]));
+            });
+        };
+        add.addEventListener('click', () => this.editCharacter(null, this.tabReload));
+        loadSources(false, null);
     }
 
-    /** Lists every custom-library character (unfiltered, unpaged: the library is operator-sized) into the
-     * Characters tab. Tapping one opens its variants, same as More > My Library. */
-    renderLibraryList(ctx, q, results, status, pager) {
-        let token = ++ctx.token;
-        pager.style.display = 'none';
-        status.textContent = 'Loading...';
-        this.loadPinnedLibrary(q, false, rows => {
-            if (token != ctx.token) {
-                return;
-            }
-            results.innerHTML = '';
-            for (let character of rows) {
-                results.appendChild(this.buildLibraryCard(character, null));
-            }
-            status.textContent = rows.length == 0 ? 'No library characters. Add one from More > Add Character.' : `${rows.length} characters`;
-        });
+    /** Your own characters for the Characters tab. Any failure yields an empty list rather than blocking the
+     * dataset results. With favoritesOnly, only starred ones. */
+    loadPinnedCustom(q, favoritesOnly, callback) {
+        genericRequest('TagDexSearchEntries', {
+            'source': MTagDexClass.CustomSource,
+            'search': q,
+            'sortBy': 'name',
+            'offset': 0,
+            'limit': 250,
+            'withFolders': false,
+            'favoritesOnly': favoritesOnly
+        }, data => callback(data.results || []), 0, () => callback([]));
     }
 
     /** Mounts the Characters picker beside the Create panel's model and LoRA pickers. Called from m_create.js
@@ -898,10 +569,10 @@ class MTagDexClass {
     /** Sort modes offered on the compact surfaces, mirroring the genpage tab's dropdown so the same dataset
      * sorts the same way on both. Values are the server's (`TagDexSearch.Run`); `scored` and `character` mark the
      * ones that only apply to some datasets, exactly as the genpage gates them. */
-    /** Characters-tab list value for the custom library (not a dataset id, so it can never collide with one). */
-    static LibrarySource = '__library__';
+    /** The dataset ID of the user's own characters. */
+    static CustomSource = 'custom_character';
 
-    /** Characters-tab list value for the character dataset plus the custom library (the default view). */
+    /** Characters-tab list value for the character dataset plus your own characters (the default view). */
     static AllSource = '__all__';
 
     static SortModes = [
@@ -1039,8 +710,8 @@ class MTagDexClass {
 
     /** Builds one browse result. The main action inserts the trigger plus every core tag at the Create prompt's
      * remembered caret; the separate star keeps favorite changes from also modifying the prompt. */
-    buildBrowseRow(record, source, onFavoriteRemoved) {
-        let row = mUI.el('div', 'm-tagdex-card');
+    buildBrowseRow(record, source, onChanged) {
+        let row = mUI.el('div', record.custom ? 'm-tagdex-card m-tagdex-custom-card' : 'm-tagdex-card');
         let main = mUI.el('button', 'm-tagdex-card-main');
         main.setAttribute('aria-label', `Add ${record.display || record.name}`);
         let image = document.createElement('img');
@@ -1057,7 +728,7 @@ class MTagDexClass {
         if (record.copyright_display) {
             textWrap.appendChild(mUI.el('span', 'm-tagdex-card-sub', record.copyright_display));
         }
-        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-count', `${largeCountStringify(record.count)} posts`));
+        textWrap.appendChild(mUI.el('span', 'm-tagdex-card-count', record.custom ? 'Your character' : `${largeCountStringify(record.count)} posts`));
         main.appendChild(textWrap);
         let insert = (text, note) => {
             if (typeof mCreate == 'undefined' || typeof mCreate.insertIntoPrompt != 'function') {
@@ -1094,6 +765,15 @@ class MTagDexClass {
             });
             row.appendChild(triggerOnly);
         }
+        if (record.custom) {
+            // Reuses the round secondary button; the edit form also carries Delete.
+            let edit = mUI.el('button', 'm-tagdex-alltags-button m-tagdex-edit-button', '\u270e');
+            let editLabel = `Edit ${name}`;
+            edit.setAttribute('aria-label', editLabel);
+            edit.title = editLabel;
+            edit.addEventListener('click', () => this.editCharacter(record.custom, onChanged));
+            row.appendChild(edit);
+        }
         let favoriteLabel = record.favorited ? 'Remove Favorite' : 'Add Favorite';
         let favorite = mUI.el('button', `m-tagdex-favorite-button${record.favorited ? ' m-tagdex-favorite-active' : ''}`, record.favorited ? '★' : '☆');
         favorite.setAttribute('aria-label', favoriteLabel);
@@ -1110,8 +790,8 @@ class MTagDexClass {
                 favorite.setAttribute('aria-label', favorited ? 'Remove Favorite' : 'Add Favorite');
                 favorite.setAttribute('aria-pressed', `${favorited}`);
                 favorite.title = favorited ? 'Remove from favorites' : 'Add to favorites';
-                if (!favorited && onFavoriteRemoved) {
-                    onFavoriteRemoved();
+                if (!favorited && onChanged) {
+                    onChanged();
                 }
             }, 0, error => {
                 favorite.disabled = false;
@@ -1309,6 +989,9 @@ class MTagDexClass {
     statusFor(source) {
         if (!source.present) {
             return 'Not downloaded';
+        }
+        if (source.custom) {
+            return `${(source.rows || 0).toLocaleString()} character${source.rows == 1 ? '' : 's'} of your own`;
         }
         if (!source.loaded) {
             return source.downloadable ? 'Installed, not in memory' : 'Supplied locally, not in memory';

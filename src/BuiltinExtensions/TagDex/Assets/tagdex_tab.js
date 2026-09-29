@@ -213,7 +213,9 @@ class TagDexTabClass {
                 localLabel.innerText = source.label;
                 let localStatus = document.createElement('span');
                 localStatus.className = 'tagdex-download-status';
-                localStatus.innerText = `Supplied locally - ${source.rows.toLocaleString()} of ${source.total_rows.toLocaleString()} entries loaded`;
+                localStatus.innerText = source.custom
+                    ? `${source.rows.toLocaleString()} character${source.rows == 1 ? '' : 's'} of your own`
+                    : `Supplied locally - ${source.rows.toLocaleString()} of ${source.total_rows.toLocaleString()} entries loaded`;
                 localRow.appendChild(localLabel);
                 this.addTypeaheadToggle(localRow, source);
                 if (canManage) {
@@ -439,6 +441,49 @@ class TagDexTabClass {
         }, wasActive && dataChanged);
     }
 
+    /** Opens the custom-character editor: `custom` is a record's `custom` object to edit it, or null to add. */
+    editCharacter(custom) {
+        tagDexCharacterEditor.edit(custom, false, result => this.afterCustomChange(result));
+    }
+
+    /** Refreshes after a custom character was saved or deleted. The dataset list is re-read first, because the first
+     * save is what makes `custom_character` a present dataset. A save then switches the picker to My Characters with
+     * the search cleared, so the card just written is on screen and not filtered out by whatever was typed. */
+    afterCustomChange(result) {
+        // The typeahead index is built from the dataset files, so it is stale now.
+        tagDexCore.status = 'unloaded';
+        tagDexCore.shards = [];
+        this.loadSources(() => {
+            if (result.action == 'saved' && this.sources.some(s => s.id == 'custom_character' && s.present)) {
+                this.source = 'custom_character';
+                this.search = '';
+                getRequiredElementById('tagdex_search').value = '';
+                getRequiredElementById('tagdex_source').value = this.source;
+                this.facets.copyright = '';
+                this.syncSortOptions();
+            }
+            this.loadFacets();
+            if (this.browser) {
+                this.requery();
+            }
+            else {
+                this.ensureBrowser();
+            }
+        }, false);
+    }
+
+    /** Deletes one custom character after a confirmation, then refreshes. */
+    deleteCharacter(record) {
+        if (!confirm(`Delete ${record.display || record.name}? This also removes its reference image.`)) {
+            return;
+        }
+        genericRequest('TagDexDeleteCustomCharacter', { name: record.name }, () => {
+            this.afterCustomChange({ action: 'deleted', name: record.name });
+        }, 0, error => {
+            this.setStatus(`Could not delete character: ${error}`);
+        });
+    }
+
     /** Shows or hides the dataset manage drawer. */
     setManageOpen(open) {
         this.manageOpen = open;
@@ -543,6 +588,7 @@ class TagDexTabClass {
         });
         getRequiredElementById('tagdex_refresh').addEventListener('click', () => this.requery());
         getRequiredElementById('tagdex_manage_toggle').addEventListener('click', () => this.onManageToggle());
+        getRequiredElementById('tagdex_add_character').addEventListener('click', () => this.editCharacter(null));
         getRequiredElementById('tagdex_batch_generate').addEventListener('click', () => this.startBatchGenerate());
         getRequiredElementById('tagdex_batch_cancel').addEventListener('click', () => this.cancelBatchGenerate());
         // One delegated listener on the container, whose identity is stable across browser rebuilds (build() only
@@ -807,11 +853,16 @@ class TagDexTabClass {
         if (record.copyright_display) {
             html += `<span class="tagdex-card-sub">${escapeHtmlNoBr(record.copyright_display)}</span>`;
         }
-        html += `<span class="tagdex-card-count">${largeCountStringify(record.count)} posts`;
-        if (record.solo_count > 0) {
-            html += ` &middot; ${largeCountStringify(record.solo_count)} solo`;
+        if (record.custom) {
+            html += '<span class="tagdex-card-count">Your character</span>';
         }
-        html += '</span>';
+        else {
+            html += `<span class="tagdex-card-count">${largeCountStringify(record.count)} posts`;
+            if (record.solo_count > 0) {
+                html += ` &middot; ${largeCountStringify(record.solo_count)} solo`;
+            }
+            html += '</span>';
+        }
         if (record.uniqueness || record.avg_score) {
             html += '<span class="tagdex-card-count">';
             if (record.uniqueness) {
@@ -836,7 +887,6 @@ class TagDexTabClass {
         let buttons = [
             { label: 'Insert Trigger', onclick: () => this.insertTag(record.trigger) },
             { label: 'Insert All Tags', onclick: () => this.insertTag(TagDexTabClass.allTagsOf(record)) },
-            { label: 'Insert Character Tag', onclick: () => this.insertTag(`<character:${record.name}>`) },
             { label: record.thumb ? 'Regenerate Reference' : 'Generate Reference', onclick: (div) => this.generateThumb(record, div) },
             { label: 'Use Current Image', onclick: (div) => this.setThumbFromCurrentImage(record, div) }
         ];
@@ -844,7 +894,18 @@ class TagDexTabClass {
         if (record.thumb) {
             buttons.push({ label: 'Delete Reference', onclick: (div) => this.deleteThumb(record, div) });
         }
-        buttons.push({ label: 'Open on Booru', href: record.url, is_download: false });
+        if (record.custom) {
+            // Custom characters have no booru page and no `<character:...>` tag - the typeahead index only knows
+            // datasets - so those two entries are replaced by editing.
+            if (typeof permissions == 'undefined' || !permissions.hasPermission || permissions.hasPermission('tagdex_manage')) {
+                buttons.push({ label: 'Edit Character', onclick: () => this.editCharacter(record.custom) });
+                buttons.push({ label: 'Delete Character', onclick: () => this.deleteCharacter(record) });
+            }
+        }
+        else {
+            buttons.splice(2, 0, { label: 'Insert Character Tag', onclick: () => this.insertTag(`<character:${record.name}>`) });
+            buttons.push({ label: 'Open on Booru', href: record.url, is_download: false });
+        }
         return {
             name: record.trigger,
             display: record.display || record.name,

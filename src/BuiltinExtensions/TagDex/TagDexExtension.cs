@@ -33,7 +33,6 @@ public partial class TagDexExtension : Extension
         ScriptFiles.Add("Assets/tagdex_core.js");
         ScriptFiles.Add("Assets/tagdex_prompt.js");
         ScriptFiles.Add("Assets/tagdex_tab.js");
-        ScriptFiles.Add("Assets/tagdex_library.js");
         ScriptFiles.Add("Assets/tagdex_editor.js");
         StyleSheetFiles.Add("Assets/tagdex.css");
         // The /simple hook goes in OtherAssets, not ScriptFiles: ScriptFiles injects on every Razor page, where
@@ -60,18 +59,8 @@ public partial class TagDexExtension : Extension
         API.RegisterAPICall(TagDexSetThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexDeleteThumbnail, true, PermManageTagDex);
         API.RegisterAPICall(TagDexReconcileFavorites, true, PermManageTagDex);
-        API.RegisterAPICall(TagDexLibraryCharacters, false, PermUseTagDex);
-        API.RegisterAPICall(TagDexLibraryCharacter, false, PermUseTagDex);
-        API.RegisterAPICall(TagDexLibraryVariant, false, PermUseTagDex);
-        API.RegisterAPICall(TagDexLibraryImage, false, PermUseTagDex);
-        API.RegisterAPICall(TagDexLibraryResolve, false, PermUseTagDex);
-        API.RegisterAPICall(TagDexLibraryGenerate, true, PermUseTagDex);
-        API.RegisterAPICall(TagDexLibraryReview, false, PermManageTagDex);
-        API.RegisterAPICall(TagDexLibrarySave, true, PermManageTagDex);
-        API.RegisterAPICall(TagDexLibraryAcquire, true, PermManageTagDex);
-        API.RegisterAPICall(TagDexLibraryArchive, false, PermManageTagDex);
-        API.RegisterAPICall(TagDexLibraryStartGenerate, true, PermManageTagDex);
-        API.RegisterAPICall(TagDexLibraryJob, false, PermManageTagDex);
+        API.RegisterAPICall(TagDexSaveCustomCharacter, true, PermManageTagDex);
+        API.RegisterAPICall(TagDexDeleteCustomCharacter, true, PermManageTagDex);
     }
 
     /// <inheritdoc/>
@@ -219,10 +208,12 @@ public static class TagDexIndexBlob
         {
             StringBuilder builder = new(1024 * 512);
             TagDexEntry[] entries = list.Entries;
+            // Custom characters have no post count (always 0), so they are exempt from the floor.
+            int floor = list.Source.Format == TagDexFormat.Custom ? 0 : minCount;
             for (int i = 0; i < entries.Length; i++)
             {
                 ref TagDexEntry entry = ref entries[i];
-                if (entry.Count < minCount)
+                if (entry.Count < floor)
                 {
                     // Entries are count-descending, so the first row under the floor ends the useful range.
                     break;

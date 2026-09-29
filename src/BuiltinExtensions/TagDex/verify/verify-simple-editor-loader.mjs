@@ -28,6 +28,18 @@ try {
     if (!requested) {
         throw new Error('/simple did not request the shared editor asset.');
     }
+    let shape = await page.evaluate(() => ({
+        editor: typeof tagDexCharacterEditor,
+        labels: [...document.querySelectorAll('.tagdex-editor-field > span')].map(e => e.textContent),
+        loraHeading: [...document.querySelectorAll('.tagdex-editor h4')].map(e => e.textContent),
+        moreItems: Object.keys(window.__more)
+    }));
+    if (shape.editor != 'object' || shape.labels.join('|') != 'Name|Series|Tags' || shape.loraHeading.join('|') != 'LoRAs') {
+        throw new Error(`The lazily loaded editor has the wrong shape: ${JSON.stringify(shape)}`);
+    }
+    if (shape.moreItems.includes('My Library') || shape.moreItems.includes('Conflict Review')) {
+        throw new Error(`/simple still registers a removed library item: ${JSON.stringify(shape.moreItems)}`);
+    }
     console.log('TagDex /simple editor loader check passed.');
 }
 finally {

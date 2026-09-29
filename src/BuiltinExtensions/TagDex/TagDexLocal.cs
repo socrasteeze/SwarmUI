@@ -30,18 +30,6 @@ public static class TagDexLocal
         public static AnimaDexConfig Default = new(false, "", "", 30);
     }
 
-    /// <summary>Authenticated local AnimaDex library API.</summary>
-    public record class LibraryConfig(bool Enabled, string Url, string Key, int TimeoutSeconds)
-    {
-        public static LibraryConfig Default = new(false, "", "", 30);
-    }
-
-    /// <summary>NAS Model Manager archive used for explicit LoRA acquisition.</summary>
-    public record class ArchiveConfig(bool Enabled, string Url, string Token, int TimeoutSeconds)
-    {
-        public static ArchiveConfig Default = new(false, "", "", 300);
-    }
-
     /// <summary>How reference thumbnails are stored.</summary>
     /// <param name="Height">Target height in pixels; width scales proportionally. 445 matches AnimaDex's
     /// own thumbnail geometry, so the two catalogues hold identically sized images.</param>
@@ -58,8 +46,6 @@ public static class TagDexLocal
 
     private static AnimaDexConfig CachedAnimaDex = null;
     private static ThumbConfig CachedThumbs = null;
-    private static LibraryConfig CachedLibrary = null;
-    private static ArchiveConfig CachedArchive = null;
     private static DateTime CachedStamp = DateTime.MinValue;
     private static string CachedPath = null;
     private static readonly object CacheLock = new();
@@ -74,8 +60,6 @@ public static class TagDexLocal
                 {
                     CachedAnimaDex = AnimaDexConfig.Default;
                     CachedThumbs = ThumbConfig.Default;
-                    CachedLibrary = LibraryConfig.Default;
-                    CachedArchive = ArchiveConfig.Default;
                     CachedStamp = DateTime.MinValue;
                     return;
                 }
@@ -96,18 +80,6 @@ public static class TagDexLocal
                     Math.Clamp(th.Value<int?>("height") ?? 445, 64, 4096),
                     Math.Clamp(th.Value<int?>("quality") ?? 82, 1, 100),
                     th.Value<bool?>("keep_originals") ?? false);
-                JObject library = data["library"] as JObject ?? [];
-                CachedLibrary = new(
-                    library.Value<bool?>("enabled") ?? false,
-                    (library.Value<string>("url") ?? "").TrimEnd('/'),
-                    library.Value<string>("key") ?? "",
-                    Math.Clamp(library.Value<int?>("timeout_seconds") ?? 30, 1, 300));
-                JObject archive = data["archive"] as JObject ?? [];
-                CachedArchive = new(
-                    archive.Value<bool?>("enabled") ?? false,
-                    (archive.Value<string>("url") ?? "").TrimEnd('/'),
-                    archive.Value<string>("token") ?? "",
-                    Math.Clamp(archive.Value<int?>("timeout_seconds") ?? 300, 10, 3600));
                 CachedStamp = stamp;
                 CachedPath = ConfigPath;
             }
@@ -118,8 +90,6 @@ public static class TagDexLocal
                 Logs.Warning($"[TagDex] Could not read '{ConfigPath}', using defaults: {ex.ReadableString()}");
                 CachedAnimaDex = AnimaDexConfig.Default;
                 CachedThumbs = ThumbConfig.Default;
-                CachedLibrary = LibraryConfig.Default;
-                CachedArchive = ArchiveConfig.Default;
                 CachedStamp = DateTime.MinValue;
                 CachedPath = null;
             }
@@ -138,19 +108,5 @@ public static class TagDexLocal
     {
         Refresh();
         return CachedThumbs ?? ThumbConfig.Default;
-    }
-
-    /// <summary>Current local library connection.</summary>
-    public static LibraryConfig Library()
-    {
-        Refresh();
-        return CachedLibrary ?? LibraryConfig.Default;
-    }
-
-    /// <summary>Current archive connection.</summary>
-    public static ArchiveConfig Archive()
-    {
-        Refresh();
-        return CachedArchive ?? ArchiveConfig.Default;
     }
 }
