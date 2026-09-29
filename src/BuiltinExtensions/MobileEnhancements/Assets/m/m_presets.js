@@ -20,7 +20,7 @@ class MPresets {
      * images attached to this one generation. Baking any of them into a preset means every later use of it
      * silently inherits a choice that had nothing to do with the preset. Everything else - including the
      * seed, which is occasionally wanted - is captured, and can be removed by hand in the editor. */
-    static Uncaptured = ['images', 'exactbackendid', 'promptimages'];
+    static Uncaptured = ['images', 'exactbackendid', 'promptimages', 'initimage', 'videoendimage'];
 
     /** How many rows the parameter picker renders at once. Truncation is reported rather than silent. */
     static PickerLimit = 60;

@@ -24,7 +24,7 @@ class MCreate {
         this.lastCompleted = [];
         /** Covered param ids that have dedicated controls (everything else renders as an Advanced chip).
          * width/height are covered because the resolution controls own them - see mState.buildGenInput. */
-        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'steps', 'cfgscale', 'sampler', 'scheduler', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix', 'refinerupscale', 'refinerupscalemethod'];
+        this.coveredParams = ['prompt', 'negativeprompt', 'images', 'seed', 'steps', 'cfgscale', 'sampler', 'scheduler', 'aspectratio', 'sidelength', 'width', 'height', 'model', 'loras', 'loraweights', 'promptimages', 'filenameprefix', 'refinerupscale', 'refinerupscalemethod', 'initimage', 'videoendimage'];
         /** Quick picklists keyed by parameter id (sampler, scheduler): {select, label}. */
         this.choiceSelects = {};
         /** Quick numeric steppers keyed by parameter id. */
@@ -447,6 +447,7 @@ class MCreate {
         negWrap.appendChild(this.negBox);
         this.negWrap = negWrap;
         panel.appendChild(negWrap);
+        panel.appendChild(this.buildFramesSection());
         this.advChips = mUI.el('div', 'm-adv-chips');
         panel.appendChild(this.advChips);
         let fileInput = document.createElement('input');
@@ -696,6 +697,7 @@ class MCreate {
             this.negWrap.open = true;
         }
         this.negWasFilled = hasNeg;
+        this.renderFrames();
         this.renderImageStrip();
         this.renderQuickParams();
         let loras = mState.getLoras();
@@ -1016,6 +1018,99 @@ class MCreate {
         close = mUI.openSheet(content);
     }
 
+    /** Builds one start/end-frame slot: an empty 44px "+" button that opens a hidden file input, or - once
+     * filled - a thumbnail with a >=44px remove ×. `getEntry`/`setEntry` read/write the matching mState field
+     * (initImage or videoEndImage) so this one method serves both slots. */
+    buildFrameSlot(label, getEntry, setEntry) {
+        let slot = mUI.el('div', 'm-frame-slot');
+        slot.appendChild(mUI.el('div', 'm-frame-slot-label', label));
+        let body = mUI.el('div', 'm-frame-slot-body');
+        slot.appendChild(body);
+        let fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+        fileInput.addEventListener('change', () => {
+            let file = fileInput.files[0];
+            if (file) {
+                let reader = new FileReader();
+                reader.onload = () => {
+                    setEntry({ 'kind': 'data', 'value': reader.result });
+                    mState.changed();
+                };
+                reader.readAsDataURL(file);
+            }
+            fileInput.value = '';
+        });
+        slot.appendChild(fileInput);
+        slot.getEntry = getEntry;
+        slot.setEntry = setEntry;
+        slot.body = body;
+        slot.fileInput = fileInput;
+        return slot;
+    }
+
+    /** Collapsible "Start / end frame" section for image-to-video presets (eg MiniMax H3 FL2VA), styled and
+     * behaved like the negative-prompt <details> immediately above it: always present, collapsed by default,
+     * auto-opens the first time either slot BECOMES filled (reuse/state restore) but never force-closes. */
+    buildFramesSection() {
+        let wrap = mUI.el('details', 'm-neg-wrap');
+        wrap.appendChild(mUI.el('summary', 'm-neg-summary', 'Start / end frame'));
+        let row = mUI.el('div', 'm-frame-row');
+        this.startFrameSlot = this.buildFrameSlot('Start frame', () => mState.initImage, entry => { mState.initImage = entry; });
+        this.endFrameSlot = this.buildFrameSlot('End frame', () => mState.videoEndImage, entry => { mState.videoEndImage = entry; });
+        row.appendChild(this.startFrameSlot);
+        row.appendChild(this.endFrameSlot);
+        wrap.appendChild(row);
+        this.framesWrap = wrap;
+        return wrap;
+    }
+
+    /** Renders one frame slot's filled/empty state from mState. Rebuilds its body's DOM only when the entry
+     * actually changed (same signature-gate pattern as renderImageStrip/syncOptions), so an untouched slot
+     * never re-decodes its thumbnail and shifts the panel under a finger on iOS. */
+    renderFrameSlot(slot) {
+        let entry = slot.getEntry();
+        let signature = JSON.stringify(entry);
+        if (slot.signature == signature) {
+            return false;
+        }
+        slot.signature = signature;
+        slot.body.innerHTML = '';
+        if (!entry) {
+            let add = mUI.el('button', 'm-frame-add', '+');
+            add.addEventListener('click', () => slot.fileInput.click());
+            slot.body.appendChild(add);
+        }
+        else {
+            let tile = mUI.el('div', 'm-frame-tile');
+            let img = document.createElement('img');
+            img.src = entry.kind == 'data' ? entry.value : `${getImageOutPrefix()}/${entry.value}`;
+            tile.appendChild(img);
+            let remove = mUI.el('span', 'm-frame-tile-remove', '×');
+            remove.addEventListener('click', (e) => {
+                e.stopPropagation();
+                slot.setEntry(null);
+                mState.changed();
+            });
+            tile.appendChild(remove);
+            slot.body.appendChild(tile);
+        }
+        return !!entry;
+    }
+
+    /** Re-renders both start/end frame slots, and opens the section the first time either slot becomes
+     * filled - mirroring the negative-prompt auto-open rule exactly (see render()). */
+    renderFrames() {
+        this.renderFrameSlot(this.startFrameSlot);
+        this.renderFrameSlot(this.endFrameSlot);
+        let hasFrame = !!mState.initImage || !!mState.videoEndImage;
+        if (hasFrame && !this.framesWereFilled) {
+            this.framesWrap.open = true;
+        }
+        this.framesWereFilled = hasFrame;
+    }
+
     /** Prompt-image strip: thumbs, remove, add tile, long-press drag reorder (DOM order == request order). */
     renderImageStrip() {
         // Same reason as syncOptions: rebuilding unconditionally re-creates every <img> on every state
@@ -1290,11 +1385,13 @@ class MCreate {
             this.imagesGroup.appendChild(btn);
         }
         let clearBtn = mUI.el('button', 'm-seg-button', 'CLR');
-        clearBtn.title = 'Clear prompt images and prefix';
-        clearBtn.setAttribute('aria-label', 'Clear prompt images and prefix');
+        clearBtn.title = 'Clear prompt images, start/end frames and prefix';
+        clearBtn.setAttribute('aria-label', 'Clear prompt images, start/end frames and prefix');
         clearBtn.addEventListener('click', () => {
-            mUI.confirm('Clear prompt images and the Prefix field? The text prompt is kept.', () => {
+            mUI.confirm('Clear prompt images, start/end frames and the Prefix field? The text prompt is kept.', () => {
                 mState.promptImages = [];
+                mState.initImage = null;
+                mState.videoEndImage = null;
                 delete mState.params['filenameprefix'];
                 mState.changed();
             });

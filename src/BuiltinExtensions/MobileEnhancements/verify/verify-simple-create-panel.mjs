@@ -1325,6 +1325,130 @@ const promptChrome = await page.evaluate(() => {
 check('prompt header hosts Enhance, not Coach', promptChrome.enhanceOnHead && promptChrome.coachPillGone, JSON.stringify(promptChrome));
 check('Prompt Coach remains reachable from More', promptChrome.moreCoach, JSON.stringify(promptChrome));
 
+// ---- Start/end frame section ----
+await page.evaluate(() => {
+    mState.initImage = null;
+    mState.videoEndImage = null;
+    mState.changed();
+});
+await page.waitForFunction(() => true); // let the animation-frame-deferred render settle before reading it
+const framesBaseline = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await settle();
+    let wrap = mCreate.framesWrap;
+    return {
+        exists: !!document.querySelector('.m-frame-row'),
+        summary: wrap.querySelector('summary').textContent,
+        collapsed: !wrap.open,
+        emptyButtons: document.querySelectorAll('.m-frame-add').length,
+        noInput: !('initimage' in mState.buildGenInput()) && !('videoendimage' in mState.buildGenInput())
+    };
+});
+check('Start/end frame section exists with the right summary', framesBaseline.exists && framesBaseline.summary == 'Start / end frame', JSON.stringify(framesBaseline));
+check('Start/end frame section is collapsed by default', framesBaseline.collapsed);
+check('both frame slots start empty (two + buttons)', framesBaseline.emptyButtons == 2, `${framesBaseline.emptyButtons}`);
+check('no start/end frame in the request when neither slot is filled', framesBaseline.noInput);
+
+// Filling the start frame (simulating the file-input path by setting state directly, same as addImageFile
+// does after FileReader resolves) shows a thumbnail and auto-opens the section.
+const startFilled = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    mState.initImage = { kind: 'data', value: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' };
+    mState.changed();
+    await settle();
+    let wrap = mCreate.framesWrap;
+    return {
+        open: wrap.open,
+        thumbCount: document.querySelectorAll('.m-frame-tile').length,
+        emptyButtons: document.querySelectorAll('.m-frame-add').length
+    };
+});
+check('filling the start frame shows a thumbnail', startFilled.thumbCount == 1, JSON.stringify(startFilled));
+check('filling the start frame leaves the end slot empty', startFilled.emptyButtons == 1, JSON.stringify(startFilled));
+check('filling a frame slot opens the section', startFilled.open, JSON.stringify(startFilled));
+
+// buildGenInput sends initimage + a default initimagecreativity of '0' when the preset/params provide none.
+const startSend = await page.evaluate(() => {
+    delete mState.params.initimagecreativity;
+    let input = mState.buildGenInput();
+    return { initimage: input.initimage, creativity: input.initimagecreativity, hasEnd: 'videoendimage' in input };
+});
+check('buildGenInput sends initimage as the data URI', startSend.initimage == 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', JSON.stringify(startSend));
+check('buildGenInput defaults initimagecreativity to 0 when nothing else set it', startSend.creativity == '0', JSON.stringify(startSend));
+check('no videoendimage sent while the end slot is empty', !startSend.hasEnd);
+
+// A preset (or reused params) supplying its own initimagecreativity must win over the '0' default.
+const presetCreativity = await page.evaluate(() => {
+    mState.params.initimagecreativity = '0.35';
+    let input = mState.buildGenInput();
+    delete mState.params.initimagecreativity;
+    return input.initimagecreativity;
+});
+check('an existing initimagecreativity value is preserved, not overwritten', presetCreativity == '0.35', presetCreativity);
+
+// End frame: fill it too, confirm buildGenInput sends both, then remove the start frame via its × and
+// confirm the request drops back to just the end frame.
+const endFilled = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    mState.videoEndImage = { kind: 'path', value: 'raw/2026-08-17/end.png' };
+    mState.changed();
+    await settle();
+    let input = mState.buildGenInput();
+    return { videoendimage: input.videoendimage, thumbCount: document.querySelectorAll('.m-frame-tile').length };
+});
+check('buildGenInput sends videoendimage as a path', endFilled.videoendimage == 'raw/2026-08-17/end.png', JSON.stringify(endFilled));
+check('both slots show thumbnails once both are filled', endFilled.thumbCount == 2, JSON.stringify(endFilled));
+
+const afterRemoveStart = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    document.querySelector('.m-frame-tile-remove').click();
+    await settle();
+    let input = mState.buildGenInput();
+    return { hasStart: 'initimage' in input, hasEnd: 'videoendimage' in input, initImageState: mState.initImage,
+        emptyButtons: document.querySelectorAll('.m-frame-add').length };
+});
+check('removing a frame via its × clears it from state and the request', !afterRemoveStart.hasStart
+    && afterRemoveStart.initImageState == null, JSON.stringify(afterRemoveStart));
+check('the other frame is untouched by removing its sibling', afterRemoveStart.hasEnd, JSON.stringify(afterRemoveStart));
+check('the emptied slot shows its + button again', afterRemoveStart.emptyButtons == 1, JSON.stringify(afterRemoveStart));
+
+// resetParams() clears both frames.
+const afterReset = await page.evaluate(() => {
+    mState.videoEndImage = { kind: 'path', value: 'raw/2026-08-17/end.png' };
+    mState.initImage = { kind: 'data', value: 'data:image/gif;base64,aaaa' };
+    mState.resetParams();
+    let input = mState.buildGenInput();
+    return { initImage: mState.initImage, videoEndImage: mState.videoEndImage,
+        hasStart: 'initimage' in input, hasEnd: 'videoendimage' in input };
+});
+check('resetParams clears both start and end frames', afterReset.initImage == null && afterReset.videoEndImage == null, JSON.stringify(afterReset));
+check('resetParams-cleared frames are absent from the next request', !afterReset.hasStart && !afterReset.hasEnd, JSON.stringify(afterReset));
+
+// CLR (the seed-row button that already clears prompt images + prefix) also clears both frames.
+const afterClr = await page.evaluate(() => {
+    mState.initImage = { kind: 'data', value: 'data:image/gif;base64,aaaa' };
+    mState.videoEndImage = { kind: 'data', value: 'data:image/gif;base64,bbbb' };
+    let originalConfirm = window.confirm;
+    window.confirm = () => true;
+    mCreate.imagesGroup.querySelector('.m-seg-button:last-child').click();
+    window.confirm = originalConfirm;
+    return { initImage: mState.initImage, videoEndImage: mState.videoEndImage,
+        title: mCreate.imagesGroup.querySelector('.m-seg-button:last-child').title };
+});
+check('CLR button clears both start and end frames', afterClr.initImage == null && afterClr.videoEndImage == null, JSON.stringify(afterClr));
+check('CLR button title names start/end frames', afterClr.title.includes('start/end frames'), afterClr.title);
+
+// Not covered by dedicated params: neither key ever renders as an Advanced chip.
+const framesNotAdvChips = await page.evaluate(() => {
+    mState.params.initimage = 'raw/x.png';
+    mState.params.videoendimage = 'raw/y.png';
+    let keys = Object.keys(mState.params).filter(k => !mCreate.coveredParams.includes(k));
+    delete mState.params.initimage;
+    delete mState.params.videoendimage;
+    return keys;
+});
+check('initimage/videoendimage are covered params, never Advanced chips', !framesNotAdvChips.includes('initimage') && !framesNotAdvChips.includes('videoendimage'), JSON.stringify(framesNotAdvChips));
+
 await browser.close();
 
 

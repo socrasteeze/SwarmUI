@@ -420,6 +420,70 @@ html:has(.m-body) {
     padding: 0 1.1rem;
 }
 
+/* Start/end frame section (image-to-video, eg MiniMax H3 FL2VA): two side-by-side slots inside the same
+   <details> styling as the negative-prompt section above it. */
+.m-frame-row {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 0.4rem;
+}
+.m-frame-slot {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.m-frame-slot-label {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin-bottom: 0.2rem;
+}
+.m-frame-slot-body {
+    display: flex;
+}
+.m-frame-add {
+    width: 100%;
+    min-height: 44px;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    border: 1px dashed var(--border-color);
+    border-radius: 0.5rem;
+    font-size: 26px;
+}
+.m-frame-tile {
+    position: relative;
+    width: 100%;
+    /* Matches .m-image-tile's aspect footprint so a frame thumbnail reads at the same scale as a prompt
+       image, without pinning it to a fixed rem width - this slot is flex:1 and shares the row with its twin. */
+    aspect-ratio: 1 / 1;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: var(--background-panel);
+}
+.m-frame-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    -webkit-user-drag: none;
+    user-select: none;
+}
+/* >=44px hit target, unlike the smaller .m-image-tile-remove: there is no tap-to-edit competing for this
+   tile's surface, so the touch target can be sized to the HIG minimum without covering anything else. */
+.m-frame-tile-remove {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 18px;
+    border-bottom-left-radius: 0.5rem;
+}
+
 .m-quick-row {
     display: flex;
     gap: 0.5rem;

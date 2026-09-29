@@ -13,6 +13,11 @@ class MState {
         this.activePresets = [];
         /** Prompt images, ordered: {kind: 'data'|'path', value: dataURI-or-serverRelativePath}. */
         this.promptImages = [];
+        /** Image-to-video start/end frames, each null or {kind: 'data'|'path', value}, same shape as a
+         * promptImages entry. Sent as the server's `initimage`/`videoendimage` params - two single-Image
+         * params, distinct from the promptimages list. */
+        this.initImage = null;
+        this.videoEndImage = null;
         /** True when the seed is locked (kept between generations) rather than randomized (-1). */
         this.seedLocked = false;
         /** True once a save() has failed, so the "not being saved" warning fires once and not per keystroke. */
@@ -459,6 +464,34 @@ class MState {
         else {
             delete input['promptimages'];
         }
+        // Start/end video frames: same value-form and path-normalization rule as promptimages above, but each
+        // is a single-Image param rather than a list entry.
+        let sendFrame = (entry, key) => {
+            if (!entry) {
+                delete input[key];
+                return;
+            }
+            if (entry.kind == 'path') {
+                let path = (typeof mImages != 'undefined' && mImages.urlToPath) ? (mImages.urlToPath(entry.value) || entry.value) : entry.value;
+                if (path && !`${path}`.startsWith('data:')) {
+                    input[key] = path;
+                }
+                else {
+                    delete input[key];
+                }
+            }
+            else {
+                input[key] = entry.value;
+            }
+        };
+        sendFrame(this.initImage, 'initimage');
+        sendFrame(this.videoEndImage, 'videoendimage');
+        // A start frame with no explicit creativity means "use the frame as-is" - the whole point of supplying
+        // one. A preset's own value (eg MiniMax H3 FL2VA's initimagecreativity: 0) must still win, so this only
+        // fills the gap when nothing upstream of here (base params or a merged preset) already set it.
+        if ('initimage' in input && !('initimagecreativity' in input)) {
+            input['initimagecreativity'] = '0';
+        }
         if (!this.seedLocked) {
             input['seed'] = '-1';
         }
@@ -552,6 +585,8 @@ class MState {
         }
         this.activePresets = [];
         this.promptImages = [];
+        this.initImage = null;
+        this.videoEndImage = null;
         this.seedLocked = false;
         this.customRatio = 0;
         this.changed();
@@ -929,6 +964,8 @@ class MState {
                 'customRatio': this.customRatio,
                 'archFilter': this.archFilter,
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
+                'initImagePath': this.initImage && this.initImage.kind == 'path' ? this.initImage.value : null,
+                'videoEndImagePath': this.videoEndImage && this.videoEndImage.kind == 'path' ? this.videoEndImage.value : null,
                 'promptGuide': this.promptGuide,
                 'genTarget': this.genTarget,
             };
@@ -966,6 +1003,8 @@ class MState {
             this.customRatio = data.customRatio || 0;
             this.archFilter = data.archFilter || '';
             this.promptImages = (data.promptImagePaths || []).map(path => ({ 'kind': 'path', 'value': path }));
+            this.initImage = data.initImagePath ? { 'kind': 'path', 'value': data.initImagePath } : null;
+            this.videoEndImage = data.videoEndImagePath ? { 'kind': 'path', 'value': data.videoEndImagePath } : null;
             // A blob written before the Coach shipped, or at a future incompatible schema, is discarded rather
             // than misread - the coach re-learns per-checkpoint choices rather than trusting a shape it does
             // not recognize.
