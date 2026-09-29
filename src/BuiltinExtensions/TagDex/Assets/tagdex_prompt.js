@@ -95,6 +95,17 @@ class TagDexPromptHookClass {
         };
         promptTabComplete.registerPrefix('character', 'Insert a booru character or artist trigger tag', completer);
         promptTabComplete.registerAltPrefix('char', 'character');
+        let modes = (prefix) => {
+            let out = [];
+            for (let mode of ['favorite', 'random']) {
+                if (mode.startsWith((prefix || '').toLowerCase())) {
+                    out.push(mode);
+                }
+            }
+            return out.length ? out : ['\nUse "favorite" (your starred entries, random if none) or "random".'];
+        };
+        promptTabComplete.registerPrefix('characters', 'Insert a random female character with all her tags', modes);
+        promptTabComplete.registerPrefix('artists', 'Insert a random artist tag', modes);
     }
 }
 
