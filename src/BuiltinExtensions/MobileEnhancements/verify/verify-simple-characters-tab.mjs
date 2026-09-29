@@ -8,6 +8,8 @@
  *    page instead of showing an empty one.
  * 3. Search resets to page one; favorites filter round-trips through TagDexToggleFavorite.
  * 4. Tapping a card inserts the trigger and its core tags into the Create prompt at the remembered caret.
+ * 5. My Characters: the user's own cards (tags plus attached LoRAs) list, insert, edit and delete like dataset
+ *    cards, through the shared editor.
  *
  * Runs the REAL shipped source, same scheme as verify-simple-create-panel.mjs: index.html with tokens
  * substituted, real m_*.js and TagDex assets, server stubbed at genericRequest. m_app.js is absent, so the
@@ -72,7 +74,7 @@ await page.addInitScript(() => {
     window.showError = function (message) { window.__err = message; };
     window.getUserSetting = () => '';
     window.__requests = [];
-    window.__favorites = new Set(['char_007']);
+    window.__favorites = new Set(['char_007', 'aria_(robot)']);
     window.__dataset = Array.from({ length: 120 }, (unused, i) => ({
         name: `char_${`${i}`.padStart(3, '0')}`,
         display: `Char ${i}`,
@@ -82,16 +84,51 @@ await page.addInitScript(() => {
         kind: 'character',
         core_tags: ['long hair', 'blue eyes']
     }));
+    window.__custom = [
+        { name: 'aria_(robot)', display: 'Aria (Robot)', trigger: 'aria_robot, robot joints', count: 0, copyright: 'Zenless Zone Zero',
+            copyright_display: 'Zenless Zone Zero', kind: 'character', core_tags: ['<lora:folder/ariarob:0.8>', 'ariarobzzz'],
+            custom: { name: 'Aria (Robot)', series: 'Zenless Zone Zero', tags: 'aria_robot, robot joints',
+                loras: [{ name: 'folder/ariarob', weight: 0.8, tags: 'ariarobzzz' }] } },
+        { name: 'solo', display: 'Solo', trigger: 'solo, plain', count: 0, kind: 'character',
+            custom: { name: 'Solo', series: '', tags: 'solo, plain', loras: [] } }
+    ];
     window.genericRequest = (route, args, callback) => {
         window.__requests.push({ route, args });
         if (route == 'TagDexListSources') {
             callback({
                 sources: [
                     { id: 'danbooru_character', label: 'Danbooru characters', kind: 'character', present: true },
-                    { id: 'danbooru_artist', label: 'Danbooru artists', kind: 'artist', present: true }
+                    { id: 'danbooru_artist', label: 'Danbooru artists', kind: 'artist', present: true },
+                    { id: 'custom_character', label: 'My Characters', kind: 'character', present: true, custom: true, rows: window.__custom.length }
                 ],
                 prefs: { active_sources: ['danbooru_character'] }
             });
+        }
+        else if (route == 'TagDexSearchEntries' && args.source == 'custom_character') {
+            let rows = window.__custom.filter(row => !args.search || row.name.includes(args.search.toLowerCase()) || row.display.toLowerCase().includes(args.search.toLowerCase()));
+            if (args.favoritesOnly) {
+                rows = rows.filter(row => window.__favorites.has(row.name));
+            }
+            callback({ total: rows.length, offset: args.offset, limit: args.limit,
+                results: rows.map(row => ({ ...row, favorited: window.__favorites.has(row.name) })) });
+        }
+        else if (route == 'TagDexSaveCustomCharacter') {
+            let slug = args.name.trim().toLowerCase().replace(/\s+/g, '_');
+            let record = { name: slug, display: args.name, trigger: args.tags, count: 0, kind: 'character', copyright: args.series,
+                copyright_display: args.series, custom: { name: args.name, series: args.series, tags: args.tags, loras: args.loras } };
+            let at = window.__custom.findIndex(row => row.custom.name == args.original);
+            if (at >= 0) {
+                window.__custom[at] = record;
+            }
+            else {
+                window.__custom.push(record);
+            }
+            window.__favorites.add(slug);
+            callback({ success: true, name: slug });
+        }
+        else if (route == 'TagDexDeleteCustomCharacter') {
+            window.__custom = window.__custom.filter(row => row.custom.name != args.name);
+            callback({ success: true });
         }
         else if (route == 'TagDexSearchEntries') {
             let rows = window.__dataset.filter(row => !args.search || row.name.includes(args.search));
@@ -114,33 +151,6 @@ await page.addInitScript(() => {
         }
         else if (route == 'GetMyUserData') {
             callback({ presets: [], starred_models: {} });
-        }
-        else if (route == 'TagDexLibraryReview' && args.view == 'favorites') {
-            callback({ ok: true, results: [{ data: { target_kind: 'character', target_id: 'lib1', favorited: true } }] });
-        }
-        else if (route == 'TagDexLibrarySave') {
-            if (args.action == 'create_character') {
-                callback({ ok: true, record: { id: 'libNew', revision: 'r1', data: args.body.data } });
-            }
-            else {
-                callback({ ok: true, record: { id: 'fav', data: args.body } });
-            }
-        }
-        else if (route == 'TagDexLibraryCharacter') {
-            let variants = args.id == 'lib1' ? [{ id: 'v1', revision: 'r1',
-                data: { name: 'Robot', archived: false, recipe: { prompt: 'ariarobzzz, robot joints', negative_prompt: '', checkpoint: '', loras: [] } } }] : [];
-            callback({ ok: true, record: { id: args.id, revision: 'r1', data: { name: args.id == 'lib1' ? 'Aria (Robot)' : 'Solo', series: '' } }, variants });
-        }
-        else if (route == 'TagDexLibraryResolve') {
-            // Mirrors the server: without a model the checkpoint cannot be verified, so the stack is not ready.
-            window.__resolveModel = args.model;
-            callback({ ok: true, ready: !!args.model, checkpoint_status: args.model ? 'ready' : 'unverified', loras: [] });
-        }
-        else if (route == 'TagDexLibraryCharacters') {
-            let rows = [{ id: 'lib1', data: { name: 'Aria (Robot)', series: 'Zenless Zone Zero', archived: false } },
-                { id: 'lib2', data: { name: 'Solo', series: '', archived: false } }]
-                .filter(row => !args.q || row.data.name.toLowerCase().includes(args.q.toLowerCase()));
-            callback({ ok: true, total: rows.length, results: rows });
         }
     };
     window.makeWSRequest = () => null;
@@ -173,33 +183,33 @@ await page.evaluate(() => {
     location.hash = 'characters';
     mUI.applyHash();
 });
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length > 0);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length > 0);
 
 // The tab opens on favorites (only char_007 is starred); one tap on the filter shows everything.
 const opening = await page.evaluate(() => ({
     view: document.querySelector('.m-tagdex-tab .m-tagdex-source').value,
     viewLabel: document.querySelector('.m-tagdex-tab .m-tagdex-source').selectedOptions[0].textContent,
-    pinned: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-card')].map(e => [...e.querySelectorAll('.m-tagdex-card-name, .m-tagdex-card-sub')].map(x => x.textContent).join(' · ')),
+    pinned: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-custom-card')].map(e => [...e.querySelectorAll('.m-tagdex-card-name, .m-tagdex-card-sub')].map(x => x.textContent).join(' · ')),
     pressed: document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').getAttribute('aria-pressed'),
-    cards: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name')].map(e => e.textContent)
+    cards: [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card) .m-tagdex-card-name')].map(e => e.textContent)
 }));
-check('the Characters tab opens on All Characters with favorited added characters pinned',
+check('the Characters tab opens on All Characters with favorited custom characters pinned',
     opening.view == '__all__' && opening.viewLabel == 'All Characters'
     && opening.pinned.join('|') == 'Aria (Robot) · Zenless Zone Zero', JSON.stringify(opening));
 check('the Characters tab opens on favorites', opening.pressed == 'true' && opening.cards.length == 1
     && opening.cards[0] == "Char 7", JSON.stringify(opening));
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-favorite-filter').click());
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
-const unfiltered = await page.evaluate(() => [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-library-card')].length);
-check('with favorites off, every added character is pinned', unfiltered == 2, `${unfiltered} pinned`);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length == 50);
+const unfiltered = await page.evaluate(() => [...document.querySelectorAll('.m-tagdex-tab .m-tagdex-custom-card')].length);
+check('with favorites off, every custom character is pinned', unfiltered == 2, `${unfiltered} pinned`);
 
 const firstPage = await page.evaluate(() => ({
-    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length,
+    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length,
     status: document.querySelector('.m-tagdex-tab .m-tagdex-browse-status').textContent,
     label: document.querySelector('.m-tagdex-page-label').textContent,
     prevDisabled: document.querySelector('.m-tagdex-pager .m-tagdex-page-button').disabled,
     pagerVisible: document.querySelector('.m-tagdex-pager').style.display != 'none',
-    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name').textContent,
+    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card) .m-tagdex-card-name').textContent,
 }));
 check('page one holds exactly one bounded page of cards', firstPage.cards == 50, `${firstPage.cards} cards`);
 check('status names the window and the total', firstPage.status.includes('1') && firstPage.status.includes('50') && firstPage.status.includes('120'), firstPage.status);
@@ -210,21 +220,21 @@ const nextButton = '.m-tagdex-pager .m-tagdex-page-button:last-of-type';
 await page.click(nextButton);
 await page.waitForFunction(() => document.querySelector('.m-tagdex-page-label').textContent.trim() == '2 / 3');
 const pageTwo = await page.evaluate(() => ({
-    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name').textContent,
+    firstName: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card) .m-tagdex-card-name').textContent,
     prevDisabled: document.querySelector('.m-tagdex-pager .m-tagdex-page-button').disabled,
 }));
 check('Next fetches the next offset, not a longer list', pageTwo.firstName == 'Char 50' && !pageTwo.prevDisabled, pageTwo.firstName);
 await page.click(nextButton);
 await page.waitForFunction(() => document.querySelector('.m-tagdex-page-label').textContent.trim() == '3 / 3');
 const lastPage = await page.evaluate(() => ({
-    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length,
+    cards: document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length,
     nextDisabled: document.querySelector('.m-tagdex-pager .m-tagdex-page-button:last-of-type').disabled,
 }));
 check('the last page holds the remainder and Next is disabled', lastPage.cards == 20 && lastPage.nextDisabled, `${lastPage.cards} cards`);
 
 // ---- Search resets to page one ----
 await page.fill('.m-tagdex-tab .m-tagdex-search', 'char_01');
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 10);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length == 10);
 const searched = await page.evaluate(() => ({
     status: document.querySelector('.m-tagdex-tab .m-tagdex-browse-status').textContent,
     pagerVisible: document.querySelector('.m-tagdex-pager').style.display != 'none',
@@ -244,10 +254,10 @@ await page.evaluate(() => {
 });
 await page.waitForFunction(() => document.querySelector('.m-tagdex-page-label').textContent.trim() == '1 / 2');
 await page.click(nextButton);
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 1
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length == 1
     && document.querySelector('.m-tagdex-page-label').textContent.trim() == '2 / 2');
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-favorite-button').click());
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length == 50);
 const clamped = await page.evaluate(() => ({
     label: document.querySelector('.m-tagdex-page-label').textContent.trim(),
     pagerVisible: document.querySelector('.m-tagdex-pager').style.display != 'none',
@@ -255,40 +265,43 @@ const clamped = await page.evaluate(() => ({
 check('unstarring the last row of the last page clamps to a real page', clamped.label == '1 / 1' || !clamped.pagerVisible, JSON.stringify(clamped));
 // Back to the plain view for the checks below.
 await page.evaluate(() => {
-    window.__favorites = new Set(['char_007']);
+    window.__favorites = new Set(['char_007', 'aria_(robot)']);
     document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click());
 });
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length == 50);
 
-// ---- My Library: every added character, no favorites filter or sort ----
-const libraryList = await page.evaluate(async () => {
+// ---- My Characters: a normal dataset in the picker, with cards that carry your own tags and LoRAs ----
+const customList = await page.evaluate(async () => {
     let source = document.querySelector('.m-tagdex-tab .m-tagdex-source');
-    let libOption = [...source.options].find(o => o.value == '__library__');
-    source.value = '__library__';
+    let option = [...source.options].find(o => o.value == 'custom_character');
+    source.value = 'custom_character';
     source.dispatchEvent(new Event('change'));
     await new Promise(r => setTimeout(r, 200));
     let tab = document.querySelector('.m-tagdex-tab');
     let out = {
-        option: libOption ? libOption.textContent : null,
-        rows: [...tab.querySelectorAll('.m-tagdex-library-card')].map(e => [...e.querySelectorAll('.m-tagdex-card-name, .m-tagdex-card-sub')].map(x => x.textContent).join(' · ')),
-        status: tab.querySelector('.m-tagdex-browse-status').textContent,
-        favoritesHidden: tab.querySelector('.m-tagdex-favorite-filter').style.display == 'none',
-        pagerHidden: tab.querySelector('.m-tagdex-pager').style.display == 'none'
+        option: option ? option.textContent : null,
+        legacyOption: [...source.options].some(o => o.value == '__library__'),
+        rows: [...tab.querySelectorAll('.m-tagdex-custom-card')].map(e => [...e.querySelectorAll('.m-tagdex-card-name, .m-tagdex-card-sub')].map(x => x.textContent).join(' · ')),
+        counts: [...tab.querySelectorAll('.m-tagdex-custom-card .m-tagdex-card-count')].map(e => e.textContent),
+        editButtons: [...tab.querySelectorAll('.m-tagdex-custom-card .m-tagdex-edit-button')].map(e => e.getAttribute('aria-label')),
+        favoritesShown: tab.querySelector('.m-tagdex-favorite-filter').style.display == '',
+        add: !!tab.querySelector('.m-tagdex-add-button')
     };
     source.value = 'danbooru_character';
     source.dispatchEvent(new Event('change'));
     await new Promise(r => setTimeout(r, 200));
-    out.favoritesBack = tab.querySelector('.m-tagdex-favorite-filter').style.display == '';
     return out;
 });
-check('Characters tab offers a My Library list', !!libraryList.option, JSON.stringify(libraryList));
-check('My Library lists every added character, unfiltered', libraryList.rows.length == 2
-    && libraryList.rows[0] == 'Aria (Robot) · Zenless Zone Zero' && libraryList.favoritesHidden && libraryList.pagerHidden
-    && libraryList.status == '2 characters', JSON.stringify(libraryList));
-check('switching back to a dataset restores the favorites filter', libraryList.favoritesBack, JSON.stringify(libraryList));
+check('My Characters is a normal dataset in the picker and the old library list is gone',
+    customList.option == 'My Characters' && !customList.legacyOption, JSON.stringify(customList));
+check('custom cards read "Your character", not a post count, and carry an edit button',
+    customList.rows.length == 2 && customList.rows[0] == 'Aria (Robot) · Zenless Zone Zero'
+    && customList.counts.every(c => c == 'Your character')
+    && customList.editButtons.join('|') == 'Edit Aria (Robot)|Edit Solo', JSON.stringify(customList));
+check('the favorites filter stays available and the tab has a + Add button', customList.favoritesShown && customList.add, JSON.stringify(customList));
 
-// ---- Added characters are cards like the dataset ones: tap applies, ... opens variants, star is the favorite ----
-const libraryCard = await page.evaluate(async () => {
+// ---- Tapping a custom card inserts my tags + <lora:...> + the LoRA's tags; T is my tags alone ----
+const customCard = await page.evaluate(async () => {
     let wait = () => new Promise(r => setTimeout(r, 200));
     let tab = document.querySelector('.m-tagdex-tab');
     let source = tab.querySelector('.m-tagdex-source');
@@ -301,48 +314,20 @@ const libraryCard = await page.evaluate(async () => {
         tab.querySelector('.m-tagdex-favorite-filter').click();
         await wait();
     }
-    let cards = [...tab.querySelectorAll('.m-tagdex-library-card')];
+    let cards = [...tab.querySelectorAll('.m-tagdex-custom-card')];
     let aria = cards.find(c => c.querySelector('.m-tagdex-card-name').textContent == 'Aria (Robot)');
     let solo = cards.find(c => c.querySelector('.m-tagdex-card-name').textContent == 'Solo');
     let out = {
-        count: aria ? aria.querySelector('.m-tagdex-card-count').textContent : null,
-        hasImage: !!(aria && aria.querySelector('.m-tagdex-card-image')),
-        details: aria ? aria.querySelector('.m-tagdex-alltags-button').textContent : null,
         ariaStar: aria ? aria.querySelector('.m-tagdex-favorite-button').textContent : null,
         soloStar: solo ? solo.querySelector('.m-tagdex-favorite-button').textContent : null,
-        wideButtons: tab.querySelectorAll('.m-tagdex-browse-results .m-wide-button').length
+        soloTriggerOnly: solo ? !!solo.querySelector('.m-tagdex-alltags-button:not(.m-tagdex-edit-button)') : null
     };
-    // The model comes from an active preset, the usual case: params['model'] itself is empty.
-    let savedPresets = [mState.presets, mState.activePresets, mState.params['model']];
-    delete mState.params['model'];
-    mState.presets = [{ title: 'anima/Turbo', param_map: { model: 'anima/krakenNOIR_v6' } }];
-    mState.activePresets = ['anima/Turbo'];
     mState.params['prompt'] = '1girl';
     aria.querySelector('.m-tagdex-card-main').click();
-    await wait();
     out.prompt = mState.params['prompt'];
-    out.resolveModel = window.__resolveModel;
-    // No model at all: a prompt-only variant still applies.
-    mState.presets = [];
-    mState.activePresets = [];
-    mState.params['prompt'] = '1girl';
-    aria.querySelector('.m-tagdex-card-main').click();
-    await wait();
-    out.promptNoModel = mState.params['prompt'];
-    [mState.presets, mState.activePresets] = savedPresets;
-    if (savedPresets[2]) {
-        mState.params['model'] = savedPresets[2];
-    }
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
-    }
-    solo.querySelector('.m-tagdex-card-main').click();
-    await wait();
-    let sheet = [...document.querySelectorAll('.m-sheet')].pop();
-    out.soloOpened = sheet ? sheet.querySelector('.m-sheet-title').textContent : null;
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
-    }
+    mState.params['prompt'] = '';
+    aria.querySelector('.m-tagdex-alltags-button:not(.m-tagdex-edit-button)').click();
+    out.triggerOnly = mState.params['prompt'];
     // Leave the tab exactly as the following checks expect it.
     source.value = startSource;
     source.dispatchEvent(new Event('change'));
@@ -353,67 +338,135 @@ const libraryCard = await page.evaluate(async () => {
     }
     return out;
 });
-check('added characters render as cards like the dataset ones', libraryCard.count == 'Your character' && libraryCard.hasImage
-    && libraryCard.details == '⋯' && libraryCard.wideButtons == 0, JSON.stringify(libraryCard));
-check('added-character stars show the library favorite', libraryCard.ariaStar == '★' && libraryCard.soloStar == '☆',
-    JSON.stringify(libraryCard));
-check('tapping an added character adds its variant to the prompt', libraryCard.prompt == '1girl, ariarobzzz, robot joints',
-    JSON.stringify(libraryCard));
-check('applying resolves against the model a preset sets', libraryCard.resolveModel == 'anima/krakenNOIR_v6', JSON.stringify(libraryCard));
-check('a prompt-only variant applies even with no model chosen', libraryCard.promptNoModel == '1girl, ariarobzzz, robot joints', JSON.stringify(libraryCard));
-check('tapping a character with no variant opens its variants to add one', libraryCard.soloOpened == 'Solo', JSON.stringify(libraryCard));
+check('custom-character stars are the normal favorites', customCard.ariaStar == '★' && customCard.soloStar == '☆', JSON.stringify(customCard));
+check('tapping a custom character adds my tags, its LoRA tag and the LoRA tags',
+    `${customCard.prompt}`.endsWith('aria_robot, robot joints, <lora:folder/ariarob:0.8>, ariarobzzz'), JSON.stringify(customCard));
+check('the T button adds just my tags', customCard.triggerOnly == 'aria_robot, robot joints', JSON.stringify(customCard));
+check('a custom character with no LoRA has no trigger-only button (nothing extra to leave out)', customCard.soloTriggerOnly === false, JSON.stringify(customCard));
 
-// ---- Add Character sheet: themed like the other /simple sheets, no Archived box on a new character ----
+// ---- Add Character sheet: themed like the other /simple sheets, with a LoRA section ----
 const addCharacter = await page.evaluate(async () => {
+    window.confirm = () => true;
     document.documentElement.style.setProperty('--emphasis', 'rgb(1, 2, 3)');
-    await new Promise(resolve => mTagDex.ensureLibraryEditor(() => { tagDexLibraryEditor.character(null, true, () => {}); resolve(); }));
+    mState.models = { 'LoRA': [['folder/ariarob.safetensors', 'c'], ['folder/other.safetensors', 'c'], ['Style/ARIA_style', 'c']] };
+    await new Promise(resolve => mTagDex.ensureCharacterEditor(resolve));
+    window.__requests = [];
+    mTagDex.editCharacter(null);
     await new Promise(r => setTimeout(r, 300));
     let sheet = [...document.querySelectorAll('.m-sheet')].pop();
     let save = sheet.querySelector('.tagdex-editor-actions button[type="submit"]');
-    // The harness loads no theme stylesheet, so pin the theme color to a known value to compare against.
-    document.documentElement.style.setProperty('--emphasis', 'rgb(1, 2, 3)');
-    let emphasisRgb = 'rgb(1, 2, 3)';
     let out = {
         labels: [...sheet.querySelectorAll('.tagdex-editor-field > span')].map(e => e.textContent),
         titleSize: getComputedStyle(sheet.querySelector('.tagdex-editor h3')).fontSize,
-        saveBg: getComputedStyle(save).backgroundColor, emphasisRgb,
+        saveBg: getComputedStyle(save).backgroundColor,
         saveHeight: Math.round(save.getBoundingClientRect().height),
         nameAutocomplete: sheet.querySelector('.tagdex-editor-field input').autocomplete,
-        loaderSrc: document.querySelector('.tagdex-editor-loader').getAttribute('src')
+        loaderSrc: document.querySelector('.tagdex-editor-loader').getAttribute('src'),
+        deleteOnNew: !!sheet.querySelector('.tagdex-editor-delete'),
+        rowsAtStart: sheet.querySelectorAll('.tagdex-editor-lora').length
     };
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
-    }
-    tagDexLibraryEditor.character({ id: 'c1', revision: 'r1', data: { name: 'Aria', series: '', archived: false } }, true, () => {});
+    sheet.querySelector('.tagdex-editor-add').click();
+    let row = sheet.querySelector('.tagdex-editor-lora');
+    let nameBox = row.querySelector('.tagdex-editor-lora-name');
+    nameBox.value = 'ARIA';
+    nameBox.dispatchEvent(new Event('input'));
+    let picks = [...row.querySelectorAll('.tagdex-editor-suggest-item')].map(e => e.textContent);
+    out.suggestions = picks;
+    out.pickHeight = Math.round(row.querySelector('.tagdex-editor-suggest-item').getBoundingClientRect().height);
+    row.querySelectorAll('.tagdex-editor-suggest-item')[0].click();
+    out.pickedName = nameBox.value;
+    row.querySelector('.tagdex-editor-lora-weight').value = '0.8';
+    row.querySelector('.tagdex-editor-lora-tags').value = 'ariarobzzz, aria (robot)';
+    let fields = sheet.querySelectorAll('.tagdex-editor-field');
+    fields[0].querySelector('input').value = '  New One ';
+    fields[1].querySelector('input').value = 'Zenless';
+    fields[2].querySelector('textarea').value = '1girl, silver hair';
+    sheet.querySelector('.tagdex-editor-form').requestSubmit();
     await new Promise(r => setTimeout(r, 200));
-    out.editLabels = [...document.querySelectorAll('.m-sheet .tagdex-editor-field > span')].map(e => e.textContent);
+    let saved = window.__requests.find(r => r.route == 'TagDexSaveCustomCharacter');
+    out.saved = saved ? saved.args : null;
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
     }
     return out;
 });
-const autoFavorite = await page.evaluate(async () => {
+check('Add Character has Name, Series, Tags, no Delete, no LoRA rows', addCharacter.labels.join('|') == 'Name|Series|Tags'
+    && !addCharacter.deleteOnNew && addCharacter.rowsAtStart == 0, JSON.stringify(addCharacter));
+check('Add Character matches the /simple sheets', addCharacter.titleSize == '15px' && addCharacter.saveBg == 'rgb(1, 2, 3)'
+    && addCharacter.saveHeight >= 44 && addCharacter.nameAutocomplete == 'off', JSON.stringify(addCharacter));
+check('the editor script is loaded with the page version token', /\?vary=/.test(addCharacter.loaderSrc), addCharacter.loaderSrc);
+check('LoRA name suggestions come from the known LoRAs, case-insensitively, as 44px targets',
+    addCharacter.suggestions.length == 2 && addCharacter.suggestions[0] == 'folder/ariarob' && addCharacter.suggestions[1] == 'Style/ARIA_style'
+    && addCharacter.pickedName == 'folder/ariarob' && addCharacter.pickHeight >= 44, JSON.stringify(addCharacter));
+check('saving sends the flat payload with LoRA rows and escaped tags',
+    addCharacter.saved && addCharacter.saved.original == '' && addCharacter.saved.name == 'New One' && addCharacter.saved.series == 'Zenless'
+    && addCharacter.saved.tags == '1girl, silver hair' && addCharacter.saved.loras.length == 1
+    && addCharacter.saved.loras[0].name == 'folder/ariarob' && addCharacter.saved.loras[0].weight === 0.8
+    && addCharacter.saved.loras[0].tags == String.raw`ariarobzzz, aria \(robot\)`, JSON.stringify(addCharacter.saved));
+
+// ---- Edit and Delete from a card ----
+const editCard = await page.evaluate(async () => {
+    let wait = () => new Promise(r => setTimeout(r, 250));
+    let tab = document.querySelector('.m-tagdex-tab');
+    let source = tab.querySelector('.m-tagdex-source');
+    source.value = 'custom_character';
+    source.dispatchEvent(new Event('change'));
+    await wait();
     window.__requests = [];
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
-    }
-    let savedRecord = null;
-    tagDexLibraryEditor.character(null, true, record => savedRecord = record);
+    let aria = [...tab.querySelectorAll('.m-tagdex-custom-card')].find(c => c.querySelector('.m-tagdex-card-name').textContent == 'Aria (Robot)');
+    aria.querySelector('.m-tagdex-edit-button').click();
+    await wait();
     let sheet = [...document.querySelectorAll('.m-sheet')].pop();
-    sheet.querySelector('.tagdex-editor-field input').value = 'New One';
+    let fields = sheet.querySelectorAll('.tagdex-editor-field');
+    let out = {
+        title: sheet.querySelector('.tagdex-editor h3').textContent,
+        name: fields[0].querySelector('input').value,
+        series: fields[1].querySelector('input').value,
+        tags: fields[2].querySelector('textarea').value,
+        rows: [...sheet.querySelectorAll('.tagdex-editor-lora')].map(r => [r.querySelector('.tagdex-editor-lora-name').value,
+            r.querySelector('.tagdex-editor-lora-weight').value, r.querySelector('.tagdex-editor-lora-tags').value].join('|')),
+        hasDelete: !!sheet.querySelector('.tagdex-editor-delete')
+    };
+    fields[0].querySelector('input').value = 'Aria Two';
     sheet.querySelector('.tagdex-editor-form').requestSubmit();
-    await new Promise(r => setTimeout(r, 200));
-    let fav = window.__requests.find(r => r.route == 'TagDexLibrarySave' && r.args.action == 'favorite');
+    await wait();
+    let saved = window.__requests.find(r => r.route == 'TagDexSaveCustomCharacter');
+    out.saved = saved ? saved.args : null;
+    out.afterSaveNames = [...tab.querySelectorAll('.m-tagdex-custom-card .m-tagdex-card-name')].map(e => e.textContent);
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
     }
-    return { fav: fav ? fav.args.body : null, saved: savedRecord ? savedRecord.id : null };
+    // Delete
+    window.__requests = [];
+    let two = [...tab.querySelectorAll('.m-tagdex-custom-card')].find(c => c.querySelector('.m-tagdex-card-name').textContent == 'Aria Two');
+    two.querySelector('.m-tagdex-edit-button').click();
+    await wait();
+    sheet = [...document.querySelectorAll('.m-sheet')].pop();
+    sheet.querySelector('.tagdex-editor-delete').click();
+    await wait();
+    let deleted = window.__requests.find(r => r.route == 'TagDexDeleteCustomCharacter');
+    out.deleted = deleted ? deleted.args : null;
+    out.afterDeleteNames = [...tab.querySelectorAll('.m-tagdex-custom-card .m-tagdex-card-name')].map(e => e.textContent);
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    source.value = 'danbooru_character';
+    source.dispatchEvent(new Event('change'));
+    await wait();
+    return out;
 });
-check('a new character is favorited as soon as it is created', autoFavorite.fav && autoFavorite.fav.target_id == 'libNew'
-    && autoFavorite.fav.favorited === true && autoFavorite.fav.target_kind == 'character' && autoFavorite.saved == 'libNew',
-    JSON.stringify(autoFavorite));
-// Variant prompts are saved with literal parens escaped; weights, <tags> and existing escapes are kept.
-const variantEscape = await page.evaluate(async () => {
+check('editing loads the stored record, LoRA rows included, and offers Delete',
+    editCard.title == 'Edit Character' && editCard.name == 'Aria (Robot)' && editCard.series == 'Zenless Zone Zero'
+    && editCard.tags == 'aria_robot, robot joints' && editCard.rows.join(',') == 'folder/ariarob|0.8|ariarobzzz' && editCard.hasDelete,
+    JSON.stringify(editCard));
+check('saving an edit names the original record, and the tab refreshes',
+    editCard.saved && editCard.saved.original == 'Aria (Robot)' && editCard.saved.name == 'Aria Two'
+    && editCard.afterSaveNames.includes('Aria Two') && !editCard.afterSaveNames.includes('Aria (Robot)'), JSON.stringify(editCard));
+check('Delete removes the record and the tab refreshes',
+    editCard.deleted && editCard.deleted.name == 'Aria Two' && !editCard.afterDeleteNames.includes('Aria Two'), JSON.stringify(editCard));
+
+// Prompt tags are saved with literal parens escaped; weights, <tags> and existing escapes are kept.
+const paren = await page.evaluate(() => {
     let B = String.fromCharCode(92);
     let cases = [
         ['aria (robot)', `aria ${B}(robot${B})`],
@@ -422,45 +475,39 @@ const variantEscape = await page.evaluate(async () => {
         ['<lora:x (v2):0.8> smile (open mouth)', `<lora:x (v2):0.8> smile ${B}(open mouth${B})`],
         ['a (b', `a ${B}(b`]
     ];
-    let bad = cases.filter(([input, want]) => tagDexLibraryEditor.escapePromptParens(input) !== want).map(c => c[0]);
-    window.__requests = [];
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
-    }
-    tagDexLibraryEditor.variant({ id: 'lib1' }, null, true, () => {});
-    let sheet = [...document.querySelectorAll('.m-sheet')].pop();
-    sheet.querySelector('.tagdex-editor-field input').value = 'Robot';
-    let areas = sheet.querySelectorAll('.tagdex-editor-field textarea');
-    areas[0].value = 'ariarobzzz, aria (robot), (glowing eyes:1.2)';
-    areas[1].value = 'bad hands (extra fingers)';
-    sheet.querySelector('.tagdex-editor-form').requestSubmit();
-    await new Promise(r => setTimeout(r, 200));
-    let save = window.__requests.find(r => r.route == 'TagDexLibrarySave' && r.args.action == 'create_variant');
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
-    }
-    return { bad, prompt: save ? save.args.body.data.recipe.prompt : null, negative: save ? save.args.body.data.recipe.negative_prompt : null };
+    return cases.filter(([input, want]) => tagDexCharacterEditor.escapePromptParens(input) !== want).map(c => c[0]);
 });
-check('prompt paren escaping keeps weights, tags and existing escapes', variantEscape.bad.length == 0, JSON.stringify(variantEscape.bad));
-check('saving a variant escapes its prompt and negative prompt',
-    variantEscape.prompt == String.raw`ariarobzzz, aria \(robot\), (glowing eyes:1.2)` && variantEscape.negative == String.raw`bad hands \(extra fingers\)`,
-    JSON.stringify(variantEscape));
-check('Add Character has no Archived box; editing explains it', addCharacter.labels.join('|') == 'Name|Series'
-    && addCharacter.editLabels.some(l => l.startsWith('Archived (hidden')), JSON.stringify(addCharacter));
-check('Add Character matches the /simple sheets', addCharacter.titleSize == '15px' && addCharacter.saveBg == addCharacter.emphasisRgb
-    && addCharacter.saveHeight >= 44 && addCharacter.nameAutocomplete == 'off', JSON.stringify(addCharacter));
-check('the editor script is loaded with the page version token', /\?vary=/.test(addCharacter.loaderSrc), addCharacter.loaderSrc);
+check('prompt paren escaping keeps weights, tags and existing escapes', paren.length == 0, JSON.stringify(paren));
+
+// ---- More: My Library and Conflict Review are gone; Add Character remains ----
+const more = await page.evaluate(() => mUI.moreItems.map(item => item.label || item[0]));
+check('More offers Add Character and no longer My Library or Conflict Review',
+    more.includes('Add Character') && !more.includes('My Library') && !more.includes('Conflict Review'), JSON.stringify(more));
+
+// ---- Without the manage permission, Add warns instead of opening the editor ----
+const denied = await page.evaluate(() => {
+    let warned = null;
+    let originalWarn = mUI.warn;
+    mUI.warn = message => warned = message;
+    permissions.hasPermission = () => false;
+    let before = document.querySelectorAll('.m-sheet').length;
+    mTagDex.editCharacter(null);
+    permissions.hasPermission = () => true;
+    mUI.warn = originalWarn;
+    return { warned, opened: document.querySelectorAll('.m-sheet').length != before };
+});
+check('a user without tagdex_manage is told so and no editor opens', /manage permission/.test(denied.warned || '') && !denied.opened, JSON.stringify(denied));
 
 // ---- Favorites filter ----
 await page.evaluate(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click()));
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 1);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length == 1);
 const favorites = await page.evaluate(() => ({
-    name: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card) .m-tagdex-card-name').textContent,
+    name: document.querySelector('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card) .m-tagdex-card-name').textContent,
     starred: document.querySelector('.m-tagdex-tab .m-tagdex-favorite-button').textContent,
 }));
 check('favorites filter shows only starred rows, marked as starred', favorites.name == 'Char 7' && favorites.starred == '★', JSON.stringify(favorites));
 await page.evaluate(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-favorite-filter').forEach(button => button.click()));
-await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-library-card)').length == 50);
+await page.waitForFunction(() => document.querySelectorAll('.m-tagdex-tab .m-tagdex-card:not(.m-tagdex-custom-card)').length == 50);
 
 // ---- Card tap inserts the trigger into the Create prompt ----
 await page.evaluate(() => document.querySelector('.m-tagdex-tab .m-tagdex-card-main').click());

@@ -18,6 +18,7 @@
             <button id="tagdex_refresh" class="basic-button tagdex-button tagdex-data-control" title="Reload results">&#x21bb;</button>
             <button id="tagdex_favorites" class="basic-button tagdex-button tagdex-favorite-filter tagdex-data-control" aria-pressed="false" title="Show favorites only">&#9733; Favorites</button>
             <button id="tagdex_manage_toggle" class="basic-button tagdex-button" title="Download or manage tag datasets" data-requiredpermission="tagdex_manage"><span class="translate">Datasets</span><span class="tagdex-manage-count" id="tagdex_manage_count"></span></button>
+            <button id="tagdex_add_character" class="basic-button tagdex-button" title="Create a character of your own: your tags, plus any LoRAs it should bring along" data-requiredpermission="tagdex_manage"><span class="translate">Add Character</span></button>
         </div>
         <div class="tagdex-row tagdex-facet-row">
             <div class="tagdex-facet-selects tagdex-data-control" id="tagdex_facets"></div>
@@ -40,7 +41,7 @@
             </p>
             <p class="tagdex-empty-note">
                 Nothing is downloaded until you click, and you can reopen this list any time with the Datasets
-                button above. You can also drop your own CSV into
+                button above, and Add Character creates a character of your own. You can also drop your own CSV into
                 <code class="tagdex-code">Data/TagDex/</code> using the same column names.
             </p>
         </div>
@@ -48,16 +49,5 @@
     <div class="tagdex-manage" id="tagdex_manage" style="display:none;">
         <div class="tagdex-download-list" id="tagdex_download_list"></div>
     </div>
-    <section class="tagdex-library" aria-labelledby="tagdex_library_title">
-        <div class="tagdex-row">
-            <h3 id="tagdex_library_title">My Library</h3>
-            <input id="tagdex_library_search" class="tagdex-search" type="search" placeholder="Search library" autocomplete="off" />
-            <button id="tagdex_library_refresh" class="basic-button tagdex-button">Refresh</button>
-            <button id="tagdex_library_add" class="basic-button tagdex-button" data-requiredpermission="tagdex_manage">Add Character</button>
-            <button id="tagdex_library_review" class="basic-button tagdex-button" data-requiredpermission="tagdex_manage">Review</button>
-        </div>
-        <div id="tagdex_library_status" class="tagdex-status" aria-live="polite"></div>
-        <div id="tagdex_library_results" class="tagdex-library-results"></div>
-    </section>
     <div class="browser_container tagdex-browser" id="tagdex_browser_container"></div>
 </div>

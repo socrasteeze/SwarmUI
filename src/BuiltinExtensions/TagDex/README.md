@@ -11,8 +11,9 @@ API surface, thumbnails, and AnimaDex sync, plus the genpage tab and the `/simpl
 
 ## Datasets
 
-Five datasets, each a `TagDexSource` in `TagDexData.cs`. All of them download and load into
-`Data/TagDex/<id>.csv` (or `<id>.js` for `anima_styles`), which is `Program.DataDir/TagDex`:
+Six datasets, each a `TagDexSource` in `TagDexData.cs`. The first four download and load into
+`Data/TagDex/<id>.csv`, `anima_styles` from `<id>.js`, and your own characters from `custom_character.json` (see
+My Characters below). All of it is under `Program.DataDir/TagDex`:
 
 | ID | Kind | Source | Downloadable |
 | --- | --- | --- | --- |
@@ -21,6 +22,7 @@ Five datasets, each a `TagDexSource` in `TagDexData.cs`. All of them download an
 | `e621_character` | Character | `Laxhar/noob-wiki` | Yes |
 | `e621_artist` | Artist | `Laxhar/noob-wiki` | Yes |
 | `anima_styles` | Artist | Supplied locally, no download source | No |
+| `custom_character` | Character | Created in the UI, see My Characters | No |
 
 `noob-wiki` is the same dataset [AnimaDex](https://github.com/zetaneko/AnimaDex) itself is built from — it is an
 unauthenticated download, where AnimaDex's own full catalogue needs an account and an export token. A dataset row
@@ -119,10 +121,10 @@ Defined in `TagDexExtension.cs`:
 | ID | Default | Covers |
 | --- | --- | --- |
 | `tagdex_use` | USER | Searching and reading the datasets — a read-only local lookup. |
-| `tagdex_manage` | POWERUSERS | Downloading datasets (up to ~113 MB of bandwidth), reloading them, unloading them, importing thumbnails, generating or setting a reference thumbnail, and reconciling AnimaDex favorites. |
+| `tagdex_manage` | POWERUSERS | Downloading datasets (up to ~113 MB of bandwidth), reloading them, unloading them, importing thumbnails, generating or setting a reference thumbnail, reconciling AnimaDex favorites, and adding, editing or deleting your own characters. |
 
-`TagDexDeleteThumbnail` is registered under `tagdex_manage` as well. Every other route below is gated by
-`tagdex_use`.
+`TagDexDeleteThumbnail`, `TagDexSaveCustomCharacter` and `TagDexDeleteCustomCharacter` are registered under
+`tagdex_manage` as well. Every other route below is gated by `tagdex_use`.
 
 ## API routes
 
@@ -145,6 +147,8 @@ All registered in `TagDexAPI.cs`, `TagDexFavorites.cs`, and `TagDexThumbs.cs` vi
 | `TagDexSetThumbnail` | Sets a reference thumbnail from an image the caller already has. |
 | `TagDexDeleteThumbnail` | Deletes a generated thumbnail. |
 | `TagDexReconcileFavorites` | Unions the caller's local favorites with the configured AnimaDex instance. |
+| `TagDexSaveCustomCharacter` | Creates or edits one of your own characters. |
+| `TagDexDeleteCustomCharacter` | Deletes one of your own characters and its reference image. |
 
 Two more routes are plain `WebServer.WebApp.MapGet` handlers, not API calls: `/TagDexIndex/{source}/{version}`
 serves the lean typeahead index as an immutably-cached, tab-separated blob, and `/TagDexThumb/{source}/{**file}`
@@ -165,48 +169,40 @@ Selecting a hidden mode's dataset falls back to Best Match rather than sorting b
 The layout toggle cycles list, two columns and three columns. Both the sort mode and the layout persist in
 browser storage under `m_client_tagdex_sort` and `m_client_tagdex_view`.
 
-## Replicated custom library
+## My Characters
 
-`Data/TagDex/local.json` can connect TagDex to the local AnimaDex library and the NAS Model Manager archive. Both
-connections are disabled by default. Their credentials remain server-side and are never included in TagDex
-preferences.
+Your own characters, created in the UI: a name, a series, your own tags, and any number of attached LoRAs, each
+with a weight and its own extra tags. They live in one file, `Data/TagDex/custom_character.json`, and load as a
+sixth dataset (`custom_character`, "My Characters") that is present once the first character is saved.
 
 ```json
-{
-  "library": {
-    "enabled": true,
-    "url": "http://local-animadex.example",
-    "key": "replace-with-library-key",
-    "timeout_seconds": 30
-  },
-  "archive": {
-    "enabled": true,
-    "url": "https://model-manager.example",
-    "token": "replace-with-archive-token",
-    "timeout_seconds": 300
-  }
-}
+{ "characters": [ { "name": "Aria", "series": "Zenless Zone Zero", "tags": "1girl, silver hair",
+    "loras": [ { "name": "folder/aria_zzz", "weight": 0.8, "tags": "aria_zzz" } ] } ] }
 ```
 
-The Genpage **My Library** panel and `/simple` **My Library** sheet browse characters, show every variant, and
-apply a ready recipe without replacing unrelated generation settings. Recipe LoRAs keep their stack order.
-Duplicate logical models are not added twice. A different weight on an already selected LoRA is reported as a
-conflict instead of being overwritten.
+A card looks and behaves like any other: thumbnail, name, series, tag chips, star, Generate Reference and Use
+Current Image. The trigger is your tags. The core tags are each LoRA's `<lora:NAME:WEIGHT>` followed by that
+LoRA's own tags, in order, so a card click inserts exactly "my tags, LoRA tag, LoRA tags" through the normal
+insert path. `TagDexCustom.cs` owns the store, the validation and the loader.
 
-Both surfaces use the same native editor. It edits character fields and full recipes, searches the configured
-archive, adds verified model references, changes weights, reorders or removes stack entries, and clones variants.
-Conflict Review shows retained versions and resolves only after an explicit choice. Manual gallery uploads have
-unknown provenance; generated-image provenance is never invented.
-
-`TagDexLibraryResolve` fetches the authoritative variant revision from local AnimaDex. A persisted install receipt
-binds the archive SHA-256 to the current file path, size, timestamp, and Swarm logical name. A changed file is
-rehash-checked. A tensor hash can identify an `unverified` candidate but never makes it ready. Missing models are
-reported as `not_downloaded` and generation stops. `TagDexLibraryAcquire` downloads from the configured archive
-origin into the normal LoRA download folder, verifies the full-file SHA-256 before publication, refuses overwrite,
-does not resave the safetensors header, refreshes inventory, and records the installed identity.
-
-Library edits use `TagDexLibrarySave`, a fixed action allowlist covering characters, variants, images, favorites,
-and conflict resolution. TagDex stores no separate character database or pending edit queue.
+- **Add, edit, delete.** Genpage has an **Add Character** button beside Datasets; the card menu gains Edit
+  Character and Delete Character. `/simple` has **More > Add Character**, a **+ Add** button on the Characters tab,
+  and a pencil button on each custom card. Both surfaces share `Assets/tagdex_editor.js`, which suggests LoRA names
+  from the LoRAs already loaded on the page. Routes: `TagDexSaveCustomCharacter` and
+  `TagDexDeleteCustomCharacter`, both `tagdex_manage`. The save route reads its fields flat off the payload (a
+  `JObject` parameter is the whole payload).
+- **Rules.** Name required, at most 100 characters, and unique by slug (trimmed, lowercase, whitespace to `_`);
+  series 200; tags 4,000; at most 20 LoRAs; a LoRA needs a name with no `<`, `>` or `,`; weights clamp to +/-2;
+  LoRA tags 1,000. The editor escapes literal parentheses in tags, the way prompt text needs them.
+- **No post count.** Custom rows have count 0. Search and the typeahead index skip the count floor for this
+  source, and the `<characters:...>`/`<artists:...>` prompt tags never draw from it.
+- **Thumbnails and favorites.** References use the normal thumbnail routes under `thumbs/custom_character/`; a
+  rename moves the file, a delete removes it. A new character is starred for you. A rename carries the saving
+  user's star across; other users' stars on the old name are left behind. The AnimaDex relay only maps the two
+  danbooru sources, so custom characters never leave this server.
+- **The old My Library is gone.** The AnimaDex-backed library (Genpage panel, `/simple` My Library and Conflict
+  Review items, `TagDexLibrary.cs`, the `TagDexLibrary*` routes, and the `library`/`archive` blocks of
+  `local.json`) was deleted. Leftover `library`/`archive` keys in an existing `local.json` are ignored.
 
 ## Gotchas
 
