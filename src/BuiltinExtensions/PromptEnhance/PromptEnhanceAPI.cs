@@ -148,7 +148,9 @@ public static class PromptEnhanceAPI
             if (PromptEnhanceCache.TryGet(key, out string cachedPromptPart))
             {
                 // Notes are not cached (only the prompt part is), so a cache hit never carries notes.
-                output(BuildResult(PromptEnhanceClient.Unshield(cachedPromptPart, extracted), "", prompt, profile, endpoint, true, effectiveStrength, strengthNote));
+                // Unwrap JSON positive_prompt here too: older cache entries may still hold a raw writer object.
+                string cachedUnwrapped = PromptEnhanceClient.UnwrapJsonPrompt(cachedPromptPart);
+                output(BuildResult(PromptEnhanceClient.Unshield(cachedUnwrapped, extracted), "", prompt, profile, endpoint, true, effectiveStrength, strengthNote));
                 return;
             }
             if (!healthy)
@@ -185,9 +187,11 @@ public static class PromptEnhanceAPI
                 }
                 return;
             }
-            // Split any NOTES: lines out of the reply per the profile pack's caller contract, and unshield only
-            // the remaining prompt part - notes are never part of the applied prompt.
+            // Split any NOTES: lines out of the reply per the profile pack's caller contract, unwrap a JSON
+            // positive_prompt object when the writer returned one (Krea-2 / Output:json shape), and unshield
+            // only the remaining prompt part - notes are never part of the applied prompt.
             (string promptPart, string notes) = PromptEnhanceClient.ExtractNotes(reply);
+            promptPart = PromptEnhanceClient.UnwrapJsonPrompt(promptPart);
             if (string.IsNullOrWhiteSpace(promptPart))
             {
                 // An empty (or notes-only) reply is not a success: never cache it, fail open instead.
@@ -197,7 +201,8 @@ public static class PromptEnhanceAPI
             // Cache the raw (still-shielded) prompt part only, not the unshielded one - Unshield is applied
             // uniformly on every retrieval (cache hit or miss) using whatever tokens this call's own prompt
             // extracted. Notes are not cached: a NOTES: line is advisory text about this one writer run, not
-            // meaningful to replay from a stale cache hit.
+            // meaningful to replay from a stale cache hit. Store the unwrapped prompt so later hits never
+            // re-surface a JSON object into the prompt box.
             PromptEnhanceCache.Put(key, promptPart);
             output(BuildResult(PromptEnhanceClient.Unshield(promptPart, extracted), notes, prompt, profile, endpoint, false, effectiveStrength, strengthNote));
         }

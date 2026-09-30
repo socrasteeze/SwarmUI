@@ -371,6 +371,55 @@ class PromptEnhanceHelperClass {
         this.setApplyEnabled(false);
     }
 
+
+    /** If a writer reply is a JSON object (optionally inside a markdown fence) with positive_prompt (or a
+     * close synonym), return that bare prompt string. Plain text is left unchanged. Defensive: Classic and
+     * /simple Apply must never paste a raw JSON object into the prompt field when the 27B writer returns
+     * the Output:json schema shape. */
+    unwrapEnhanceResult(text) {
+        if (text == null) {
+            return text;
+        }
+        let original = text + '';
+        let trimmed = original.trim();
+        if (trimmed.startsWith('```')) {
+            let firstNl = trimmed.indexOf('\n');
+            if (firstNl >= 0) {
+                let body = trimmed.slice(firstNl + 1);
+                let fence = body.lastIndexOf('```');
+                if (fence >= 0) {
+                    trimmed = body.slice(0, fence).trim();
+                }
+            }
+        }
+        if (!trimmed.startsWith('{')) {
+            return original;
+        }
+        try {
+            let obj = JSON.parse(trimmed);
+            if (!obj || typeof obj != 'object' || Array.isArray(obj)) {
+                return original;
+            }
+            let keys = ['positive_prompt', 'prompt', 'enhanced_prompt', 'rewritten_prompt'];
+            for (let i = 0; i < keys.length; i++) {
+                let val = obj[keys[i]];
+                if (typeof val == 'string') {
+                    return val;
+                }
+                // Case-insensitive fallback for unusual writer casing.
+                for (let k in obj) {
+                    if (Object.prototype.hasOwnProperty.call(obj, k) && k.toLowerCase() == keys[i] && typeof obj[k] == 'string') {
+                        return obj[k];
+                    }
+                }
+            }
+        }
+        catch (e) {
+            return original;
+        }
+        return original;
+    }
+
     /** Handles one frame from the EnhancePrompt websocket. Split out of open() so it can be tested directly
      * against the exact JSON shapes the server contract defines, without a real socket. */
     handleFrame(data) {
@@ -384,6 +433,7 @@ class PromptEnhanceHelperClass {
         }
         if (data.result != null) {
             this.running = false;
+            data.result = this.unwrapEnhanceResult(data.result);
             if (data.result.trim() == '') {
                 // An empty result is not a success - never enable Apply on it, treat it like passthrough.
                 this.showPassthrough('The writer returned an empty reply');
@@ -470,7 +520,8 @@ class PromptEnhanceHelperClass {
      * clear-on-edit listener, and remembers the applied text so a later generate click is never re-enhanced
      * against its own output. */
     applyResult(data) {
-        this.promptBox.value = data.result;
+        let promptText = this.unwrapEnhanceResult(data.result);
+        this.promptBox.value = promptText;
         triggerChangeFor(this.promptBox);
         this.recordProvenance({
             'original': data.original,
@@ -481,8 +532,8 @@ class PromptEnhanceHelperClass {
             'cached': data.cached,
             'strength': data.strength
         });
-        this.armProvenanceClearOnEdit(data.result);
-        this.appliedEnhancedText = data.result;
+        this.armProvenanceClearOnEdit(promptText);
+        this.appliedEnhancedText = promptText;
     }
 
     /** Records provenance into the hidden 'Prompt Enhance Provenance' T2I param (id 'promptenhanceprovenance').
@@ -669,6 +720,7 @@ class PromptEnhanceHelperClass {
                 return;
             }
             if (data.result != null) {
+                data.result = this.unwrapEnhanceResult(data.result);
                 if (data.result.trim() == '') {
                     // An empty result is not a success - fail open exactly like a passthrough.
                     failOpen('The writer returned an empty reply');
