@@ -642,6 +642,59 @@ public class PromptEnhanceTests : SwarmUITest
 
     #endregion
 
+
+    #region PromptEnhanceClient.UnwrapJsonPrompt
+
+    /// <summary>A plain-text reply is returned unchanged.</summary>
+    [Test]
+    public void UnwrapJsonPrompt_PlainText_Unchanged()
+    {
+        string reply = "a sunlit cat on a windowsill, soft natural light";
+        Assert.That(PromptEnhanceClient.UnwrapJsonPrompt(reply), Is.EqualTo(reply));
+    }
+
+    /// <summary>A JSON object with positive_prompt unwraps to that string alone.</summary>
+    [Test]
+    public void UnwrapJsonPrompt_PositivePromptObject_Unwraps()
+    {
+        string reply = "{\"target_model\":\"Krea-2\",\"positive_prompt\":\"a red bicycle beside a canal\",\"negative_prompt\":null,\"parameters\":{},\"notes\":[]}";
+        Assert.That(PromptEnhanceClient.UnwrapJsonPrompt(reply), Is.EqualTo("a red bicycle beside a canal"));
+    }
+
+    /// <summary>Markdown-fenced JSON still unwraps to positive_prompt.</summary>
+    [Test]
+    public void UnwrapJsonPrompt_MarkdownFencedJson_Unwraps()
+    {
+        string reply = "```json\n{\"positive_prompt\":\"fenced prompt text\",\"notes\":[]}\n```";
+        Assert.That(PromptEnhanceClient.UnwrapJsonPrompt(reply), Is.EqualTo("fenced prompt text"));
+    }
+
+    /// <summary>Synonym key <c>prompt</c> is accepted when positive_prompt is absent.</summary>
+    [Test]
+    public void UnwrapJsonPrompt_PromptSynonym_Unwraps()
+    {
+        string reply = "{\"prompt\":\"synonym prompt value\"}";
+        Assert.That(PromptEnhanceClient.UnwrapJsonPrompt(reply), Is.EqualTo("synonym prompt value"));
+    }
+
+    /// <summary>JSON without a recognized prompt key is left unchanged (do not invent a prompt).</summary>
+    [Test]
+    public void UnwrapJsonPrompt_ObjectWithoutPromptKey_Unchanged()
+    {
+        string reply = "{\"target_model\":\"Krea-2\",\"notes\":[\"only notes\"]}";
+        Assert.That(PromptEnhanceClient.UnwrapJsonPrompt(reply), Is.EqualTo(reply));
+    }
+
+    /// <summary>An empty positive_prompt becomes an empty string so the empty-reply fail-open still fires.</summary>
+    [Test]
+    public void UnwrapJsonPrompt_EmptyPositivePrompt_ReturnsEmpty()
+    {
+        string reply = "{\"positive_prompt\":\"\"}";
+        Assert.That(PromptEnhanceClient.UnwrapJsonPrompt(reply), Is.EqualTo(""));
+    }
+
+    #endregion
+
     #region PromptEnhanceClient.ApplyStrength
 
     /// <summary>Strength <c>faithful</c> sends the shielded prompt unchanged - exactly the pre-Strength

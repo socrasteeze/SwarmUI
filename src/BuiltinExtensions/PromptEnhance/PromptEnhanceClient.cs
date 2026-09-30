@@ -480,6 +480,75 @@ public static class PromptEnhanceClient
         return false;
     }
 
+
+    /// <summary>If a writer reply is a JSON object (optionally wrapped in a markdown fence) that carries
+    /// <c>positive_prompt</c> (or a close synonym: <c>prompt</c>, <c>enhanced_prompt</c>, <c>rewritten_prompt</c>),
+    /// returns that string so Apply/display get a bare prompt. Plain-text replies, non-object JSON, and objects
+    /// without a recognized prompt key are returned unchanged. Empty <c>positive_prompt</c> becomes an empty
+    /// string so the caller's empty-reply fail-open still fires.</summary>
+    public static string UnwrapJsonPrompt(string reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply))
+        {
+            return reply ?? "";
+        }
+        string trimmed = reply.Trim();
+        string candidate = StripMarkdownFence(trimmed);
+        if (candidate.Length == 0 || candidate[0] != '{')
+        {
+            return reply;
+        }
+        JObject obj;
+        try
+        {
+            obj = JObject.Parse(candidate);
+        }
+        catch
+        {
+            return reply;
+        }
+        if (obj is null)
+        {
+            return reply;
+        }
+        string[] keys = ["positive_prompt", "prompt", "enhanced_prompt", "rewritten_prompt"];
+        foreach (string key in keys)
+        {
+            if (obj.TryGetValue(key, StringComparison.OrdinalIgnoreCase, out JToken token) && token.Type == JTokenType.String)
+            {
+                return token.Value<string>() ?? "";
+            }
+        }
+        return reply;
+    }
+
+    /// <summary>Strips a single leading/trailing markdown code fence (optional <c>json</c> language tag) from
+    /// <paramref name="text"/>. Returns the inner body when a fence is present, otherwise the original text.</summary>
+    public static string StripMarkdownFence(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text ?? "";
+        }
+        string trimmed = text.Trim();
+        if (!trimmed.StartsWith("```"))
+        {
+            return trimmed;
+        }
+        int firstNewline = trimmed.IndexOf('\n');
+        if (firstNewline < 0)
+        {
+            return trimmed;
+        }
+        string body = trimmed[(firstNewline + 1)..];
+        int fence = body.LastIndexOf("```", StringComparison.Ordinal);
+        if (fence < 0)
+        {
+            return trimmed;
+        }
+        return body[..fence].Trim();
+    }
+
     /// <summary>Splits any line that starts with <c>NOTES:</c> out of a writer reply, per the profile pack's
     /// caller contract (profiles-noninteractive rule 5-6): those lines are advisory text about the rewrite,
     /// not part of the prompt itself. Returns the reply with those lines removed as <c>PromptText</c>, and the
