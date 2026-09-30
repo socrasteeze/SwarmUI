@@ -391,6 +391,9 @@ public class GridGeneratorExtension : Extension
 
         public JObject SaveConfig = null;
 
+        /// <summary>Optional contact-sheet row count from /simple (gridRows). 0 = server default layout.</summary>
+        public int GridRows = 0;
+
         public Task[] GetActive()
         {
             lock (UpdateLock)
@@ -481,6 +484,15 @@ public class GridGeneratorExtension : Extension
         baseParams.Remove(T2IParamTypes.OutputIntermediateImages);
         baseParams.LockSeeds();
         await sendStatus();
+        int gridRows = 0;
+        if (raw.TryGetValue("gridRows", out JToken gridRowsTok))
+        {
+            gridRows = gridRowsTok.Value<int>();
+            if (gridRows < 0)
+            {
+                gridRows = 0;
+            }
+        }
         SwarmUIGridData data = new()
         {
             Session = session,
@@ -488,7 +500,8 @@ public class GridGeneratorExtension : Extension
             MaxSimul = session.User.CalcMaxT2ISimultaneous,
             ContinueOnError = continueOnError,
             ShowOutputs = showOutputs,
-            SaveConfig = raw.TryGetValue("saveConfig", out JToken saveConfig) ? saveConfig as JObject : null
+            SaveConfig = raw.TryGetValue("saveConfig", out JToken saveConfig) ? saveConfig as JObject : null,
+            GridRows = gridRows
         };
         Grid grid = null;
         try
@@ -516,6 +529,51 @@ public class GridGeneratorExtension : Extension
                 List<(string, string)> xAxis = [.. grid.Axes[0].Values.Where(v => !v.Skip).Select(proc)];
                 List<(string, string)> yAxis = grid.Axes.Count > 1 ? [.. grid.Axes[1].Values.Where(v => !v.Skip).Select(proc)] : [(null, null)];
                 List<(string, string)> y2Axis = grid.Axes.Count > 2 ? [.. grid.Axes[2].Values.Where(v => !v.Skip).Select(proc)] : [(null, null)];
+                // /simple may ask for N rows on a single-axis run. GridGen only lays out from axes, so reshape
+                // the flat value list into cols x rows and map fake axis keys back to the real output paths.
+                Dictionary<string, string> reshapePaths = null;
+                if (grid.Axes.Count == 1 && data.GridRows > 1 && xAxis.Count > 1)
+                {
+                    List<(string, string)> flat = xAxis;
+                    int rows = Math.Min(data.GridRows, flat.Count);
+                    int cols = (int)Math.Ceiling(flat.Count / (double)rows);
+                    reshapePaths = new();
+                    List<(string, string)> newX = [];
+                    List<(string, string)> newY = [];
+                    for (int c = 0; c < cols; c++)
+                    {
+                        newX.Add(("", $"c{c}"));
+                    }
+                    for (int r = 0; r < rows; r++)
+                    {
+                        newY.Add(("", $"r{r}"));
+                    }
+                    for (int r = 0; r < rows; r++)
+                    {
+                        for (int c = 0; c < cols; c++)
+                        {
+                            int i = r * cols + c;
+                            if (i < flat.Count)
+                            {
+                                reshapePaths[$"c{c}/r{r}"] = flat[i].Item2;
+                                // Surface the real value title on the first row / first column headers so the
+                                // sheet still names what each cell is when there is room.
+                                if (r == 0)
+                                {
+                                    newX[c] = (flat[i].Item1, $"c{c}");
+                                }
+                                if (c == 0)
+                                {
+                                    newY[r] = (flat[i].Item1, $"r{r}");
+                                }
+                            }
+                        }
+                    }
+                    xAxis = newX;
+                    yAxis = newY;
+                    y2Axis = [(null, null)];
+                    Logs.Info($"Reshaping single-axis grid image into {cols}x{rows} per gridRows={data.GridRows}");
+                }
                 int maxWidth = images.Max(x => x.ToIS.Width);
                 int maxHeight = images.Max(x => x.ToIS.Height);
                 float extraSizeMult = 1;
@@ -604,6 +662,15 @@ public class GridGeneratorExtension : Extension
                                     {
                                         imgPath = $"{imgPath}/{y2}";
                                     }
+                                }
+                                if (reshapePaths is not null)
+                                {
+                                    if (!reshapePaths.TryGetValue(imgPath, out string realPath))
+                                    {
+                                        xIndex++;
+                                        continue;
+                                    }
+                                    imgPath = realPath;
                                 }
                                 ISImage img = (data.GeneratedOutputs[imgPath] as ImageFile).ToIS;
                                 m.DrawImage(img, new Point(xIndex * maxWidth + textWidth, (int)(yIndex * maxHeight + textHeight)), 1);

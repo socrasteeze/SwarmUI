@@ -24,7 +24,7 @@ class MGrid {
      * three separate single-LoRA cells. */
     static Axes = [
         { key: 'loras', mode: 'loras', label: 'LoRAs', kind: 'lora', separator: '||',
-            hint: 'One cell per LoRA. Weight is left at the model default.' },
+            hint: 'One cell per LoRA, stacked on top of the Create tab LoRAs. Same name -> grid wins. Weight is left at the model default.' },
         { key: 'steps', mode: 'steps', label: 'Steps', kind: 'number', separator: ',',
             quick: ['4', '8', '16', '20', '30', '40'] },
         { key: 'cfgscale', mode: 'cfgscale', label: 'CFG Scale', kind: 'number', separator: ',',
@@ -39,6 +39,33 @@ class MGrid {
      * that changes one axis does not mean rebuilding all of them. */
     constructor() {
         this.selected = {};
+        /** Preferred contact-sheet row count. 0 = Auto (most values on X — never vertical). */
+        this.rows = MGrid.loadRowsPref();
+    }
+
+    /** Persisted row-count preference. 0 means Auto. */
+    static loadRowsPref() {
+        try {
+            let raw = localStorage.getItem('m_client_grid_rows');
+            if (raw == null || raw === '') {
+                return 0;
+            }
+            let n = parseInt(raw, 10);
+            return Number.isFinite(n) && n >= 0 ? n : 0;
+        }
+        catch (e) {
+            return 0;
+        }
+    }
+
+    /** Stores the row-count preference (0 = Auto). */
+    static saveRowsPref(rows) {
+        try {
+            localStorage.setItem('m_client_grid_rows', `${rows}`);
+        }
+        catch (e) {
+            /* private mode / quota */
+        }
     }
 
     /** Registers the More-tab entry. The Generate long-press still opens this too; the row exists because a
@@ -101,6 +128,36 @@ class MGrid {
         let footer = mUI.el('div', 'm-grid-footer');
         let count = mUI.el('div', 'm-grid-count');
         footer.appendChild(count);
+        let layout = mUI.el('div', 'm-grid-layout');
+        layout.appendChild(mUI.el('div', 'm-grid-layout-label', 'Rows'));
+        let layoutRow = mUI.el('div', 'm-grid-layout-choices m-seg-group');
+        let rowChoices = [
+            { value: 0, label: 'Auto' },
+            { value: 1, label: '1' },
+            { value: 2, label: '2' },
+            { value: 3, label: '3' },
+            { value: 4, label: '4' }
+        ];
+        let paintRowChoice = () => {
+            for (let button of layoutRow.querySelectorAll('.m-grid-layout-button')) {
+                let value = parseInt(button.dataset.rows, 10);
+                button.classList.toggle('m-selected', value == this.rows);
+            }
+        };
+        for (let choice of rowChoices) {
+            let button = mUI.el('button', 'm-grid-layout-button', choice.label);
+            button.type = 'button';
+            button.dataset.rows = `${choice.value}`;
+            button.addEventListener('click', () => {
+                this.rows = choice.value;
+                MGrid.saveRowsPref(this.rows);
+                paintRowChoice();
+            });
+            layoutRow.appendChild(button);
+        }
+        paintRowChoice();
+        layout.appendChild(layoutRow);
+        footer.appendChild(layout);
         let runButton = mUI.el('button', 'm-generate-button m-grid-run', 'Run Grid');
         footer.appendChild(runButton);
         content.appendChild(footer);
@@ -132,7 +189,7 @@ class MGrid {
                 return;
             }
             let base = this.buildBase();
-            mGen.runGrid(base, axes);
+            mGen.runGrid(base, axes, { 'rows': this.rows });
             mUI.note(`Grid started: ${this.totalImages()} images.`);
             close();
         });
@@ -142,18 +199,51 @@ class MGrid {
 
     /** Base parameters for the run: the Create tab as it stands, minus what the grid itself decides.
      *
-     * `images` goes because the batch count would multiply every cell. The LoRA pair goes ONLY when a LoRA
-     * axis is set, and that one matters: GridGenerator registers loras/loraweights as comma-stackable, so an
-     * axis value is APPENDED to whatever the base already carries rather than replacing it. Left in, a grid
-     * meant to compare LoRA A against LoRA B would run "current stack + A" against "current stack + B" - the
-     * comparison still looks right and is measuring the wrong thing. */
+     * `images` goes because the batch count would multiply every cell. Session (and preset-merged) LoRAs are
+     * STACKED with a LoRA axis rather than cleared: GridGenerator registers loras/loraweights as
+     * comma-stackable, so each cell appends the axis value onto this base. Same LoRA id in both -> the base
+     * entry is dropped so the axis weight/entry wins. Non-LoRA preset params still ride through buildGenInput. */
     buildBase() {
         let base = mState.buildGenInput();
         delete base['images'];
-        if (this.valuesFor('loras').length > 0) {
-            delete base['loras'];
-            delete base['loraweights'];
-            delete base['lorasectionconfinement'];
+        let gridLoras = this.valuesFor('loras');
+        if (gridLoras.length > 0) {
+            let axisIds = [];
+            for (let cell of gridLoras) {
+                for (let part of MState.toList(cell)) {
+                    axisIds.push(part);
+                }
+            }
+            let names = MState.toList(base['loras']);
+            let weights = MState.toList(base['loraweights']);
+            let confs = MState.toList(base['lorasectionconfinement']);
+            let keepNames = [], keepWeights = [], keepConfs = [];
+            let hadConf = confs.length > 0;
+            for (let i = 0; i < names.length; i++) {
+                if (axisIds.some(id => MState.sameModel(names[i], id))) {
+                    continue;
+                }
+                keepNames.push(names[i]);
+                keepWeights.push(weights.length > i ? weights[i] : '1');
+                if (hadConf) {
+                    keepConfs.push(confs.length > i && `${confs[i]}` != '' ? `${confs[i]}` : '0');
+                }
+            }
+            if (keepNames.length == 0) {
+                delete base['loras'];
+                delete base['loraweights'];
+                delete base['lorasectionconfinement'];
+            }
+            else {
+                base['loras'] = keepNames;
+                base['loraweights'] = keepWeights;
+                if (keepConfs.some(c => c != '0')) {
+                    base['lorasectionconfinement'] = keepConfs;
+                }
+                else {
+                    delete base['lorasectionconfinement'];
+                }
+            }
         }
         return base;
     }
@@ -293,7 +383,14 @@ class MGrid {
                     let value = MState.stripModelExt(model.name);
                     let button = mUI.el('button', 'm-grid-option', mUI.modelName(value));
                     button.classList.toggle('m-selected', this.valuesFor(axis.key).includes(value));
-                    button.addEventListener('click', () => toggle(value));
+                    button.addEventListener('click', () => {
+                        // Dismiss the on-screen keyboard before the list reflows - otherwise iOS keeps the
+                        // search focused and the keyboard covers the options Adam just tried to reach.
+                        if (search && search.blur) {
+                            search.blur();
+                        }
+                        toggle(value);
+                    });
                     list.appendChild(button);
                 }
                 if (matches.length > shown.length) {
@@ -302,6 +399,15 @@ class MGrid {
                 }
             };
             search.addEventListener('input', () => renderOptions());
+            // Scroll/drag on the results list means Adam is hunting a row - blur so the keyboard gets out of
+            // the way. touchstart on an option also blurs (click handler above covers the select case).
+            let dismissKb = () => {
+                if (document.activeElement == search && search.blur) {
+                    search.blur();
+                }
+            };
+            list.addEventListener('scroll', dismissKb, { passive: true });
+            list.addEventListener('touchmove', dismissKb, { passive: true });
             renderOptions();
             body.appendChild(list);
             // The Create tab loads this list when its own LoRA sheet is opened, which may never have

@@ -2031,6 +2031,36 @@ html:has(.m-body) {
     text-align: center;
     margin-bottom: 0.4rem;
 }
+.m-grid-layout {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.m-grid-layout-label {
+    color: var(--text-soft);
+    font-size: 13px;
+    flex: 0 0 auto;
+}
+.m-grid-layout-choices {
+    display: flex;
+    flex: 1 1 auto;
+    gap: 0.3rem;
+}
+.m-grid-layout-button {
+    flex: 1 1 0;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.4rem;
+    font-size: 14px;
+}
+.m-grid-layout-button.m-selected {
+    border-color: var(--emphasis);
+    color: var(--emphasis);
+}
 .m-grid-run {
     width: 100%;
 }

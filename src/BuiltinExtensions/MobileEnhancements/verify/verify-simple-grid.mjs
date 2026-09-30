@@ -6,10 +6,11 @@
  * 1. The LoRA axis is joined with '||', every other axis with ','. GridGenCore splits an axis on '||' when
  *    the string contains one and on ',' otherwise, and a LoRA axis VALUE can itself be a comma-joined stack
  *    - so joining LoRAs with ',' silently turns one three-LoRA stack into three single-LoRA cells.
- * 2. A LoRA axis strips the base LoRAs. GridGenerator registers loras/loraweights as comma-stackable, which
- *    means an axis value is APPENDED to the base rather than replacing it: left in, "compare A against B"
- *    quietly runs "current stack + A" against "current stack + B".
+ * 2. A LoRA axis STACKS onto session/preset LoRAs (CommaStackable append). Same LoRA id in both -> base entry
+ *    is dropped so the grid axis wins. Non-overlapping base LoRAs remain in the base params.
  * 3. The batch count never survives into the base, or every cell is multiplied by it.
+ * 7. Row-count chooser (Auto/1/2/3/4) persists in localStorage and is forwarded as runGrid opts.rows.
+ * 8. Picking a LoRA from the axis list blurs the search field so the on-screen keyboard dismisses.
  * 4. LoRA axis values are extension-stripped, matching how a LoRA is named everywhere else in the client.
  * 5. The image count is the product of the live axes, and Run is unavailable below two images - a "grid" of
  *    one is a generation.
@@ -44,7 +45,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[TOAST]', TOAST)
     .replaceAll('[VARY]', '1');
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_create.js', 'm_grid.js',
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_create.js', 'm_grid.js',
     'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
@@ -265,15 +266,33 @@ check('every other axis is joined with a comma',
     byMode.steps == '20,30' && byMode.sampler == 'euler,er_sde' && byMode.cfgscale == '4.5',
     JSON.stringify(byMode));
 check('the batch count never reaches the base params', !('images' in payload.base), JSON.stringify(Object.keys(payload.base)));
-check('a LoRA axis strips the base LoRAs, so cells are not stack-plus-axis',
-    !('loras' in payload.base) && !('loraweights' in payload.base), JSON.stringify(Object.keys(payload.base)));
+check('a LoRA axis keeps non-overlapping base LoRAs so cells stack session + axis',
+    `${payload.base.loras}` == 'ill/preexisting' && `${payload.base.loraweights}` == '0.8',
+    JSON.stringify({ loras: payload.base.loras, weights: payload.base.loraweights }));
 check('the rest of the Create state still rides along', payload.base.prompt == 'a cat', `${payload.base.prompt}`);
+
+// Same LoRA id on the Create tab and the axis: base entry is dropped, grid wins.
+const overlap = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.setLoras([
+        { name: 'ill/preexisting', weight: 0.8 },
+        { name: 'ill/style_a', weight: 0.5 }
+    ]);
+    mGrid.selected = { loras: ['ill/style_a', 'ill/style_b'] };
+    let base = mGrid.buildBase();
+    return { loras: base.loras, weights: base.loraweights };
+});
+check('same LoRA id in session and axis drops the session entry (grid wins)',
+    `${overlap.loras}` == 'ill/preexisting' && `${overlap.weights}` == '0.8', JSON.stringify(overlap));
 
 // ---- Without a LoRA axis the base LoRAs must survive ----
 const keptLoras = await page.evaluate(() => {
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
     }
+    mState.setLoras([{ name: 'ill/preexisting', weight: 0.8 }]);
     mGrid.selected = { steps: ['20', '30'] };
     let base = mGrid.buildBase();
     return { loras: base.loras, weights: base.loraweights, images: base.images };
@@ -282,8 +301,76 @@ check('with no LoRA axis, the Create tab\'s LoRAs are left alone',
     `${keptLoras.loras}` == 'ill/preexisting' && `${keptLoras.weights}` == '0.8', JSON.stringify(keptLoras));
 check('the batch count is dropped either way', keptLoras.images == undefined, `${keptLoras.images}`);
 
+// ---- Row layout chooser ----
+const rowUi = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    localStorage.removeItem('m_client_grid_rows');
+    mGrid.rows = MGrid.loadRowsPref();
+    mGrid.open();
+    let buttons = [...__sheet().querySelectorAll('.m-grid-layout-button')].map(b => ({
+        label: b.textContent, rows: b.dataset.rows, selected: b.classList.contains('m-selected')
+    }));
+    __sheet().querySelector('.m-grid-layout-button[data-rows="2"]').click();
+    return {
+        buttons,
+        after: mGrid.rows,
+        stored: localStorage.getItem('m_client_grid_rows'),
+        selected: [...__sheet().querySelectorAll('.m-grid-layout-button')].map(b =>
+            b.classList.contains('m-selected') ? b.dataset.rows : null).filter(Boolean)
+    };
+});
+check('row chooser offers Auto and 1-4',
+    rowUi.buttons.map(b => b.label).join(',') == 'Auto,1,2,3,4'
+    && rowUi.buttons[0].selected && rowUi.buttons[0].rows == '0', JSON.stringify(rowUi.buttons));
+check('picking 2 rows persists and selects that choice',
+    rowUi.after == 2 && rowUi.stored == '2' && rowUi.selected.join(',') == '2', JSON.stringify(rowUi));
+
+const rowForward = await page.evaluate(() => {
+    window.__gridOpts = null;
+    let orig = mGen.runGrid;
+    mGen.runGrid = (base, axes, opts) => { window.__gridOpts = opts || null; window.__grid = { base, axes }; };
+    mGrid.selected = { steps: ['20', '30'] };
+    mGrid.rows = 3;
+    __sheet().querySelector('.m-grid-run').click();
+    mGen.runGrid = orig;
+    return window.__gridOpts;
+});
+check('Run forwards the chosen row count into runGrid opts',
+    rowForward && rowForward.rows == 3, JSON.stringify(rowForward));
+
+// ---- LoRA search keyboard dismiss ----
+const kbDismiss = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.selected = {};
+    mGrid.open();
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'LoRAs');
+    card.open = true;
+    let search = card.querySelector('.m-grid-search');
+    search.focus();
+    let focusedBefore = document.activeElement == search;
+    let option = [...card.querySelectorAll('.m-grid-lora-options .m-grid-option')]
+        .find(o => o.textContent.includes('style_a'));
+    option.click();
+    return {
+        focusedBefore,
+        focusedAfter: document.activeElement == search,
+        selected: mGrid.valuesFor('loras')
+    };
+});
+check('picking a LoRA blurs the search field (dismisses the keyboard)',
+    kbDismiss.focusedBefore && !kbDismiss.focusedAfter
+    && kbDismiss.selected.includes('ill/style_a'), JSON.stringify(kbDismiss));
+
 // ---- Permission ----
 const denied = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
     permissions.hasPermission = () => false;
     mUI.toastBox = null;
     for (let toast of document.querySelectorAll('.m-toast')) {

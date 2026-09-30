@@ -178,11 +178,39 @@ class MGenSocket {
     }
 
     /** Runs a grid generation over the same WS helper. axes = [{mode, vals}] (vals comma-joined string).
-     * The axis with the most values is placed first so the contact sheet is a horizontal rectangle or a
-     * square, never vertical (fork owner's rule). Output lands in normal history under the fixed `m-grid`
-     * folder (outputFolderName below) - there is no per-run timestamp in the name. */
-    runGrid(baseParams, axes) {
-        let sorted = [...axes].sort((a, b) => MState.toList(b.vals).length - MState.toList(a.vals).length);
+     * opts.rows: preferred contact-sheet row count (0/omitted = Auto). Auto places the axis with the most
+     * values first so the sheet is horizontal or square, never vertical (fork owner's rule). A positive
+     * rows value prefers that many values on Y when two+ axes are set, and is forwarded as gridRows so a
+     * single-axis run can still reshape the contact sheet. Output lands in normal history under the fixed
+     * `m-grid` folder - there is no per-run timestamp in the name. */
+    runGrid(baseParams, axes, opts = {}) {
+        let rows = opts && opts.rows ? parseInt(opts.rows, 10) || 0 : 0;
+        let sorted;
+        if (rows > 0 && axes.length >= 2) {
+            let pool = axes.map(a => ({ 'mode': a.mode, 'vals': a.vals,
+                'count': MState.toList(a.vals).length }));
+            let yIdx = pool.findIndex(a => a.count == rows);
+            if (yIdx < 0) {
+                let best = { 'i': 0, 'd': Infinity };
+                for (let i = 0; i < pool.length; i++) {
+                    let d = Math.abs(pool[i].count - rows);
+                    if (d < best.d) {
+                        best = { 'i': i, 'd': d };
+                    }
+                }
+                yIdx = best.i;
+            }
+            let yAxis = pool.splice(yIdx, 1)[0];
+            pool.sort((a, b) => b.count - a.count);
+            sorted = [{ 'mode': pool[0].mode, 'vals': pool[0].vals },
+                { 'mode': yAxis.mode, 'vals': yAxis.vals }];
+            for (let i = 1; i < pool.length; i++) {
+                sorted.push({ 'mode': pool[i].mode, 'vals': pool[i].vals });
+            }
+        }
+        else {
+            sorted = [...axes].sort((a, b) => MState.toList(b.vals).length - MState.toList(a.vals).length);
+        }
         let input = {
             'baseParams': baseParams,
             'gridAxes': sorted.map(a => ({ 'mode': a.mode, 'vals': a.vals })),
@@ -197,6 +225,9 @@ class MGenSocket {
             'continueOnError': true,
             'showOutputs': true,
         };
+        if (rows > 0) {
+            input['gridRows'] = rows;
+        }
         this.acquireWakeLock();
         makeWSRequest('GridGenRun', input, data => this.handleFrame(data), 0, err => this.failed(err));
     }
