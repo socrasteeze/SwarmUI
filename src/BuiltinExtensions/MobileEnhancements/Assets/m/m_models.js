@@ -1,6 +1,8 @@
-/** MobileEnhancements standalone client - thin Models tab.
+/** MobileEnhancements standalone client - Models tab.
  * Browse checkpoints and LoRAs via ListModels; tap a checkpoint to set it as the generation model, tap a
- * LoRA to add it to the active set. No editing/downloading here - that stays in the full UI. */
+ * LoRA to add it to the active set. Local cards also expose Load CivitAI: hash lookup + metadata enrich +
+ * save via the same ForwardMetadataRequest / GetModelHash / EditModelMetadata / imageToData path Classic
+ * uses, without pulling utiltab.js's ModelDownloader (genpage DOM). */
 class MModels {
 
     constructor() {
@@ -8,6 +10,8 @@ class MModels {
         this.subtype = 'Stable-Diffusion';
         /** Current folder path within the subtype. */
         this.folder = '';
+        /** True while a Load CivitAI run is in flight, so a second tap does not stack requests. */
+        this.civitaiBusy = false;
     }
 
     /** Builds the Models panel once. */
@@ -143,7 +147,7 @@ class MModels {
     renderFolders(folders) {
         this.folderChips.innerHTML = '';
         if (this.folder != '') {
-            let up = mUI.el('button', 'm-folder-chip m-folder-up', '←');
+            let up = mUI.el('button', 'm-folder-chip m-folder-up', '\u2190');
             up.addEventListener('click', () => {
                 this.folder = this.folder.includes('/') ? this.folder.substring(0, this.folder.lastIndexOf('/')) : '';
                 this.refresh();
@@ -161,8 +165,16 @@ class MModels {
         }
     }
 
+    /** EditModelMetadata / ForwardMetadataRequest / GetModelHash share this permission. Fail open before the
+     * session lands (same pattern as presets/restart), so a slow boot does not hide the button forever. */
+    canEditMetadata() {
+        return typeof permissions == 'undefined' || !permissions.hasPermission
+            || permissions.hasPermission('edit_model_metadata');
+    }
+
     /** One model card: preview, heading, subtitle, trigger phrase; tap = select (checkpoint) or add (LoRA).
-     * Checkpoints stay file-name first; LoRAs prefer the metadata title - see mUI.modelLines. */
+     * Checkpoints stay file-name first; LoRAs prefer the metadata title - see mUI.modelLines.
+     * Local models with edit permission also get Load CivitAI (stopPropagation so it does not select/add). */
     buildCard(model) {
         let card = mUI.el('div', 'm-model-card');
         let thumb = mUI.modelThumb(model, null);
@@ -177,6 +189,15 @@ class MModels {
             card.appendChild(star);
         }
         card.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag(), this.subtype == 'LoRA'));
+        if (model.local !== false && this.canEditMetadata()) {
+            let civitBtn = mUI.el('button', 'm-model-civitai-btn', 'Load CivitAI');
+            civitBtn.type = 'button';
+            civitBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openCivitaiLoad(model);
+            });
+            card.appendChild(civitBtn);
+        }
         if (this.subtype == 'Stable-Diffusion' && mState.params['model'] == model.name) {
             card.classList.add('m-selected');
         }
@@ -200,6 +221,350 @@ class MModels {
             }
         });
         return card;
+    }
+
+    /** Opens the Load CivitAI progress sheet and starts enrich+save for one local model card. */
+    openCivitaiLoad(model) {
+        if (this.civitaiBusy) {
+            mUI.warn('CivitAI load already in progress.');
+            return;
+        }
+        if (!this.canEditMetadata()) {
+            mUI.warn('You do not have permission to edit model metadata.');
+            return;
+        }
+        if (model.local === false) {
+            mUI.warn('Remote models cannot be edited here.');
+            return;
+        }
+        let content = mUI.el('div', 'm-model-civitai-sheet');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Load CivitAI'));
+        content.appendChild(mUI.el('div', 'm-model-civitai-name', mUI.modelLines(model, this.subtype == 'LoRA').primary));
+        let status = mUI.el('div', 'm-model-civitai-status', 'Starting...');
+        content.appendChild(status);
+        let actions = mUI.el('div', 'm-edit-actions');
+        let closeBtn = mUI.el('button', 'm-edit-cancel-button', 'Close');
+        closeBtn.type = 'button';
+        actions.appendChild(closeBtn);
+        content.appendChild(actions);
+        let close = mUI.openSheet(content);
+        closeBtn.addEventListener('click', () => close());
+        let setStatus = (text) => { status.textContent = text; };
+        this.civitaiBusy = true;
+        this.runCivitaiLoad(model, setStatus, (ok, message) => {
+            this.civitaiBusy = false;
+            setStatus(message);
+            if (ok) {
+                mUI.note(message);
+                close();
+                this.refresh();
+            }
+            else {
+                mUI.warn(message);
+            }
+        });
+    }
+
+    /** Classic Load CivitAI pipeline, auto-saved: hash (or description URL) -> ForwardMetadataRequest ->
+     * preview via imageToData -> EditModelMetadata. setStatus updates the sheet; done(ok, message) finishes. */
+    runCivitaiLoad(model, setStatus, done) {
+        let subtype = this.subtype;
+        let finishErr = (msg) => done(false, msg);
+        let afterUrl = (civitUrl) => {
+            if (!civitUrl) {
+                finishErr('No CivitAI match for this model hash.');
+                return;
+            }
+            setStatus('Loading metadata from CivitAI...');
+            let [id, versId] = this.parseCivitaiUrl(civitUrl);
+            if (!id && !versId) {
+                finishErr('Invalid CivitAI URL.');
+                return;
+            }
+            this.fetchCivitaiMetadata(id, versId, (metadata, img, errMsg) => {
+                if (!metadata) {
+                    finishErr(`Failed to load metadata.${errMsg ? ' ' + errMsg : ''}`);
+                    return;
+                }
+                setStatus(img ? 'Saving metadata and preview...' : 'Saving metadata...');
+                this.saveCivitaiMetadata(model, subtype, metadata, img, (ok, msg) => {
+                    if (ok) {
+                        this.patchCachedModel(model.name, subtype, metadata, img);
+                    }
+                    done(ok, msg);
+                });
+            });
+        };
+        let urlGuess = this.guessCivitUrl(model);
+        if (urlGuess) {
+            setStatus('Using CivitAI URL from description...');
+            afterUrl(urlGuess);
+            return;
+        }
+        let withHash = (hash) => {
+            if (!hash) {
+                finishErr('Could not get a hash for this model.');
+                return;
+            }
+            model.hash = hash;
+            setStatus('Searching CivitAI by hash...');
+            this.searchCivitaiForHash(hash, afterUrl);
+        };
+        if (model.hash) {
+            withHash(model.hash);
+            return;
+        }
+        setStatus('Computing hash...');
+        genericRequest('GetModelHash', { 'modelName': model.name, 'subtype': subtype }, data => {
+            withHash(data.hash);
+        }, 0, err => {
+            finishErr(`Could not get hash: ${err || 'request failed'}`);
+        });
+    }
+
+    /** Same guess Classic edit-metadata uses: first civitai.red / civitai.com models link in description. */
+    guessCivitUrl(model) {
+        let description = model.description || '';
+        let civitUrlStartIndex = description.indexOf('<a href="https://civitai.red/models/');
+        let prefixLen = '<a href="'.length;
+        if (civitUrlStartIndex < 0) {
+            civitUrlStartIndex = description.indexOf('<a href="https://civitai.com/models/');
+        }
+        if (civitUrlStartIndex < 0) {
+            return '';
+        }
+        let start = civitUrlStartIndex + prefixLen;
+        let end = description.indexOf('"', start);
+        if (end < 0) {
+            return '';
+        }
+        let civitUrl = description.substring(start, end);
+        if (civitUrl.startsWith('https://civitai.com/')) {
+            civitUrl = `https://civitai.red/${civitUrl.substring('https://civitai.com/'.length)}`;
+        }
+        if (!civitUrl.startsWith('https://civitai.red/models/')) {
+            return '';
+        }
+        return civitUrl;
+    }
+
+    /** Hash -> civitai.red model URL, or null. Same ForwardMetadataRequest by-hash route Classic uses. */
+    searchCivitaiForHash(hash, callback) {
+        if (hash.startsWith('0x')) {
+            hash = hash.substring(2);
+        }
+        hash = hash.substring(0, 12);
+        genericRequest('ForwardMetadataRequest', { 'url': `https://civitai.red/api/v1/model-versions/by-hash/${hash}` }, (rawData) => {
+            if (!rawData.response || rawData.response['error']) {
+                callback(null);
+                return;
+            }
+            callback(`https://civitai.red/models/${rawData.response.modelId}?modelVersionId=${rawData.response.id}`);
+        }, 0, () => {
+            callback(null);
+        });
+    }
+
+    /** Parses model id + version id from a civitai.red / civitai.com models URL. */
+    parseCivitaiUrl(url) {
+        url = (url || '').trim();
+        if (url.startsWith('https://civitai.com/')) {
+            url = `https://civitai.red/${url.substring('https://civitai.com/'.length)}`;
+        }
+        if (url.startsWith('https://civitai.green/')) {
+            url = `https://civitai.red/${url.substring('https://civitai.green/'.length)}`;
+        }
+        let prefix = 'https://civitai.red/';
+        if (!url.startsWith(prefix)) {
+            return [null, null];
+        }
+        let rest = url.substring(prefix.length);
+        let parts = typeof splitWithTail == 'function' ? splitWithTail(rest, '/', 4) : rest.split('/');
+        if (parts.length >= 2 && parts[0] == 'models') {
+            let idPart = parts[1];
+            let q = idPart.indexOf('?');
+            if (q >= 0) {
+                let id = idPart.substring(0, q);
+                let query = idPart.substring(q + 1);
+                let versMatch = query.match(/(?:^|&)modelVersionId=([^&]+)/);
+                return [id, versMatch ? versMatch[1] : null];
+            }
+            if (parts.length >= 3 && parts[2].startsWith('?')) {
+                let versMatch = parts[2].substring(1).match(/(?:^|&)modelVersionId=([^&]+)/);
+                return [idPart, versMatch ? versMatch[1] : null];
+            }
+            if (parts.length >= 3) {
+                let sub = typeof splitWithTail == 'function' ? splitWithTail(parts[2], '?modelVersionId=', 2) : parts[2].split('?modelVersionId=');
+                if (sub.length == 2) {
+                    return [idPart, sub[1]];
+                }
+            }
+            return [idPart, null];
+        }
+        return [null, null];
+    }
+
+    /** Fetches models/{id}, picks the matching version, builds modelspec.* fields, and loads the face/preview
+     * image (or a video frame) through imageToData / ForwardImageRequest - same serverside proxies Classic uses. */
+    fetchCivitaiMetadata(id, versId, callback) {
+        let doError = (msg) => callback(null, null, msg);
+        let loadByVersOnly = () => {
+            genericRequest('ForwardMetadataRequest', { 'url': `https://civitai.red/api/v1/model-versions/${versId}` }, (rawData) => {
+                let vers = rawData.response;
+                if (!vers || !vers.modelId) {
+                    doError();
+                    return;
+                }
+                this.fetchCivitaiMetadata(vers.modelId, versId, callback);
+            }, 0, () => doError());
+        };
+        if (!id && versId) {
+            loadByVersOnly();
+            return;
+        }
+        genericRequest('ForwardMetadataRequest', { 'url': `https://civitai.red/api/v1/models/${id}` }, (rawWrap) => {
+            let rawData = rawWrap.response;
+            if (!rawData || !rawData.modelVersions || !rawData.modelVersions.length) {
+                doError();
+                return;
+            }
+            let rawVersion = rawData.modelVersions[0];
+            if (versId) {
+                let matched = rawData.modelVersions.find(v => String(v.id) == String(versId));
+                if (matched) {
+                    rawVersion = matched;
+                }
+            }
+            let url = versId
+                ? `https://civitai.red/models/${id}?modelVersionId=${versId}`
+                : `https://civitai.red/models/${id}`;
+            let metadata = {
+                'modelspec.title': `${rawData.name} - ${rawVersion.name}`,
+                'modelspec.description': `From <a href="${url}" target="_blank">${url}</a>\n${rawVersion.description || ''}\n${rawData.description || ''}\n`,
+                'modelspec.date': rawVersion.createdAt || ''
+            };
+            if (rawData.creator && rawData.creator.username) {
+                metadata['modelspec.author'] = rawData.creator.username;
+            }
+            if (rawVersion.trainedWords && rawVersion.trainedWords.length) {
+                metadata['modelspec.trigger_phrase'] = rawVersion.trainedWords.join('; ');
+            }
+            if (rawData.tags && rawData.tags.length) {
+                metadata['modelspec.tags'] = rawData.tags.join(', ');
+            }
+            if (['Illustrious', 'Pony', 'NoobAI', 'Anima'].includes(rawVersion.baseModel)) {
+                metadata['modelspec.usage_hint'] = rawVersion.baseModel;
+            }
+            let imgs = rawVersion.images ? rawVersion.images.filter(img => img.type == 'image') : [];
+            let applyPreview = (img) => callback(metadata, img || '', null);
+            if (imgs.length > 0) {
+                imageToData(imgs[0].url, applyPreview, true);
+                return;
+            }
+            let videos = rawVersion.images ? rawVersion.images.filter(img => img.type == 'video') : [];
+            if (videos.length > 0) {
+                this.previewFromCivitaiVideo(videos[0].url, applyPreview);
+                return;
+            }
+            applyPreview('');
+        }, 0, () => doError());
+    }
+
+    /** Grabs one frame from a CivitAI preview video via ForwardImageRequest (CORS-safe), matching Classic. */
+    previewFromCivitaiVideo(url, done) {
+        genericRequest('ForwardImageRequest', { 'url': url }, (data) => {
+            if (!data.image) {
+                done('');
+                return;
+            }
+            let video = document.createElement('video');
+            video.crossOrigin = 'Anonymous';
+            video.preload = 'auto';
+            video.onloadedmetadata = () => { video.currentTime = 0.001; };
+            video.onseeked = () => {
+                let canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                done(canvas.toDataURL());
+            };
+            video.onerror = () => done('');
+            video.src = data.image;
+        }, 0, () => done(''));
+    }
+
+    /** Writes CivitAI fields through EditModelMetadata; keeps architecture / resolution / license / LoRA
+     * defaults the card already had. preview_image is only set when a face/preview was pulled. */
+    saveCivitaiMetadata(model, subtype, metadata, img, done) {
+        let tags = metadata['modelspec.tags'];
+        if (!tags && model.tags) {
+            tags = Array.isArray(model.tags) ? model.tags.join(', ') : model.tags;
+        }
+        let payload = {
+            'model': model.name,
+            'subtype': subtype,
+            'title': metadata['modelspec.title'] || model.title || '',
+            'author': metadata['modelspec.author'] || model.author || '',
+            'type': model.architecture || '',
+            'description': metadata['modelspec.description'] || model.description || '',
+            'standard_width': model.standard_width || 0,
+            'standard_height': model.standard_height || 0,
+            'date': metadata['modelspec.date'] || model.date || '',
+            'license': model.license || '',
+            'trigger_phrase': metadata['modelspec.trigger_phrase'] || model.trigger_phrase || '',
+            'usage_hint': metadata['modelspec.usage_hint'] || model.usage_hint || '',
+            'prediction_type': model.prediction_type || '',
+            'tags': tags || '',
+            'preview_image_metadata': null,
+            'is_negative_embedding': !!model.is_negative_embedding,
+            'lora_default_weight': model.lora_default_weight || '',
+            'lora_default_confinement': model.lora_default_confinement || ''
+        };
+        if (img) {
+            payload['preview_image'] = img;
+        }
+        genericRequest('EditModelMetadata', payload, () => {
+            done(true, 'CivitAI metadata saved.');
+        }, 0, err => {
+            done(false, `Could not save metadata: ${err || 'request failed'}`);
+        });
+    }
+
+    /** Keeps Create-tab picker caches in step with the Models-tab save so titles/triggers/previews match. */
+    patchCachedModel(name, subtype, metadata, img) {
+        let patch = (row) => {
+            if (!row) {
+                return;
+            }
+            if (metadata['modelspec.title']) {
+                row.title = metadata['modelspec.title'];
+            }
+            if (metadata['modelspec.author']) {
+                row.author = metadata['modelspec.author'];
+            }
+            if (metadata['modelspec.description']) {
+                row.description = metadata['modelspec.description'];
+            }
+            if (metadata['modelspec.trigger_phrase']) {
+                row.trigger_phrase = metadata['modelspec.trigger_phrase'];
+            }
+            if (metadata['modelspec.usage_hint']) {
+                row.usage_hint = metadata['modelspec.usage_hint'];
+            }
+            if (metadata['modelspec.date']) {
+                row.date = metadata['modelspec.date'];
+            }
+            if (metadata['modelspec.tags']) {
+                row.tags = metadata['modelspec.tags'].split(',').map(t => t.trim()).filter(Boolean);
+            }
+            if (img) {
+                row.preview_image = img;
+            }
+        };
+        let list = subtype == 'LoRA' ? mCreate.loraList : mCreate.modelList;
+        if (list) {
+            patch(list.find(m => MState.sameModel(m.name, name)));
+        }
     }
 }
 
