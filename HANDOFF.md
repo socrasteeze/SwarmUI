@@ -1,12 +1,15 @@
 # HANDOFF
 
-**Updated:** 2026-09-30 (00:20 PT, live Windows) · **Branch:** `main` · **Base:** `1b90222a` · **Tree:** clean
+**Updated:** 2026-09-30 (12:17 PT, live Windows) · **Branch:** `main` · **Base:** `d5ba1937` · **Tree:** clean
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
 The user waived the handoff line cap; the H3 reference sections below were logged at the user's request.
 
 ## Done this session
+
+- 2026-09-30 (12:17 PT, live Windows box): routine automated sync — `upstream/master` at `de7b834b`, already an ancestor of HEAD (`d5ba1937`); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI `8cfe5e1ec`→`83071e1ae` (minimax VAE offload fix + Ideogram 4.5 partner nodes; no requirements change) and `comfyui-manager` `14b5aaab`→`6db282e2` (8 commits, DB list only). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty checkouts: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended. All earlier handoff detail above is unchanged.
+
 - 2026-09-30 (00:20 PT, live Windows box): routine automated sync — merged upstream `de7b834b` (2 commits: MiniMax H3 int8 VAE → comfy-org URL/hash; ShiftedLatentAverageInit model-type guard) into `main` as `1b90222a`, zero conflicts. Fork touchpoints (PublishDownloadedModel, SpokeModePolicy download assert) re-verified. Gates: Release build clean, format clean, headless boot reached "is now running" (pre-existing VideoStages `CS1061` unchanged). Backend nodes: no clean checkout behind origin; bundled ComfyUI already current at `fb2315f11`. Skipped dirty: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended. All earlier handoff detail above is unchanged.
 
 - 2026-09-29 (18:18 PT, live Windows box): routine automated sync — merged upstream `467fce36` (2 commits: PromptEnhancer extension list entry + FOSS license helper) into `main` as `a4873b71`, zero conflicts. Gates: Release build clean, format clean, headless boot reached "is now running" (pre-existing VideoStages `CS1061` unchanged). Fast-forwarded bundled ComfyUI `9d80841aa`→`a65316bd5` (Save Video quality defaults). GPU accel check OK on both installs. Skipped dirty checkouts: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended. All earlier handoff detail above is unchanged.
