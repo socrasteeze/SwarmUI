@@ -14,7 +14,7 @@ jobs:
             fetch-tags: true
         - uses: actions/setup-dotnet@v5
           with:
-            dotnet-version: '8.x'
+            dotnet-version: '10.x'
         - run: dotnet build SwarmUI.sln --configuration Release
         - run: dotnet format --verify-no-changes
         - run: dotnet format style --verify-no-changes
@@ -30,7 +30,7 @@ jobs:
           run: git fetch https://github.com/mcmonkeyprojects/SwarmUI.git 'refs/tags/*:refs/tags/*'
         - uses: actions/setup-dotnet@v5
           with:
-            dotnet-version: '8.x'
+            dotnet-version: '10.x'
         - run: ./launch-linux.sh --ci-test true --launch_mode none --loglevel debug
 
     ci-test-extensions:
@@ -44,5 +44,5 @@ jobs:
           run: git fetch https://github.com/mcmonkeyprojects/SwarmUI.git 'refs/tags/*:refs/tags/*'
         - uses: actions/setup-dotnet@v5
           with:
-            dotnet-version: '8.x'
+            dotnet-version: '10.x'
         - run: ./launch-linux.sh --ci-test true --ci-test-extensions true --launch_mode none --loglevel debug
