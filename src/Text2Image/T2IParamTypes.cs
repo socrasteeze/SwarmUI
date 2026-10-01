@@ -1156,7 +1156,7 @@ public class T2IParamTypes
                 {
                     val = val.After(',');
                 }
-                if (val.StartsWith("inputs/") || val.StartsWith("raw/") || val.StartsWith("Starred/"))
+                if (IsOutputRelativeMediaPath(val))
                 {
                     return new JObject() { ["filename"] = val, ["data"] = FilePathToDataString(session, val, $"for param {type.Name}") }.ToString();
                 }
@@ -1179,7 +1179,7 @@ public class T2IParamTypes
                     for (int i = 0; i < rawSplit.Length; i++)
                     {
                         string partVal = rawSplit[i];
-                        if (partVal.StartsWith("inputs/") || partVal.StartsWith("raw/") || partVal.StartsWith("Starred/"))
+                        if (IsOutputRelativeMediaPath(partVal))
                         {
                             string filename = partVal;
                             partVal = FilePathToDataString(session, filename, $"for param {type.Name}");
@@ -1210,6 +1210,35 @@ public class T2IParamTypes
                 return val;
         }
         throw new SwarmUserErrorException($"Unknown parameter type's data type? {type.Type}");
+    }
+
+    /// <summary>True when <paramref name="val"/> looks like an output-root-relative media file path (not base64 or a data URI).
+    /// Historically only <c>inputs/</c>, <c>raw/</c>, and <c>Starred/</c> were accepted; any subfolder under the user
+    /// output directory is safe because <see cref="FilePathToDataString"/> sandboxes via <see cref="WebServer.CheckFilePath"/>.
+    /// Requires a known media file extension so a slash-containing base64 blob cannot be misread as a path.</summary>
+    public static bool IsOutputRelativeMediaPath(string val)
+    {
+        if (string.IsNullOrWhiteSpace(val) || val.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (val.Contains("..", StringComparison.Ordinal) || val.Contains('\\') || val.StartsWith('/') || Path.IsPathRooted(val))
+        {
+            return false;
+        }
+        if (val.StartsWith("inputs/", StringComparison.OrdinalIgnoreCase)
+            || val.StartsWith("raw/", StringComparison.OrdinalIgnoreCase)
+            || val.StartsWith("Starred/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        string ext = Path.GetExtension(val).TrimStart('.').ToLowerInvariant();
+        if (string.IsNullOrEmpty(ext) || !val.Contains('/'))
+        {
+            return false;
+        }
+        MediaType media = MediaType.GetByExtension(ext);
+        return media is not null && media.MetaType != MediaMetaType.Text;
     }
 
     public static string FilePathToDataString(Session session, string filePath, string errorContext)
