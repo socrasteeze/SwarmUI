@@ -1215,10 +1215,22 @@ function makeVideoInput(featureid, id, paramid, name, description, toggles = fal
     </div>`;
     return html;
 }
-
-/** Returns whether a value is a reusable server media path. */
+/** Returns whether a value is a reusable server media path under the user output root.
+ * Matches the server's IsOutputRelativeMediaPath: historical inputs/raw/Starred prefixes, or any
+ * slash-containing relative path with a known media extension (MixStudio/..., year folders, etc.). */
 function isValidMediaPath(path) {
-    return typeof path == 'string' && (path.startsWith('inputs/') || path.startsWith('raw/') || path.startsWith('Starred/'));
+    if (typeof path != 'string' || !path || path.startsWith('data:') || path.includes('..') || path.includes('\\') || path.startsWith('/')) {
+        return false;
+    }
+    if (path.startsWith('inputs/') || path.startsWith('raw/') || path.startsWith('Starred/')) {
+        return true;
+    }
+    let dot = path.lastIndexOf('.');
+    if (dot < 0 || !path.includes('/')) {
+        return false;
+    }
+    let ext = path.substring(dot + 1).toLowerCase();
+    return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'avif', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext);
 }
 
 let swarmMediaPathDataType = 'application/x-swarm-media-path';

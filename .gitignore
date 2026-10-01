@@ -54,3 +54,8 @@ package-lock.json
 
 # Local agent tracker scratch (logs, prompt dumps, screenshots)
 /.nimbalyst/
+
+# Local agent scratch helpers (never commit)
+tmp_*.mjs
+tmp_*.txt
+

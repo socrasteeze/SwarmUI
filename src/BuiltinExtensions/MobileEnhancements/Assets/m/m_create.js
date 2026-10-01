@@ -342,7 +342,7 @@ class MCreate {
         if (typeof mTagDex != 'undefined' && typeof mTagDex.installBrowse == 'function') {
             mTagDex.installBrowse(this.pickerRow);
         }
-        this.resetButton = mUI.el('button', 'm-picker-button m-reset-button', '↺');
+        this.resetButton = mUI.el('button', 'm-picker-button m-reset-button', 'Ã¢â€ Âº');
         this.resetButton.title = 'Reset params';
         this.resetButton.addEventListener('click', () => {
             mUI.confirm('Reset prompt, images, model, LoRAs, and all other params to blank?', () => {
@@ -865,7 +865,7 @@ class MCreate {
     /** Search filter shared by both pickers: matches the file name, the folder path, the metadata title,
      * and the trigger phrase, so a LoRA can be found by the word you actually type into prompts. */
     static filterModels(list, term) {
-        // Every word must appear somewhere, in any order: "aria zen" finds "Aria 爱芮 4 Outfits - Zenless Zone
+        // Every word must appear somewhere, in any order: "aria zen" finds "Aria Ã§Ë†Â±Ã¨Å Â® 4 Outfits - Zenless Zone
         // Zero". Separators in file names (_ - / . () [] ,) count as spaces on both sides.
         let words = MCreate.searchWords(term);
         if (words.length == 0) {
@@ -1018,9 +1018,61 @@ class MCreate {
         close = mUI.openSheet(content);
     }
 
-    /** Builds one start/end-frame slot: an empty 44px "+" button that opens a hidden file input, or - once
-     * filled - a thumbnail with a >=44px remove ×. `getEntry`/`setEntry` read/write the matching mState field
-     * (initImage or videoEndImage) so this one method serves both slots. */
+    /** Opens the server image browser (or falls back to the phone file input) to fill a frame slot.
+     * Primary path is server-backed so iOS Files is not required for images already under OutputPath. */
+    openFramePicker(slot) {
+        if (typeof mImageBrowser == 'undefined') {
+            slot.fileInput.click();
+            return;
+        }
+        mImageBrowser.open({
+            'title': slot === this.startFrameSlot ? 'Start frame' : (slot === this.endFrameSlot ? 'End frame' : 'Pick frame'),
+            'mediaTypes': ['image'],
+            'allowPhone': true,
+            'onPick': (entry) => {
+                slot.setEntry(entry);
+                mState.changed();
+            }
+        });
+    }
+
+
+    /** Same browser as frame slots, but appends to promptImages. Phone multi-select still goes through
+     * the hidden file input so several device photos can be added in one go. */
+    openPromptImagePicker() {
+        if (typeof mImageBrowser == 'undefined') {
+            this.fileInput.click();
+            return;
+        }
+        let content = mUI.el('div', 'm-imgbrowser-chooser');
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Add image'));
+        let close = null;
+        let serverBtn = mUI.el('button', 'm-imgbrowser-chooser-btn', 'Browse server folders');
+        serverBtn.addEventListener('click', () => {
+            if (close) { close(); }
+            mImageBrowser.open({
+                'title': 'Add prompt image',
+                'mediaTypes': ['image'],
+                'allowPhone': false,
+                'onPick': (entry) => {
+                    mState.promptImages.push(entry);
+                    mState.changed();
+                }
+            });
+        });
+        let phoneBtn = mUI.el('button', 'm-imgbrowser-chooser-btn m-imgbrowser-chooser-secondary', 'From phone');
+        phoneBtn.addEventListener('click', () => {
+            if (close) { close(); }
+            this.fileInput.click();
+        });
+        content.appendChild(serverBtn);
+        content.appendChild(phoneBtn);
+        close = mUI.openSheet(content);
+    }
+
+    /** Builds one start/end-frame slot: empty "+" opens the server image browser (phone fallback inside
+     * the sheet); filled shows a thumbnail with a >=44px remove control. `getEntry`/`setEntry` read/write
+     * the matching mState field (initImage or videoEndImage) so this one method serves both slots. */
     buildFrameSlot(label, getEntry, setEntry) {
         let slot = mUI.el('div', 'm-frame-slot');
         slot.appendChild(mUI.el('div', 'm-frame-slot-label', label));
@@ -1079,7 +1131,7 @@ class MCreate {
         slot.body.innerHTML = '';
         if (!entry) {
             let add = mUI.el('button', 'm-frame-add', '+');
-            add.addEventListener('click', () => slot.fileInput.click());
+            add.addEventListener('click', () => this.openFramePicker(slot));
             slot.body.appendChild(add);
         }
         else {
@@ -1087,7 +1139,7 @@ class MCreate {
             let img = document.createElement('img');
             img.src = entry.kind == 'data' ? entry.value : `${getImageOutPrefix()}/${entry.value}`;
             tile.appendChild(img);
-            let remove = mUI.el('span', 'm-frame-tile-remove', '×');
+            let remove = mUI.el('span', 'm-frame-tile-remove', 'Ãƒâ€”');
             remove.addEventListener('click', (e) => {
                 e.stopPropagation();
                 slot.setEntry(null);
@@ -1133,7 +1185,7 @@ class MCreate {
             // anything - long-press+drag (wireReorder, below) is unaffected, and a real drag never lets a
             // synthetic click fire afterward, so this never fires mid-reorder either.
             tile.addEventListener('click', () => mImageEdit.open(i));
-            let remove = mUI.el('span', 'm-image-tile-remove', '×');
+            let remove = mUI.el('span', 'm-image-tile-remove', 'Ãƒâ€”');
             remove.addEventListener('click', (e) => {
                 // Without this the click also bubbles to the tile's own listener above and opens the editor
                 // on top of the tile that was just removed from under it.
@@ -1146,7 +1198,7 @@ class MCreate {
             this.imageStrip.appendChild(tile);
         }
         let add = mUI.el('button', 'm-image-tile m-image-add', '+');
-        add.addEventListener('click', () => this.fileInput.click());
+        add.addEventListener('click', () => this.openPromptImagePicker());
         this.imageStrip.appendChild(add);
         // With no images attached the add tile shrinks to a plain button rather than holding a full
         // thumbnail-sized square of empty space open at the top of every session.
@@ -1365,7 +1417,7 @@ class MCreate {
             mState.save();
         });
         seedWrap.appendChild(this.seedInput);
-        this.seedClear = mUI.el('button', 'm-seed-clear', '×');
+        this.seedClear = mUI.el('button', 'm-seed-clear', 'Ãƒâ€”');
         this.seedClear.setAttribute('aria-label', 'Use random seed');
         this.seedClear.addEventListener('click', () => {
             mState.seedLocked = false;
@@ -1455,7 +1507,7 @@ class MCreate {
         let wrap = mUI.el('div', 'm-number-stepper m-size-stepper');
         this.sizeLabel = mUI.el('span', 'm-stepper-label', 'Size');
         wrap.appendChild(this.sizeLabel);
-        let minus = mUI.el('button', 'm-stepper-button', '−');
+        let minus = mUI.el('button', 'm-stepper-button', 'Ã¢Ë†â€™');
         minus.setAttribute('aria-label', 'Decrease size');
         minus.addEventListener('click', () => this.adjustSideLength(-1));
         wrap.appendChild(minus);
@@ -1473,7 +1525,7 @@ class MCreate {
     buildAspectStepper() {
         let wrap = mUI.el('div', 'm-number-stepper m-aspect-stepper');
         wrap.appendChild(mUI.el('span', 'm-stepper-label', 'Aspect'));
-        let minus = mUI.el('button', 'm-stepper-button', '−');
+        let minus = mUI.el('button', 'm-stepper-button', 'Ã¢Ë†â€™');
         minus.setAttribute('aria-label', 'Decrease aspect ratio');
         minus.addEventListener('click', () => this.adjustAspect(-1));
         wrap.appendChild(minus);
@@ -1565,7 +1617,7 @@ class MCreate {
     buildNumberStepper(paramId, label, fallback) {
         let wrap = mUI.el('div', 'm-number-stepper');
         wrap.appendChild(mUI.el('span', 'm-stepper-label', label));
-        let minus = mUI.el('button', 'm-stepper-button', '−');
+        let minus = mUI.el('button', 'm-stepper-button', 'Ã¢Ë†â€™');
         minus.setAttribute('aria-label', `Decrease ${label}`);
         minus.addEventListener('click', () => this.adjustQuickNumber(paramId, -1));
         wrap.appendChild(minus);
@@ -1793,7 +1845,7 @@ class MCreate {
         // Read from previewResolution, not from a local recomputation: it derives from a real buildGenInput,
         // so the pixels on screen cannot drift from the ones that get sent.
         let dims = mState.previewResolution();
-        this.sizeLabel.textContent = dims ? `${dims[0]} × ${dims[1]}` : 'full UI';
+        this.sizeLabel.textContent = dims ? `${dims[0]} Ãƒâ€” ${dims[1]}` : 'full UI';
         if (stateChanged) {
             mState.save();
         }
@@ -1804,7 +1856,7 @@ class MCreate {
         let keys = Object.keys(mState.params).filter(k => !this.coveredParams.includes(k));
         let labels = keys.map(key => {
             let text = `${MCreate.paramLabel(key)}: ${MCreate.paramValueLabel(key, mState.params[key])}`;
-            return text.length > 40 ? `${text.substring(0, 38)}…` : text;
+            return text.length > 40 ? `${text.substring(0, 38)}Ã¢â‚¬Â¦` : text;
         });
         // Rebuilt only when the chips actually differ - see syncOptions for why churn here moves the panel.
         let signature = JSON.stringify([keys, labels]);
@@ -1816,7 +1868,7 @@ class MCreate {
         for (let i = 0; i < keys.length; i++) {
             let key = keys[i];
             let chip = mUI.el('span', 'm-adv-chip', labels[i]);
-            let x = mUI.el('span', 'm-adv-chip-x', '×');
+            let x = mUI.el('span', 'm-adv-chip-x', 'Ãƒâ€”');
             x.addEventListener('click', () => {
                 delete mState.params[key];
                 mState.changed();
@@ -2062,7 +2114,7 @@ class MCreate {
                     top.appendChild(thumb);
                 }
                 top.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag(), true));
-                let remove = mUI.el('button', 'm-lora-remove', '×');
+                let remove = mUI.el('button', 'm-lora-remove', 'Ãƒâ€”');
                 remove.setAttribute('aria-label', `Remove ${mUI.modelName(loras[i].name)}`);
                 remove.addEventListener('click', () => {
                     let cur = mState.getLoras();
@@ -2089,12 +2141,12 @@ class MCreate {
                 });
                 section.classList.toggle('m-lora-section-confined', loras[i].confinement != '0');
                 weight.appendChild(section);
-                let minus = mUI.el('button', 'm-lora-weight-button', '−');
+                let minus = mUI.el('button', 'm-lora-weight-button', 'Ã¢Ë†â€™');
                 minus.setAttribute('aria-label', `Decrease ${mUI.modelName(loras[i].name)} weight`);
                 weight.appendChild(minus);
                 let input = document.createElement('input');
                 input.type = 'number';
-                // No inputMode='decimal' — many mobile keyboards omit the minus key on that layout.
+                // No inputMode='decimal' Ã¢â‚¬â€ many mobile keyboards omit the minus key on that layout.
                 input.min = '-2';
                 input.max = '2';
                 input.step = '0.05';

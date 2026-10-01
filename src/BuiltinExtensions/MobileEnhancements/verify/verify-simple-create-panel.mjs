@@ -45,7 +45,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
     .replaceAll('[VARY]', '1');
 
 /** Client modules served from the real tree. m_app.js is deliberately absent - booting needs a server. */
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_image_browser.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,
@@ -157,11 +157,29 @@ await page.addInitScript(() => {
             window.__tagDexFavorite = args.favorited == null ? !window.__tagDexFavorite : `${args.favorited}` == 'true';
             callback({ success: true, favorited: window.__tagDexFavorite });
         }
+        else if (route == 'ListImages') {
+            let path = args.path || '';
+            if (path == '') {
+                callback({ folders: ['inputs', 'Starred', 'MixStudio', 'raw'], files: [{ src: 'root.png', metadata: '' }] });
+            }
+            else if (path == 'MixStudio') {
+                callback({ folders: ['shots'], files: [{ src: 'mix-a.png', metadata: '' }, { src: 'clip.mp4', metadata: '' }] });
+            }
+            else if (path == 'MixStudio/shots') {
+                callback({ folders: [], files: [{ src: 'shot1.png', metadata: '' }] });
+            }
+            else if (path == 'inputs') {
+                callback({ folders: [], files: [{ src: 'ref.png', metadata: '' }] });
+            }
+            else {
+                callback({ folders: [], files: [] });
+            }
+        }
     };
     window.makeWSRequest = () => null;
     window.getSession = () => {};
     window.getImageOutPrefix = () => 'View/local';
-    window.isValidMediaPath = (path) => typeof path == 'string' && (path.startsWith('inputs/') || path.startsWith('raw/') || path.startsWith('Starred/'));
+    window.isValidMediaPath = (path) => typeof path == 'string' && !!path && !path.startsWith('data:') && !path.includes('..') && (path.startsWith('inputs/') || path.startsWith('raw/') || path.startsWith('Starred/') || (path.includes('/') && /\.(png|jpe?g|webp|gif)$/i.test(path)));
     window.getTextSelRange = () => [0, 0];
     window.largeCountStringify = value => `${value}`;
     window.session_id = 'test';
@@ -265,7 +283,7 @@ check('aspect stepper writes the next wider ratio and leaves the size alone', re
 check('extra aspect ratios generate as Custom pixels', resolution.generated.aspectratio == 'Custom'
     && `${resolution.generated.width}x${resolution.generated.height}` == resolution.dims.join('x'), JSON.stringify(resolution.generated));
 check('size stepper shows the rung it moves and the pixels it produces', resolution.value == '1024'
-    && resolution.label == resolution.dims.join(' × '), JSON.stringify(resolution));
+    && resolution.label == resolution.dims.join(' Ãƒâ€” '), JSON.stringify(resolution));
 
 // Ladder walk: up through every rung, clamped at the top, then back down and clamped at the bottom.
 const sizeSteps = [];
@@ -274,7 +292,7 @@ for (let i = 0; i < 4; i++) {
     sizeSteps.push(await page.evaluate(() => `${mState.params.sidelength}=${mState.previewResolution().join('x')}`));
     await page.waitForFunction(([side, dims]) => document.querySelector('.m-size-stepper .m-stepper-value').textContent == side
         && document.querySelector('.m-size-stepper .m-stepper-label').textContent == dims,
-        await page.evaluate(() => [`${mState.params.sidelength}`, mState.previewResolution().join(' × ')]));
+        await page.evaluate(() => [`${mState.params.sidelength}`, mState.previewResolution().join(' Ãƒâ€” ')]));
 }
 check('size steps up the fixed ladder, redraws, and clamps at the top', sizeSteps.join(' | ') == '1152=1536x896 | 1280=1664x960 | 1536=2048x1152 | 1536=2048x1152', sizeSteps.join(' | '));
 const sizeDown = [];
@@ -309,7 +327,7 @@ await page.waitForFunction(() => mState.activePresets.join(',') == 'ill/pose');
 const presetOn = await page.evaluate(() => ({
     active: mState.activePresets.join(','),
     shown: document.querySelector('.m-preset-select').value,
-    unmarked: [...document.querySelector('.m-preset-select').options].every(option => !option.textContent.startsWith('✓'))
+    unmarked: [...document.querySelector('.m-preset-select').options].every(option => !option.textContent.startsWith('Ã¢Å“â€œ'))
 }));
 check('preset picklist shows the picked preset as the selected option', presetOn.shown == 'ill/pose' && presetOn.unmarked, JSON.stringify(presetOn));
 await page.selectOption('.m-preset-select', 'qwen/edit');
@@ -973,7 +991,7 @@ check('starredFirst still lifts favourites among survivors (only ill/keep left)'
 // Search matches every word in any order across name/title/trigger, and says when the filters hide a match.
 const wordSearch = await page.evaluate(async () => {
     let list = [
-        { name: 'anima/Aria 爱芮 4 Outfits — Zenless Zone Zero [Anima+Illustrious].safetensors', title: 'lora' },
+        { name: 'anima/Aria Ã§Ë†Â±Ã¨Å Â® 4 Outfits Ã¢â‚¬â€ Zenless Zone Zero [Anima+Illustrious].safetensors', title: 'lora' },
         { name: 'anima/aria-nikke-richy-v1_anima.safetensors' },
         { name: 'anima/Other.safetensors', title: 'Zenless style', trigger_phrase: 'xyzhumzzz' }
     ];
@@ -1386,7 +1404,7 @@ const presetCreativity = await page.evaluate(() => {
 });
 check('an existing initimagecreativity value is preserved, not overwritten', presetCreativity == '0.35', presetCreativity);
 
-// End frame: fill it too, confirm buildGenInput sends both, then remove the start frame via its × and
+// End frame: fill it too, confirm buildGenInput sends both, then remove the start frame via its Ãƒâ€” and
 // confirm the request drops back to just the end frame.
 const endFilled = await page.evaluate(async () => {
     let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -1407,7 +1425,7 @@ const afterRemoveStart = await page.evaluate(async () => {
     return { hasStart: 'initimage' in input, hasEnd: 'videoendimage' in input, initImageState: mState.initImage,
         emptyButtons: document.querySelectorAll('.m-frame-add').length };
 });
-check('removing a frame via its × clears it from state and the request', !afterRemoveStart.hasStart
+check('removing a frame via its Ãƒâ€” clears it from state and the request', !afterRemoveStart.hasStart
     && afterRemoveStart.initImageState == null, JSON.stringify(afterRemoveStart));
 check('the other frame is untouched by removing its sibling', afterRemoveStart.hasEnd, JSON.stringify(afterRemoveStart));
 check('the emptied slot shows its + button again', afterRemoveStart.emptyButtons == 1, JSON.stringify(afterRemoveStart));
@@ -1448,6 +1466,70 @@ const framesNotAdvChips = await page.evaluate(() => {
     return keys;
 });
 check('initimage/videoendimage are covered params, never Advanced chips', !framesNotAdvChips.includes('initimage') && !framesNotAdvChips.includes('videoendimage'), JSON.stringify(framesNotAdvChips));
+
+
+// ---- Server image browser (start frame + roots) ----
+const browserModule = await page.evaluate(() => typeof mImageBrowser != 'undefined' && typeof mImageBrowser.open == 'function');
+check('mImageBrowser module is loaded', browserModule);
+
+const browserOpen = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    mCreate.openFramePicker(mCreate.startFrameSlot);
+    await settle();
+    return {
+        sheet: !!document.querySelector('.m-imgbrowser'),
+        roots: [...document.querySelectorAll('.m-imgbrowser-roots .m-folder-chip')].map(c => c.textContent),
+        phone: [...document.querySelectorAll('.m-imgbrowser-tool')].some(b => b.textContent == 'From phone')
+    };
+});
+check('frame + opens server image browser sheet', browserOpen.sheet, JSON.stringify(browserOpen));
+check('browser shows default Output/Inputs/Starred/MixStudio roots', ['Output','Inputs','Starred','MixStudio'].every(l => browserOpen.roots.includes(l)), JSON.stringify(browserOpen.roots));
+check('browser offers From phone fallback', browserOpen.phone);
+
+const pickFromMix = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // Click MixStudio root then the mix-a.png tile.
+    let root = [...document.querySelectorAll('.m-imgbrowser-roots .m-folder-chip')].find(c => c.textContent == 'MixStudio');
+    if (root) { root.click(); }
+    await settle();
+    // Wait a tick for ListImages callback.
+    await new Promise(r => setTimeout(r, 100));
+    await settle();
+    let tile = [...document.querySelectorAll('.m-imgbrowser-tile')].find(t => (t.querySelector('.m-imgbrowser-tile-name') || {}).textContent == 'mix-a.png');
+    if (tile) { tile.click(); }
+    await settle();
+    // openSheet removes the DOM 250ms after close(); wait past that animation.
+    await new Promise(r => setTimeout(r, 300));
+    let input = mState.buildGenInput();
+    return {
+        initImage: mState.initImage,
+        initParam: input.initimage,
+        sheetGone: !document.querySelector('.m-imgbrowser')
+    };
+});
+check('picking MixStudio image sets initImage path entry', pickFromMix.initImage && pickFromMix.initImage.kind == 'path' && pickFromMix.initImage.value == 'MixStudio/mix-a.png', JSON.stringify(pickFromMix));
+check('buildGenInput sends the MixStudio path as initimage', pickFromMix.initParam == 'MixStudio/mix-a.png', JSON.stringify(pickFromMix));
+check('browser sheet closes after pick', pickFromMix.sheetGone);
+
+const promptChooser = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    mState.initImage = null;
+    mState.changed();
+    await settle();
+    mCreate.openPromptImagePicker();
+    await settle();
+    return {
+        chooser: !!document.querySelector('.m-imgbrowser-chooser'),
+        server: [...document.querySelectorAll('.m-imgbrowser-chooser-btn')].some(b => b.textContent == 'Browse server folders'),
+        phone: [...document.querySelectorAll('.m-imgbrowser-chooser-btn')].some(b => b.textContent == 'From phone')
+    };
+});
+check('prompt-image + opens server/phone chooser', promptChooser.chooser && promptChooser.server && promptChooser.phone, JSON.stringify(promptChooser));
+
+// Dismiss chooser for a clean teardown.
+await page.evaluate(() => {
+    document.querySelectorAll('.m-sheet-backdrop').forEach(el => el.click());
+});
 
 await browser.close();
 

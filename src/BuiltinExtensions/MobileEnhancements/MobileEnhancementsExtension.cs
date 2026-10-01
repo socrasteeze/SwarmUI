@@ -88,6 +88,8 @@ public class MobileEnhancementsExtension : Extension
         // MobileEnhancements only owns the /simple chrome that calls it.
         OtherAssets.Add("Assets/m/m_enhance.js");
         OtherAssets.Add("Assets/m/m_image_edit.js");
+        // Server-backed folder browser for /simple start/end frame + prompt-image attach (ListImages).
+        OtherAssets.Add("Assets/m/m_image_browser.js");
         OtherAssets.Add("Assets/m/m_create.js");
         OtherAssets.Add("Assets/m/m_presets.js");
         OtherAssets.Add("Assets/m/m_grid.js");

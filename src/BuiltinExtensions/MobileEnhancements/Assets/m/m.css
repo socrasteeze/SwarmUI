@@ -2515,3 +2515,152 @@ html:has(.m-body) {
         filter: brightness(1.25);
     }
 }
+
+/* --- Server image browser sheet (/simple) --- */
+.m-imgbrowser {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    /* Fill the sheet's max-height band so the grid scrolls inside the sheet rather than growing the sheet
+       under the keyboard. min-height:0 lets the flex child shrink. */
+    min-height: min(70dvh, calc(100dvh - var(--m-kb-inset, 0px) - 5rem));
+    max-height: min(70dvh, calc(100dvh - var(--m-kb-inset, 0px) - 5rem));
+}
+.m-imgbrowser-roots {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.2rem;
+}
+.m-imgbrowser-roots .m-folder-chip.m-selected {
+    border-color: var(--emphasis, #4a9eff);
+    color: var(--emphasis, #4a9eff);
+}
+.m-imgbrowser-toolbar {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.m-imgbrowser-path {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-soft);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-imgbrowser-tool {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0.35rem 0.8rem;
+    background: var(--background);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    font-size: 14px;
+}
+.m-imgbrowser-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.35rem;
+    -webkit-overflow-scrolling: touch;
+}
+.m-imgbrowser-tile {
+    position: relative;
+    aspect-ratio: 1;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 0.45rem;
+    overflow: hidden;
+    background: var(--background);
+    min-height: 44px;
+}
+.m-imgbrowser-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    -webkit-user-drag: none;
+}
+.m-imgbrowser-tile-name {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 0.15rem 0.25rem;
+    font-size: 10px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+}
+.m-imgbrowser-status {
+    color: var(--text-soft);
+    font-size: 12px;
+    padding: 0.2rem 0;
+}
+.m-imgbrowser-hint {
+    color: var(--text-soft);
+    font-size: 12px;
+    margin-bottom: 0.4rem;
+}
+.m-imgbrowser-roots-list,
+.m-imgbrowser-add-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+.m-imgbrowser-root-row,
+.m-imgbrowser-add-row {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+}
+.m-imgbrowser-root-label,
+.m-imgbrowser-root-path {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.45rem;
+    background: var(--background);
+    color: var(--text);
+    font-size: 14px;
+}
+.m-imgbrowser-root-remove {
+    min-width: 44px;
+    font-size: 20px;
+}
+.m-imgbrowser-chooser {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-bottom: 0.4rem;
+}
+.m-imgbrowser-chooser-btn {
+    min-height: 48px;
+    width: 100%;
+    background: var(--button-background, var(--emphasis, #4a9eff));
+    color: var(--button-text, #fff);
+    border: none;
+    border-radius: 0.6rem;
+    font-size: 16px;
+    font-weight: 600;
+}
+.m-imgbrowser-chooser-secondary {
+    background: var(--background);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    font-weight: 500;
+}

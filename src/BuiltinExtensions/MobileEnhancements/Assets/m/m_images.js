@@ -102,8 +102,8 @@ class MImages {
     }
 
     /** Prompt-image entry for a generated or history file. Always kind:'path' with the output-relative
-     * path (raw/..., Starred/..., inputs/...). The server only expands those three prefixes into file
-     * bytes; anything else is treated as base64, and ValidateParam interpolates the entire value into the
+     * path under the output root (raw/..., inputs/..., Starred/..., MixStudio/..., ...). The server expands
+     * any output-relative media path into file bytes; anything else is treated as base64, and ValidateParam interpolates the entire value into the
      * exception - a View URL or a data URI stuffed here is the "string too long" failure. Returns null
      * when the image was never saved (data URI preview, SaveFiles off). */
     promptPathEntry(urlOrPath) {
