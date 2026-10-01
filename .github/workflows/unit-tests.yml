@@ -14,5 +14,5 @@ jobs:
             fetch-tags: true
         - uses: actions/setup-dotnet@v5
           with:
-            dotnet-version: '8.x'
+            dotnet-version: '10.x'
         - run: bash ./launchtools/run_tests.sh
