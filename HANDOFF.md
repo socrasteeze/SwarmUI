@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-09-30 (12:17 PT, live Windows) · **Branch:** `main` · **Base:** `d5ba1937` · **Tree:** clean
+**Updated:** 2026-10-01 (00:17 PT, live Windows) · **Branch:** `main` · **Base:** `9b1453c0` · **Tree:** clean
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
 The user waived the handoff line cap; the H3 reference sections below were logged at the user's request.
 
 ## Done this session
+
+- 2026-10-01 (00:17 PT, live Windows box): routine automated sync — `upstream/master` at `de7b834b`, already an ancestor of HEAD (`9b1453c0`); nothing to merge, no SwarmUI source gates. Backend nodes: no clean checkout behind origin (bundled ComfyUI already at `651ca296a`; comfyui-manager at `6db282e2`). Skipped dirty checkouts: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`; RMBG also 15 behind). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended. All earlier handoff detail above is unchanged.
 
 - 2026-09-30 (12:17 PT, live Windows box): routine automated sync — `upstream/master` at `de7b834b`, already an ancestor of HEAD (`d5ba1937`); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI `8cfe5e1ec`→`83071e1ae` (minimax VAE offload fix + Ideogram 4.5 partner nodes; no requirements change) and `comfyui-manager` `14b5aaab`→`6db282e2` (8 commits, DB list only). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty checkouts: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended. All earlier handoff detail above is unchanged.
 
