@@ -202,6 +202,19 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-10-01 (12:35 PT, live Windows box) - routine automated sync; merged 1 upstream commit. Ran at Adam's request (ZSIX90 back online; prior blockers cleared). Working tree was clean on `main` at `6762cea4` ("Pin CI to the .NET 10 SDK"), matching `origin/main` 0/0 (prior MobileEnhancements WIP and unpushed `3cc9ead8` already resolved/pushed). Remotes already correct: `origin` -> `socrasteeze/SwarmUI`, `upstream` fetch -> `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Git identity already `socrasteeze <socradeez@gmail.com>`. `git pull --ff-only origin main` - already up to date. `git fetch upstream`; upstream default branch resolved as `master`. Incoming 1 commit `de7b834b..d9ecb52d`: `d9ecb52d` "minor doc fix" (`Settings.cs` CloudflaredPath `ConfigComment` string -> interpolated `$"{...}"` so `Utilities.RepoDocsRoot` expands). Merged `git merge upstream/master` (`a363809c`) - auto-merged `Settings.cs`, zero conflicts. Fork AGENTS.md not reintroduced.
+
+  Gates: `dotnet build src/SwarmUI.csproj --configuration Release` - 0 warnings / 0 errors. Format/headless suite skipped (ConfigComment-only Settings change).
+
+  Backend/custom_nodes review (live `dlbackend/` present on this box):
+  - Updated: none (no clean checkout behind its origin).
+  - Current (clean, 0 behind): bundled ComfyUI `dlbackend/comfy/ComfyUI` at `77c0f39e3` on `master`; custom_nodes comfyui-manager `2a6cb164`, KJNodes, MiniMaxH3-FirstBlockCache, MiniMaxH3_Ref-Patch, seedvr2-tilingupscaler, Spectrum-MiniMax-H3, RES4LYF, rgthree-comfy, was-node-suite-comfyui, comfyui-sam3.disabled; also confirmed current (0 behind) despite `__pycache__`-only dirt: comfyui-mask-boundingbox, ComfyUI-QwenVL, ComfyUI_Comfyroll_CustomNodes, ComfyUI-ConditioningKrea2Rebalance.
+  - Skipped dirty: WD14-Tagger / RMBG (`requirements.txt`; RMBG also 15 behind origin, left alone per dirty-checkout rule). ReActor / TeaCache custom_node checkouts not present under `custom_nodes/` this pass (only `models/reactor` data folder found).
+  - Left alone: `ComfyUI-nunchaku.disabled`, `comfyui-sam3.disabled`. Non-git custom_nodes left as-is: comfyui-auto-nodes-layout, ComfyUI-Crystools, llm_sdxl_adapter.
+  - GPU acceleration check: not applicable (no ComfyUI backend update, no requirements change).
+
+  Author/committer on this commit: `socrasteeze <socradeez@gmail.com>`; no AI-attribution trailer.
+
 - 2026-10-01 (00:17 PT, live Windows box) - routine automated check, SwarmUI already current; no backend node updates. Ran unattended (scheduled, no human watching live). Working tree was clean on `main` at `9b1453c0` ("/simple: server image browser for start/end frames and prompt images"), matching `origin/main` 0/0. Remotes already correct: `origin` -> `socrasteeze/SwarmUI`, `upstream` fetch -> `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Git identity already `socrasteeze <socradeez@gmail.com>`. `git pull --ff-only origin main` - already up to date. `git fetch upstream`; upstream default branch resolved as `master` (via `refs/remotes/upstream/HEAD`). `upstream/master` at `de7b834b` ("ShiftedLatentAverageInit: refuse to apply to irrelevant model types") - `git merge-base --is-ancestor upstream/master HEAD` returned true (`HEAD...upstream/master` measured 0 behind / 473 ahead), so 0 incoming commits; no merge, no conflicts, no SwarmUI source gate suite (no SwarmUI source changed).
 
   Backend/custom_nodes review (live `dlbackend/` present on this box):
