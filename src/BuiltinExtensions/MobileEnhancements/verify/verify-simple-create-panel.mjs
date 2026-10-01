@@ -22,9 +22,9 @@
  * Requires playwright + a chromium build; neither is a repo dependency, so this is opt-in tooling rather than
  * part of the CI gate. Run from the repo root:
  *     node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-create-panel.mjs
- * Set SWARM_CHROMIUM to override the browser path. Exits non-zero if any check fails.
+ * Set SWARM_CHROMIUM to override the browser path, or SWARM_WEBKIT=1 to check WebKit. Exits non-zero if any check fails.
  */
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
@@ -48,6 +48,7 @@ const html = readFileSync(`${M}/index.html`, 'utf8')
 const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_image_browser.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
+    '/css/bootstrap.min.css': `${REPO}/src/wwwroot/css/bootstrap.min.css`,
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,
     '/css/themes/modern.css': `${REPO}/src/wwwroot/css/themes/modern.css`,
     '/css/themes/modern_dark.css': `${REPO}/src/wwwroot/css/themes/modern_dark.css`,
@@ -87,8 +88,9 @@ function extractFunction(src, name) {
     throw new Error(`unbalanced function ${name}`);
 }
 
-const browser = await chromium.launch(process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
-const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } });
+const engine = process.env.SWARM_WEBKIT == '1' ? webkit : chromium;
+const browser = await engine.launch(engine == chromium && process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
+const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT }, isMobile: true, hasTouch: true });
 await page.route('**/*', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path == '/simple') {
@@ -207,8 +209,8 @@ const promptHeights = await page.evaluate(async () => {
     let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     let box = document.querySelector('.m-prompt-box');
     let panel = document.querySelector('.m-panel[data-mtab="create"]');
-    mState.params['prompt'] = 'a long enough prompt that the box has grown past its three starting rows, '
-        + 'wrapping over several lines so a collapse is unmistakable in the measurement below';
+    mState.params['prompt'] = ('a long enough prompt that the box has grown past its three starting rows, '
+        + 'wrapping over several lines so a collapse is unmistakable in the measurement below ').repeat(3);
     mState.changed();
     await settle();
     let grown = box.getBoundingClientRect().height;
@@ -237,6 +239,9 @@ check('an empty prompt box still stands at its three-row floor',
 // ---- Priority-control regressions ----
 const initialControls = await page.evaluate(() => ({
     randomLabel: document.querySelector('.m-seed-random').textContent,
+    resetLabel: document.querySelector('.m-reset-button').textContent,
+    seedClearLabel: document.querySelector('.m-seed-clear').textContent,
+    decreaseLabels: [...document.querySelectorAll('.m-stepper-button:first-of-type')].map(button => button.textContent),
     seedInputHidden: getComputedStyle(document.querySelector('.m-seed-input')).display == 'none',
     aspectSteppers: document.querySelectorAll('.m-aspect-stepper').length,
     sizeSteppers: document.querySelectorAll('.m-size-stepper').length,
@@ -246,6 +251,10 @@ const initialControls = await page.evaluate(() => ({
 check('seed starts as one Random button', initialControls.randomLabel == 'Random' && initialControls.seedInputHidden, JSON.stringify(initialControls));
 check('aspect and size are steppers', initialControls.aspectSteppers == 1 && initialControls.sizeSteppers == 1 && initialControls.oldResolutionPickers == 0, JSON.stringify(initialControls));
 check('TagDex browse is mounted once in the Create picker row', initialControls.tagDexButtons == 1, `${initialControls.tagDexButtons} buttons`);
+check('reset and seed-clear controls show single symbols', initialControls.resetLabel == '\u21ba'
+    && initialControls.seedClearLabel == '\u00d7', JSON.stringify(initialControls));
+check('all four quick steppers show a minus sign', initialControls.decreaseLabels.length == 4
+    && initialControls.decreaseLabels.every(label => label == '\u2212'), JSON.stringify(initialControls.decreaseLabels));
 
 await page.click('.m-seed-random');
 await page.waitForFunction(() => document.activeElement == document.querySelector('.m-seed-input')
@@ -283,7 +292,7 @@ check('aspect stepper writes the next wider ratio and leaves the size alone', re
 check('extra aspect ratios generate as Custom pixels', resolution.generated.aspectratio == 'Custom'
     && `${resolution.generated.width}x${resolution.generated.height}` == resolution.dims.join('x'), JSON.stringify(resolution.generated));
 check('size stepper shows the rung it moves and the pixels it produces', resolution.value == '1024'
-    && resolution.label == resolution.dims.join(' Ãƒâ€” '), JSON.stringify(resolution));
+    && resolution.label == resolution.dims.join(' \u00d7 '), JSON.stringify(resolution));
 
 // Ladder walk: up through every rung, clamped at the top, then back down and clamped at the bottom.
 const sizeSteps = [];
@@ -292,7 +301,7 @@ for (let i = 0; i < 4; i++) {
     sizeSteps.push(await page.evaluate(() => `${mState.params.sidelength}=${mState.previewResolution().join('x')}`));
     await page.waitForFunction(([side, dims]) => document.querySelector('.m-size-stepper .m-stepper-value').textContent == side
         && document.querySelector('.m-size-stepper .m-stepper-label').textContent == dims,
-        await page.evaluate(() => [`${mState.params.sidelength}`, mState.previewResolution().join(' Ãƒâ€” ')]));
+        await page.evaluate(() => [`${mState.params.sidelength}`, mState.previewResolution().join(' \u00d7 ')]));
 }
 check('size steps up the fixed ladder, redraws, and clamps at the top', sizeSteps.join(' | ') == '1152=1536x896 | 1280=1664x960 | 1536=2048x1152 | 1536=2048x1152', sizeSteps.join(' | '));
 const sizeDown = [];
@@ -327,7 +336,7 @@ await page.waitForFunction(() => mState.activePresets.join(',') == 'ill/pose');
 const presetOn = await page.evaluate(() => ({
     active: mState.activePresets.join(','),
     shown: document.querySelector('.m-preset-select').value,
-    unmarked: [...document.querySelector('.m-preset-select').options].every(option => !option.textContent.startsWith('Ã¢Å“â€œ'))
+    unmarked: [...document.querySelector('.m-preset-select').options].every(option => !option.textContent.startsWith('\u2713'))
 }));
 check('preset picklist shows the picked preset as the selected option', presetOn.shown == 'ill/pose' && presetOn.unmarked, JSON.stringify(presetOn));
 await page.selectOption('.m-preset-select', 'qwen/edit');
@@ -346,6 +355,9 @@ await page.evaluate(() => {
 });
 check('LoRA weight uses a stepped picker, not a slider', await page.evaluate(() =>
     document.querySelectorAll('.m-lora-weight-picker').length == 1 && document.querySelectorAll('.m-lora-slider').length == 0));
+check('LoRA remove and decrease controls show single symbols', await page.evaluate(() =>
+    document.querySelector('.m-lora-remove').textContent == '\u00d7'
+        && document.querySelector('.m-lora-weight-button').textContent == '\u2212'));
 // ListModels truncates at the server's ModelListSanityCap and truncates before it sorts, so on a large
 // library it answers with an arbitrary slice - which is why the picker's corpus is the uncapped boot list
 // from ListT2IParams, with the ListModels rows only as a metadata overlay on top of it.
@@ -991,7 +1003,7 @@ check('starredFirst still lifts favourites among survivors (only ill/keep left)'
 // Search matches every word in any order across name/title/trigger, and says when the filters hide a match.
 const wordSearch = await page.evaluate(async () => {
     let list = [
-        { name: 'anima/Aria Ã§Ë†Â±Ã¨Å Â® 4 Outfits Ã¢â‚¬â€ Zenless Zone Zero [Anima+Illustrious].safetensors', title: 'lora' },
+        { name: 'anima/Aria \u7231\u82ae 4 Outfits \u2014 Zenless Zone Zero [Anima+Illustrious].safetensors', title: 'lora' },
         { name: 'anima/aria-nikke-richy-v1_anima.safetensors' },
         { name: 'anima/Other.safetensors', title: 'Zenless style', trigger_phrase: 'xyzhumzzz' }
     ];
@@ -1125,10 +1137,11 @@ const upscale = await page.evaluate(() => {
         default: '1', min: 0.25, max: 8, view_max: 4, step: 0.25, examples: ['1', '1.5', '2'] };
     mState.paramMeta['refinerupscalemethod'] = { id: 'refinerupscalemethod', name: 'Refiner Upscale Method',
         type: 'dropdown', default: 'pixel-lanczos',
-        values: ['pixel-lanczos', 'latent-nearest-exact'],
-        value_names: ['Pixel Lanczos', 'Latent Nearest Exact'] };
+        values: ['pixel-lanczos', 'latent-nearest-exact', 'model-long-name'],
+        value_names: ['Pixel: Lanczos (cheap)', 'Latent Nearest Exact', 'Model: RealESRGAN_x4plus_anime_6B with a long method description'] };
     mCreate.renderQuickParams();
     let row = document.querySelector('.m-upscale-row');
+    let panel = row.closest('.m-panel');
     let selects = row.querySelectorAll('.m-choice-select');
     let out = {
         rowDisplay: getComputedStyle(row).display,
@@ -1137,6 +1150,8 @@ const upscale = await page.evaluate(() => {
             && mCreate.coveredParams.includes('refinerupscalemethod'),
         scaleOptions: [...selects[0].options].map(o => `${o.value}=${o.textContent}`).join('|'),
         methodOptions: [...selects[1].options].map(o => `${o.value}=${o.textContent}`).join('|'),
+        panelWidth: panel.clientWidth,
+        panelScrollWidth: panel.scrollWidth,
         helperExamples: MCreate.upscaleScaleOptions(mState.paramMeta['refinerupscale'], '1').join(','),
         helperGenerated: MCreate.upscaleScaleOptions({ min: 0.25, view_max: 4 }, '1.1').join(',')
     };
@@ -1158,6 +1173,8 @@ const upscale = await page.evaluate(() => {
     return out;
 });
 check('upscale row appears once refiner params are advertised', upscale.rowDisplay != 'none' && upscale.count == 2, JSON.stringify(upscale));
+check('long upscale options do not widen the Create panel', upscale.panelScrollWidth <= upscale.panelWidth,
+    `${upscale.panelScrollWidth}/${upscale.panelWidth}px`);
 check('upscale scale options always use preferred ladder (union Examples)', upscale.scaleOptions == '1=Upscale: Off|1.25=Upscale: 1.25x|1.5=Upscale: 1.5x|1.75=Upscale: 1.75x|2=Upscale: 2x|2.5=Upscale: 2.5x|3=Upscale: 3x|4=Upscale: 4x', upscale.scaleOptions);
 check('upscaleScaleOptions keeps preferred ladder when Examples present', upscale.helperExamples == '1,1.25,1.5,1.75,2,2.5,3,4', upscale.helperExamples);
 check('upscaleScaleOptions keeps unknown current on preferred ladder', upscale.helperGenerated == '1,1.1,1.25,1.5,1.75,2,2.5,3,4', upscale.helperGenerated);
@@ -1404,7 +1421,7 @@ const presetCreativity = await page.evaluate(() => {
 });
 check('an existing initimagecreativity value is preserved, not overwritten', presetCreativity == '0.35', presetCreativity);
 
-// End frame: fill it too, confirm buildGenInput sends both, then remove the start frame via its Ãƒâ€” and
+// End frame: fill it too, confirm buildGenInput sends both, then remove the start frame via its remove control and
 // confirm the request drops back to just the end frame.
 const endFilled = await page.evaluate(async () => {
     let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -1425,7 +1442,7 @@ const afterRemoveStart = await page.evaluate(async () => {
     return { hasStart: 'initimage' in input, hasEnd: 'videoendimage' in input, initImageState: mState.initImage,
         emptyButtons: document.querySelectorAll('.m-frame-add').length };
 });
-check('removing a frame via its Ãƒâ€” clears it from state and the request', !afterRemoveStart.hasStart
+check('removing a frame clears it from state and the request', !afterRemoveStart.hasStart
     && afterRemoveStart.initImageState == null, JSON.stringify(afterRemoveStart));
 check('the other frame is untouched by removing its sibling', afterRemoveStart.hasEnd, JSON.stringify(afterRemoveStart));
 check('the emptied slot shows its + button again', afterRemoveStart.emptyButtons == 1, JSON.stringify(afterRemoveStart));

@@ -627,6 +627,8 @@ html:has(.m-body) {
     padding: 0 0.4rem;
     flex: 1 1 0;
     min-width: 0;
+    /* WebKit can count a native select's long label outside its box as panel scroll overflow. */
+    contain: paint;
 }
 .m-aspect-stepper {
     flex: 1 1 0;
