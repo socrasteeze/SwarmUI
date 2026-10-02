@@ -80,6 +80,8 @@
          its first consumer. -->
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_image_edit.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_image_browser.js?vary=[VARY]"></script>
+    <!-- FL2VA same-frame mirror + shortest-768 letterbox prep; must load before m_create.js. -->
+    <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_frame_prep.js?vary=[VARY]"></script>
     <script defer src="/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_create.js?vary=[VARY]"></script>
     <!-- Grid builder, opened by the Generate long-press and the More > Grid generate row. Registers its More
          row at script load, so it must come before m_app.js; it reads MCreate/mCreate, so after m_create.js. -->

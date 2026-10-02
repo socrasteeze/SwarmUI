@@ -422,6 +422,25 @@ html:has(.m-body) {
 
 /* Start/end frame section (image-to-video, eg MiniMax H3 FL2VA): two side-by-side slots inside the same
    <details> styling as the negative-prompt section above it. */
+/* Same-as-start toggle for FL2VA 360-orbit / same-frame presets (m_frame_prep.js). Hidden unless the
+   active preset qualifies; sits above the two frame slots inside the Start/end <details>. */
+.m-frame-same-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.45rem;
+    color: var(--text-soft);
+    font-size: 13px;
+    min-height: 44px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.m-frame-same-check {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--emphasis, #0d6efd);
+}
+
 .m-frame-row {
     display: flex;
     gap: 0.6rem;
