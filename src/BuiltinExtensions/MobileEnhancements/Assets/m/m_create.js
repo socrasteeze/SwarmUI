@@ -1105,12 +1105,7 @@ class MCreate {
         fileInput.addEventListener('change', () => {
             let file = fileInput.files[0];
             if (file) {
-                let reader = new FileReader();
-                reader.onload = () => {
-                    setEntry({ 'kind': 'data', 'value': reader.result });
-                    mState.changed();
-                };
-                reader.readAsDataURL(file);
+                this.applyFrameFile(slot, file);
             }
             fileInput.value = '';
         });
@@ -1119,7 +1114,75 @@ class MCreate {
         slot.setEntry = setEntry;
         slot.body = body;
         slot.fileInput = fileInput;
+        // Paste/drop onto the slot (or its + / thumb). Goes through setEntry so Start paste
+        // mirrors to End when Same-as-start is ON — same path as browser pick / From phone.
+        slot.addEventListener('paste', (e) => {
+            if (this.applyFrameFromTransfer(slot, e.clipboardData) > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
+        slot.setAttribute('tabindex', '0');
+        slot.addEventListener('dragover', (e) => {
+            if (e.dataTransfer && [...(e.dataTransfer.types || [])].some(t => t == 'Files' || t == 'files')) {
+                e.preventDefault();
+                slot.classList.add('m-frame-drop-hover');
+            }
+        });
+        slot.addEventListener('dragleave', () => slot.classList.remove('m-frame-drop-hover'));
+        slot.addEventListener('drop', (e) => {
+            slot.classList.remove('m-frame-drop-hover');
+            if (this.applyFrameFromTransfer(slot, e.dataTransfer) > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
         return slot;
+    }
+
+    /** First image from a paste/drop DataTransfer into a frame slot. Returns 1 if attached, else 0. */
+    applyFrameFromTransfer(slot, data) {
+        if (!slot || !data) {
+            return 0;
+        }
+        let file = null;
+        let items = data.items || [];
+        for (let i = 0; i < items.length; i++) {
+            let item = items[i];
+            if (item.kind == 'file' && item.type && item.type.startsWith('image/')) {
+                file = item.getAsFile();
+                if (file) {
+                    break;
+                }
+            }
+        }
+        if (!file && data.files) {
+            for (let i = 0; i < data.files.length; i++) {
+                let f = data.files[i];
+                if (f.type && f.type.startsWith('image/')) {
+                    file = f;
+                    break;
+                }
+            }
+        }
+        if (!file) {
+            return 0;
+        }
+        this.applyFrameFile(slot, file);
+        return 1;
+    }
+
+    /** Reads a File to a data URI and sets it on the frame slot via setEntry (mirrors Same-as-start). */
+    applyFrameFile(slot, file) {
+        if (!slot || !file) {
+            return;
+        }
+        let reader = new FileReader();
+        reader.onload = () => {
+            slot.setEntry({ 'kind': 'data', 'value': reader.result });
+            mState.changed();
+        };
+        reader.readAsDataURL(file);
     }
 
     /** Collapsible "Start / end frame" section for image-to-video presets (eg MiniMax H3 FL2VA), styled and
@@ -1192,6 +1255,39 @@ class MCreate {
         row.appendChild(this.endFrameSlot);
         wrap.appendChild(row);
         this.framesWrap = wrap;
+        // One document-level paste: when Create is visible and focus is inside the frames
+        // section (not the prompt), a single paste attaches Start (and mirrors End if Same-as-start).
+        if (!this._framePasteBound) {
+            this._framePasteBound = true;
+            document.addEventListener('paste', (e) => {
+                if (!this.panel || this.panel.style.display == 'none') {
+                    return;
+                }
+                if (!this.framesWrap || !this.framesWrap.open) {
+                    return;
+                }
+                if (e.target && e.target.closest) {
+                    if (e.target.closest('.m-prompt') || e.target.closest('textarea') || e.target.closest('input')) {
+                        return;
+                    }
+                    // Slot handlers already ran for in-slot paste; skip double-attach.
+                    if (e.target.closest('.m-frame-slot')) {
+                        return;
+                    }
+                    if (!e.target.closest('.m-neg-wrap') && document.activeElement != this.framesWrap
+                        && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.m-frame-slot'))) {
+                        // Only claim pastes clearly aimed at the frames UI (focus inside section).
+                        if (!this.framesWrap.contains(document.activeElement) && !this.framesWrap.contains(e.target)) {
+                            return;
+                        }
+                    }
+                }
+                let slot = this.startFrameSlot;
+                if (this.applyFrameFromTransfer(slot, e.clipboardData) > 0) {
+                    e.preventDefault();
+                }
+            });
+        }
         return wrap;
     }
 
@@ -1430,6 +1526,10 @@ class MCreate {
      * flow). Text is deliberately left alone here - this box is where prompts are typed, so a pasted path
      * belongs in the text, not attached as an image. The attachment + button opens the photo library. */
     onPaste(e) {
+        // Frame slots handle their own paste (and mirror Same-as-start). Do not also attach as prompt images.
+        if (e.target && e.target.closest && e.target.closest('.m-frame-slot')) {
+            return;
+        }
         if (this.attachFromTransfer(e.clipboardData) > 0) {
             e.preventDefault();
         }
