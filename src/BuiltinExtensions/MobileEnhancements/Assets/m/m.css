@@ -1583,6 +1583,17 @@ html:has(.m-body) {
     transition: transform 0.25s ease-out;
     z-index: 1001;
 }
+/* Grid Generate: sheet becomes a flex column so the footer (count + Rows + Run Grid) stays pinned
+   while the axis body scrolls. overflow:hidden stops the outer sheet eating the gesture the LoRA list
+   and cards need; safe-area padding remains on the sheet and the footer paints it via box-shadow. */
+.m-sheet:has(> .m-grid-sheet) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.m-sheet:has(> .m-grid-sheet) > .m-sheet-grip {
+    flex: 0 0 auto;
+}
 .m-sheet.m-open {
     transform: translateY(0);
 }
@@ -1915,6 +1926,9 @@ html:has(.m-body) {
 .m-grid-sheet {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
 }
 .m-grid-intro,
 .m-grid-hint {
@@ -1922,12 +1936,18 @@ html:has(.m-body) {
     font-size: 12px;
     margin-bottom: 0.4rem;
 }
+.m-grid-sheet > .m-sheet-title,
+.m-grid-sheet > .m-grid-intro {
+    flex: 0 0 auto;
+}
 .m-grid-cards {
     display: flex;
     flex-direction: column;
-    /* Capped so the footer's count and Run button stay on screen with a card expanded - the whole point of
-       the count is to be read before committing to a run. */
-    max-height: 52vh;
+    /* Fills the band between the intro and the sticky footer. Selected LoRA chips used to push count/Rows/
+       Run Grid below the fold (and overscroll-behavior:contain ate the parent scroll that would have
+       reached them); flex shrink + this scroller keeps the footer on screen. */
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: none;
@@ -2068,7 +2088,15 @@ html:has(.m-body) {
     min-height: 44px;
     padding: 0 0.9rem;
 }
+/* Same sticky+shadow contract as .m-preset-sheet > .m-edit-actions: pin count/Rows/Run Grid to the
+   sheet's visible bottom and paint the sheet's safe-area padding so it does not show through as a gap. */
 .m-grid-footer {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: var(--background-panel);
+    box-shadow: 0 calc(0.8rem + var(--m-safe-bottom)) 0 var(--background-panel);
     padding-top: 0.5rem;
 }
 .m-grid-count {
