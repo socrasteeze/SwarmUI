@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-01 (12:35 PT, live Windows) · **Branch:** `main` · **Base:** `a363809c` · **Tree:** clean
+**Updated:** 2026-10-01 (18:24 PT, live Windows) · **Branch:** `main` · **Base:** `b09608ef` · **Tree:** clean
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
 The user waived the handoff line cap; the H3 reference sections below were logged at the user's request.
 
 ## Done this session
+
+- 2026-10-01 (18:24 PT, live Windows box): routine automated sync — `upstream/master` at `d9ecb52d`, already an ancestor of HEAD (`b09608ef`); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI `1b883beab`→`fa98a189b` (Grok Imagine Video 1.5 lite partner node + workflow templates 0.11.73→0.11.74; pip-installed templates). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`; RMBG 15 behind). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. All earlier handoff detail above is unchanged.
 
 - 2026-10-01 (12:35 PT, live Windows box): routine automated sync — merged upstream `d9ecb52d` ("minor doc fix", CloudflaredPath ConfigComment interpolation) into `main` as `a363809c`, zero conflicts. Prior MobileEnhancements WIP / unpushed `3cc9ead8` blockers cleared (tree clean; `3cc9ead8` already on origin). Backend nodes: no clean checkout behind origin (ComfyUI `77c0f39e3`; comfyui-manager `2a6cb164`). Skipped dirty: WD14-Tagger / RMBG (`requirements.txt`; RMBG 15 behind). ReActor/TeaCache custom_nodes not present this pass. Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. All earlier handoff detail above is unchanged.
 - 2026-10-01 (00:17 PT, live Windows box): routine automated sync — `upstream/master` at `de7b834b`, already an ancestor of HEAD (`9b1453c0`); nothing to merge, no SwarmUI source gates. Backend nodes: no clean checkout behind origin (bundled ComfyUI already at `651ca296a`; comfyui-manager at `6db282e2`). Skipped dirty checkouts: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`; RMBG also 15 behind). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended. All earlier handoff detail above is unchanged.
