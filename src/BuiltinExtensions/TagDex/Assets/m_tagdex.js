@@ -46,8 +46,8 @@ class MTagDexClass {
         // request and no memory. This is also why no edit to m_app.js's boot sequence is needed.
         let originalEnable = MAutoComplete.prototype.enableFor;
         if (typeof originalEnable == 'function') {
-            MAutoComplete.prototype.enableFor = function (box, paramId) {
-                originalEnable.call(this, box, paramId);
+            MAutoComplete.prototype.enableFor = function (box, paramId, host = null) {
+                originalEnable.call(this, box, paramId, host);
                 box.addEventListener('focus', () => tagDexCore.ensureLoaded(), { once: true });
             };
         }

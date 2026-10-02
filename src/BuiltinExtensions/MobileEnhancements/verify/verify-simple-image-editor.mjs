@@ -31,9 +31,11 @@
  * Requires playwright + a chromium build; neither is a repo dependency, so this is opt-in tooling rather than
  * part of the CI gate. Run from the repo root:
  *     node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-image-editor.mjs
- * Set SWARM_CHROMIUM to override the browser path. Exits non-zero if any check fails.
+ * Set SWARM_CHROMIUM to override the browser path, or SWARM_WEBKIT=1 for WebKit. Set
+ * SWARM_EDITOR_DESKTOP_ONLY=1 to run only the native desktop-pointer suite, and SWARM_EDITOR_SOURCE to a
+ * local m_image_edit.js path when proving a baseline failure. Exits non-zero if any check fails.
  */
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
@@ -41,6 +43,7 @@ import { dirname, resolve } from 'path';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const EXT = `${REPO}/src/BuiltinExtensions/MobileEnhancements`;
 const M = `${EXT}/Assets/m`;
+const EDITOR_SOURCE = process.env.SWARM_EDITOR_SOURCE || `${M}/m_image_edit.js`;
 const WIDTH = 390, HEIGHT = 844;
 
 const results = [];
@@ -72,7 +75,7 @@ check('every index.html asset is registered in OtherAssets (would 404 otherwise)
     referenced.length > 0 && unregistered.length == 0,
     unregistered.length ? `unregistered: ${unregistered.join(', ')}` : `${referenced.length} checked`);
 
-const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_image_edit.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
+const CLIENT = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_image_edit.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
 const FILES = {
     '/js/util.js': `${REPO}/src/wwwroot/js/util.js`,
     '/css/site.css': `${REPO}/src/wwwroot/css/site.css`,
@@ -82,8 +85,10 @@ const FILES = {
 for (const file of CLIENT) {
     FILES[`/ExtensionFile/MobileEnhancementsExtension/Assets/m/${file}`] = `${M}/${file}`;
 }
+FILES['/ExtensionFile/MobileEnhancementsExtension/Assets/m/m_image_edit.js'] = EDITOR_SOURCE;
 
-const browser = await chromium.launch(process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
+const engine = process.env.SWARM_WEBKIT == '1' ? webkit : chromium;
+const browser = await engine.launch(engine == chromium && process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
 const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } });
 await page.route('**/*', async route => {
     const path = new URL(route.request().url()).pathname;
@@ -109,6 +114,8 @@ await page.addInitScript(() => {
 });
 page.on('pageerror', e => check(`no page errors (${e.message})`, false));
 
+const desktopOnly = process.env.SWARM_EDITOR_DESKTOP_ONLY == '1';
+if (!desktopOnly) {
 await page.goto('http://localhost/simple');
 await page.waitForFunction(() => typeof mCreate != 'undefined' && typeof mImageEdit != 'undefined');
 await page.evaluate(() => {
@@ -350,6 +357,164 @@ await page.evaluate(([x1, y, x2]) => {
 let orderAfterDrag = await page.evaluate(() => mState.promptImages.map(p => p._tag));
 check('long-press+drag reorder still works', orderAfterDrag.join(',') == 'second,first', orderAfterDrag.join(','));
 check('the completed drag did not also open the editor', await page.evaluate(() => document.querySelector('.m-sheet') == null));
+}
+
+// ---- Desktop pointer regression. The small 8x6 fixture above intentionally makes the 44px handles overlap;
+// use a large image and real Playwright mouse actions here so the browser sends native PointerEvents through
+// the Create thumbnail -> editor path. Crop coordinates always come from live display bounds, never guessed CSS.
+if (desktopOnly) {
+    await page.goto('http://localhost/simple');
+    await page.waitForFunction(() => typeof mCreate != 'undefined' && typeof mImageEdit != 'undefined');
+    await page.evaluate(() => {
+        let panel = document.querySelector('.m-panel[data-mtab="create"]');
+        panel.classList.add('m-tab-active');
+        mCreate.build(panel);
+    });
+}
+await page.setViewportSize({ width: 1440, height: 900 });
+const desktopImage = await page.evaluate(() => {
+    let canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 480;
+    let ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#f00'; ctx.fillRect(0, 0, 320, 240);
+    ctx.fillStyle = '#0f0'; ctx.fillRect(320, 0, 320, 240);
+    ctx.fillStyle = '#00f'; ctx.fillRect(0, 240, 320, 240);
+    ctx.fillStyle = '#ff0'; ctx.fillRect(320, 240, 320, 240);
+    return canvas.toDataURL('image/png');
+});
+await page.evaluate(src => {
+    mState.promptImages = [{ 'kind': 'data', 'value': src }];
+    mCreate.renderImageStrip();
+}, desktopImage);
+await page.locator('.m-image-tile:not(.m-image-add)').click();
+await page.waitForFunction(() => mImageEdit.ready && mImageEdit.canvas.width == 640);
+// Native coordinate drags need the sheet's opening animation to finish before measuring their targets.
+await page.waitForTimeout(300);
+
+/** Returns a point in the displayed canvas at fractional source coordinates. */
+const canvasPoint = (x, y) => page.evaluate(([fx, fy]) => {
+    let box = mImageEdit.displayCanvas.getBoundingClientRect();
+    return { x: box.left + box.width * fx, y: box.top + box.height * fy };
+}, [x, y]);
+/** Real native mouse drag. The final point may be outside the canvas to prove pointer capture. */
+async function mouseDrag(start, end) {
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 4 });
+    await page.mouse.up();
+}
+
+let handleBox = await page.locator('.m-edit-crop-handle-nw').boundingBox();
+let resizeEnd = await canvasPoint(0.25, 0.25);
+await mouseDrag({ x: handleBox.x + handleBox.width / 2, y: handleBox.y + handleBox.height / 2 }, resizeEnd);
+let desktopRect = await page.evaluate(() => mImageEdit.cropRect);
+check('desktop mouse resizes the NW corner while anchoring SE', desktopRect.x > 0 && desktopRect.y > 0
+    && desktopRect.w > 20 && desktopRect.h > 20 && Math.abs(desktopRect.x + desktopRect.w - 640) < 1
+    && Math.abs(desktopRect.y + desktopRect.h - 480) < 1, JSON.stringify(desktopRect));
+check('desktop corner drag only changes pending crop state before Save', await page.evaluate(() => mImageEdit.canvas.width == 640 && mImageEdit.canvas.height == 480));
+
+// Keep the move target clear of 44px corner handles on both engines. This is setup only; the following
+// native mouse drag is what proves the editor's move path preserves a cropped rectangle's dimensions.
+await page.evaluate(() => { mImageEdit.cropRect = { 'x': 100, 'y': 100, 'w': 400, 'h': 250 }; mImageEdit.layoutCropOverlay(); });
+await page.locator('.m-edit-crop-rect').scrollIntoViewIfNeeded();
+let cropBox = await page.evaluate(() => {
+    let box = document.querySelector('.m-edit-crop-rect').getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+});
+let moveStart = { x: cropBox.x + cropBox.width / 2, y: cropBox.y + cropBox.height / 2 };
+let moveEnd = { x: moveStart.x - 80, y: moveStart.y };
+let beforeMove = await page.evaluate(() => ({ ...mImageEdit.cropRect }));
+let moveTarget = await page.evaluate(point => document.elementFromPoint(point.x, point.y)?.className || '', moveStart);
+await mouseDrag(moveStart, moveEnd);
+let afterMove = await page.evaluate(() => mImageEdit.cropRect);
+check('desktop mouse moves a non-full crop rectangle', afterMove.x < beforeMove.x && afterMove.w == beforeMove.w && afterMove.h == beforeMove.h, JSON.stringify({ moveTarget, afterMove }));
+
+// Starting inside a full crop is a new-selection gesture. It must not try to move the full rectangle.
+await page.evaluate(() => { mImageEdit.cropRect = mImageEdit.fullCropRect(); mImageEdit.layoutCropOverlay(); });
+let drawStart = await canvasPoint(0.15, 0.20);
+let drawEnd = await canvasPoint(0.70, 0.75);
+await mouseDrag(drawStart, drawEnd);
+let drawnRect = await page.evaluate(() => mImageEdit.cropRect);
+check('desktop mouse drags across a full crop to draw a new pending rectangle', drawnRect.x > 50 && drawnRect.y > 50 && drawnRect.w < 500 && drawnRect.h < 400, JSON.stringify(drawnRect));
+
+// Pointer capture must carry the resize outside the canvas and clamp at the source edge.
+handleBox = await page.locator('.m-edit-crop-handle-nw').boundingBox();
+let outside = await canvasPoint(-0.40, -0.30);
+await mouseDrag({ x: handleBox.x + handleBox.width / 2, y: handleBox.y + handleBox.height / 2 }, outside);
+let clampedRect = await page.evaluate(() => mImageEdit.cropRect);
+check('desktop pointer capture continues outside canvas and clamps to its edge', clampedRect.x == 0 && clampedRect.y == 0, JSON.stringify(clampedRect));
+
+let beforeRight = await page.evaluate(() => JSON.stringify(mImageEdit.cropRect));
+let rightPoint = await canvasPoint(0.35, 0.35);
+await page.mouse.move(rightPoint.x, rightPoint.y);
+await page.mouse.down({ button: 'right' });
+await page.mouse.move(rightPoint.x + 90, rightPoint.y + 70);
+await page.mouse.up({ button: 'right' });
+check('right-click does not begin a desktop crop gesture', await page.evaluate(() => JSON.stringify(mImageEdit.cropRect)) == beforeRight);
+
+// The native down gives the browser's primary pointer id. Cancel must restore the rectangle, and later
+// movement from that still-held physical mouse must be inert.
+await page.evaluate(() => { mImageEdit.cropRect = mImageEdit.fullCropRect(); mImageEdit.layoutCropOverlay(); window.__cropPointerId = null; });
+handleBox = await page.locator('.m-edit-crop-handle-nw').boundingBox();
+await page.evaluate(() => document.querySelector('.m-edit-crop-handle-nw').addEventListener('pointerdown', event => { window.__cropPointerId = event.pointerId; }, { once: true }));
+await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+await page.mouse.down();
+let cancelId = await page.evaluate(() => window.__cropPointerId);
+let cancelOriginal = await page.evaluate(() => ({ ...mImageEdit.cropRect }));
+let cancelMove = await canvasPoint(0.35, 0.35);
+await page.mouse.move(cancelMove.x, cancelMove.y);
+await page.evaluate(id => {
+    let event = new Event('pointercancel', { bubbles: true });
+    Object.defineProperty(event, 'pointerId', { value: id });
+    document.querySelector('.m-edit-crop-handle-nw').dispatchEvent(event);
+}, cancelId);
+let afterPointerCancel = await page.evaluate(() => ({ ...mImageEdit.cropRect }));
+await page.mouse.move(cancelMove.x + 90, cancelMove.y + 70);
+await page.mouse.up();
+let afterCancelledMouse = await page.evaluate(() => ({ ...mImageEdit.cropRect }));
+check('pointercancel restores the native drag rectangle and ends that drag', JSON.stringify(afterPointerCancel) == JSON.stringify(cancelOriginal) && JSON.stringify(afterCancelledMouse) == JSON.stringify(cancelOriginal), JSON.stringify(afterCancelledMouse));
+
+// Release the real capture mid-drag. Later movement must be ignored, while a new drag must work without
+// resetting the rectangle in between.
+await page.evaluate(() => { mImageEdit.cropRect = mImageEdit.fullCropRect(); mImageEdit.layoutCropOverlay(); window.__cropPointerId = null; });
+let releaseStart = await canvasPoint(0.20, 0.20);
+await page.evaluate(() => document.querySelector('.m-edit-crop-rect').addEventListener('pointerdown', event => { window.__cropPointerId = event.pointerId; }, { once: true }));
+await page.mouse.move(releaseStart.x, releaseStart.y);
+await page.mouse.down();
+let releaseId = await page.evaluate(() => window.__cropPointerId);
+let releaseMove = await canvasPoint(0.55, 0.55);
+await page.mouse.move(releaseMove.x, releaseMove.y);
+let beforeRelease = await page.evaluate(() => ({ ...mImageEdit.cropRect }));
+await page.evaluate(id => document.querySelector('.m-edit-crop-rect').releasePointerCapture(id), releaseId);
+await page.waitForTimeout(0);
+let postReleaseMove = await canvasPoint(0.80, 0.75);
+await page.mouse.move(postReleaseMove.x, postReleaseMove.y);
+await page.mouse.up();
+let afterRelease = await page.evaluate(() => ({ ...mImageEdit.cropRect }));
+drawStart = await canvasPoint(0.25, 0.25);
+drawEnd = await canvasPoint(0.60, 0.60);
+await mouseDrag(drawStart, drawEnd);
+let afterFreshDrag = await page.evaluate(() => ({ ...mImageEdit.cropRect }));
+check('lost pointer capture freezes the crop and permits a later native drag', JSON.stringify(afterRelease) == JSON.stringify(beforeRelease) && JSON.stringify(afterFreshDrag) != JSON.stringify(afterRelease), JSON.stringify({ afterRelease, afterFreshDrag }));
+
+await page.locator('.m-edit-save-button').click();
+await page.waitForTimeout(300);
+let desktopSaved = await page.evaluate(() => mState.promptImages[0].value);
+let desktopSavedDims = await page.evaluate(async value => {
+    let image = new Image();
+    await new Promise(resolve => { image.onload = resolve; image.src = value; });
+    return { w: image.naturalWidth, h: image.naturalHeight };
+}, desktopSaved);
+check('desktop Save commits the pending crop to changed output bytes', desktopSaved != desktopImage && desktopSavedDims.w < 640 && desktopSavedDims.h < 480, JSON.stringify(desktopSavedDims));
+
+await page.locator('.m-image-tile:not(.m-image-add)').click();
+await page.waitForFunction(() => mImageEdit.ready);
+await page.waitForTimeout(300);
+await mouseDrag(await canvasPoint(0.25, 0.25), await canvasPoint(0.70, 0.70));
+await page.locator('.m-edit-cancel-button').click();
+await page.waitForTimeout(300);
+check('desktop Cancel leaves the previously saved bytes unchanged', await page.evaluate(value => mState.promptImages[0].value == value, desktopSaved));
 
 await browser.close();
 

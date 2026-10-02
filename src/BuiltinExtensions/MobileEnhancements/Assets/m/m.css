@@ -315,7 +315,8 @@ html:has(.m-body) {
 
 /* --- Create tab --- */
 .m-preset-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
     gap: 0.4rem;
     align-items: center;
     margin-bottom: 0.4rem;
@@ -410,14 +411,47 @@ html:has(.m-body) {
     font-size: 26px;
     border-style: dashed;
 }
-/* No images attached: the add tile has nothing to sit alongside, so it drops from a thumbnail-sized
-   square to a plain control and gives the height back to the prompt. */
-.m-image-strip-empty .m-image-add {
-    width: auto;
-    height: 2.4rem;
+/* Prompt actions keep their positions as thumbnails are added and removed. */
+.m-prompt-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+.m-prompt-completion {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.m-prompt-toolbar > .m-prompt-image-add,
+.m-prompt-toolbar > .m-prompt-image-clear,
+.m-prompt-toolbar > .m-enhance-pill {
+    flex: 0 0 auto;
+}
+.m-prompt-image-clear:disabled {
+    opacity: 0.45;
+}
+.m-preset-row.m-folder-hidden {
+    grid-template-columns: minmax(0, 1fr);
+}
+.m-prompt-image-add {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    border: 1px dashed var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
     line-height: 1;
-    font-size: 18px;
-    padding: 0 1.1rem;
+    font-size: 22px;
+    padding: 0;
+}
+.m-prompt-toolbar .m-coach-pill,
+.m-prompt-toolbar .m-enhance-pill {
+    min-height: 44px;
+    border-radius: 0.5rem;
+}
+.m-image-strip:empty {
+    display: none;
 }
 
 /* Start/end frame section (image-to-video, eg MiniMax H3 FL2VA): two side-by-side slots inside the same
@@ -543,6 +577,31 @@ html:has(.m-body) {
 .m-seed-control {
     flex: 0 0 auto;
 }
+.m-seed-prefix-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 0.4rem;
+}
+.m-seed-prefix-row .m-seed-control {
+    min-width: 0;
+    gap: 0;
+}
+.m-seed-prefix-row .m-seed-random {
+    width: 100%;
+}
+.m-seed-prefix-row .m-seed-input {
+    min-width: 0;
+    width: 0;
+    flex: 1 1 0;
+}
+.m-seed-prefix-row .m-seed-clear {
+    flex: 0 0 44px;
+}
+.m-seed-prefix-row .m-prefix-input {
+    width: 100%;
+    min-height: 44px;
+}
 .m-seed-random {
     background: var(--background-panel);
     border: 1px solid var(--border-color);
@@ -568,32 +627,15 @@ html:has(.m-body) {
     color: var(--text-soft);
     font-size: 19px;
 }
-.m-quick-label {
-    font-size: 13px;
-    color: var(--text-soft);
-    flex: 0 0 auto;
-}
 .m-prefix-input {
     flex: 1 1 auto;
+    box-sizing: border-box;
     min-width: 0;
     min-height: 40px;
     padding: 0 0.4rem;
 }
 .m-seg-group {
     display: flex;
-}
-/* Seed row: 1/2/4/paste/CLR share the leftover width equally so the cluster's right edge
-   matches Prefix / Steps / CFG, instead of CLR growing from its three-letter label. */
-.m-batch-group {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-.m-batch-group .m-seg-button {
-    flex: 1 1 0;
-    width: 0;
-    min-width: 0;
-    padding-left: 0;
-    padding-right: 0;
 }
 .m-seg-button {
     background: var(--background-panel);
@@ -856,12 +898,13 @@ html:has(.m-body) {
 }
 
 /* --- Autocomplete suggestion strip --- */
-/* The slot holds suggestions above the prompt without reserving an empty row. The strip is out of flow, so
-   chips appearing or clearing never move the prompt or the controls below it. */
+/* Prompt suggestions use the existing action row. Other fields own a row below their textarea. */
 .m-ac-slot {
-    height: 0;
-    position: relative;
-    z-index: 1;
+    height: 44px;
+    min-width: 0;
+}
+.m-ac-slot:has(> .m-ac-strip:empty) {
+    display: none;
 }
 .m-ac-strip {
     display: flex;
@@ -872,10 +915,8 @@ html:has(.m-body) {
     padding: 0.25rem 0;
     min-height: 44px;
     box-sizing: border-box;
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    width: 100%;
+    height: 44px;
     background: var(--background);
 }
 .m-ac-strip:empty {
@@ -936,16 +977,11 @@ html:has(.m-body) {
 /* --- Architecture and preset pickers --- */
 .m-arch-select,
 .m-preset-select {
+    width: 100%;
     box-sizing: border-box;
     min-height: 44px;
     padding: 0 0.4rem;
     min-width: 0;
-}
-.m-arch-select {
-    flex: 0 1 38%;
-}
-.m-preset-select {
-    flex: 1 1 62%;
 }
 /* The "limited to X / show all" escape hatch inside the model and LoRA pickers. */
 .m-arch-note {
@@ -959,7 +995,8 @@ html:has(.m-body) {
     min-height: 40px;
 }
 .m-picker-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.4rem;
     margin-top: 0.4rem;
 }
@@ -979,13 +1016,20 @@ html:has(.m-body) {
 .m-model-button.m-selected {
     border-color: var(--emphasis);
 }
-/* Fixed-width rather than sharing the row equally with Model/LoRAs - it's one glyph, and giving it flex:1
-   would squeeze the two name-bearing buttons for no benefit. */
+.m-create-secondary {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.5rem;
+}
 .m-reset-button {
-    flex: 0 0 44px;
+    min-height: 44px;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text-soft);
     text-align: center;
-    font-size: 18px;
-    padding: 0;
+    font-size: 13px;
+    padding: 0.35rem 0.7rem;
 }
 /* An active preset's param_map also sets 'model' and wins over the manual pick on every generate (presets
    apply after raw params) - this needs to read as distinctly different from a normal selection, not just a
@@ -1122,21 +1166,6 @@ html:has(.m-body) {
     margin-right: -0.2rem;
 }
 
-/* Prompt heading row: label + Prompt Enhance pill (m_enhance.js). Coach used to live here; it moved to
-   More > Prompt Coach so this slot could host Enhance. */
-.m-prompt-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-}
-.m-prompt-head-label {
-    color: var(--text-soft);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
 /* Non-modal by design - this only ever opens a bottom sheet, never a wizard. Text overflow is clipped rather
    than wrapped: the pill sits on one line beside the label and must not push the row to a second line. */
 .m-coach-pill {
@@ -1348,7 +1377,7 @@ html:has(.m-body) {
 }
 
 
-/* Prompt Enhance entry (m_enhance.js): same heading-row slot Coach vacated. Disabled state stays tappable
+/* Prompt Enhance entry (m_enhance.js). Disabled state stays tappable
    so the sheet (and its profile override) remains reachable when auto-resolution finds nothing. */
 .m-enhance-pill {
     background: var(--background-panel);
@@ -1757,11 +1786,14 @@ html:has(.m-body) {
 }
 .m-edit-canvas {
     display: block;
+    cursor: crosshair;
+    touch-action: none;
     /* Sized in JS (fitDisplaySize), not CSS - see the comment there for why a canvas's percentage
        max-width/max-height can't resolve against a flex-centered wrap without a definite-width ancestor. */
 }
 .m-edit-crop-rect {
     position: absolute;
+    cursor: move;
     border: 2px solid var(--emphasis);
     /* A 9999px spread dimmed rectangle around the crop box, clipped by the wrap's own overflow:hidden - the
        simplest way to darken "outside the crop" without a second element tracking the same four edges. */
@@ -1771,6 +1803,17 @@ html:has(.m-body) {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+}
+.m-edit-full-crop .m-edit-crop-rect {
+    cursor: crosshair;
+}
+.m-edit-crop-handle-nw,
+.m-edit-crop-handle-se {
+    cursor: nwse-resize;
+}
+.m-edit-crop-handle-ne,
+.m-edit-crop-handle-sw {
+    cursor: nesw-resize;
 }
 /* 44px touch target (these are precision drag handles - if anything they deserve MORE room than a typical
    row button, not less), centered on its corner point via the transform rather than sized/positioned to sit
@@ -2611,14 +2654,32 @@ html:has(.m-body) {
 }
 
 /* --- Server image browser sheet (/simple) --- */
+.m-sheet:has(> .m-imgbrowser) {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - var(--m-kb-inset, 0px) - 1rem);
+    overflow: hidden;
+}
+.m-sheet:has(> .m-imgbrowser) > .m-sheet-grip {
+    flex: 0 0 auto;
+}
 .m-imgbrowser {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    /* Fill the sheet's max-height band so the grid scrolls inside the sheet rather than growing the sheet
-       under the keyboard. min-height:0 lets the flex child shrink. */
-    min-height: min(70dvh, calc(100dvh - var(--m-kb-inset, 0px) - 5rem));
-    max-height: min(70dvh, calc(100dvh - var(--m-kb-inset, 0px) - 5rem));
+    /* The two content columns scroll independently below fixed navigation controls. */
+    height: min(86dvh, calc(100dvh - var(--m-kb-inset, 0px) - 3rem));
+    min-height: 0;
+    max-height: calc(100dvh - var(--m-kb-inset, 0px) - 3rem);
+}
+.m-imgbrowser > :not(.m-imgbrowser-body) {
+    flex-shrink: 0;
+}
+.m-imgbrowser > .m-imgbrowser-hint {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin-bottom: 0;
 }
 .m-imgbrowser-title-row {
     display: flex;
@@ -2644,13 +2705,6 @@ html:has(.m-body) {
     font-size: 22px;
     line-height: 1;
 }
-.m-imgbrowser-fav-label {
-    color: var(--text-soft);
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    margin: 0.1rem 0 0;
-}
 .m-imgbrowser-roots {
     display: flex;
     flex-wrap: wrap;
@@ -2666,11 +2720,138 @@ html:has(.m-body) {
     border-color: var(--emphasis, #4a9eff);
     color: var(--emphasis, #4a9eff);
 }
-.m-imgbrowser-toolbar {
+.m-imgbrowser-favorites,
+.m-imgbrowser-navigation,
+.m-imgbrowser-footer {
     display: flex;
     gap: 0.4rem;
     align-items: center;
-    flex-wrap: wrap;
+    min-width: 0;
+}
+.m-imgbrowser-favorites-select {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    font-size: max(16px, 100%);
+}
+.m-imgbrowser-machine .m-imgbrowser-path {
+    display: none;
+}
+.m-imgbrowser-body {
+    flex: 1 1 0;
+    min-height: 80px;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(118px, 36%) minmax(0, 1fr);
+    gap: 0.65rem;
+    overflow: hidden;
+}
+.m-imgbrowser-folders-panel,
+.m-imgbrowser-images-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+}
+.m-imgbrowser-folders-panel {
+    padding-right: 0.65rem;
+}
+.m-imgbrowser-panel-title {
+    flex: 0 0 auto;
+    margin: 0 0 0.35rem;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-soft);
+}
+.m-imgbrowser-folders {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+.m-imgbrowser-folder-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0.5rem 0.25rem;
+    text-align: left;
+    border: 0;
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+}
+.m-imgbrowser-folder-row:hover,
+.m-imgbrowser-folder-row:focus-visible {
+    background: var(--background-panel);
+}
+.m-imgbrowser-folder-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-imgbrowser-folder-chevron {
+    flex: 0 0 auto;
+    color: var(--text-soft);
+}
+.m-imgbrowser-footer .m-imgbrowser-status {
+    flex: 1 1 0;
+    min-width: 0;
+}
+@media (min-width: 640px) {
+    .m-imgbrowser-body {
+        grid-template-columns: minmax(180px, 24%) minmax(0, 1fr);
+    }
+}
+@media (max-height: 500px) {
+    .m-imgbrowser {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: auto auto auto minmax(80px, 1fr) auto;
+    }
+    .m-imgbrowser-title-row,
+    .m-imgbrowser-navigation,
+    .m-imgbrowser-body,
+    .m-imgbrowser-footer {
+        grid-column: 1 / -1;
+    }
+    .m-imgbrowser-sources {
+        grid-column: 1;
+    }
+    .m-imgbrowser-favorites,
+    .m-imgbrowser > .m-imgbrowser-hint {
+        grid-column: 2;
+    }
+}
+.m-imgbrowser-sources {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
+}
+.m-imgbrowser-source {
+    min-height: 44px;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    font-size: 14px;
+}
+.m-imgbrowser-source.m-selected {
+    border-color: var(--emphasis, #4a9eff);
+    color: var(--emphasis, #4a9eff);
 }
 .m-imgbrowser-path {
     flex: 1 1 auto;
@@ -2681,7 +2862,8 @@ html:has(.m-body) {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.m-imgbrowser-tool {
+.m-imgbrowser-tool,
+.m-imgbrowser-up {
     flex: 0 0 auto;
     min-height: 44px;
     padding: 0.35rem 0.8rem;
@@ -2691,13 +2873,29 @@ html:has(.m-body) {
     border-radius: 0.5rem;
     font-size: 14px;
 }
+.m-imgbrowser-machine-path {
+    flex: 1 1 12rem;
+    min-width: 0;
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    font-size: max(16px, 100%);
+}
+.m-imgbrowser-up:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
 .m-imgbrowser-grid {
     flex: 1 1 auto;
-    min-height: 6rem;
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(90px, 100%), 1fr));
     gap: 0.35rem;
     align-content: start;
     -webkit-overflow-scrolling: touch;
@@ -2739,6 +2937,15 @@ html:has(.m-body) {
     text-overflow: ellipsis;
     white-space: nowrap;
     pointer-events: none;
+}
+.m-imgbrowser-more {
+    grid-column: 1 / -1;
+    min-height: 44px;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    font-size: 14px;
 }
 .m-imgbrowser-roots-edit .m-imgbrowser-title-row {
     margin-bottom: 0.35rem;

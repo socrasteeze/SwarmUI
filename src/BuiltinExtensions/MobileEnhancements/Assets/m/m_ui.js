@@ -192,8 +192,8 @@ class MUI {
     }
 
     /** Opens a bottom sheet with the given content element. Returns a close function. Drag-down on the grip
-     * or backdrop tap dismisses (interaction contract carried over from the proven shell). */
-    openSheet(contentElem) {
+     * or backdrop tap dismisses. The optional onClose callback runs as soon as dismissal starts. */
+    openSheet(contentElem, onClose = null) {
         this.openSheets++;
         this.applyKeyboardInset();
         let backdrop = this.el('div', 'm-sheet-backdrop');
@@ -215,6 +215,9 @@ class MUI {
                 return;
             }
             closed = true;
+            if (onClose) {
+                onClose();
+            }
             this.openSheets--;
             backdrop.classList.remove('m-open');
             sheet.classList.remove('m-open');

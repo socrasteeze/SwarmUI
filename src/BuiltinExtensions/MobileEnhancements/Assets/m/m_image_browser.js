@@ -1,10 +1,7 @@
 /** MobileEnhancements standalone client - server-backed image folder browser for /simple.
- * Opens a bottom sheet that lists Swarm output folders via ListImages (same API as the Images tab and
- * Classic's input browser). Configurable root chips (localStorage) jump to common trees under the
- * configured OutputPath - Inputs, Starred, MixStudio, year folders, etc. - without touching iOS Files.
- * Selection returns a path entry ({kind:'path', value:outputRelativePath}) that initimage / videoendimage /
- * promptimages already know how to send. An optional "From phone" control keeps the device picker as a
- * fallback for images that are not already on the server. */
+ * Output lists Swarm output folders through ListImages and returns relative path entries. Drives, when the
+ * user has browse_server_images, lists machine folders through ListSimpleImageFolder and returns image data.
+ * Configurable roots only apply to Output. An optional phone picker remains available for device images. */
 class MImageBrowser {
 
     static StorageKey = 'm_client_img_browser_roots';
@@ -30,6 +27,10 @@ class MImageBrowser {
         this.path = '';
         /** Active root chip path (used to highlight the matching chip). */
         this.rootPath = '';
+        /** Current simple-machine-browser path. This remains in memory, never in output-root storage. */
+        this.machinePath = '';
+        /** Last selected source in this browser instance. */
+        this.source = 'output';
     }
 
     /** True when a folder segment should stay out of the /simple image browser. */
@@ -86,6 +87,8 @@ class MImageBrowser {
         let onPick = opts.onPick;
         let allowPhone = opts.allowPhone !== false;
         let roots = this.loadRoots();
+        let canBrowseMachine = typeof permissions != 'undefined' && permissions.hasPermission
+            && permissions.hasPermission('browse_server_images');
         if (typeof opts.startPath == 'string') {
             this.path = opts.startPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
             this.rootPath = this.path;
@@ -102,39 +105,115 @@ class MImageBrowser {
         closeBtn.setAttribute('aria-label', 'Close');
         titleRow.appendChild(closeBtn);
         content.appendChild(titleRow);
-        content.appendChild(mUI.el('div', 'm-imgbrowser-fav-label', 'Favorites'));
-        let rootsRow = mUI.el('div', 'm-imgbrowser-roots');
-        content.appendChild(rootsRow);
-        let folderChips = mUI.el('div', 'm-folder-chips');
-        content.appendChild(folderChips);
-        let toolbar = mUI.el('div', 'm-imgbrowser-toolbar');
+        let sourceRow = mUI.el('div', 'm-imgbrowser-sources');
+        let outputBtn = mUI.el('button', 'm-imgbrowser-source', 'Output');
+        outputBtn.type = 'button';
+        sourceRow.appendChild(outputBtn);
+        let drivesBtn = null;
+        if (canBrowseMachine) {
+            drivesBtn = mUI.el('button', 'm-imgbrowser-source', 'Drives');
+            drivesBtn.type = 'button';
+            sourceRow.appendChild(drivesBtn);
+        }
+        content.appendChild(sourceRow);
+        let machineHint = mUI.el('div', 'm-imgbrowser-hint', 'Folders on the SwarmUI host.');
+        content.appendChild(machineHint);
+        let favorites = mUI.el('div', 'm-imgbrowser-favorites');
+        let favoritesSelect = document.createElement('select');
+        favoritesSelect.className = 'm-imgbrowser-favorites-select';
+        favoritesSelect.setAttribute('aria-label', 'Favorites');
+        favorites.appendChild(favoritesSelect);
+        let rootsBtn = mUI.el('button', 'm-imgbrowser-tool', 'Edit');
+        rootsBtn.type = 'button';
+        favorites.appendChild(rootsBtn);
+        content.appendChild(favorites);
+        let navigation = mUI.el('div', 'm-imgbrowser-navigation');
         let pathLabel = mUI.el('div', 'm-imgbrowser-path', this.path || '(output root)');
-        toolbar.appendChild(pathLabel);
-        let rootsBtn = mUI.el('button', 'm-imgbrowser-tool', 'Roots');
-        toolbar.appendChild(rootsBtn);
+        navigation.appendChild(pathLabel);
+        let upBtn = mUI.el('button', 'm-imgbrowser-up', 'Up');
+        upBtn.type = 'button';
+        upBtn.disabled = true;
+        navigation.appendChild(upBtn);
+        let parentPath = null;
+        let machinePathInput = document.createElement('input');
+        machinePathInput.type = 'text';
+        machinePathInput.className = 'm-imgbrowser-machine-path';
+        machinePathInput.placeholder = 'Folder Path';
+        machinePathInput.setAttribute('aria-label', 'Folder Path');
+        let goBtn = mUI.el('button', 'm-imgbrowser-tool', 'Go');
+        goBtn.type = 'button';
+        navigation.appendChild(machinePathInput);
+        navigation.appendChild(goBtn);
         let phoneInput = null;
+        let phoneBtn = null;
         if (allowPhone) {
             phoneInput = document.createElement('input');
             phoneInput.type = 'file';
             phoneInput.accept = mediaTypes.includes('image') && mediaTypes.length == 1 ? 'image/*' : mediaTypes.map(t => `${t}/*`).join(',');
             phoneInput.style.display = 'none';
             content.appendChild(phoneInput);
-            let phoneBtn = mUI.el('button', 'm-imgbrowser-tool', 'From phone');
+            phoneBtn = mUI.el('button', 'm-imgbrowser-tool', 'From Phone');
             phoneBtn.addEventListener('click', () => phoneInput.click());
-            toolbar.appendChild(phoneBtn);
         }
-        content.appendChild(toolbar);
+        content.appendChild(navigation);
+        let body = mUI.el('div', 'm-imgbrowser-body');
+        let foldersPanel = mUI.el('div', 'm-imgbrowser-folders-panel');
+        foldersPanel.appendChild(mUI.el('div', 'm-imgbrowser-panel-title', 'Folders'));
+        let foldersList = mUI.el('div', 'm-imgbrowser-folders');
+        foldersPanel.appendChild(foldersList);
+        body.appendChild(foldersPanel);
+        let imagesPanel = mUI.el('div', 'm-imgbrowser-images-panel');
+        imagesPanel.appendChild(mUI.el('div', 'm-imgbrowser-panel-title', 'Images'));
         let grid = mUI.el('div', 'm-imgbrowser-grid');
-        content.appendChild(grid);
+        imagesPanel.appendChild(grid);
+        body.appendChild(imagesPanel);
+        content.appendChild(body);
+        let footer = mUI.el('div', 'm-imgbrowser-footer');
         let status = mUI.el('div', 'm-imgbrowser-status', 'Loading...');
-        content.appendChild(status);
+        footer.appendChild(status);
+        if (phoneBtn) {
+            footer.appendChild(phoneBtn);
+        }
+        content.appendChild(footer);
         let close = null;
+        let closed = false;
+        let requestVersion = 0;
+        let selectionVersion = 0;
+        let selectionInFlight = false;
+        let previewQueue = [];
+        let previewsInFlight = 0;
+        let observer = typeof IntersectionObserver == 'undefined' ? null : new IntersectionObserver(entries => {
+            for (let entry of entries) {
+                if (entry.isIntersecting) {
+                    observer.unobserve(entry.target);
+                    previewQueue.push(entry.target);
+                }
+            }
+            loadPreviews();
+        }, { 'root': grid, 'rootMargin': '160px' });
         closeBtn.addEventListener('click', () => {
+            closed = true;
+            requestVersion++;
+            selectionInFlight = false;
+            selectionVersion++;
+            if (observer) {
+                observer.disconnect();
+            }
             if (close) {
                 close();
             }
         });
         let pick = (entry) => {
+            if (closed || !content.isConnected) {
+                return;
+            }
+            closed = true;
+            requestVersion++;
+            selectionInFlight = false;
+            selectionVersion++;
+            if (observer) {
+                observer.disconnect();
+            }
             if (onPick) {
                 onPick(entry);
             }
@@ -155,45 +234,76 @@ class MImageBrowser {
             });
         }
         let renderRoots = () => {
-            rootsRow.innerHTML = '';
+            favoritesSelect.innerHTML = '';
             for (let root of roots) {
-                let chip = mUI.el('button', 'm-folder-chip', root.label);
+                let option = document.createElement('option');
+                option.value = root.path;
+                option.textContent = root.label;
                 if (this.rootPath == root.path || (this.path == root.path)) {
-                    chip.classList.add('m-selected');
+                    option.selected = true;
                 }
-                chip.addEventListener('click', () => {
-                    this.path = root.path;
-                    this.rootPath = root.path;
+                favoritesSelect.appendChild(option);
+            }
+        };
+        let setSource = (source) => {
+            this.source = source;
+            let machine = source == 'machine';
+            content.classList.toggle('m-imgbrowser-machine', machine);
+            outputBtn.classList.toggle('m-selected', !machine);
+            if (drivesBtn) {
+                drivesBtn.classList.toggle('m-selected', machine);
+            }
+            favorites.hidden = machine;
+            machinePathInput.hidden = !machine;
+            goBtn.hidden = !machine;
+            machineHint.hidden = !machine;
+            if (machine) {
+                machinePathInput.value = this.machinePath;
+            }
+        };
+        upBtn.addEventListener('click', () => {
+            if (upBtn.disabled) {
+                return;
+            }
+            if (this.source == 'machine') {
+                this.machinePath = parentPath;
+            }
+            else {
+                this.path = this.path.includes('/') ? this.path.substring(0, this.path.lastIndexOf('/')) : '';
+                let match = roots.filter(r => r.path == this.path || (r.path && this.path.startsWith(`${r.path}/`)))
+                    .sort((a, b) => b.path.length - a.path.length)[0];
+                this.rootPath = match ? match.path : '';
+            }
+            refresh();
+        });
+        let renderFolderRows = (folders, append) => {
+            if (!append) {
+                foldersList.innerHTML = '';
+            }
+            for (let folder of folders) {
+                let row = mUI.el('button', 'm-imgbrowser-folder-row');
+                row.type = 'button';
+                row.appendChild(mUI.el('span', 'm-imgbrowser-folder-name', folder.name || folder));
+                let chevron = mUI.el('span', 'm-imgbrowser-folder-chevron', '\u203A');
+                chevron.setAttribute('aria-hidden', 'true');
+                row.appendChild(chevron);
+                row.addEventListener('click', () => {
+                    if (this.source == 'machine') {
+                        this.machinePath = folder.path;
+                    }
+                    else {
+                        this.path = this.path == '' ? folder : `${this.path}/${folder}`;
+                    }
                     refresh();
                 });
-                rootsRow.appendChild(chip);
+                foldersList.appendChild(row);
             }
         };
         let renderFolders = (folders) => {
-            folderChips.innerHTML = '';
             folders = [...folders]
                 .filter(f => !this.isHiddenFolder(f))
                 .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-            if (this.path != '') {
-                let up = mUI.el('button', 'm-folder-chip m-folder-up', '\u2190');
-                up.addEventListener('click', () => {
-                    this.path = this.path.includes('/') ? this.path.substring(0, this.path.lastIndexOf('/')) : '';
-                    // Keep the highlighted root as the longest configured root that is still a prefix.
-                    let match = roots.filter(r => r.path == this.path || (r.path && this.path.startsWith(`${r.path}/`)))
-                        .sort((a, b) => b.path.length - a.path.length)[0];
-                    this.rootPath = match ? match.path : '';
-                    refresh();
-                });
-                folderChips.appendChild(up);
-            }
-            for (let folder of folders) {
-                let chip = mUI.el('button', 'm-folder-chip', folder);
-                chip.addEventListener('click', () => {
-                    this.path = this.path == '' ? folder : `${this.path}/${folder}`;
-                    refresh();
-                });
-                folderChips.appendChild(chip);
-            }
+            renderFolderRows(folders, false);
         };
         let renderFiles = (files) => {
             grid.innerHTML = '';
@@ -230,19 +340,195 @@ class MImageBrowser {
                 status.textContent = `${shown} image${shown == 1 ? '' : 's'}`;
             }
         };
-        let refresh = () => {
+        let renderMachineFolders = (folders, parent, append) => {
+            renderFolderRows(folders || [], append);
+        };
+        let loadPreviews = () => {
+            while (previewsInFlight < 4 && previewQueue.length > 0) {
+                let tile = previewQueue.shift();
+                let version = Number(tile.dataset.version);
+                let path = tile.dataset.path;
+                if (closed || !content.isConnected || version != requestVersion || !path || tile.dataset.loading == 'true') {
+                    continue;
+                }
+                tile.dataset.loading = 'true';
+                previewsInFlight++;
+                genericRequest('ReadSimpleImage', { 'path': path, 'preview': true }, data => {
+                    previewsInFlight--;
+                    if (!closed && content.isConnected && version == requestVersion && data && data.image) {
+                        tile.querySelector('img').src = data.image;
+                    }
+                    loadPreviews();
+                }, 0, () => {
+                    previewsInFlight--;
+                    loadPreviews();
+                });
+            }
+        };
+        let appendMachineFiles = (files, version) => {
+            for (let file of files || []) {
+                let tile = mUI.el('button', 'm-imgbrowser-tile');
+                tile.type = 'button';
+                tile.dataset.path = file.path;
+                tile.dataset.version = version;
+                let img = document.createElement('img');
+                img.alt = file.name;
+                tile.appendChild(img);
+                tile.appendChild(mUI.el('div', 'm-imgbrowser-tile-name', file.name));
+                tile.addEventListener('click', () => {
+                    if (selectionInFlight || tile.disabled || closed || !content.isConnected || version != requestVersion) {
+                        return;
+                    }
+                    this.dismissKeyboard();
+                    let selection = ++selectionVersion;
+                    selectionInFlight = true;
+                    tile.disabled = true;
+                    status.textContent = 'Loading image...';
+                    genericRequest('ReadSimpleImage', { 'path': file.path, 'preview': false }, data => {
+                        if (closed || !content.isConnected || selection != selectionVersion || version != requestVersion) {
+                            return;
+                        }
+                        if (data && data.image) {
+                            pick({ 'kind': 'data', 'value': data.image });
+                            return;
+                        }
+                        selectionInFlight = false;
+                        tile.disabled = false;
+                        status.textContent = 'Could not load image. Try again.';
+                    }, 0, () => {
+                        if (!closed && content.isConnected && selection == selectionVersion && version == requestVersion) {
+                            selectionInFlight = false;
+                            tile.disabled = false;
+                            status.textContent = 'Could not load image. Try again.';
+                        }
+                    });
+                });
+                grid.appendChild(tile);
+                if (observer) {
+                    observer.observe(tile);
+                }
+                else {
+                    previewQueue.push(tile);
+                }
+            }
+            loadPreviews();
+        };
+        let refresh = (offset = 0, append = false) => {
+            let version = append ? requestVersion : ++requestVersion;
+            if (!append) {
+                selectionInFlight = false;
+                selectionVersion++;
+                previewQueue = [];
+                if (observer) {
+                    observer.disconnect();
+                }
+                grid.innerHTML = '';
+                foldersList.innerHTML = '';
+                parentPath = null;
+                upBtn.disabled = true;
+            }
+            if (this.source == 'machine') {
+                this.dismissKeyboard();
+                machinePathInput.value = this.machinePath;
+                pathLabel.textContent = this.machinePath || 'Drives';
+                status.textContent = 'Loading...';
+                let requestedPath = this.machinePath;
+                genericRequest('ListSimpleImageFolder', { 'path': this.machinePath, 'offset': offset, 'limit': 100 }, data => {
+                    if (closed || !content.isConnected || version != requestVersion) {
+                        return;
+                    }
+                    this.machinePath = data.path || '';
+                    if (machinePathInput.value == requestedPath) {
+                        machinePathInput.value = this.machinePath;
+                    }
+                    pathLabel.textContent = this.machinePath || 'Drives';
+                    parentPath = data.parent;
+                    upBtn.disabled = parentPath === null || parentPath === undefined;
+                    renderMachineFolders(data.folders, data.parent, append);
+                    appendMachineFiles(data.files, version);
+                    let oldMore = grid.querySelector('.m-imgbrowser-more');
+                    if (oldMore) {
+                        oldMore.remove();
+                    }
+                    if (data.next_offset !== null && data.next_offset !== undefined) {
+                        let more = mUI.el('button', 'm-imgbrowser-more', 'Load More');
+                        more.type = 'button';
+                        more.addEventListener('click', () => {
+                            more.disabled = true;
+                            refresh(data.next_offset, true);
+                        });
+                        grid.appendChild(more);
+                    }
+                    let count = grid.querySelectorAll('.m-imgbrowser-tile').length;
+                    status.textContent = count ? `${count} image${count == 1 ? '' : 's'}` : 'No images in this folder.';
+                }, 0, err => {
+                    if (!closed && content.isConnected && version == requestVersion) {
+                        if (!append) {
+                            grid.innerHTML = '';
+                            foldersList.innerHTML = '';
+                            parentPath = null;
+                            upBtn.disabled = true;
+                        }
+                        let more = grid.querySelector('.m-imgbrowser-more');
+                        if (more) {
+                            more.remove();
+                        }
+                        status.textContent = `Could not list folder: ${err}`;
+                    }
+                });
+                return;
+            }
             pathLabel.textContent = this.path || '(output root)';
+            parentPath = this.path == '' ? null : true;
+            upBtn.disabled = parentPath === null;
             renderRoots();
             status.textContent = 'Loading...';
             grid.innerHTML = '';
             genericRequest('ListImages', { 'path': this.path, 'depth': 1, 'sortBy': 'Date', 'sortReverse': true }, data => {
+                if (closed || !content.isConnected || version != requestVersion) {
+                    return;
+                }
                 renderFolders(data.folders || []);
                 renderFiles(data.files || []);
             }, 0, err => {
+                if (closed || !content.isConnected || version != requestVersion) {
+                    return;
+                }
                 status.textContent = `Could not list folder: ${err}`;
                 mUI.warn(`Could not list folder: ${err}`);
             });
         };
+        outputBtn.addEventListener('click', () => {
+            setSource('output');
+            refresh();
+        });
+        if (drivesBtn) {
+            drivesBtn.addEventListener('click', () => {
+                setSource('machine');
+                refresh();
+            });
+        }
+        let goMachine = () => {
+            let next = machinePathInput.value.trim();
+            if (!next) {
+                status.textContent = 'Enter a folder path.';
+                return;
+            }
+            this.machinePath = next;
+            refresh();
+        };
+        goBtn.addEventListener('click', goMachine);
+        machinePathInput.addEventListener('keydown', e => {
+            if (e.key == 'Enter') {
+                e.preventDefault();
+                goMachine();
+            }
+        });
+        favoritesSelect.addEventListener('change', () => {
+            this.path = favoritesSelect.value;
+            this.rootPath = this.path;
+            refresh();
+        });
         rootsBtn.addEventListener('click', () => {
             this.openRootsEditor(roots, (next) => {
                 roots = next;
@@ -259,8 +545,18 @@ class MImageBrowser {
         let dismissKb = () => this.dismissKeyboard();
         grid.addEventListener('scroll', dismissKb, { passive: true });
         grid.addEventListener('touchmove', dismissKb, { passive: true });
+        close = mUI.openSheet(content, () => {
+            closed = true;
+            requestVersion++;
+            selectionInFlight = false;
+            selectionVersion++;
+            previewQueue = [];
+            if (observer) {
+                observer.disconnect();
+            }
+        });
+        setSource(canBrowseMachine && this.source == 'machine' ? 'machine' : 'output');
         refresh();
-        close = mUI.openSheet(content);
         return close;
     }
 
@@ -270,14 +566,14 @@ class MImageBrowser {
         let roots = currentRoots.map(r => ({ 'label': r.label, 'path': r.path }));
         let content = mUI.el('div', 'm-imgbrowser-roots-edit');
         let titleRow = mUI.el('div', 'm-imgbrowser-title-row');
-        titleRow.appendChild(mUI.el('div', 'm-sheet-title', 'Folder roots'));
+        titleRow.appendChild(mUI.el('div', 'm-sheet-title', 'Output Favorites'));
         let closeBtn = mUI.el('button', 'm-imgbrowser-close', '\u00D7');
         closeBtn.type = 'button';
         closeBtn.setAttribute('aria-label', 'Close');
         titleRow.appendChild(closeBtn);
         content.appendChild(titleRow);
         content.appendChild(mUI.el('div', 'm-imgbrowser-hint',
-            'Favorites under Swarm OutputPath (ListImages). Not system drives — ListImages is sandboxed to Output. Examples: inputs, Starred, MixStudio, raw/2026-09.'));
+            'Use paths relative to Output. Select Drives in the browser for other drives.'));
         let list = mUI.el('div', 'm-imgbrowser-roots-list');
         content.appendChild(list);
         let close = null;

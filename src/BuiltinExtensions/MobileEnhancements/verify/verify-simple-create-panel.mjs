@@ -246,13 +246,16 @@ const initialControls = await page.evaluate(() => ({
     aspectSteppers: document.querySelectorAll('.m-aspect-stepper').length,
     sizeSteppers: document.querySelectorAll('.m-size-stepper').length,
     oldResolutionPickers: document.querySelectorAll('.m-resolution-select, .m-size-select, .m-res-readout').length,
-    tagDexButtons: document.querySelectorAll('.m-tagdex-browse-button').length
+    tagDexButtons: document.querySelectorAll('.m-tagdex-browse-button').length,
+    resetOutsidePicker: !document.querySelector('.m-picker-row .m-reset-button'),
+    resetSecondary: !!document.querySelector('.m-create-secondary .m-reset-button')
 }));
 check('seed starts as one Random button', initialControls.randomLabel == 'Random' && initialControls.seedInputHidden, JSON.stringify(initialControls));
 check('aspect and size are steppers', initialControls.aspectSteppers == 1 && initialControls.sizeSteppers == 1 && initialControls.oldResolutionPickers == 0, JSON.stringify(initialControls));
-check('TagDex browse is mounted once in the Create picker row', initialControls.tagDexButtons == 1, `${initialControls.tagDexButtons} buttons`);
-check('reset and seed-clear controls show single symbols', initialControls.resetLabel == '\u21ba'
-    && initialControls.seedClearLabel == '\u00d7', JSON.stringify(initialControls));
+check('Characters shortcut is absent from the Create picker row', initialControls.tagDexButtons == 0, `${initialControls.tagDexButtons} buttons`);
+check('Reset Params is a secondary action outside the picker row', initialControls.resetLabel == 'Reset Params'
+    && initialControls.resetOutsidePicker && initialControls.resetSecondary, JSON.stringify(initialControls));
+check('seed-clear control shows its single symbol', initialControls.seedClearLabel == '\u00d7', JSON.stringify(initialControls));
 check('all four quick steppers show a minus sign', initialControls.decreaseLabels.length == 4
     && initialControls.decreaseLabels.every(label => label == '\u2212'), JSON.stringify(initialControls.decreaseLabels));
 
@@ -285,14 +288,17 @@ const resolution = await page.evaluate(() => ({
     side: mState.params.sidelength,
     dims: mState.previewResolution(),
     generated: mState.buildGenInput(),
-    label: document.querySelector('.m-size-stepper .m-stepper-label').textContent,
-    value: document.querySelector('.m-size-stepper .m-stepper-value').textContent
+    value: document.querySelector('.m-size-stepper .m-stepper-value').textContent,
+    title: document.querySelector('.m-size-stepper .m-stepper-value').title,
+    aspectLabel: document.querySelector('.m-aspect-stepper').getAttribute('aria-label'),
+    sizeLabel: document.querySelector('.m-size-stepper').getAttribute('aria-label')
 }));
 check('aspect stepper writes the next wider ratio and leaves the size alone', resolution.aspect == '7:4' && resolution.side == '1024', JSON.stringify(resolution));
 check('extra aspect ratios generate as Custom pixels', resolution.generated.aspectratio == 'Custom'
     && `${resolution.generated.width}x${resolution.generated.height}` == resolution.dims.join('x'), JSON.stringify(resolution.generated));
 check('size stepper shows the rung it moves and the pixels it produces', resolution.value == '1024'
-    && resolution.label == resolution.dims.join(' \u00d7 '), JSON.stringify(resolution));
+    && resolution.title == `${resolution.dims.join(' \u00d7 ')} pixels`
+    && resolution.aspectLabel == 'Aspect Ratio' && resolution.sizeLabel == 'Side Length', JSON.stringify(resolution));
 
 // Ladder walk: up through every rung, clamped at the top, then back down and clamped at the bottom.
 const sizeSteps = [];
@@ -300,7 +306,7 @@ for (let i = 0; i < 4; i++) {
     await page.click('.m-size-stepper .m-stepper-button:last-of-type');
     sizeSteps.push(await page.evaluate(() => `${mState.params.sidelength}=${mState.previewResolution().join('x')}`));
     await page.waitForFunction(([side, dims]) => document.querySelector('.m-size-stepper .m-stepper-value').textContent == side
-        && document.querySelector('.m-size-stepper .m-stepper-label').textContent == dims,
+        && document.querySelector('.m-size-stepper .m-stepper-value').title == `${dims} pixels`,
         await page.evaluate(() => [`${mState.params.sidelength}`, mState.previewResolution().join(' \u00d7 ')]));
 }
 check('size steps up the fixed ladder, redraws, and clamps at the top', sizeSteps.join(' | ') == '1152=1536x896 | 1280=1664x960 | 1536=2048x1152 | 1536=2048x1152', sizeSteps.join(' | '));
@@ -472,7 +478,8 @@ await page.evaluate(() => {
     sessionStorage.removeItem('m-lora-weight-step');
 });
 
-await page.click('.m-tagdex-browse-button');
+// The Create shortcut was removed; keep the shared Characters sheet's behavior covered directly.
+await page.evaluate(() => mTagDex.openBrowseSheet());
 await page.waitForSelector('.m-tagdex-card');
 const tagDexSheet = await page.evaluate(() => ({
     title: document.querySelector('.m-tagdex-browse-sheet .m-sheet-title').textContent,
@@ -574,6 +581,56 @@ const tagDexTypeahead = await page.evaluate(() => {
 });
 check('TagDex typeahead keeps single-word trigger insertion intact', tagDexTypeahead.single == 'hatsune miku, vocaloid', JSON.stringify(tagDexTypeahead));
 check('TagDex typeahead does not duplicate an already typed name prefix', tagDexTypeahead.multiple == 'hatsune miku, vocaloid', JSON.stringify(tagDexTypeahead));
+
+// Suggestions must remain in their own toolbar space, without covering Generate or its neighboring actions.
+for (let width of [360, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: HEIGHT });
+    const autocompleteGeometry = await page.evaluate(async () => {
+        let originalMatcher = mAutoComplete.getPossibleList;
+        let originalPrompt = mState.params.prompt;
+        let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        mAutoComplete.hide();
+        let toolbar = mCreate.promptActions;
+        let before = toolbar.getBoundingClientRect();
+        mAutoComplete.getPossibleList = () => ['alpha', 'alphabet', 'alpha_with_a_very_long_completion_name', 'alpine'];
+        let box = mCreate.promptBox;
+        box.value = 'alp';
+        box.setSelectionRange(3, 3);
+        box.dispatchEvent(new Event('input'));
+        await settle();
+        let panel = document.querySelector('.m-create-panel');
+        panel.scrollTop += mCreate.genButton.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+        let strip = mAutoComplete.slots.get(box);
+        let rect = strip.getBoundingClientRect();
+        let generate = mCreate.genButton.getBoundingClientRect();
+        let add = mCreate.promptImageAdd.getBoundingClientRect();
+        let clear = mCreate.promptImageClear.getBoundingClientRect();
+        let enhance = document.querySelector('.m-enhance-pill').getBoundingClientRect();
+        let after = toolbar.getBoundingClientRect();
+        let hit = document.elementFromPoint(generate.x + generate.width / 2, generate.y + generate.height / 2);
+        let result = {
+            chipCount: strip.querySelectorAll('.m-ac-chip').length,
+            belowGenerate: rect.top >= generate.bottom,
+            betweenActions: rect.left >= add.right && rect.left >= clear.right && rect.right <= enhance.left,
+            stableHeight: Math.abs(before.height - after.height) <= 1,
+            generateReachable: !!hit && (hit == mCreate.genButton || mCreate.genButton.contains(hit)),
+            noOverflow: panel.scrollWidth <= panel.clientWidth,
+            parent: strip.parentElement.parentElement.className
+        };
+        mAutoComplete.hide();
+        mAutoComplete.getPossibleList = originalMatcher;
+        mState.params.prompt = originalPrompt;
+        mState.changed();
+        await settle();
+        return result;
+    });
+    check(`autocomplete ${width}px stays clear of Generate, Add, and Enhance`, autocompleteGeometry.chipCount == 4
+        && autocompleteGeometry.belowGenerate && autocompleteGeometry.betweenActions && autocompleteGeometry.generateReachable,
+        JSON.stringify(autocompleteGeometry));
+    check(`autocomplete ${width}px does not resize the toolbar or widen the panel`, autocompleteGeometry.stableHeight
+        && autocompleteGeometry.noOverflow, JSON.stringify(autocompleteGeometry));
+}
+await page.setViewportSize({ width: WIDTH, height: HEIGHT });
 
 await page.addScriptTag({ content: extractFunction(readFileSync(OUTPUT_HISTORY, 'utf8'), 'showMostRecentSessionImage') });
 const deleteFallback = await page.evaluate(() => {
@@ -1119,7 +1176,7 @@ const sampler = await page.evaluate(async () => {
     return out;
 });
 check('sampler and scheduler picklists appear once the params are advertised', sampler.rowDisplay != 'none' && sampler.count == 2, JSON.stringify(sampler));
-check('sampler options are the server values with a leading default', sampler.samplerOptions == '=Sampler: Euler|euler=Euler|dpmpp_2m=DPM++ 2M', sampler.samplerOptions);
+check('sampler options show chosen values without repeated field prefixes', sampler.samplerOptions == '=Euler|euler=Euler|dpmpp_2m=DPM++ 2M', sampler.samplerOptions);
 check('picking a sampler and scheduler writes the raw values into state', sampler.picked == 'dpmpp_2m,karras', sampler.picked);
 check('a picked sampler is not also shown as an Advanced chip', sampler.chips == 0, `${sampler.chips}`);
 check('picking the default option clears the param from state', sampler.afterDefault == false, `${sampler.afterDefault}`);
@@ -1172,7 +1229,7 @@ const upscale = await page.evaluate(() => {
     mCreate.renderQuickParams();
     return out;
 });
-check('upscale row appears once refiner params are advertised', upscale.rowDisplay != 'none' && upscale.count == 2, JSON.stringify(upscale));
+check('upscale row stays hidden when refiner params are advertised', upscale.rowDisplay == 'none' && upscale.count == 2, JSON.stringify(upscale));
 check('long upscale options do not widen the Create panel', upscale.panelScrollWidth <= upscale.panelWidth,
     `${upscale.panelScrollWidth}/${upscale.panelWidth}px`);
 check('upscale scale options always use preferred ladder (union Examples)', upscale.scaleOptions == '1=Upscale: Off|1.25=Upscale: 1.25x|1.5=Upscale: 1.5x|1.75=Upscale: 1.75x|2=Upscale: 2x|2.5=Upscale: 2.5x|3=Upscale: 3x|4=Upscale: 4x', upscale.scaleOptions);
@@ -1182,46 +1239,50 @@ check('picking upscale scale and method writes raw values', upscale.picked == '1
 check('picked upscale params are covered, not Advanced chips', upscale.covered && upscale.chips == 0, JSON.stringify(upscale));
 check('selecting upscale Off (1) clears the param', upscale.afterOff == false, `${upscale.afterOff}`);
 
-// The Prefix row is hidden unless the session advertises the `filenameprefix` param - renderQuickParams
-// recomputes `prefixRow.style.display` from `mState.paramMeta` on every render (m_create.js). This harness
-// never boots, so ListT2IParams never lands and the row stayed `display: none`, giving the Prefix input a
-// zero rect. The right-edge check below then compared a real edge against 0 and had always failed, which
-// read as a misalignment for weeks. Populate the param and re-render first, so the check measures the
-// arrangement it was written for.
+// The Prefix field is hidden unless the session advertises `filenameprefix`. This harness never boots, so
+// ListT2IParams never lands. Populate metadata before measuring the shared seed-prefix row.
 await page.evaluate(() => {
     mState.paramMeta['filenameprefix'] = { id: 'filenameprefix', name: 'Filename Prefix', type: 'text', default: '' };
     mCreate.renderQuickParams();
 });
 
-// Prefix sits above Steps/CFG; CLR follows the 1/2/4 batch buttons.
+// Seed and prefix share one compact row.
 const layout = await page.evaluate(() => {
     let prefix = document.querySelector('.m-prefix-input');
     let tune = document.querySelector('.m-tune-row');
-    let labels = [...document.querySelector('.m-quick-item.m-seg-group').querySelectorAll('.m-seg-button')].map(b => b.textContent);
     let createIcon = document.querySelector('.m-nav-item[data-mdest="create"] .m-nav-icon').textContent;
-    let prefixBox = prefix ? prefix.getBoundingClientRect() : null;
-    let batchBtns = [...document.querySelectorAll('.m-batch-group .m-seg-button')].map(b => b.getBoundingClientRect());
-    let widths = batchBtns.map(b => Math.round(b.width * 10) / 10);
-    let widthSpan = widths.length ? Math.max(...widths) - Math.min(...widths) : 99;
-    let last = batchBtns.length ? batchBtns[batchBtns.length - 1] : null;
+    let row = document.querySelector('.m-seed-prefix-row');
+    let picker = document.querySelector('.m-picker-row');
+    let panel = document.querySelector('.m-panel[data-mtab="create"]');
     return {
+        prefixOnSeedRow: !!(prefix && row && prefix.parentElement == row),
         prefixBeforeTune: !!(prefix && tune && (prefix.compareDocumentPosition(tune) & Node.DOCUMENT_POSITION_FOLLOWING)),
-        batch: labels.join(','),
+        batchAbsent: !document.querySelector('.m-batch-group'),
         createIcon: createIcon,
-        batchEqual: widthSpan <= 1,
-        batchWidths: widths,
-        prefixVisible: !!(prefixBox && prefixBox.width > 0),
-        batchRightAlign: !!(prefixBox && last && Math.abs(last.right - prefixBox.right) <= 1),
-        batchRightGap: (prefixBox && last) ? Math.round((last.right - prefixBox.right) * 100) / 100 : null
+        prefixVisible: !!(prefix && prefix.getBoundingClientRect().width > 0),
+        prefixPlaceholder: prefix ? prefix.placeholder : '',
+        prefixAccessibility: prefix ? {
+            id: prefix.id, name: prefix.name, label: prefix.getAttribute('aria-label'), autocomplete: prefix.autocomplete,
+            autocapitalize: prefix.getAttribute('autocapitalize'), autocorrect: prefix.getAttribute('autocorrect'), spellcheck: prefix.spellcheck,
+            formType: prefix.getAttribute('data-form-type'), lpIgnore: prefix.getAttribute('data-lpignore')
+        } : null,
+        picker: picker ? [...picker.querySelectorAll('button')].map(button => button.getAttribute('aria-label') || button.textContent).join('|') : '',
+        seedPrefixOneLine: row ? [...row.children].every(child => Math.abs(child.getBoundingClientRect().top - row.children[0].getBoundingClientRect().top) <= 1) : false,
+        seedPrefixFits: row ? row.scrollWidth <= panel.clientWidth : false,
+        hiddenResolutionLabels: document.querySelectorAll('.m-res-row .m-stepper-label').length == 0
     };
 });
-check('Prefix field sits above the Steps/CFG row', layout.prefixBeforeTune);
-check('batch row is 1, 2, 4, CLR',
-    layout.batch == '1,2,4,CLR', layout.batch);
-check('batch 1/2/4/CLR buttons are equal width',
-    layout.batchEqual, JSON.stringify(layout.batchWidths));
-check('Prefix row is visible once filenameprefix is advertised', layout.prefixVisible);
-check('batch group right edge matches Prefix', layout.batchRightAlign, `gap ${layout.batchRightGap}px`);
+check('Prefix field shares the Seed row above Steps/CFG', layout.prefixOnSeedRow && layout.prefixBeforeTune);
+check('image-count picker is absent', layout.batchAbsent);
+check('Prefix is visible and uses safe filename-field autofill attributes', layout.prefixVisible && layout.prefixPlaceholder == 'Prefix'
+    && layout.prefixAccessibility.id == 'm-generation-file-stem' && layout.prefixAccessibility.name == 'm-generation-file-stem'
+    && layout.prefixAccessibility.label == 'Filename Prefix' && layout.prefixAccessibility.autocomplete == 'off'
+    && layout.prefixAccessibility.autocapitalize == 'off' && layout.prefixAccessibility.autocorrect == 'off'
+    && layout.prefixAccessibility.spellcheck == false && layout.prefixAccessibility.formType == 'other'
+    && layout.prefixAccessibility.lpIgnore == 'true', JSON.stringify(layout.prefixAccessibility));
+check('picker row contains only Checkpoint and LoRA', layout.picker == 'Checkpoint|LoRA', layout.picker);
+check('Seed and Prefix stay on one row without overflow', layout.seedPrefixOneLine && layout.seedPrefixFits, JSON.stringify(layout));
+check('Aspect and Side Length have no visible top labels', layout.hiddenResolutionLabels, JSON.stringify(layout));
 check('Create nav icon is the geometric triangle, not a pencil emoji',
     layout.createIcon == '\u25B3', JSON.stringify(layout.createIcon));
 
@@ -1345,20 +1406,83 @@ check('stepping away from Custom clears the matched ratio', restoredAspect.exite
     && restoredAspect.ratio == 0, JSON.stringify(restoredAspect));
 
 
-// ---- Prompt-header chrome: Enhance replaced Coach ----
+// ---- Prompt toolbar: image add and Enhance replace the visible Prompt heading ----
 const promptChrome = await page.evaluate(() => {
     let enhance = document.querySelector('.m-enhance-pill');
     let coach = document.querySelector('.m-coach-pill');
     let more = (mUI.moreItems || []).some(item => item.label == 'Prompt Coach');
+    let toolbar = document.querySelector('.m-prompt-toolbar');
+    let add = document.querySelector('.m-prompt-image-add');
     return {
-        enhanceOnHead: !!(enhance && enhance.parentElement.classList.contains('m-prompt-head')),
+        enhanceOnToolbar: !!(enhance && enhance.parentElement == toolbar),
+        addOnToolbar: !!(add && add.parentElement == toolbar && add.textContent == '+'),
+        noPromptHead: !document.querySelector('.m-prompt-head, .m-prompt-head-label'),
         enhanceText: enhance ? enhance.textContent : '',
         coachPillGone: !coach,
         moreCoach: more
     };
 });
-check('prompt header hosts Enhance, not Coach', promptChrome.enhanceOnHead && promptChrome.coachPillGone, JSON.stringify(promptChrome));
+check('prompt toolbar hosts Add Image and Enhance without a Prompt heading', promptChrome.enhanceOnToolbar
+    && promptChrome.addOnToolbar && promptChrome.noPromptHead && promptChrome.coachPillGone, JSON.stringify(promptChrome));
 check('Prompt Coach remains reachable from More', promptChrome.moreCoach, JSON.stringify(promptChrome));
+
+const promptImageLayout = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    mState.promptImages = [];
+    mState.changed();
+    await settle();
+    let strip = document.querySelector('.m-image-strip');
+    let empty = { hidden: getComputedStyle(strip).display == 'none', tiles: strip.querySelectorAll('.m-image-tile').length };
+    mState.promptImages = [{ kind: 'data', value: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }];
+    mState.changed();
+    await settle();
+    return { empty, filled: { hidden: getComputedStyle(strip).display == 'none', tiles: strip.querySelectorAll('.m-image-tile').length },
+        addStillOnToolbar: document.querySelectorAll('.m-prompt-toolbar .m-prompt-image-add').length == 1 };
+});
+check('prompt image strip hides empty and shows thumbnails without moving the Add button', promptImageLayout.empty.hidden
+    && promptImageLayout.empty.tiles == 0 && !promptImageLayout.filled.hidden && promptImageLayout.filled.tiles == 1
+    && promptImageLayout.addStillOnToolbar, JSON.stringify(promptImageLayout));
+
+const clearedPhotos = await page.evaluate(async () => {
+    let savedParams = { ...mState.params };
+    let savedPhotos = mState.promptImages;
+    let savedStart = mState.initImage;
+    let savedEnd = mState.videoEndImage;
+    let savedFramesOpen = mCreate.framesWrap.open;
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    mState.params.prompt = 'Keep this prompt';
+    mState.params.filenameprefix = 'keep-prefix';
+    mState.initImage = { kind: 'path', value: 'raw/start.png' };
+    mState.videoEndImage = { kind: 'path', value: 'raw/end.png' };
+    mState.changed();
+    await settle();
+    let enabled = !mCreate.promptImageClear.disabled;
+    mCreate.promptImageClear.click();
+    await settle();
+    let result = {
+        enabled,
+        count: mState.promptImages.length,
+        sentPhotos: 'promptimages' in mState.buildGenInput(),
+        disabled: mCreate.promptImageClear.disabled,
+        prompt: mState.params.prompt,
+        prefix: mState.params.filenameprefix,
+        start: mState.initImage.value,
+        end: mState.videoEndImage.value,
+        onPhotoRow: mCreate.promptImageClear.parentElement == mCreate.promptActions
+    };
+    mState.params = savedParams;
+    mState.promptImages = savedPhotos;
+    mState.initImage = savedStart;
+    mState.videoEndImage = savedEnd;
+    mState.changed();
+    await settle();
+    mCreate.framesWrap.open = savedFramesOpen;
+    return result;
+});
+check('photo-row Clear removes attached photos and disables when empty', clearedPhotos.enabled && clearedPhotos.count == 0
+    && !clearedPhotos.sentPhotos && clearedPhotos.disabled && clearedPhotos.onPhotoRow, JSON.stringify(clearedPhotos));
+check('photo-row Clear preserves prompt, Prefix, and Start/End frames', clearedPhotos.prompt == 'Keep this prompt'
+    && clearedPhotos.prefix == 'keep-prefix' && clearedPhotos.start == 'raw/start.png' && clearedPhotos.end == 'raw/end.png', JSON.stringify(clearedPhotos));
 
 // ---- Start/end frame section ----
 await page.evaluate(() => {
@@ -1459,19 +1583,19 @@ const afterReset = await page.evaluate(() => {
 check('resetParams clears both start and end frames', afterReset.initImage == null && afterReset.videoEndImage == null, JSON.stringify(afterReset));
 check('resetParams-cleared frames are absent from the next request', !afterReset.hasStart && !afterReset.hasEnd, JSON.stringify(afterReset));
 
-// CLR (the seed-row button that already clears prompt images + prefix) also clears both frames.
-const afterClr = await page.evaluate(() => {
+// Reset Params remains the explicit reset control and clears both frames.
+const afterResetButton = await page.evaluate(() => {
     mState.initImage = { kind: 'data', value: 'data:image/gif;base64,aaaa' };
     mState.videoEndImage = { kind: 'data', value: 'data:image/gif;base64,bbbb' };
     let originalConfirm = window.confirm;
     window.confirm = () => true;
-    mCreate.imagesGroup.querySelector('.m-seg-button:last-child').click();
+    mCreate.resetButton.click();
     window.confirm = originalConfirm;
     return { initImage: mState.initImage, videoEndImage: mState.videoEndImage,
-        title: mCreate.imagesGroup.querySelector('.m-seg-button:last-child').title };
+        clearAbsent: !document.querySelector('.m-clear-button') };
 });
-check('CLR button clears both start and end frames', afterClr.initImage == null && afterClr.videoEndImage == null, JSON.stringify(afterClr));
-check('CLR button title names start/end frames', afterClr.title.includes('start/end frames'), afterClr.title);
+check('Reset Params button clears both start and end frames', afterResetButton.initImage == null && afterResetButton.videoEndImage == null, JSON.stringify(afterResetButton));
+check('Clear is absent from the checkpoint picker row', afterResetButton.clearAbsent);
 
 // Not covered by dedicated params: neither key ever renders as an Advanced chip.
 const framesNotAdvChips = await page.evaluate(() => {
@@ -1495,19 +1619,22 @@ const browserOpen = await page.evaluate(async () => {
     await settle();
     return {
         sheet: !!document.querySelector('.m-imgbrowser'),
-        roots: [...document.querySelectorAll('.m-imgbrowser-roots .m-folder-chip')].map(c => c.textContent),
-        phone: [...document.querySelectorAll('.m-imgbrowser-tool')].some(b => b.textContent == 'From phone')
+        roots: [...document.querySelectorAll('.m-imgbrowser-favorites-select option')].map(option => option.textContent),
+        upDisabled: document.querySelector('.m-imgbrowser-up').disabled,
+        phone: [...document.querySelectorAll('.m-imgbrowser-tool')].some(b => b.textContent == 'From Phone')
     };
 });
 check('frame + opens server image browser sheet', browserOpen.sheet, JSON.stringify(browserOpen));
-check('browser shows default Output/Inputs/Starred/MixStudio roots', ['Output','Inputs','Starred','MixStudio'].every(l => browserOpen.roots.includes(l)), JSON.stringify(browserOpen.roots));
+check('browser shows Output favorites in its select and disables Up at the root', ['Output','Inputs','Starred','MixStudio'].every(l => browserOpen.roots.includes(l))
+    && browserOpen.upDisabled, JSON.stringify(browserOpen));
 check('browser offers From phone fallback', browserOpen.phone);
 
 const pickFromMix = await page.evaluate(async () => {
     let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    // Click MixStudio root then the mix-a.png tile.
-    let root = [...document.querySelectorAll('.m-imgbrowser-roots .m-folder-chip')].find(c => c.textContent == 'MixStudio');
-    if (root) { root.click(); }
+    // Select MixStudio favorite then choose its mix-a.png tile.
+    let favorites = document.querySelector('.m-imgbrowser-favorites-select');
+    favorites.value = 'MixStudio';
+    favorites.dispatchEvent(new Event('change'));
     await settle();
     // Wait a tick for ListImages callback.
     await new Promise(r => setTimeout(r, 100));
@@ -1537,7 +1664,7 @@ const promptChooser = await page.evaluate(async () => {
     await settle();
     return {
         chooser: !!document.querySelector('.m-imgbrowser-chooser'),
-        server: [...document.querySelectorAll('.m-imgbrowser-chooser-btn')].some(b => b.textContent == 'Browse server folders'),
+        server: [...document.querySelectorAll('.m-imgbrowser-chooser-btn')].some(b => b.textContent == 'Browse Folders'),
         phone: [...document.querySelectorAll('.m-imgbrowser-chooser-btn')].some(b => b.textContent == 'From phone')
     };
 });
