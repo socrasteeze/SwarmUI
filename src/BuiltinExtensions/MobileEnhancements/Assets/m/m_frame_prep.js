@@ -4,10 +4,9 @@
  *   1. Detect same-frame presets (known titles + FL2VA+orbit/360/same-frame title match +
  *      optional localStorage extras) and default a "Same as start" toggle ON for them so
  *      End mirrors Start whenever Start is set or changes.
- *   2. Before submit (and on attach when the preset qualifies), letterbox-scale Start (and
+ *   2. Before submit (and on attach when the preset qualifies), scale Start (and
  *      End when mirrored) so the shortest side is 768 and both dims are multiples of 32 -
- *      matching Comfy LayerUtility ImageScaleByAspectRatio V2 (aspect original, fit letterbox,
- *      scale_to_side shortest, scale_to_length 768, round_to_multiple 32, black pad).
+ *      preserving aspect ratio, then rounding each dimension to the nearest multiple of 32.
  *
  * Client-side canvas resize is intentional: Swarm has no Init-image preprocess hook that
  * matches this node, and /simple already owns the frame slots. Browser canvas does not expose
@@ -30,7 +29,7 @@ class MFramePrep {
     ];
 
     /** Marks an entry already prepared so prepareFramesForGenerate does not re-encode it. */
-    static PrepTag = 'fl2va768v1';
+    static PrepTag = 'fl2va768v2';
 
     /** localStorage key: comma-separated extra titles treated as same-frame. */
     static ExtraTitlesKey = 'm_client_same_frame_presets';
@@ -104,14 +103,12 @@ class MFramePrep {
         catch (e) { /* private mode */ }
     }
 
-    /** Round a positive length up to the next multiple (LayerUtility num_round_up_to_multiple). */
-    static roundUp(n, multiple) {
-        let rem = n % multiple;
-        return rem == 0 ? n : n + (multiple - rem);
+    /** Round a positive length to the nearest multiple; never pad the canvas. */
+    static roundNearest(n, multiple) {
+        return Math.max(multiple, Math.round(n / multiple) * multiple);
     }
 
-    /** Target width/height for aspect=original, scale_to_side=shortest, scale_to_length, round_to_multiple.
-     * Mirrors aspect_resize.py (Python int() truncates toward 0 for positive values = Math.floor). */
+    /** Target width/height after scaling the shortest side to 768 and rounding to *32. */
     static targetDims(srcW, srcH, shortest, multiple) {
         shortest = shortest || MFramePrep.Shortest;
         multiple = multiple || MFramePrep.Multiple;
@@ -119,38 +116,24 @@ class MFramePrep {
         let tw, th;
         if (ratio > 1) {
             th = shortest;
-            tw = Math.floor(th * ratio);
+            tw = th * ratio;
         }
         else {
             tw = shortest;
-            th = Math.floor(tw / ratio);
+            th = tw / ratio;
         }
-        return [MFramePrep.roundUp(tw, multiple), MFramePrep.roundUp(th, multiple)];
+        return [MFramePrep.roundNearest(tw, multiple), MFramePrep.roundNearest(th, multiple)];
     }
 
-    /** Letterbox-fit source onto a black target canvas (LayerUtility fit_resize_image letterbox).
-     * Uses canvas imageSmoothingQuality='high' as the practical browser stand-in for LANCZOS. */
-    static letterboxToCanvas(img, targetW, targetH) {
+    /** Scale the source directly to the target dimensions; no padding is added. */
+    static scaleToCanvas(img, targetW, targetH) {
         let canvas = document.createElement('canvas');
         canvas.width = targetW;
         canvas.height = targetH;
         let ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, targetW, targetH);
-        let srcW = img.naturalWidth || img.width;
-        let srcH = img.naturalHeight || img.height;
-        let fitW, fitH;
-        if (srcW / srcH > targetW / targetH) {
-            fitW = targetW;
-            fitH = Math.floor(targetW / srcW * srcH);
-        }
-        else {
-            fitH = targetH;
-            fitW = Math.floor(targetH / srcH * srcW);
-        }
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, Math.floor((targetW - fitW) / 2), Math.floor((targetH - fitH) / 2), fitW, fitH);
+        ctx.drawImage(img, 0, 0, targetW, targetH);
         return canvas;
     }
 
@@ -198,7 +181,7 @@ class MFramePrep {
         if (srcW == tw && srcH == th && entry.kind == 'data' && entry.prep == MFramePrep.PrepTag) {
             return entry;
         }
-        let canvas = MFramePrep.letterboxToCanvas(img, tw, th);
+        let canvas = MFramePrep.scaleToCanvas(img, tw, th);
         // JPEG keeps payload small for phone uploads; FL2VA frames are photographs.
         return {
             'kind': 'data',

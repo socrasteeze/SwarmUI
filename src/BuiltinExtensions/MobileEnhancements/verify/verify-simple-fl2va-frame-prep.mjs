@@ -1,5 +1,5 @@
 /**
- * Light offline checks for m_frame_prep.js math + preset detection (no DOM / canvas / Playwright).
+ * Light offline checks for m_frame_prep.js scaling math + preset detection (no DOM / canvas / Playwright).
  * Run from repo root:
  *     node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-fl2va-frame-prep.mjs
  */
@@ -39,6 +39,8 @@ assert(dims(1080, 1920) === JSON.stringify([768, 1376]), '1080x1920 -> 768x1376 
 assert(dims(1024, 1024) === JSON.stringify([768, 768]), '1024x1024 -> 768x768 got ' + dims(1024, 1024));
 assert(dims(768, 768) === JSON.stringify([768, 768]), 'already 768 square stays');
 assert(dims(800, 600) === JSON.stringify([1024, 768]), '800x600 -> 1024x768 got ' + dims(800, 600));
+assert(dims(1000, 700) === JSON.stringify([1088, 768]), '1000x700 rounds nearest without padding -> 1088x768 got ' + dims(1000, 700));
+assert(dims(700, 1000) === JSON.stringify([768, 1088]), '700x1000 rounds nearest without padding -> 768x1088 got ' + dims(700, 1000));
 
 mState.activePresets = ['minimax/FL2VA_360_Orbit_Eros'];
 assert(mFramePrep.isSameFramePreset() === true, 'known Orbit_Eros title matches');

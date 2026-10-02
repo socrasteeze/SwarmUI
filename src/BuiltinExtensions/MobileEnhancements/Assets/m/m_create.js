@@ -537,7 +537,7 @@ class MCreate {
     }
 
     /** Fires one generation batch. Stays on this tab - the preview is right here.
-     * For FL2VA same-frame presets, m_frame_prep.js letterbox-scales Start/End to shortest-768 / *32
+     * For FL2VA same-frame presets, m_frame_prep.js scales Start/End to shortest-768 / *32 without padding
      * before the request is built so the phone does not have to pre-size frames by hand. */
     doGenerate() {
         let kick = (input) => {

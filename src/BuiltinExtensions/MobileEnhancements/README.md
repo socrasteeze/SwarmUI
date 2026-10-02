@@ -17,8 +17,7 @@ It is intentionally built as a self-contained extension (new files only, zero ed
 For MiniMax H3 FL2VA same-frame / 360-orbit presets (at least minimax/FL2VA_360_Orbit_Eros, plus any title matching FL2VA + orbit/360/same-frame, or extras in localStorage.m_client_same_frame_presets):
 
 - **Same as start** toggle (default ON) mirrors Start frame into End whenever Start is set or changes.
-- **Auto-scale** letterboxes Start (and End when mirrored) to shortest side 768, dims multiple of 32, black pad — client-side canvas stand-in for LayerUtility ImageScaleByAspectRatio V2 (spect=original, it=letterbox, scale_to_side=shortest, scale_to_length=768, 
-ound_to_multiple=32). Browser canvas uses imageSmoothingQuality='high' rather than true LANCZOS; a future server-side hook would be more accurate.
+- **Auto-scale** scales Start (and End when mirrored) so the shortest side is 768, preserves the aspect ratio, and rounds dimensions to the nearest multiple of 32 without adding padding - client-side canvas processing for the FL2VA workflow. Browser canvas uses imageSmoothingQuality='high' rather than true LANCZOS; a future server-side hook would be more accurate.
 - Frame **+** buttons still open the existing server image browser (m_image_browser.js).
 
 Implemented in Assets/m/m_frame_prep.js (wired from m_create.js). Restart the SwarmUI server after pulling so GetLazy reloads OtherAssets.
