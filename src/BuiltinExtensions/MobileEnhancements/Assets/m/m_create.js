@@ -536,41 +536,60 @@ class MCreate {
         });
     }
 
-    /** Fires one generation batch. Stays on this tab - the preview is right here. */
+    /** Fires one generation batch. Stays on this tab - the preview is right here.
+     * For FL2VA same-frame presets, m_frame_prep.js letterbox-scales Start/End to shortest-768 / *32
+     * before the request is built so the phone does not have to pre-size frames by hand. */
     doGenerate() {
-        let input = mState.buildGenInput();
-        if (!`${input['prompt'] || ''}`.trim() && !input['promptimages'] && mState.activePresets.length == 0) {
-            mUI.warn('Type a prompt or pick a preset first.');
+        let kick = (input) => {
+            if (!`${input['prompt'] || ''}`.trim() && !input['promptimages'] && mState.activePresets.length == 0) {
+                mUI.warn('Type a prompt or pick a preset first.');
+                return;
+            }
+            // The header error strip is sticky, so clear it here: from this point the last failure describes an
+            // attempt the user has already moved on from. Cleared on the way out rather than on the way in so a
+            // rejected input (the guard above) still leaves the reason it was rejected on screen.
+            mUI.clearError();
+            mAutoComplete.hide();
+            if (document.activeElement && document.activeElement.blur) {
+                document.activeElement.blur();
+            }
+            this.setPending(true);
+            // The snapshot is re-read on every send, not just when the picker opens. A spoke's worker id changes
+            // whenever the spoke restarts (see mState.genTarget), so a snapshot taken before that restart would pin
+            // the request to a backend that no longer exists and the server refuses it outright. The round trip is
+            // one local ListBackends call. Resolved here rather than in buildGenInput so the fallback notice fires
+            // once per generation and not on every readout that rebuilds the input dict.
+            mState.refreshBackendTargets(() => {
+                this.renderGenTarget();
+                let target = mState.resolveGenTarget();
+                if (target.id == null) {
+                    delete input['exactbackendid'];
+                }
+                else {
+                    input['exactbackendid'] = target.id;
+                }
+                if (target.fellBack) {
+                    mUI.warn(`${MCreate.genTargetName(mState.genTarget, mState.backendTargets)} is not available - running here instead.`);
+                }
+                mGen.generate(input);
+            });
+        };
+        let afterPrep = () => {
+            // Rebuild after prep so initimage/videoendimage pick up any scaled data URIs.
+            kick(mState.buildGenInput());
+        };
+        if (typeof mFramePrep != 'undefined' && mFramePrep.isSameFramePreset()) {
+            mFramePrep.prepareFramesForGenerate().then(() => {
+                mState.save();
+                this.renderFrames();
+                afterPrep();
+            }).catch(err => {
+                console.warn('frame prep failed, sending unscaled', err);
+                afterPrep();
+            });
             return;
         }
-        // The header error strip is sticky, so clear it here: from this point the last failure describes an
-        // attempt the user has already moved on from. Cleared on the way out rather than on the way in so a
-        // rejected input (the guard above) still leaves the reason it was rejected on screen.
-        mUI.clearError();
-        mAutoComplete.hide();
-        if (document.activeElement && document.activeElement.blur) {
-            document.activeElement.blur();
-        }
-        this.setPending(true);
-        // The snapshot is re-read on every send, not just when the picker opens. A spoke's worker id changes
-        // whenever the spoke restarts (see mState.genTarget), so a snapshot taken before that restart would pin
-        // the request to a backend that no longer exists and the server refuses it outright. The round trip is
-        // one local ListBackends call. Resolved here rather than in buildGenInput so the fallback notice fires
-        // once per generation and not on every readout that rebuilds the input dict.
-        mState.refreshBackendTargets(() => {
-            this.renderGenTarget();
-            let target = mState.resolveGenTarget();
-            if (target.id == null) {
-                delete input['exactbackendid'];
-            }
-            else {
-                input['exactbackendid'] = target.id;
-            }
-            if (target.fellBack) {
-                mUI.warn(`${MCreate.genTargetName(mState.genTarget, mState.backendTargets)} is not available - running here instead.`);
-            }
-            mGen.generate(input);
-        });
+        afterPrep();
     }
 
     /** Short name for a target, used by the caret label and the fallback warning. Falls back to the stored
@@ -1105,13 +1124,70 @@ class MCreate {
 
     /** Collapsible "Start / end frame" section for image-to-video presets (eg MiniMax H3 FL2VA), styled and
      * behaved like the negative-prompt <details> immediately above it: always present, collapsed by default,
-     * auto-opens the first time either slot BECOMES filled (reuse/state restore) but never force-closes. */
+     * auto-opens the first time either slot BECOMES filled (reuse/state restore) but never force-closes.
+     * Same-as-start (m_frame_prep.js) defaults ON for FL2VA 360-orbit / same-frame presets so End mirrors
+     * Start; the toggle lets Adam override without leaving /simple. */
     buildFramesSection() {
         let wrap = mUI.el('details', 'm-neg-wrap');
         wrap.appendChild(mUI.el('summary', 'm-neg-summary', 'Start / end frame'));
+        let sameRow = mUI.el('label', 'm-frame-same-row');
+        this.sameAsStartInput = document.createElement('input');
+        this.sameAsStartInput.type = 'checkbox';
+        this.sameAsStartInput.className = 'm-frame-same-check';
+        this.sameAsStartInput.addEventListener('change', () => {
+            if (typeof mFramePrep != 'undefined') {
+                mFramePrep.setSameAsStart(this.sameAsStartInput.checked);
+                if (this.sameAsStartInput.checked) {
+                    mFramePrep.mirrorStartToEnd();
+                }
+                mState.changed();
+            }
+        });
+        sameRow.appendChild(this.sameAsStartInput);
+        sameRow.appendChild(document.createTextNode(' Same as start'));
+        this.sameAsStartRow = sameRow;
+        wrap.appendChild(sameRow);
         let row = mUI.el('div', 'm-frame-row');
-        this.startFrameSlot = this.buildFrameSlot('Start frame', () => mState.initImage, entry => { mState.initImage = entry; });
-        this.endFrameSlot = this.buildFrameSlot('End frame', () => mState.videoEndImage, entry => { mState.videoEndImage = entry; });
+        this.startFrameSlot = this.buildFrameSlot('Start frame', () => mState.initImage, entry => {
+            mState.initImage = entry;
+            this.startFrameSeq = (this.startFrameSeq || 0) + 1;
+            let seq = this.startFrameSeq;
+            // Scale on attach for same-frame presets so the thumbnail matches what Generate will send.
+            if (entry && typeof mFramePrep != 'undefined' && mFramePrep.isSameFramePreset()) {
+                mFramePrep.scaleEntry(entry).then(scaled => {
+                    if (seq != this.startFrameSeq) {
+                        return;
+                    }
+                    mState.initImage = scaled;
+                    if (mFramePrep.sameAsStartEnabled()) {
+                        mFramePrep.mirrorStartToEnd();
+                    }
+                    mState.changed();
+                }).catch(() => {
+                    if (seq != this.startFrameSeq) {
+                        return;
+                    }
+                    if (mFramePrep.sameAsStartEnabled()) {
+                        mFramePrep.mirrorStartToEnd();
+                        mState.changed();
+                    }
+                });
+                return;
+            }
+            if (typeof mFramePrep != 'undefined' && mFramePrep.sameAsStartEnabled()) {
+                mFramePrep.mirrorStartToEnd();
+            }
+        });
+        this.endFrameSlot = this.buildFrameSlot('End frame', () => mState.videoEndImage, entry => {
+            // A manual End pick is an explicit override of Same-as-start.
+            if (entry && typeof mFramePrep != 'undefined' && mFramePrep.sameAsStartEnabled()) {
+                mFramePrep.setSameAsStart(false);
+                if (this.sameAsStartInput) {
+                    this.sameAsStartInput.checked = false;
+                }
+            }
+            mState.videoEndImage = entry;
+        });
         row.appendChild(this.startFrameSlot);
         row.appendChild(this.endFrameSlot);
         wrap.appendChild(row);
@@ -1153,8 +1229,23 @@ class MCreate {
     }
 
     /** Re-renders both start/end frame slots, and opens the section the first time either slot becomes
-     * filled - mirroring the negative-prompt auto-open rule exactly (see render()). */
+     * filled - mirroring the negative-prompt auto-open rule exactly (see render()). Also syncs the
+     * Same-as-start toggle visibility/state for FL2VA same-frame presets (m_frame_prep.js). */
     renderFrames() {
+        let sameFrame = typeof mFramePrep != 'undefined' && mFramePrep.isSameFramePreset();
+        if (this.sameAsStartRow) {
+            this.sameAsStartRow.style.display = sameFrame ? '' : 'none';
+        }
+        if (sameFrame && this.sameAsStartInput && document.activeElement != this.sameAsStartInput) {
+            this.sameAsStartInput.checked = mFramePrep.sameAsStartEnabled();
+        }
+        // Keep End mirrored while Same-as-start is on (covers preset switch + Start restore from localStorage).
+        if (sameFrame && typeof mFramePrep != 'undefined' && mFramePrep.sameAsStartEnabled()) {
+            if (mFramePrep.mirrorStartToEnd()) {
+                // Persist the mirrored End without a full changed() re-render (would re-enter renderFrames).
+                mState.save();
+            }
+        }
         this.renderFrameSlot(this.startFrameSlot);
         this.renderFrameSlot(this.endFrameSlot);
         let hasFrame = !!mState.initImage || !!mState.videoEndImage;
