@@ -17,11 +17,25 @@ class MImageBrowser {
         { 'label': 'MixStudio', 'path': 'MixStudio' }
     ];
 
+    /** Folder name prefixes hidden from this browser (Comfy paste dumps, test scratch).
+     * Matching is case-insensitive on the final path segment. Complements HiddenHistoryFolders. */
+    static HiddenFolderRes = [
+        /^_comfy/i,
+        /^_charsheet/i,
+        /^_restore_test/i
+    ];
+
     constructor() {
         /** Current ListImages path under the output root. */
         this.path = '';
         /** Active root chip path (used to highlight the matching chip). */
         this.rootPath = '';
+    }
+
+    /** True when a folder segment should stay out of the /simple image browser. */
+    isHiddenFolder(name) {
+        let n = `${name || ''}`.replace(/\\/g, '/').split('/').pop();
+        return MImageBrowser.HiddenFolderRes.some(re => re.test(n));
     }
 
     /** Loads configured roots from localStorage, falling back to DefaultRoots. */
@@ -34,7 +48,7 @@ class MImageBrowser {
                     return parsed.map(r => ({
                         'label': `${r.label || r.path || 'Root'}`.trim() || 'Root',
                         'path': `${r.path || ''}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-                    }));
+                    })).filter(r => !this.isHiddenFolder(r.path || r.label));
                 }
             }
         }
@@ -81,7 +95,14 @@ class MImageBrowser {
             this.rootPath = roots[0].path;
         }
         let content = mUI.el('div', 'm-imgbrowser');
-        content.appendChild(mUI.el('div', 'm-sheet-title', title));
+        let titleRow = mUI.el('div', 'm-imgbrowser-title-row');
+        titleRow.appendChild(mUI.el('div', 'm-sheet-title', title));
+        let closeBtn = mUI.el('button', 'm-imgbrowser-close', '\u00D7');
+        closeBtn.type = 'button';
+        closeBtn.setAttribute('aria-label', 'Close');
+        titleRow.appendChild(closeBtn);
+        content.appendChild(titleRow);
+        content.appendChild(mUI.el('div', 'm-imgbrowser-fav-label', 'Favorites'));
         let rootsRow = mUI.el('div', 'm-imgbrowser-roots');
         content.appendChild(rootsRow);
         let folderChips = mUI.el('div', 'm-folder-chips');
@@ -108,6 +129,11 @@ class MImageBrowser {
         let status = mUI.el('div', 'm-imgbrowser-status', 'Loading...');
         content.appendChild(status);
         let close = null;
+        closeBtn.addEventListener('click', () => {
+            if (close) {
+                close();
+            }
+        });
         let pick = (entry) => {
             if (onPick) {
                 onPick(entry);
@@ -145,7 +171,9 @@ class MImageBrowser {
         };
         let renderFolders = (folders) => {
             folderChips.innerHTML = '';
-            folders = [...folders].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+            folders = [...folders]
+                .filter(f => !this.isHiddenFolder(f))
+                .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
             if (this.path != '') {
                 let up = mUI.el('button', 'm-folder-chip m-folder-up', '\u2190');
                 up.addEventListener('click', () => {
@@ -241,12 +269,24 @@ class MImageBrowser {
         this.dismissKeyboard();
         let roots = currentRoots.map(r => ({ 'label': r.label, 'path': r.path }));
         let content = mUI.el('div', 'm-imgbrowser-roots-edit');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'Folder roots'));
+        let titleRow = mUI.el('div', 'm-imgbrowser-title-row');
+        titleRow.appendChild(mUI.el('div', 'm-sheet-title', 'Folder roots'));
+        let closeBtn = mUI.el('button', 'm-imgbrowser-close', '\u00D7');
+        closeBtn.type = 'button';
+        closeBtn.setAttribute('aria-label', 'Close');
+        titleRow.appendChild(closeBtn);
+        content.appendChild(titleRow);
         content.appendChild(mUI.el('div', 'm-imgbrowser-hint',
-            'Paths are relative to Swarm OutputPath (ListImages). Examples: inputs, Starred, MixStudio, raw/2026-09.'));
+            'Favorites under Swarm OutputPath (ListImages). Not system drives — ListImages is sandboxed to Output. Examples: inputs, Starred, MixStudio, raw/2026-09.'));
         let list = mUI.el('div', 'm-imgbrowser-roots-list');
         content.appendChild(list);
         let close = null;
+        let dismiss = () => {
+            if (close) {
+                close();
+            }
+        };
+        closeBtn.addEventListener('click', dismiss);
         let render = () => {
             list.innerHTML = '';
             for (let i = 0; i < roots.length; i++) {
@@ -302,7 +342,9 @@ class MImageBrowser {
         let suggest = mUI.el('div', 'm-imgbrowser-suggest');
         content.appendChild(suggest);
         genericRequest('ListImages', { 'path': '', 'depth': 1, 'sortBy': 'Name', 'sortReverse': false }, data => {
-            let folders = [...(data.folders || [])].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+            let folders = [...(data.folders || [])]
+                .filter(f => !this.isHiddenFolder(f))
+                .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
             if (folders.length == 0) {
                 return;
             }
@@ -321,24 +363,29 @@ class MImageBrowser {
             suggest.appendChild(chips);
         });
         let actions = mUI.el('div', 'm-edit-actions');
+        let cancel = mUI.el('button', 'm-edit-cancel-button', 'Cancel');
+        cancel.type = 'button';
+        cancel.addEventListener('click', dismiss);
         let reset = mUI.el('button', 'm-edit-cancel-button', 'Reset defaults');
+        reset.type = 'button';
         reset.addEventListener('click', () => {
             roots = MImageBrowser.DefaultRoots.map(r => ({ 'label': r.label, 'path': r.path }));
             render();
         });
         let save = mUI.el('button', 'm-edit-save-button', 'Save');
+        save.type = 'button';
         save.addEventListener('click', () => {
             let cleaned = roots
                 .map(r => ({ 'label': `${r.label || r.path || 'Root'}`.trim() || 'Root', 'path': `${r.path || ''}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '') }))
+                .filter(r => !this.isHiddenFolder(r.path || r.label))
                 .filter((r, idx, arr) => arr.findIndex(x => x.path == r.path) == idx);
             if (cleaned.length == 0) {
                 cleaned = MImageBrowser.DefaultRoots.map(r => ({ 'label': r.label, 'path': r.path }));
             }
             onSave(cleaned);
-            if (close) {
-                close();
-            }
+            dismiss();
         });
+        actions.appendChild(cancel);
         actions.appendChild(reset);
         actions.appendChild(save);
         content.appendChild(actions);

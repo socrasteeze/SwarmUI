@@ -457,6 +457,12 @@ html:has(.m-body) {
 }
 .m-frame-slot-body {
     display: flex;
+    position: relative;
+}
+.m-frame-slot.m-frame-drop-hover .m-frame-slot-body,
+.m-frame-slot.m-frame-drop-hover .m-frame-add {
+    outline: 2px solid var(--emphasis, #4a9eff);
+    outline-offset: 2px;
 }
 .m-frame-add {
     width: 100%;
@@ -2092,20 +2098,40 @@ html:has(.m-body) {
 /* --- Images tab --- */
 .m-folder-chips {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.35rem;
-    overflow-x: auto;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     padding-bottom: 0.4rem;
-    -webkit-overflow-scrolling: touch;
     align-items: center;
+    /* Wrap avoids the iOS crush where overflow-x flex rows shrink/stack button chips. */
+    overflow-x: visible;
 }
 .m-folder-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
+    flex-shrink: 0;
+    width: max-content;
+    max-width: 100%;
+    box-sizing: border-box;
     background: var(--background-panel);
     color: var(--text);
     border: 1px solid var(--border-color);
     border-radius: 1rem;
     padding: 0.3rem 0.8rem;
     min-height: 36px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.m-folder-chip.m-folder-up {
+    font-weight: 700;
+    min-width: 44px;
+    padding-left: 0.7rem;
+    padding-right: 0.7rem;
 }
 .m-folder-current {
     color: var(--text-soft);
@@ -2547,12 +2573,47 @@ html:has(.m-body) {
     min-height: min(70dvh, calc(100dvh - var(--m-kb-inset, 0px) - 5rem));
     max-height: min(70dvh, calc(100dvh - var(--m-kb-inset, 0px) - 5rem));
 }
+.m-imgbrowser-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.15rem;
+}
+.m-imgbrowser-title-row .m-sheet-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
+}
+.m-imgbrowser-close {
+    flex: 0 0 auto;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    font-size: 22px;
+    line-height: 1;
+}
+.m-imgbrowser-fav-label {
+    color: var(--text-soft);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    margin: 0.1rem 0 0;
+}
 .m-imgbrowser-roots {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.35rem;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     padding-bottom: 0.2rem;
+    align-items: center;
+    overflow-x: visible;
 }
 .m-imgbrowser-roots .m-folder-chip.m-selected {
     border-color: var(--emphasis, #4a9eff);
@@ -2585,25 +2646,33 @@ html:has(.m-body) {
 }
 .m-imgbrowser-grid {
     flex: 1 1 auto;
-    min-height: 0;
+    min-height: 6rem;
     overflow-y: auto;
     overscroll-behavior: contain;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.35rem;
+    align-content: start;
     -webkit-overflow-scrolling: touch;
 }
 .m-imgbrowser-tile {
+    /* WebKit often ignores aspect-ratio on <button>; pad-box keeps a square cell. */
     position: relative;
-    aspect-ratio: 1;
+    display: block;
+    width: 100%;
+    height: 0;
     padding: 0;
+    padding-bottom: 100%;
     border: 1px solid var(--border-color);
     border-radius: 0.45rem;
     overflow: hidden;
     background: var(--background);
-    min-height: 44px;
+    min-height: 0;
+    box-sizing: border-box;
 }
 .m-imgbrowser-tile img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -2623,6 +2692,12 @@ html:has(.m-body) {
     text-overflow: ellipsis;
     white-space: nowrap;
     pointer-events: none;
+}
+.m-imgbrowser-roots-edit .m-imgbrowser-title-row {
+    margin-bottom: 0.35rem;
+}
+.m-imgbrowser-roots-edit .m-edit-actions {
+    flex-wrap: wrap;
 }
 .m-imgbrowser-status {
     color: var(--text-soft);
