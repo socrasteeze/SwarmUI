@@ -1098,6 +1098,17 @@ class MCreate {
         slot.appendChild(mUI.el('div', 'm-frame-slot-label', label));
         let body = mUI.el('div', 'm-frame-slot-body');
         slot.appendChild(body);
+        // Visible Paste: iOS Safari rarely fires paste on an empty + button / document listener,
+        // and long-press on + does not show a system Paste callout. A tap is a user gesture for
+        // navigator.clipboard.read(); setEntry still mirrors End when Same-as-start is ON.
+        let pasteBtn = mUI.el('button', 'm-frame-paste', 'Paste');
+        pasteBtn.type = 'button';
+        pasteBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.pasteFrameFromClipboard(slot);
+        });
+        slot.appendChild(pasteBtn);
         let fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = 'image/*';
@@ -1114,8 +1125,9 @@ class MCreate {
         slot.setEntry = setEntry;
         slot.body = body;
         slot.fileInput = fileInput;
+        slot.pasteBtn = pasteBtn;
         // Paste/drop onto the slot (or its + / thumb). Goes through setEntry so Start paste
-        // mirrors to End when Same-as-start is ON — same path as browser pick / From phone.
+        // mirrors to End when Same-as-start is ON - same path as browser pick / From phone.
         slot.addEventListener('paste', (e) => {
             if (this.applyFrameFromTransfer(slot, e.clipboardData) > 0) {
                 e.preventDefault();
@@ -1123,6 +1135,16 @@ class MCreate {
             }
         });
         slot.setAttribute('tabindex', '0');
+        // Long-press: open a tiny sheet (setTimeout clears Safari user-activation, so clipboard.read
+        // needs a fresh tap). Right-click calls clipboard.read directly (desktop gesture).
+        this.bindFrameLongPress(body, () => {
+            slot._suppressNextClick = true;
+            this.offerFramePaste(slot);
+        });
+        slot.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this.pasteFrameFromClipboard(slot);
+        });
         slot.addEventListener('dragover', (e) => {
             if (e.dataTransfer && [...(e.dataTransfer.types || [])].some(t => t == 'Files' || t == 'files')) {
                 e.preventDefault();
@@ -1138,6 +1160,135 @@ class MCreate {
             }
         });
         return slot;
+    }
+
+    /** Long-press sheet: Paste (fresh gesture for clipboard.read) + Browse. Used because a setTimeout
+     * long-press itself is not a Safari user activation for navigator.clipboard.read. */
+    offerFramePaste(slot) {
+        if (!slot) {
+            return;
+        }
+        let title = slot === this.startFrameSlot ? 'Start frame' : (slot === this.endFrameSlot ? 'End frame' : 'Frame');
+        let content = mUI.el('div', 'm-imgbrowser-chooser');
+        content.appendChild(mUI.el('div', 'm-sheet-title', title));
+        let close = null;
+        let pasteBtn = mUI.el('button', 'm-imgbrowser-chooser-btn', 'Paste from clipboard');
+        pasteBtn.addEventListener('click', () => {
+            if (close) {
+                close();
+            }
+            this.pasteFrameFromClipboard(slot);
+        });
+        let pickBtn = mUI.el('button', 'm-imgbrowser-chooser-btn m-imgbrowser-chooser-secondary', 'Browse / phone');
+        pickBtn.addEventListener('click', () => {
+            if (close) {
+                close();
+            }
+            this.openFramePicker(slot);
+        });
+        content.appendChild(pasteBtn);
+        content.appendChild(pickBtn);
+        close = mUI.openSheet(content);
+    }
+
+    /** Long-press (~550ms, cancelled on move) on a frame slot body - iOS empty + has no Paste callout. */
+    bindFrameLongPress(el, onLongPress) {
+        if (!el || typeof onLongPress != 'function') {
+            return;
+        }
+        let timer = null;
+        let startX = 0;
+        let startY = 0;
+        let clear = () => {
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        };
+        el.addEventListener('touchstart', (e) => {
+            if (!e.touches || e.touches.length != 1) {
+                return;
+            }
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            clear();
+            timer = setTimeout(() => {
+                timer = null;
+                onLongPress();
+            }, 550);
+        }, { 'passive': true });
+        el.addEventListener('touchmove', (e) => {
+            if (!timer || !e.touches || !e.touches[0]) {
+                return;
+            }
+            let t = e.touches[0];
+            if (Math.abs(t.clientX - startX) > 12 || Math.abs(t.clientY - startY) > 12) {
+                clear();
+            }
+        }, { 'passive': true });
+        el.addEventListener('touchend', clear, { 'passive': true });
+        el.addEventListener('touchcancel', clear, { 'passive': true });
+    }
+
+    /** Reads the system clipboard for an image (Safari iOS needs this tap as the user gesture) and
+     * attaches it via setEntry - same path as browser pick / From phone (Start mirrors End when
+     * Same-as-start is ON). Only the frame Paste button / long-press / context menu call this;
+     * prompt-focused pastes still go through onPaste on the prompt box. */
+    async pasteFrameFromClipboard(slot) {
+        if (!slot) {
+            return false;
+        }
+        // Explicit frame Paste: blur prompt/text fields so we do not race prompt onPaste.
+        let active = document.activeElement;
+        if (active && active !== slot && active !== slot.pasteBtn && active.closest) {
+            if (active.closest('.m-prompt') || (active.tagName == 'TEXTAREA') ||
+                (active.tagName == 'INPUT' && active.type != 'checkbox' && active.type != 'file' && !slot.contains(active))) {
+                active.blur();
+            }
+        }
+        if (navigator.clipboard && typeof navigator.clipboard.read == 'function') {
+            try {
+                let items = await navigator.clipboard.read();
+                for (let i = 0; i < items.length; i++) {
+                    let item = items[i];
+                    let types = item.types || [];
+                    let imageType = null;
+                    for (let t = 0; t < types.length; t++) {
+                        if (types[t] && types[t].startsWith('image/')) {
+                            imageType = types[t];
+                            break;
+                        }
+                    }
+                    if (!imageType) {
+                        continue;
+                    }
+                    let blob = await item.getType(imageType);
+                    if (!blob) {
+                        continue;
+                    }
+                    let ext = imageType.split('/')[1] || 'png';
+                    if (ext.indexOf('+') >= 0) {
+                        ext = ext.split('+')[0];
+                    }
+                    let file = new File([blob], 'clipboard.' + ext, { 'type': imageType });
+                    this.applyFrameFile(slot, file);
+                    return true;
+                }
+                mUI.toast('No image on clipboard', 'warn');
+                return false;
+            }
+            catch (err) {
+                // NotAllowedError / NotFoundError / insecure context - fall through to guidance.
+                console.warn('frame clipboard.read failed', err);
+            }
+        }
+        // Fallback: focus the slot so a subsequent system Paste (if the OS offers one) hits slot paste.
+        try {
+            slot.focus();
+        }
+        catch (e) { /* ignore */ }
+        mUI.toast('Clipboard blocked - copy an image, then tap Paste again (or use +)', 'warn');
+        return false;
     }
 
     /** First image from a paste/drop DataTransfer into a frame slot. Returns 1 if attached, else 0. */
@@ -1304,7 +1455,16 @@ class MCreate {
         slot.body.innerHTML = '';
         if (!entry) {
             let add = mUI.el('button', 'm-frame-add', '+');
-            add.addEventListener('click', () => this.openFramePicker(slot));
+            add.type = 'button';
+            add.addEventListener('click', (e) => {
+                // Long-press on the slot body sets this so we do not also open the picker.
+                if (slot._suppressNextClick) {
+                    slot._suppressNextClick = false;
+                    e.preventDefault();
+                    return;
+                }
+                this.openFramePicker(slot);
+            });
             slot.body.appendChild(add);
         }
         else {

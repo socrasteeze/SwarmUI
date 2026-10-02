@@ -473,6 +473,25 @@ html:has(.m-body) {
     border-radius: 0.5rem;
     font-size: 26px;
 }
+/* Visible Paste under each Start/End slot: iOS has no paste affordance on empty +; tap is the
+   user gesture Safari requires for navigator.clipboard.read(). */
+.m-frame-paste {
+    display: block;
+    width: 100%;
+    margin-top: 0.35rem;
+    min-height: 44px;
+    padding: 0 0.6rem;
+    background: var(--background-panel);
+    color: var(--text);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    font-size: 14px;
+}
+.m-frame-paste:active {
+    background: var(--emphasis, #0d6efd);
+    color: var(--emphasis-text, #fff);
+    border-color: var(--emphasis, #0d6efd);
+}
 .m-frame-tile {
     position: relative;
     width: 100%;
