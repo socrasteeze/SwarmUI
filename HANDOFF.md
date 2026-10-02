@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-01 (18:24 PT, live Windows) · **Branch:** `main` · **Base:** `b09608ef` · **Tree:** clean
+**Updated:** 2026-10-02 (00:18 PT, live Windows) · **Branch:** `main` · **Base:** `402de194` · **Tree:** clean
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
 The user waived the handoff line cap; the H3 reference sections below were logged at the user's request.
 
 ## Done this session
+
+- 2026-10-02 (00:18 PT, live Windows box): routine automated sync -- `upstream/master` at `d9ecb52d`, already an ancestor of HEAD (`402de194`); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI `fa98a189b`->`65787d668` (assets scanner batch prefix filters for many model folders; no requirements change). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`; RMBG 15 behind). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. All earlier handoff detail above is unchanged.
 
 - 2026-10-01 (18:24 PT, live Windows box): routine automated sync — `upstream/master` at `d9ecb52d`, already an ancestor of HEAD (`b09608ef`); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI `1b883beab`→`fa98a189b` (Grok Imagine Video 1.5 lite partner node + workflow templates 0.11.73→0.11.74; pip-installed templates). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty: DLNode ReActor / TeaCache (`nodes.py`), WD14-Tagger / RMBG (`requirements.txt`; RMBG 15 behind). Left `.disabled` folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. All earlier handoff detail above is unchanged.
 
