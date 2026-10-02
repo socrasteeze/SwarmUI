@@ -88,7 +88,7 @@ public class MobileEnhancementsExtension : Extension
         // MobileEnhancements only owns the /simple chrome that calls it.
         OtherAssets.Add("Assets/m/m_enhance.js");
         OtherAssets.Add("Assets/m/m_image_edit.js");
-        // Server-backed folder browser for /simple start/end frame + prompt-image attach (ListImages).
+        // Server-backed folder browser for /simple start/end frame + prompt-image attach.
         OtherAssets.Add("Assets/m/m_image_browser.js");
         OtherAssets.Add("Assets/m/m_frame_prep.js");
         OtherAssets.Add("Assets/m/m_create.js");
@@ -98,6 +98,8 @@ public class MobileEnhancementsExtension : Extension
         OtherAssets.Add("Assets/m/m_models.js");
         OtherAssets.Add("Assets/m/m_app.js");
         API.RegisterAPICall(GetSimpleAutocompletions, false, Permissions.FundamentalGenerateTabAccess);
+        API.RegisterAPICall(SimpleImageBrowserAPI.ListSimpleImageFolder, false, SimpleImageBrowserAPI.BrowsePermission);
+        API.RegisterAPICall(SimpleImageBrowserAPI.ReadSimpleImage, false, SimpleImageBrowserAPI.BrowsePermission);
     }
 
     /// <summary>Returns the current user's autocomplete word list for the standalone client. This endpoint is

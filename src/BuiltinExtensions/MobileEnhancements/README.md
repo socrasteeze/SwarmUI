@@ -22,6 +22,26 @@ For MiniMax H3 FL2VA same-frame / 360-orbit presets (at least minimax/FL2VA_360_
 
 Implemented in Assets/m/m_frame_prep.js (wired from m_create.js). Restart the SwarmUI server after pulling so GetLazy reloads OtherAssets.
 
+## /simple image folders
+
+Use an image attachment **+**, or a Start/End frame **+**, to open the image browser. **Output** keeps the existing output favorites in a dropdown, with **Edit** beside it. **Drives** lists the drives on the SwarmUI host. The folder list and image grid scroll separately. Open folders, use **Up**, or enter an absolute folder path and select **Go**. Image previews load as they enter view. **Load More** adds the next page in large folders.
+
+Drives requires the **Browse Server Images** role permission (`browse_server_images`), enabled by default for administrators. The permission grants image access across the host's filesystem, including mounted drives and readable network shares. Operating system access restrictions still apply. The browser shows folders and supported bitmap images only. It does not change source files. Selected images become normal attachments for prompt images and Start/End frames, including when the PWA runs on a phone.
+
+Supported formats: PNG, JPEG, WebP, GIF, BMP, and TIFF. Files must decode as images and must be no larger than 32 MiB. The **From Phone** option continues to use the device picker.
+
+Restart SwarmUI after installing the change, then reload the PWA with its cache cleared. Release servers hold extension assets in memory until restart.
+
+## /simple Create layout
+
+Preset Folder and Preset share the first control row. Checkpoint and LoRA share the next row. Generate stays above the prompt. The photo row contains the attachment button, Clear, autocomplete suggestions, and Enhance, followed by attached thumbnails. Clear removes only prompt photos and is disabled when none are attached. Suggestions do not cover Generate or resize the action row. Seed and Prefix share one row. Steps/CFG, Sampler/Scheduler, and Aspect/Side Length remain paired below it. The Upscale/Method row is hidden.
+
+Prefix has no separate visible label and disables contact autofill hints, automatic capitalization, autocorrection, and spelling checks. Sampler and Scheduler display their selected values without repeated labels. Aspect and Side Length keep accessible names and dimension tooltips without top labels. Reset Params remains at the bottom of Create. Characters remains available from the bottom navigation.
+
+## /simple attached photo cropping
+
+Open an attached photo to edit it. On desktop, drag across the image to create a crop. Drag a corner handle to resize the crop, or drag inside a smaller crop to move it. Mouse drags continue outside the image and stay within its boundaries. Touch cropping still uses the corner handles. Save applies the crop to the attachment; Cancel keeps the original attachment.
+
 ## Icons
 
 `Assets/icons/*` are generated from the repo's `src/wwwroot/favicon.ico` (128×128, upscaled). They are a functional placeholder — dropping a higher-resolution source logo in and regenerating the PNGs (192, 512, maskable 512, apple-touch 180) is a clean drop-in improvement. The maskable variant pads the glyph into the ~80% safe zone on the `#161616` theme background. As of 2026-08-28 they are palette-quantized PNGs (`-strip`, adaptive palette, no visible banding on the alpha edge) instead of naive full-RGBA upscales — the four files total well under 150KB, down from ~449KB.

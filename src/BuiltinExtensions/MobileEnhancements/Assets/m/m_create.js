@@ -316,12 +316,14 @@ class MCreate {
         panel.appendChild(this.resolvedWrap);
         this.presetRow = mUI.el('div', 'm-preset-row');
         this.archSelect = mUI.el('select', 'm-arch-select');
+        this.archSelect.setAttribute('aria-label', 'Preset Folder');
         this.archSelect.addEventListener('change', () => {
             mState.archFilter = this.archSelect.value;
             mState.changed();
         });
         this.presetRow.appendChild(this.archSelect);
         this.presetSelect = mUI.el('select', 'm-preset-select');
+        this.presetSelect.setAttribute('aria-label', 'Preset');
         this.presetSelect.addEventListener('change', () => {
             // Single pick: the selection IS the active preset, so picking replaces rather than accumulates.
             // See renderPresets for why this client does not offer the full UI's multi-preset merge.
@@ -331,18 +333,20 @@ class MCreate {
         });
         this.presetRow.appendChild(this.presetSelect);
         panel.appendChild(this.presetRow);
-        // Model and LoRAs share one row: two taps that open two sheets, no reason to spend two rows on them.
+        // Model and LoRA share one compact picker row.
         this.pickerRow = mUI.el('div', 'm-picker-row');
         this.modelButton = mUI.el('button', 'm-picker-button m-model-button');
+        this.modelButton.setAttribute('aria-label', 'Checkpoint');
         this.modelButton.addEventListener('click', () => this.openModelSheet());
         this.pickerRow.appendChild(this.modelButton);
         this.loraButton = mUI.el('button', 'm-picker-button');
+        this.loraButton.setAttribute('aria-label', 'LoRA');
         this.loraButton.addEventListener('click', () => this.openLoraSheet());
         this.pickerRow.appendChild(this.loraButton);
-        if (typeof mTagDex != 'undefined' && typeof mTagDex.installBrowse == 'function') {
-            mTagDex.installBrowse(this.pickerRow);
-        }
-        this.resetButton = mUI.el('button', 'm-picker-button m-reset-button', '\u21ba');
+        panel.appendChild(this.pickerRow);
+        // Keep the full reset outside the primary picker row. It remains in normal panel flow so it
+        // is present even when More was built before Create.
+        this.resetButton = mUI.el('button', 'm-reset-button', 'Reset Params');
         this.resetButton.title = 'Reset params';
         this.resetButton.setAttribute('aria-label', 'Reset Params');
         this.resetButton.addEventListener('click', () => {
@@ -354,8 +358,6 @@ class MCreate {
                 mUI.note('Params reset.');
             });
         });
-        this.pickerRow.appendChild(this.resetButton);
-        panel.appendChild(this.pickerRow);
         // Generate/Interrupt sit directly ABOVE the prompt box rather than at the foot of the panel. At the
         // foot they were sticky to the bottom of the layout viewport, which is exactly where the on-screen
         // keyboard is - so the one moment you most want to tap Generate (having just finished typing) was
@@ -400,12 +402,6 @@ class MCreate {
         genSplit.appendChild(this.genTargetButton);
         genBar.appendChild(genSplit);
         panel.appendChild(genBar);
-        // Prompt Enhance entry point (m_enhance.js): slim pill beside the heading, same spot Coach used to
-        // occupy. Coach (including Tags tools) remains under More > Prompt Coach.
-        let promptHead = mUI.el('div', 'm-prompt-head');
-        promptHead.appendChild(mUI.el('span', 'm-prompt-head-label', 'Prompt'));
-        promptHead.appendChild(mEnhance.buildPill());
-        panel.appendChild(promptHead);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
         this.promptBox = mUI.el('textarea', 'm-prompt-box');
         this.promptBox.placeholder = 'Type your prompt, or paste an image...';
@@ -424,6 +420,23 @@ class MCreate {
             });
         }
         promptWrap.appendChild(this.promptBox);
+        this.promptActions = mUI.el('div', 'm-prompt-toolbar');
+        this.promptImageAdd = mUI.el('button', 'm-image-add m-prompt-image-add', '+');
+        this.promptImageAdd.setAttribute('aria-label', 'Add Prompt Image');
+        this.promptImageAdd.addEventListener('click', () => this.openPromptImagePicker());
+        this.promptActions.appendChild(this.promptImageAdd);
+        this.promptImageClear = mUI.el('button', 'm-picker-button m-prompt-image-clear', 'Clear');
+        this.promptImageClear.setAttribute('aria-label', 'Clear Photos');
+        this.promptImageClear.title = 'Clear attached prompt photos';
+        this.promptImageClear.addEventListener('click', () => {
+            mState.promptImages = [];
+            mState.changed();
+        });
+        this.promptActions.appendChild(this.promptImageClear);
+        this.promptCompletionHost = mUI.el('div', 'm-prompt-completion');
+        this.promptActions.appendChild(this.promptCompletionHost);
+        this.promptActions.appendChild(mEnhance.buildPill());
+        promptWrap.appendChild(this.promptActions);
         this.imageStrip = mUI.el('div', 'm-image-strip');
         promptWrap.appendChild(this.imageStrip);
         this.ratioRow = mUI.el('div', 'm-ratio-row');
@@ -448,9 +461,12 @@ class MCreate {
         negWrap.appendChild(this.negBox);
         this.negWrap = negWrap;
         panel.appendChild(negWrap);
+        this.secondaryActions = mUI.el('div', 'm-create-secondary');
+        this.secondaryActions.appendChild(this.resetButton);
         panel.appendChild(this.buildFramesSection());
         this.advChips = mUI.el('div', 'm-adv-chips');
         panel.appendChild(this.advChips);
+        panel.appendChild(this.secondaryActions);
         let fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = 'image/*';
@@ -464,7 +480,7 @@ class MCreate {
         });
         panel.appendChild(fileInput);
         this.fileInput = fileInput;
-        mAutoComplete.enableFor(this.promptBox, 'prompt');
+        mAutoComplete.enableFor(this.promptBox, 'prompt', this.promptCompletionHost);
         mAutoComplete.enableFor(this.negBox, 'negativeprompt');
         mState.onChange(() => this.render());
         this.render();
@@ -721,7 +737,7 @@ class MCreate {
         this.renderImageStrip();
         this.renderQuickParams();
         let loras = mState.getLoras();
-        this.loraButton.textContent = `LoRAs (${loras.length})`;
+        this.loraButton.textContent = 'LoRA';
         this.renderAdvChips();
     }
 
@@ -732,9 +748,11 @@ class MCreate {
         let groups = mState.presetGroups();
         if (groups.length < 2) {
             this.archSelect.style.display = 'none';
+            this.presetRow.classList.add('m-folder-hidden');
             return;
         }
         this.archSelect.style.display = '';
+        this.presetRow.classList.remove('m-folder-hidden');
         if (mState.archFilter && !groups.includes(mState.archFilter)) {
             mState.archFilter = '';
         }
@@ -796,7 +814,7 @@ class MCreate {
         // image still came out as the preset's "Anima" - the button must show what will actually be used.
         let effective = mState.buildGenInput()['model'];
         if (!effective) {
-            this.modelButton.textContent = 'Model: default';
+            this.modelButton.textContent = 'Checkpoint';
             return;
         }
         // Normalised, because a preset stores 'qwen/Foo' where the picker stores 'qwen/Foo.safetensors'.
@@ -1039,7 +1057,7 @@ class MCreate {
     }
 
     /** Opens the server image browser (or falls back to the phone file input) to fill a frame slot.
-     * Primary path is server-backed so iOS Files is not required for images already under OutputPath. */
+     * The server browser supports Output and permitted machine folders. */
     openFramePicker(slot) {
         if (typeof mImageBrowser == 'undefined') {
             slot.fileInput.click();
@@ -1067,7 +1085,7 @@ class MCreate {
         let content = mUI.el('div', 'm-imgbrowser-chooser');
         content.appendChild(mUI.el('div', 'm-sheet-title', 'Add image'));
         let close = null;
-        let serverBtn = mUI.el('button', 'm-imgbrowser-chooser-btn', 'Browse server folders');
+        let serverBtn = mUI.el('button', 'm-imgbrowser-chooser-btn', 'Browse Folders');
         serverBtn.addEventListener('click', () => {
             if (close) { close(); }
             mImageBrowser.open({
@@ -1511,8 +1529,9 @@ class MCreate {
         this.framesWereFilled = hasFrame;
     }
 
-    /** Prompt-image strip: thumbs, remove, add tile, long-press drag reorder (DOM order == request order). */
+    /** Prompt-image strip: thumbs, remove, and long-press drag reorder (DOM order == request order). */
     renderImageStrip() {
+        this.promptImageClear.disabled = mState.promptImages.length == 0;
         // Same reason as syncOptions: rebuilding unconditionally re-creates every <img> on every state
         // change, which re-decodes the thumbnails and, on a browser with no scroll anchoring, shifts the
         // panel under the finger.
@@ -1545,12 +1564,7 @@ class MCreate {
             this.wireReorder(tile);
             this.imageStrip.appendChild(tile);
         }
-        let add = mUI.el('button', 'm-image-tile m-image-add', '+');
-        add.addEventListener('click', () => this.openPromptImagePicker());
-        this.imageStrip.appendChild(add);
-        // With no images attached the add tile shrinks to a plain button rather than holding a full
-        // thumbnail-sized square of empty space open at the top of every session.
-        this.imageStrip.classList.toggle('m-image-strip-empty', mState.promptImages.length == 0);
+        this.imageStrip.style.display = mState.promptImages.length > 0 ? '' : 'none';
         this.ratioRow.style.display = mState.promptImages.length > 0 ? '' : 'none';
     }
 
@@ -1741,10 +1755,10 @@ class MCreate {
         reader.readAsDataURL(file);
     }
 
-    /** Quick params row: seed mode, image count, tuning controls, and aspect/size steppers. */
+    /** Quick params row: seed mode, filename prefix, tuning controls, and aspect/size steppers. */
     buildQuickParams() {
         let wrap = mUI.el('div', 'm-quick-wrap');
-        let row = mUI.el('div', 'm-quick-row');
+        let row = mUI.el('div', 'm-quick-row m-seed-prefix-row');
         let seedWrap = mUI.el('div', 'm-quick-item m-seed-control');
         this.seedRandom = mUI.el('button', 'm-seed-random', 'Random');
         this.seedRandom.addEventListener('click', () => {
@@ -1778,40 +1792,20 @@ class MCreate {
         });
         seedWrap.appendChild(this.seedClear);
         row.appendChild(seedWrap);
-        this.imagesGroup = mUI.el('div', 'm-quick-item m-seg-group m-batch-group');
-        for (let n of ['1', '2', '4']) {
-            let btn = mUI.el('button', 'm-seg-button', n);
-            btn.dataset.count = n;
-            btn.addEventListener('click', () => {
-                mState.params['images'] = n;
-                mState.changed();
-            });
-            this.imagesGroup.appendChild(btn);
-        }
-        let clearBtn = mUI.el('button', 'm-seg-button', 'CLR');
-        clearBtn.title = 'Clear prompt images, start/end frames and prefix';
-        clearBtn.setAttribute('aria-label', 'Clear prompt images, start/end frames and prefix');
-        clearBtn.addEventListener('click', () => {
-            mUI.confirm('Clear prompt images, start/end frames and the Prefix field? The text prompt is kept.', () => {
-                mState.promptImages = [];
-                mState.initImage = null;
-                mState.videoEndImage = null;
-                delete mState.params['filenameprefix'];
-                mState.changed();
-            });
-        });
-        this.imagesGroup.appendChild(clearBtn);
-        row.appendChild(this.imagesGroup);
-        wrap.appendChild(row);
-        // Filename prefix sits directly above Steps/CFG: a label for the session's saved files, used as
-        // often as the steppers, so it should not live below aspect/size. Same control as before - only
-        // the DOM order changed. resetParams still preserves it; the CLR button above is what clears it.
-        this.prefixRow = mUI.el('div', 'm-quick-row');
-        this.prefixRow.appendChild(mUI.el('span', 'm-quick-label', 'Prefix'));
         this.prefixInput = document.createElement('input');
         this.prefixInput.type = 'text';
+        this.prefixInput.id = 'm-generation-file-stem';
+        this.prefixInput.name = 'm-generation-file-stem';
         this.prefixInput.className = 'm-prefix-input';
-        this.prefixInput.placeholder = 'none';
+        this.prefixInput.placeholder = 'Prefix';
+        this.prefixInput.inputMode = 'text';
+        this.prefixInput.autocomplete = 'off';
+        this.prefixInput.setAttribute('autocapitalize', 'off');
+        this.prefixInput.setAttribute('autocorrect', 'off');
+        this.prefixInput.spellcheck = false;
+        this.prefixInput.setAttribute('aria-label', 'Filename Prefix');
+        this.prefixInput.setAttribute('data-form-type', 'other');
+        this.prefixInput.setAttribute('data-lpignore', 'true');
         this.prefixInput.addEventListener('input', () => {
             let val = this.prefixInput.value.trim();
             // Deleting rather than storing '' keeps m_client_state clean and avoids sending a no-op key.
@@ -1824,8 +1818,8 @@ class MCreate {
             // save(), not changed(): a full re-render per keystroke would fight the user's typing.
             mState.save();
         });
-        this.prefixRow.appendChild(this.prefixInput);
-        wrap.appendChild(this.prefixRow);
+        row.appendChild(this.prefixInput);
+        wrap.appendChild(row);
         let tuneRow = mUI.el('div', 'm-quick-row m-tune-row');
         tuneRow.appendChild(this.buildNumberStepper('steps', 'Steps', { 'default': 20, 'min': 0, 'max': 500, 'step': 1 }));
         tuneRow.appendChild(this.buildNumberStepper('cfgscale', 'CFG', { 'default': 7, 'min': 0, 'max': 100, 'step': 0.5 }));
@@ -1840,6 +1834,7 @@ class MCreate {
         // Refiner upscale is a number on the server, but day-to-day use is a few fixed scales - a picklist
         // beats a free-text Advanced chip. Method sits beside it when ComfyUI advertises the dropdown.
         this.upscaleRow = mUI.el('div', 'm-quick-row m-upscale-row');
+        this.upscaleRow.hidden = true;
         this.upscaleRow.appendChild(this.buildUpscaleScaleSelect());
         this.upscaleRow.appendChild(this.buildChoiceSelect('refinerupscalemethod', 'Method'));
         wrap.appendChild(this.upscaleRow);
@@ -1851,14 +1846,12 @@ class MCreate {
         return wrap;
     }
 
-    /** The size ladder as a stepper. Deliberately not buildNumberStepper: side length walks a fixed ladder of
-     * model-friendly rungs rather than a uniform increment, and the label line carries the pixels that rung
-     * produces at the current ratio - so the number the buttons move and the number that gets generated are
-     * both on screen, in the same shape as the Steps/CFG steppers directly above. */
+    /** Steps through model-friendly side lengths. Final pixel dimensions remain in the tooltip and accessible description. */
     buildSideLengthStepper() {
         let wrap = mUI.el('div', 'm-number-stepper m-size-stepper');
-        this.sizeLabel = mUI.el('span', 'm-stepper-label', 'Size');
-        wrap.appendChild(this.sizeLabel);
+        wrap.setAttribute('role', 'group');
+        wrap.setAttribute('aria-label', 'Side Length');
+        this.sizeStepper = wrap;
         let minus = mUI.el('button', 'm-stepper-button', '\u2212');
         minus.setAttribute('aria-label', 'Decrease size');
         minus.addEventListener('click', () => this.adjustSideLength(-1));
@@ -1876,7 +1869,9 @@ class MCreate {
      * a stored unknown value retained so restored sessions never lose their generation dimensions. */
     buildAspectStepper() {
         let wrap = mUI.el('div', 'm-number-stepper m-aspect-stepper');
-        wrap.appendChild(mUI.el('span', 'm-stepper-label', 'Aspect'));
+        wrap.setAttribute('role', 'group');
+        wrap.setAttribute('aria-label', 'Aspect Ratio');
+        this.aspectStepper = wrap;
         let minus = mUI.el('button', 'm-stepper-button', '\u2212');
         minus.setAttribute('aria-label', 'Decrease aspect ratio');
         minus.addEventListener('click', () => this.adjustAspect(-1));
@@ -2092,7 +2087,7 @@ class MCreate {
         let current = `${mState.buildGenInput()[paramId] ?? ''}`;
         let names = meta.value_names && meta.value_names.length == meta.values.length ? meta.value_names : meta.values;
         let defaultName = MCreate.paramValueLabel(paramId, meta.default);
-        let entries = [['', `${control.label}: ${defaultName || 'default'}`]];
+        let entries = [['', defaultName || 'default']];
         for (let i = 0; i < meta.values.length; i++) {
             entries.push([meta.values[i], names[i]]);
         }
@@ -2134,12 +2129,9 @@ class MCreate {
         // Visibility is recomputed every render rather than decided at build time: this panel can be built
         // before ListT2IParams lands, when paramMeta is still empty, and the row would stay hidden forever.
         // Absent from paramMeta means the session may not set the param (or the extension is disabled).
-        this.prefixRow.style.display = mState.paramMeta['filenameprefix'] ? '' : 'none';
+        this.prefixInput.style.display = mState.paramMeta['filenameprefix'] ? '' : 'none';
         if (document.activeElement != this.prefixInput) {
             this.prefixInput.value = `${mState.params['filenameprefix'] ?? ''}`;
-        }
-        for (let btn of this.imagesGroup.querySelectorAll('.m-seg-button')) {
-            btn.classList.toggle('m-selected', btn.dataset.count == `${mState.params['images'] || '1'}`);
         }
         let metadataReady = Object.keys(mState.paramMeta).length > 0;
         let effective = mState.buildGenInput();
@@ -2197,7 +2189,13 @@ class MCreate {
         // Read from previewResolution, not from a local recomputation: it derives from a real buildGenInput,
         // so the pixels on screen cannot drift from the ones that get sent.
         let dims = mState.previewResolution();
-        this.sizeLabel.textContent = dims ? `${dims[0]} \u00d7 ${dims[1]}` : 'full UI';
+        let dimensionText = dims ? `${dims[0]} \u00d7 ${dims[1]} pixels` : 'Full UI dimensions';
+        this.aspectValue.title = dimensionText;
+        this.aspectValue.setAttribute('aria-label', `Aspect Ratio ${this.aspectValue.textContent}. ${dimensionText}`);
+        this.sizeValue.title = dimensionText;
+        this.sizeValue.setAttribute('aria-label', `Side Length ${this.sizeValue.textContent}. ${dimensionText}`);
+        this.aspectStepper.setAttribute('aria-description', dimensionText);
+        this.sizeStepper.setAttribute('aria-description', dimensionText);
         if (stateChanged) {
             mState.save();
         }

@@ -547,6 +547,7 @@ class MImageEdit {
         let scaleX = canvasRect.width / this.canvas.width;
         let scaleY = canvasRect.height / this.canvas.height;
         let r = this.cropRect;
+        this.wrap.classList.toggle('m-edit-full-crop', r.x == 0 && r.y == 0 && r.w == this.canvas.width && r.h == this.canvas.height);
         let left = (canvasRect.left - wrapRect.left) + r.x * scaleX;
         let top = (canvasRect.top - wrapRect.top) + r.y * scaleY;
         let width = r.w * scaleX;
@@ -568,21 +569,20 @@ class MImageEdit {
         }
     }
 
-    /** Converts a touch point to this session's canvas-pixel space, from the display canvas's own live
+    /** Converts a touch or pointer point to this session's canvas-pixel space, from the display canvas's own live
      * rendered box - correct regardless of its on-screen size, which fitDisplaySize sets explicitly. */
-    touchToCanvas(touch) {
+    pointToCanvas(point) {
         let rect = this.displayCanvas.getBoundingClientRect();
-        let x = ((touch.clientX - rect.left) / rect.width) * this.canvas.width;
-        let y = ((touch.clientY - rect.top) / rect.height) * this.canvas.height;
+        let x = ((point.clientX - rect.left) / rect.width) * this.canvas.width;
+        let y = ((point.clientY - rect.top) / rect.height) * this.canvas.height;
         return {
             'x': Math.min(Math.max(x, 0), this.canvas.width),
             'y': Math.min(Math.max(y, 0), this.canvas.height),
         };
     }
 
-    /** Wires the four corner handles (resize from the opposite corner) and the rectangle's own interior
-     * (drag to move, same size) - touch-only, matching this client's existing drag gestures (m_create.js's
-     * wireReorder, the bottom-sheet grip), which are mobile-first and don't add a parallel mouse path. */
+    /** Wires touch and mouse/pen crop gestures. Touch keeps its existing path. Mouse and pen use PointerEvent
+     * capture so a crop drag stays live after the pointer leaves a handle or the displayed canvas. */
     wireCropDrag(rect, handles) {
         let opposite = { 'nw': 'se', 'ne': 'sw', 'sw': 'ne', 'se': 'nw' };
         // The canvas-pixel point diagonally opposite whichever handle is currently being dragged - fixed for
@@ -612,7 +612,7 @@ class MImageEdit {
                 if (!touch) {
                     return;
                 }
-                this.setCropFromPoints(anchor, this.touchToCanvas(touch));
+                this.setCropFromPoints(anchor, this.pointToCanvas(touch));
             }, { passive: false });
             let endHandle = () => { anchor = null; };
             handle.addEventListener('touchend', endHandle);
@@ -624,7 +624,7 @@ class MImageEdit {
             if (!touch) {
                 return;
             }
-            let point = this.touchToCanvas(touch);
+            let point = this.pointToCanvas(touch);
             moveStart = { 'touchX': point.x, 'touchY': point.y, 'rectX': this.cropRect.x, 'rectY': this.cropRect.y };
         }, { passive: true });
         rect.addEventListener('touchmove', (e) => {
@@ -636,7 +636,7 @@ class MImageEdit {
             if (!touch) {
                 return;
             }
-            let point = this.touchToCanvas(touch);
+            let point = this.pointToCanvas(touch);
             let r = this.cropRect;
             let x = Math.min(Math.max(moveStart.rectX + (point.x - moveStart.touchX), 0), this.canvas.width - r.w);
             let y = Math.min(Math.max(moveStart.rectY + (point.y - moveStart.touchY), 0), this.canvas.height - r.h);
@@ -646,6 +646,79 @@ class MImageEdit {
         let endMove = () => { moveStart = null; };
         rect.addEventListener('touchend', endMove);
         rect.addEventListener('touchcancel', endMove);
+
+        let pointerDrag = null;
+        let isFullCrop = () => this.cropRect.x == 0 && this.cropRect.y == 0
+            && this.cropRect.w == this.canvas.width && this.cropRect.h == this.canvas.height;
+        let startPointerDrag = (e, mode, corner = null) => {
+            if (e.pointerType == 'touch' || pointerDrag || e.button != 0 || e.isPrimary == false) {
+                return;
+            }
+            let original = { 'x': this.cropRect.x, 'y': this.cropRect.y, 'w': this.cropRect.w, 'h': this.cropRect.h };
+            let point = this.pointToCanvas(e);
+            let target = e.currentTarget;
+            let dragMode = mode;
+            let dragAnchor = null;
+            if (mode == 'resize') {
+                let opp = opposite[corner];
+                dragAnchor = {
+                    'x': opp[1] == 'w' ? original.x : original.x + original.w,
+                    'y': opp[0] == 'n' ? original.y : original.y + original.h,
+                };
+            }
+            else if (mode == 'move' && isFullCrop()) {
+                dragMode = 'draw';
+                dragAnchor = point;
+            }
+            else if (mode == 'draw') {
+                dragAnchor = point;
+            }
+            pointerDrag = { 'id': e.pointerId, 'mode': dragMode, 'anchor': dragAnchor, 'start': point, 'original': original, 'target': target };
+            target.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        };
+        let movePointerDrag = (e) => {
+            if (!pointerDrag || e.pointerId != pointerDrag.id) {
+                return;
+            }
+            let point = this.pointToCanvas(e);
+            if (pointerDrag.mode == 'resize' || pointerDrag.mode == 'draw') {
+                this.setCropFromPoints(pointerDrag.anchor, point);
+            }
+            else {
+                let r = pointerDrag.original;
+                let x = Math.min(Math.max(r.x + (point.x - pointerDrag.start.x), 0), this.canvas.width - r.w);
+                let y = Math.min(Math.max(r.y + (point.y - pointerDrag.start.y), 0), this.canvas.height - r.h);
+                this.cropRect = { 'x': x, 'y': y, 'w': r.w, 'h': r.h };
+                this.layoutCropOverlay();
+            }
+            e.preventDefault();
+        };
+        let endPointerDrag = (e, restore) => {
+            if (!pointerDrag || e.pointerId != pointerDrag.id) {
+                return;
+            }
+            if (restore) {
+                this.cropRect = pointerDrag.original;
+                this.layoutCropOverlay();
+            }
+            if (pointerDrag.target.hasPointerCapture(e.pointerId)) {
+                pointerDrag.target.releasePointerCapture(e.pointerId);
+            }
+            pointerDrag = null;
+        };
+        let wirePointerTarget = (target, mode, corner = null) => {
+            target.addEventListener('pointerdown', e => startPointerDrag(e, mode, corner));
+            target.addEventListener('pointermove', movePointerDrag);
+            target.addEventListener('pointerup', e => endPointerDrag(e, false));
+            target.addEventListener('pointercancel', e => endPointerDrag(e, true));
+            target.addEventListener('lostpointercapture', e => endPointerDrag(e, false));
+        };
+        for (let corner in handles) {
+            wirePointerTarget(handles[corner], 'resize', corner);
+        }
+        wirePointerTarget(rect, 'move');
+        wirePointerTarget(this.displayCanvas, 'draw');
     }
 
     /** Recomputes the pending crop rectangle from two opposite corner points (a fixed anchor and the point
