@@ -202,6 +202,20 @@ These two are the only escapes these files actually use. Values are tab-indented
 
 ## Upstream Sync Log
 
+- 2026-10-02 (06:24 PT, live Windows box) - routine automated check, SwarmUI already current; no backend node updates. Ran at Adam's request (standing sync). Working tree was clean on main at 29dfa4ab ("/simple: keep Grid Generate footer visible on mobile"), matching origin/main 0/0. Remotes already correct: origin -> socrasteeze/SwarmUI, upstream fetch -> mcmonkeyprojects/SwarmUI, push URL pinned to DISABLED-NEVER-PUSH-TO-UPSTREAM. Git identity already socrasteeze <socradeez@gmail.com>. git pull --ff-only origin main - already up to date. git fetch upstream; upstream default branch resolved as master (via 
+efs/remotes/upstream/HEAD). upstream/master at d9ecb52d ("minor doc fix") - git merge-base --is-ancestor upstream/master HEAD returned true (HEAD...upstream/master measured 0 behind / 486 ahead), so 0 incoming commits; no merge, no conflicts, no SwarmUI source gate suite (no SwarmUI source changed).
+
+  Backend/custom_nodes review (live dlbackend/ present on this box):
+  - Updated: none (no clean checkout behind its origin).
+  - Current (clean, 0 behind): bundled ComfyUI dlbackend/comfy/ComfyUI at 65787d668 on master; DLNodes Frame-Interpolation, GGUF, Krea2-Ostris-Edit, SeedVR2 Image/Video, controlnet_aux, IPAdapter_plus; custom_nodes comfyui-manager 2a6cb164, KJNodes, MiniMaxH3-FirstBlockCache, MiniMaxH3_Ref-Patch, seedvr2-tilingupscaler, Spectrum-MiniMax-H3, RES4LYF, rgthree-comfy, was-node-suite-comfyui; also confirmed current (0 behind) despite __pycache__-only dirt: comfyui-mask-boundingbox, ComfyUI-QwenVL, ComfyUI_Comfyroll_CustomNodes, ComfyUI-APG_ImYourCFGNow (DLNodes), ComfyUI-ConditioningKrea2Rebalance (DLNodes + custom_nodes), Skimmed_CFG (DLNodes).
+  - Skipped dirty: DLNode ReActor / TeaCache (
+odes.py), WD14-Tagger / RMBG (
+equirements.txt; RMBG also 15 behind origin, left alone per dirty-checkout rule).
+  - Left alone: ComfyUI-nunchaku.disabled (DLNodes + custom_nodes), comfyui-sam3.disabled. Non-git custom_nodes left as-is: comfyui-auto-nodes-layout, ComfyUI-Crystools, llm_sdxl_adapter.
+  - GPU acceleration check: not applicable (no DLNode reinstall, no pip install in python_embeded, no ComfyUI backend update).
+
+  Author/committer on this commit: socrasteeze <socradeez@gmail.com>; no AI-attribution trailer.
+
 - 2026-10-02 (00:18 PT, live Windows box) - routine automated check, SwarmUI already current; backend nodes fast-forwarded. Ran at Adam's request (standing sync). Working tree was clean on `main` at `402de194` ("MobileEnhancements: visible Paste on Start/End frames for iOS"), matching `origin/main` 0/0. Remotes already correct: `origin` -> `socrasteeze/SwarmUI`, `upstream` fetch -> `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Git identity already `socrasteeze <socradeez@gmail.com>`. `git pull --ff-only origin main` - already up to date. `git fetch upstream`; upstream default branch resolved as `master` (via `refs/remotes/upstream/HEAD`). `upstream/master` at `d9ecb52d` ("minor doc fix") - `git merge-base --is-ancestor upstream/master HEAD` returned true (`HEAD...upstream/master` measured 0 behind / 484 ahead), so 0 incoming commits; no merge, no conflicts, no SwarmUI source gate suite (no SwarmUI source changed).
 
   Backend/custom_nodes review (live `dlbackend/` present on this box):
