@@ -417,10 +417,10 @@ class MState {
         // First-frame MiniMax hybrid / FL2VA (Eros included) sizes the video from Video Resolution, not
         // from Aspect Ratio. With the param absent the server falls back to "Model Preferred", and MiniMax
         // H3's standard is square 960, so the /simple aspect stepper changed its label while the video stayed
-        // 1:1. A start frame therefore sends "Image Aspect, Model Res": the stepper's ratio fitted to the
-        // model's pixel count (2:3 lands on 768x1152 for that square). An explicit Image or Image Aspect
-        // value is left alone. A pinned stepper also replaces a preset aspectratio; until the button is used,
-        // the preset's own aspect stays the default.
+        // 1:1. A start frame therefore sends "Image Aspect, Model Res": the pinned ratio fitted to the
+        // model's pixel count (2:3 lands on 768x1152 for that square). The pin is the start frame's closest
+        // aspect, or a later stepper tap. An explicit Image or Image Aspect value is left alone. Until
+        // something pins the ratio, the preset's own aspect stays the default.
         let firstFrameVideoAspect = !!this.initImage
             && typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext();
         if (firstFrameVideoAspect && this.aspectPinned && this.params['aspectratio']) {

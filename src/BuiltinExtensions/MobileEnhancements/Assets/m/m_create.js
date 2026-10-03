@@ -1366,7 +1366,9 @@ class MCreate {
      * behaved like the negative-prompt <details> immediately above it: always present, collapsed by default,
      * auto-opens the first time either slot BECOMES filled (reuse/state restore) but never force-closes.
      * Same-as-start (m_frame_prep.js) defaults ON for FL2VA 360-orbit / same-frame presets so End mirrors
-     * Start; the toggle lets Adam override without leaving /simple. */
+     * Start; the toggle lets Adam override without leaving /simple. On MiniMax hybrid / FL2VA / Eros,
+     * setting or pasting Start also snaps aspect to that frame's closest ratio (short side at least 768,
+     * x32). End does not. The aspect stepper still overrides after the frame is set. */
     buildFramesSection() {
         let wrap = mUI.el('details', 'm-neg-wrap');
         wrap.appendChild(mUI.el('summary', 'm-neg-summary', 'Start / end frame'));
@@ -1392,7 +1394,11 @@ class MCreate {
             mState.initImage = entry;
             this.startFrameSeq = (this.startFrameSeq || 0) + 1;
             let seq = this.startFrameSeq;
+            // Captured before the async scale. A stepper tap during that wait bumps startAspectGen
+            // and must win; setting the frame itself must not bump, or it would cancel its own apply.
+            let aspectGen = this.startAspectGen || 0;
             // Scale on attach for same-frame presets so the thumbnail matches what Generate will send.
+            // Closest aspect runs after the scale, on the frame that will actually be sent.
             if (entry && typeof mFramePrep != 'undefined' && mFramePrep.isSameFramePreset()) {
                 mFramePrep.scaleEntry(entry).then(scaled => {
                     if (seq != this.startFrameSeq) {
@@ -1402,6 +1408,7 @@ class MCreate {
                     if (mFramePrep.sameAsStartEnabled()) {
                         mFramePrep.mirrorStartToEnd();
                     }
+                    this.applyStartFrameAspect(scaled, seq, aspectGen);
                     mState.changed();
                 }).catch(() => {
                     if (seq != this.startFrameSeq) {
@@ -1411,14 +1418,18 @@ class MCreate {
                         mFramePrep.mirrorStartToEnd();
                         mState.changed();
                     }
+                    this.applyStartFrameAspect(mState.initImage, seq, aspectGen);
                 });
                 return;
             }
             if (typeof mFramePrep != 'undefined' && mFramePrep.sameAsStartEnabled()) {
                 mFramePrep.mirrorStartToEnd();
             }
+            this.applyStartFrameAspect(entry, seq, aspectGen);
         });
         this.endFrameSlot = this.buildFrameSlot('End frame', () => mState.videoEndImage, entry => {
+            // End never sets aspect. Same-as-start mirrors this slot from Start and must not
+            // fight the closest ratio the start frame just applied.
             // A manual End pick is an explicit override of Same-as-start.
             if (entry && typeof mFramePrep != 'undefined' && mFramePrep.sameAsStartEnabled()) {
                 mFramePrep.setSameAsStart(false);
@@ -1608,12 +1619,59 @@ class MCreate {
         img.src = entry.kind == 'data' ? entry.value : `${getImageOutPrefix()}/${entry.value}`;
     }
 
+    /** Writes a measured box the same way "Use closest ratio" does: snap to the picker ladder,
+     * and for MiniMax hybrid / FL2VA set the side length from the image (short side at least 768, x32).
+     * Pins so the pick beats a preset 1:1 or a leftover stepper ratio. */
+    applyClosestBox(box) {
+        if (!box) {
+            return;
+        }
+        let aspect = MState.closestAspect(box.ratio);
+        mState.params['aspectratio'] = aspect;
+        mState.customRatio = 0;
+        if (typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext()) {
+            let side = MFramePrep.sideLengthForClosest(aspect, box.w, box.h, MState.AspectReferences, MState.ExtraAspects);
+            mState.params['sidelength'] = `${side}`;
+        }
+        mState.aspectPinned = true;
+        mState.changed();
+    }
+
+    /** Closest aspect of a start frame, for MiniMax hybrid / FL2VA / Eros only. seq/aspectGen were
+     * captured when the frame was set: a newer frame, a cleared frame, or a stepper/ratio-button tap
+     * during the load aborts this so the later choice wins. End frames must not call this. */
+    applyStartFrameAspect(entry, seq, aspectGen) {
+        if (!entry || typeof MFramePrep == 'undefined' || !MFramePrep.isLowResAspectContext()) {
+            return;
+        }
+        this.measureEntry(entry, box => {
+            if (!box || seq != this.startFrameSeq || mState.initImage != entry) {
+                return;
+            }
+            if ((this.startAspectGen || 0) != (aspectGen || 0)) {
+                return;
+            }
+            this.applyClosestBox(box);
+        });
+    }
+
+    /** A manual aspect or size step, or the ratio buttons, cancel an in-flight start-frame aspect apply. */
+    noteAspectOverride() {
+        this.startAspectGen = (this.startAspectGen || 0) + 1;
+    }
+
     /** Sets the aspect ratio from the primary prompt image, or the start frame for MiniMax hybrid / FL2VA.
      * Exact keeps the image's real ratio (sent as Custom with computed pixels, and still scaled by whatever
      * the Size setting says). Closest snaps to the nearest ratio in the picker. For MiniMax hybrid / FL2VA
-     * that snap also sets the side length from the image, floored at 768 (x32) instead of the 1024 res floor. */
+     * that snap also sets the side length from the image, floored at 768 (x32) instead of the 1024 res floor.
+     * Setting a start frame calls applyClosestBox on its own, so this button stays an override. */
     applyImageRatio(exact) {
+        this.noteAspectOverride();
+        let gen = this.startAspectGen;
         this.measureEntry(this.aspectSourceEntry(), box => {
+            if ((this.startAspectGen || 0) != gen) {
+                return;
+            }
             if (!box) {
                 mUI.warn('Could not read that image\'s size.');
                 return;
@@ -1621,18 +1679,12 @@ class MCreate {
             if (exact) {
                 mState.params['aspectratio'] = 'Custom';
                 mState.customRatio = box.ratio;
+                mState.aspectPinned = true;
+                mState.changed();
             }
             else {
-                let aspect = MState.closestAspect(box.ratio);
-                mState.params['aspectratio'] = aspect;
-                mState.customRatio = 0;
-                if (typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext()) {
-                    let side = MFramePrep.sideLengthForClosest(aspect, box.w, box.h, MState.AspectReferences, MState.ExtraAspects);
-                    mState.params['sidelength'] = `${side}`;
-                }
+                this.applyClosestBox(box);
             }
-            mState.aspectPinned = true;
-            mState.changed();
         });
     }
 
@@ -1945,6 +1997,7 @@ class MCreate {
 
     /** Walks the aspect list without wrapping. A new aspect clears a prompt-image matched custom ratio. */
     adjustAspect(direction) {
+        this.noteAspectOverride();
         let aspects = this.aspectLadder();
         let current = mState.params['aspectratio'] || aspects[0];
         let at = aspects.indexOf(current);
@@ -1987,6 +2040,7 @@ class MCreate {
     /** Walks the size ladder one rung, clamped at both ends rather than wrapping - a '+' that jumps from the
      * largest size back to the smallest would silently undo a deliberate choice. */
     adjustSideLength(direction) {
+        this.noteAspectOverride();
         let rungs = this.sideLengthLadder();
         let at = rungs.indexOf(`${mState.params['sidelength'] ?? ''}`);
         if (at < 0) {
