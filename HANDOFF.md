@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-02 (12:19 PT, live Windows) · **Branch:** main · **Base:** a26ecf13 · **Tree:** clean
+**Updated:** 2026-10-02 (18:18 PT, live Windows) · **Branch:** main · **Base:** 335c69c9 · **Tree:** clean
 
 ## State
 Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
 The user waived the handoff line cap; the H3 reference sections below were logged at the user's request.
 
 ## Done this session
+
+- 2026-10-02 (18:18 PT, live Windows box): routine automated sync -- upstream/master at d9ecb52d, already an ancestor of HEAD (335c69c9); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI 36c0b0a68->4d981c9b0 (pinned-memory auto-disable on iGPUs; no requirements change) and DLNode ReActor a7628cc->a12c5b1 (26 commits, was clean again this pass). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty: TeaCache (nodes.py), WD14-Tagger / RMBG (requirements.txt; RMBG 15 behind), Skimmed_CFG (__pycache__; 2 behind). Left .disabled folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via /clean. All earlier handoff detail above is unchanged.
 
 - 2026-10-02 (12:19 PT, live Windows box): routine automated sync -- upstream/master at d9ecb52d, already an ancestor of HEAD (a26ecf13); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI 65787d668->2472a20bd (comfy-kitchen 0.2.37; pip-installed) and DLNode ReActor a7628cc->a12c5b1 (26 commits, was clean). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty: TeaCache (nodes.py), WD14-Tagger / RMBG (requirements.txt; RMBG 15 behind), Skimmed_CFG (__pycache__; 2 behind). Left .disabled folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via /clean. All earlier handoff detail above is unchanged.
 
