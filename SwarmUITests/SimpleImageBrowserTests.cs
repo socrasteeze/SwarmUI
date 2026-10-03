@@ -2,6 +2,7 @@ using NUnit.Framework;
 using SixLabors.ImageSharp;
 using SwarmUI.Accounts;
 using SwarmUI.Builtin_MobileEnhancementsExtension;
+using SwarmUI.WebAPI;
 using System;
 using System.IO;
 using System.Linq;
@@ -81,8 +82,92 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That((string)first["parent"], Is.EqualTo(Directory.GetParent(Path.GetFullPath(TempRoot))?.FullName));
         Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, -1, 1)["error_id"], Is.EqualTo("bad_page"));
         Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 0)["error_id"], Is.EqualTo("bad_page"));
+        Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, 0, SimpleImageBrowserAPI.MaximumPageSize + 1, "", true)["error_id"], Is.EqualTo("bad_page"));
         Assert.That(SimpleImageBrowserAPI.ListFolder(TempRoot, int.MaxValue, 100)["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
         Assert.That(SimpleImageBrowserAPI.ListFolder("", 0, 1)["parent"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
+        Newtonsoft.Json.Linq.JObject drives = SimpleImageBrowserAPI.ListFolder("", 999, 1, "ignored", true);
+        Assert.That((int)drives["total"], Is.EqualTo(0));
+        Assert.That(drives["files"].Count(), Is.EqualTo(0));
+        Assert.That(drives["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
+        Assert.That(drives["folders"].Count(), Is.EqualTo(DriveInfo.GetDrives().Length));
+    }
+
+    /// <summary>Image-only pages keep folder navigation while paging every matching direct filename.</summary>
+    [Test]
+    public void ListFolder_ImagePagesSearchAcrossAllDirectFiles()
+    {
+        Directory.CreateDirectory(Path.Combine(TempRoot, "NavigateHere"));
+        for (int i = 0; i < 102; i++)
+        {
+            WriteValidPng(Path.Combine(TempRoot, $"Needle-{i:000}.png"));
+        }
+        WriteValidPng(Path.Combine(TempRoot, "other.png"));
+
+        Newtonsoft.Json.Linq.JObject first = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "needle", true);
+        Newtonsoft.Json.Linq.JObject middle = SimpleImageBrowserAPI.ListFolder(TempRoot, 48, 48, "NEEDLE", true);
+        Newtonsoft.Json.Linq.JObject last = SimpleImageBrowserAPI.ListFolder(TempRoot, 96, 48, "needle", true);
+
+        Assert.That(first["folders"].Select(row => (string)row["name"]), Is.EqualTo(new[] { "NavigateHere" }));
+        Assert.That(first["files"].Count(), Is.EqualTo(48));
+        Assert.That((string)first["files"][0]["name"], Is.EqualTo("Needle-000.png"));
+        Assert.That((int)first["total"], Is.EqualTo(102));
+        Assert.That((int)first["next_offset"], Is.EqualTo(48));
+        Assert.That((string)middle["files"][0]["name"], Is.EqualTo("Needle-048.png"));
+        Assert.That((int)middle["next_offset"], Is.EqualTo(96));
+        Assert.That(last["files"].Count(), Is.EqualTo(6));
+        Assert.That((string)last["files"][0]["name"], Is.EqualTo("Needle-096.png"));
+        Assert.That(last["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
+    }
+
+    /// <summary>Output paging filters media before paging and keeps direct virtual folders visible.</summary>
+    [Test]
+    public void ListOutputImagePage_PagesFilesAndKeepsVirtualFolders()
+    {
+        string outputRoot = Path.Combine(TempRoot, "output");
+        string specialRoot = Path.Combine(TempRoot, "special");
+        Directory.CreateDirectory(outputRoot);
+        Directory.CreateDirectory(specialRoot);
+        Directory.CreateDirectory(Path.Combine(outputRoot, "physical"));
+        WriteValidPng(Path.Combine(outputRoot, "physical", "child.png"));
+        WriteValidPng(Path.Combine(specialRoot, "shared.png"));
+        for (int i = 0; i < 102; i++)
+        {
+            string file = Path.Combine(outputRoot, $"needle-{i:000}.png");
+            WriteValidPng(file);
+            File.SetLastWriteTimeUtc(file, DateTime.UnixEpoch.AddSeconds(i));
+        }
+        File.WriteAllText(Path.Combine(outputRoot, "movie.mp4"), "video");
+        string alias = $"inputs/_test_{Guid.NewGuid():N}/";
+        UserImageHistoryHelper.SharedSpecialFolders[alias] = specialRoot;
+        try
+        {
+            User user = RuntimeHelpers.GetUninitializedObject(typeof(User)) as User;
+            user.Data = new User.DatabaseEntry() { ID = "simple-output-page-test" };
+            user.Settings = new SwarmUI.Core.Settings.User();
+            Session session = new() { User = user };
+            Newtonsoft.Json.Linq.JObject first = SimpleImageBrowserAPI.ListOutputImagePage(session, "", outputRoot, 0, 48, "Date", true, "NEEDLE", new[] { "image" });
+            Newtonsoft.Json.Linq.JObject middle = SimpleImageBrowserAPI.ListOutputImagePage(session, "", outputRoot, 48, 48, "Date", true, "needle", new[] { "image" });
+            Newtonsoft.Json.Linq.JObject last = SimpleImageBrowserAPI.ListOutputImagePage(session, "", outputRoot, 96, 48, "Date", true, "needle", new[] { "image" });
+            Newtonsoft.Json.Linq.JObject virtualParent = SimpleImageBrowserAPI.ListOutputImagePage(session, "inputs", outputRoot, 0, 48, "Name", false, "", new[] { "image" });
+            Newtonsoft.Json.Linq.JObject dotRoot = SimpleImageBrowserAPI.ListOutputImagePage(session, ".", outputRoot, 0, 1, "Name", false, "", new[] { "image" });
+
+            Assert.That(first["error"], Is.Null);
+            Assert.That(first["folders"].Values<string>(), Does.Contain("physical"));
+            Assert.That(first["folders"].Values<string>(), Does.Contain("inputs"));
+            Assert.That(virtualParent["folders"].Values<string>(), Does.Contain(alias.Split('/')[1]));
+            Assert.That(dotRoot["folders"].Values<string>(), Does.Contain("inputs"));
+            Assert.That((int)first["total"], Is.EqualTo(102));
+            Assert.That((string)first["files"][0]["src"], Is.EqualTo("needle-000.png"));
+            Assert.That((string)middle["files"][0]["src"], Is.EqualTo("needle-048.png"));
+            Assert.That(last["files"].Count(), Is.EqualTo(6));
+            Assert.That(last["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
+            Assert.That((string)SimpleImageBrowserAPI.ListOutputImagePage(session, "../outside", outputRoot, 0, 1, "Name", false, "", new[] { "image" })["error_id"], Is.EqualTo("missing_folder"));
+            Assert.That((string)SimpleImageBrowserAPI.ListOutputImagePage(session, "", outputRoot, -1, 1, "Name", false, "", new[] { "image" })["error_id"], Is.EqualTo("bad_page"));
+        }
+        finally
+        {
+            UserImageHistoryHelper.SharedSpecialFolders.TryRemove(alias, out _);
+        }
     }
 
     /// <summary>Invalid, relative, stream, missing, and oversized paths fail without returning source data.</summary>
@@ -164,10 +249,26 @@ public class SimpleImageBrowserTests : SwarmUITest
         Newtonsoft.Json.Linq.JObject listDenied = await SimpleImageBrowserAPI.ListSimpleImageFolder(session, TempRoot);
         Newtonsoft.Json.Linq.JObject nullReadDenied = await SimpleImageBrowserAPI.ReadSimpleImage(null, Path.Combine(TempRoot, "never-read.png"));
         Newtonsoft.Json.Linq.JObject nullListDenied = await SimpleImageBrowserAPI.ListSimpleImageFolder(null, TempRoot);
+        Newtonsoft.Json.Linq.JObject searchedListDenied = await SimpleImageBrowserAPI.ListSimpleImageFolder(session, TempRoot, 48, 48, "needle", true);
 
         Assert.That((string)readDenied["error_id"], Is.EqualTo("bad_permissions"));
         Assert.That((string)listDenied["error_id"], Is.EqualTo("bad_permissions"));
         Assert.That((string)nullReadDenied["error_id"], Is.EqualTo("bad_permissions"));
         Assert.That((string)nullListDenied["error_id"], Is.EqualTo("bad_permissions"));
+        Assert.That((string)searchedListDenied["error_id"], Is.EqualTo("bad_permissions"));
+    }
+
+    /// <summary>Negative output page limits are rejected instead of using the legacy recursive listing.</summary>
+    [Test]
+    public async System.Threading.Tasks.Task ListImages_RejectsNegativePageLimit()
+    {
+        User user = RuntimeHelpers.GetUninitializedObject(typeof(User)) as User;
+        user.Data = new User.DatabaseEntry() { ID = "negative-output-page-test" };
+        user.Settings = new SwarmUI.Core.Settings.User();
+        Session session = new() { User = user };
+
+        Newtonsoft.Json.Linq.JObject result = await T2IAPI.ListImages(session, "", 1, limit: -1);
+
+        Assert.That((string)result["error_id"], Is.EqualTo("bad_page"));
     }
 }

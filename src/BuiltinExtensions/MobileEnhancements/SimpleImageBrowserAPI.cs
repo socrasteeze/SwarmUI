@@ -3,6 +3,8 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SwarmUI.Accounts;
+using SwarmUI.Core;
+using SwarmUI.Utils;
 using SwarmUI.WebAPI;
 using System;
 using System.Collections.Generic;
@@ -36,13 +38,15 @@ public static class SimpleImageBrowserAPI
     public static Task<JObject> ListSimpleImageFolder(Session session,
         [API.APIParameter("Fully qualified server directory path. Leave empty to list available drives.")] string path = "",
         [API.APIParameter("Zero-based result offset.")] int offset = 0,
-        [API.APIParameter("Maximum results to return, from 1 to 250.")] int limit = 100)
+        [API.APIParameter("Maximum results to return, from 1 to 250.")] int limit = 100,
+        [API.APIParameter("Optional case-insensitive filename substring filter for direct files.")] string search = "",
+        [API.APIParameter("If true, return all direct folders and page only matching direct image files.")] bool image_page = false)
     {
         if (!HasBrowsePermission(session))
         {
             return Task.FromResult(Error("You lack permission to browse server images.", "bad_permissions"));
         }
-        return Task.FromResult(ListFolder(path, offset, limit));
+        return Task.FromResult(ListFolder(path, offset, limit, search, image_page));
     }
 
     /// <summary>Reads one validated image as a data URI, converting TIFF to PNG or optionally producing a small JPEG preview.</summary>
@@ -59,7 +63,7 @@ public static class SimpleImageBrowserAPI
     }
 
     /// <summary>Lists a folder without session handling so focused tests can cover path and paging behavior.</summary>
-    public static JObject ListFolder(string path, int offset, int limit)
+    public static JObject ListFolder(string path, int offset, int limit, string search = "", bool imagePage = false)
     {
         if (offset < 0 || limit < 1 || limit > MaximumPageSize)
         {
@@ -67,7 +71,7 @@ public static class SimpleImageBrowserAPI
         }
         if (string.IsNullOrWhiteSpace(path))
         {
-            return ListDrives(offset, limit);
+            return ListDrives(offset, limit, imagePage);
         }
         if (!TryGetDirectoryPath(path, out string fullPath))
         {
@@ -80,7 +84,11 @@ public static class SimpleImageBrowserAPI
                 return Error("The folder does not exist or is unavailable.", "missing_folder");
             }
             List<string> folders = Directory.EnumerateDirectories(fullPath).OrderBy(GetName, PathNameComparer.Instance).ToList();
-            List<string> files = Directory.EnumerateFiles(fullPath).Where(IsAllowedImagePath).OrderBy(GetName, PathNameComparer.Instance).ToList();
+            List<string> files = Directory.EnumerateFiles(fullPath).Where(IsAllowedImagePath).Where(file => string.IsNullOrWhiteSpace(search) || GetName(file).Contains(search, StringComparison.OrdinalIgnoreCase)).OrderBy(GetName, PathNameComparer.Instance).ToList();
+            if (imagePage)
+            {
+                return BuildImagePage(fullPath, GetParentPath(fullPath), folders, files, offset, limit);
+            }
             List<SimplePathRow> entries = folders.Select(p => new SimplePathRow(GetName(p), p, true)).Concat(files.Select(p => new SimplePathRow(GetName(p), p, false))).ToList();
             return BuildPage(fullPath, GetParentPath(fullPath), entries, offset, limit);
         }
@@ -95,6 +103,73 @@ public static class SimpleImageBrowserAPI
         catch (ArgumentException)
         {
             return Error("The folder path is invalid.", "bad_path");
+        }
+    }
+
+    /// <summary>Lists one direct output-history folder with folder navigation separate from media-file pagination.</summary>
+    public static JObject ListOutputImagePage(Session session, string rawPath, string root, int offset, int limit, string sortBy, bool sortReverse, string search, string[] mediaTypes)
+    {
+        if (offset < 0 || limit < 1 || limit > MaximumPageSize)
+        {
+            return Error("The requested page is invalid.", "bad_page");
+        }
+        if (!Enum.TryParse(sortBy, true, out T2IAPI.ImageHistorySortMode sortMode))
+        {
+            return Error($"Invalid sort mode '{sortBy}'.", "bad_sort");
+        }
+        string cleanedRawPath = (rawPath ?? "").Replace('\\', '/').Trim('/');
+        if (cleanedRawPath == ".")
+        {
+            cleanedRawPath = "";
+        }
+        (string checkedPath, string consoleError, string userError) = WebServer.CheckFilePath(root, cleanedRawPath);
+        string path = UserImageHistoryHelper.GetRealPathFor(session.User, checkedPath, root: root);
+        if (consoleError is not null)
+        {
+            Logs.Error(consoleError);
+            return Error(userError, "bad_path");
+        }
+        try
+        {
+            string browseBase = cleanedRawPath;
+            string virtualPrefix = string.IsNullOrEmpty(browseBase) ? "" : browseBase + "/";
+            bool hasVirtualChild = UserImageHistoryHelper.SharedSpecialFolders.Keys.Any(folder => folder.Replace('\\', '/').Trim('/').StartsWith(virtualPrefix, StringComparison.OrdinalIgnoreCase));
+            if (!Directory.Exists(path) && !hasVirtualChild)
+            {
+                return Error("404, path not found.", "missing_folder");
+            }
+            HashSet<string> hiddenRoots = T2IAPI.ParseHiddenFolders(session.User.Settings.HiddenHistoryFolders);
+            List<string> folders = ListOutputFolders(session.User, path, root, browseBase, hiddenRoots, mediaTypes);
+            HashSet<string> acceptedExtensions = GetOutputExtensions(mediaTypes);
+            IEnumerable<string> directFiles = Directory.Exists(path) ? Directory.EnumerateFiles(path) : [];
+            List<OutputImageRow> files = directFiles
+                .Where(file => IsOutputMediaFile(file, acceptedExtensions, search))
+                .Select(file => new OutputImageRow(Path.GetFileName(file), file, File.GetLastWriteTimeUtc(file).Ticks))
+                .ToList();
+            files.Sort((first, second) => CompareOutputRows(first, second, sortMode, sortReverse));
+            int total = files.Count;
+            List<OutputImageRow> page = files.Skip(offset).Take(limit).ToList();
+            bool starNoFolders = session.User.Settings.StarNoFolders;
+            JArray fileRows = new();
+            foreach (OutputImageRow file in page)
+            {
+                OutputMetadataTracker.OutputMetadataEntry metadata = OutputMetadataTracker.GetMetadataFor(file.FullPath.Replace('\\', '/'), root, starNoFolders);
+                fileRows.Add(new JObject() { ["src"] = file.Name, ["metadata"] = metadata?.Metadata });
+            }
+            string parent = GetOutputParent(browseBase);
+            return new JObject()
+            {
+                ["path"] = browseBase,
+                ["parent"] = parent is null ? JValue.CreateNull() : new JValue(parent),
+                ["folders"] = new JArray(folders),
+                ["files"] = fileRows,
+                ["total"] = total,
+                ["next_offset"] = (long)offset + limit < total ? offset + limit : null
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return Error("Error reading file list.", "list_failed");
         }
     }
 
@@ -210,12 +285,29 @@ public static class SimpleImageBrowserAPI
     }
 
     /// <summary>Builds the drive listing without querying volume labels or other removable-drive metadata.</summary>
-    private static JObject ListDrives(int offset, int limit)
+    private static JObject ListDrives(int offset, int limit, bool imagePage)
     {
         try
         {
             List<SimplePathRow> entries = DriveInfo.GetDrives().OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(drive => drive.Name, StringComparer.Ordinal).Select(drive => new SimplePathRow(drive.Name, drive.Name, true, IsDriveReady(drive))).ToList();
+            if (imagePage)
+            {
+                JArray folders = new();
+                foreach (SimplePathRow entry in entries)
+                {
+                    folders.Add(new JObject() { ["name"] = entry.Name, ["path"] = entry.Path, ["ready"] = entry.Ready });
+                }
+                return new JObject()
+                {
+                    ["path"] = "",
+                    ["parent"] = JValue.CreateNull(),
+                    ["folders"] = folders,
+                    ["files"] = new JArray(),
+                    ["total"] = 0,
+                    ["next_offset"] = JValue.CreateNull()
+                };
+            }
             return BuildPage("", null, entries, offset, limit);
         }
         catch (IOException)
@@ -243,6 +335,119 @@ public static class SimpleImageBrowserAPI
         {
             return false;
         }
+    }
+
+    /// <summary>Builds an image-only page while retaining every immediate folder for navigation.</summary>
+    private static JObject BuildImagePage(string path, string parent, List<string> folderPaths, List<string> filePaths, int offset, int limit)
+    {
+        JArray folders = new(folderPaths.Select(folder => new JObject() { ["name"] = GetName(folder), ["path"] = folder }));
+        JArray files = new(filePaths.Skip(offset).Take(limit).Select(file => new JObject() { ["name"] = GetName(file), ["path"] = file }));
+        int total = filePaths.Count;
+        return new JObject()
+        {
+            ["path"] = path,
+            ["parent"] = parent is null ? JValue.CreateNull() : new JValue(parent),
+            ["folders"] = folders,
+            ["files"] = files,
+            ["total"] = total,
+            ["next_offset"] = (long)offset + limit < total ? offset + limit : null
+        };
+    }
+
+    /// <summary>Lists visible direct output folders, including virtual shared-folder children.</summary>
+    private static List<string> ListOutputFolders(User user, string path, string root, string browseBase, HashSet<string> hiddenRoots, string[] mediaTypes)
+    {
+        HashSet<string> extensions = GetOutputExtensions(mediaTypes);
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        IEnumerable<string> directFolders = Directory.Exists(path) ? Directory.EnumerateDirectories(path) : [];
+        foreach (string folder in directFolders)
+        {
+            string name = GetName(folder);
+            if (!name.StartsWith('.') && !hiddenRoots.Contains(T2IAPI.JoinHistoryPath(browseBase, name)) && ImageHistoryFolders.ContainsMedia(folder, extensions))
+            {
+                names.Add(name);
+            }
+        }
+        string prefix = string.IsNullOrEmpty(browseBase) ? "" : browseBase + "/";
+        foreach (KeyValuePair<string, string> specialEntry in UserImageHistoryHelper.SharedSpecialFolders)
+        {
+            string specialFolder = specialEntry.Key;
+            string normalized = specialFolder.Replace('\\', '/').Trim('/');
+            if (!normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            string remainder = normalized[prefix.Length..];
+            int slash = remainder.IndexOf('/');
+            string name = slash < 0 ? remainder : remainder[..slash];
+            if (string.IsNullOrEmpty(name) || name.StartsWith('.') || hiddenRoots.Contains(T2IAPI.JoinHistoryPath(browseBase, name)))
+            {
+                continue;
+            }
+            string childRawPath = T2IAPI.JoinHistoryPath(browseBase, name);
+            string childPath = UserImageHistoryHelper.GetRealPathFor(user, $"{root}/{childRawPath}", root: root);
+            bool hasMappedChildMedia = Directory.Exists(childPath) && ImageHistoryFolders.ContainsMedia(childPath, extensions);
+            bool hasNestedVirtualMedia = Directory.Exists(specialEntry.Value) && ImageHistoryFolders.ContainsMedia(specialEntry.Value, extensions);
+            if (hasMappedChildMedia || hasNestedVirtualMedia)
+            {
+                names.Add(name);
+            }
+        }
+        return names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ThenBy(name => name, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>Returns the history extensions selected by an optional media-type filter.</summary>
+    private static HashSet<string> GetOutputExtensions(string[] mediaTypes)
+    {
+        if (mediaTypes is null || mediaTypes.Length == 0)
+        {
+            return new HashSet<string>(T2IAPI.HistoryExtensions, StringComparer.OrdinalIgnoreCase);
+        }
+        HashSet<string> types = new(mediaTypes.Where(type => !string.IsNullOrWhiteSpace(type)), StringComparer.OrdinalIgnoreCase);
+        HashSet<string> extensions = new(StringComparer.OrdinalIgnoreCase);
+        if (types.Contains("image"))
+        {
+            extensions.UnionWith(["png", "jpg", "gif", "webp"]);
+        }
+        if (types.Contains("video"))
+        {
+            extensions.UnionWith(["webm", "mp4", "mov"]);
+        }
+        if (types.Contains("audio"))
+        {
+            extensions.UnionWith(["mp3", "aac", "wav", "flac"]);
+        }
+        return extensions;
+    }
+
+    /// <summary>Returns whether a direct output file is visible under the requested media and name filters.</summary>
+    private static bool IsOutputMediaFile(string file, HashSet<string> extensions, string search)
+    {
+        string name = Path.GetFileName(file);
+        return !name.StartsWith('.') && !name.EndsWith(".swarmpreview.jpg", StringComparison.OrdinalIgnoreCase) && !name.EndsWith(".swarmpreview.webp", StringComparison.OrdinalIgnoreCase)
+            && extensions.Contains(Path.GetExtension(name).TrimStart('.')) && (string.IsNullOrWhiteSpace(search) || name.Contains(search, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Sorts output files with the legacy descending default and a deterministic filename tiebreaker.</summary>
+    private static int CompareOutputRows(OutputImageRow first, OutputImageRow second, T2IAPI.ImageHistorySortMode sortMode, bool sortReverse)
+    {
+        int result = sortMode == T2IAPI.ImageHistorySortMode.Date ? second.FileTime.CompareTo(first.FileTime) : string.Compare(second.Name, first.Name, StringComparison.Ordinal);
+        if (result == 0)
+        {
+            result = string.Compare(second.Name, first.Name, StringComparison.Ordinal);
+        }
+        return sortReverse ? -result : result;
+    }
+
+    /// <summary>Returns the output-history parent path, or null for the output root.</summary>
+    private static string GetOutputParent(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+        int slash = path.LastIndexOf('/');
+        return slash < 0 ? "" : path[..slash];
     }
 
     /// <summary>Builds the API response with folders and files split for the simple client.</summary>
@@ -354,6 +559,9 @@ public static class SimpleImageBrowserAPI
         /// <summary>Returns whether this row represents a drive root.</summary>
         public bool IsDrive => IsFolder && string.Equals(Name, Path, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>One output file used for deterministic direct-folder paging.</summary>
+    private record class OutputImageRow(string Name, string FullPath, long FileTime);
 
     /// <summary>Sorts paths by their final component using deterministic ordinal comparison.</summary>
     private sealed class PathNameComparer : IComparer<string>
