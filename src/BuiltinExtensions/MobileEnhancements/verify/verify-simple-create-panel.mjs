@@ -469,14 +469,15 @@ const loraMinus = await page.evaluate(() => ({
 check('LoRA minus with step 0.5 goes more negative',
     loraMinus.state == -0.7 && loraMinus.shown == '-0.7', JSON.stringify(loraMinus));
 await page.evaluate(() => {
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
     }
     mState.setLoras([]);
     // Put the boot list back the way the rest of the harness expects it - indexLoras reads it on every call.
     mState.models['LoRA'] = [];
     sessionStorage.removeItem('m-lora-weight-step');
 });
+await page.waitForTimeout(300);
 
 // The Create shortcut was removed; keep the shared Characters sheet's behavior covered directly.
 await page.evaluate(() => mTagDex.openBrowseSheet());
@@ -542,12 +543,13 @@ await page.click('.m-tagdex-card .m-tagdex-alltags-button');
 const triggerOnlyPrompt = await page.evaluate(() => mState.params.prompt);
 check('TagDex trigger-only control inserts just the trigger', triggerOnlyPrompt == 'hatsune_miku, vocaloid', triggerOnlyPrompt);
 await page.evaluate(() => {
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
     }
     mState.params.prompt = '';
     mState.changed();
 });
+await page.waitForTimeout(300);
 
 const tagDexTypeahead = await page.evaluate(() => {
     window.getTextSelRange = box => [box.selectionStart, box.selectionEnd];
@@ -614,6 +616,9 @@ for (let width of [360, 768, 1024, 1440]) {
             betweenActions: rect.left >= add.right && rect.left >= clear.right && rect.right <= enhance.left,
             stableHeight: Math.abs(before.height - after.height) <= 1,
             generateReachable: !!hit && (hit == mCreate.genButton || mCreate.genButton.contains(hit)),
+            hit: hit ? `${hit.tagName}.${hit.className}#${hit.id}` : 'none',
+            sheetStack: (mUI.sheetStack || []).length,
+            appInert: document.querySelector('.m-app').inert,
             noOverflow: panel.scrollWidth <= panel.clientWidth,
             parent: strip.parentElement.parentElement.className
         };
@@ -794,12 +799,13 @@ check('LoRA picker: starred still leads a filtered list', searched.join(',') == 
 
 // The checkpoint sheet uses the same ordering, off its own subtype's star list.
 await page.evaluate(() => {
-    // Drop the LoRA sheet rather than animating it closed - openSheet's close() is on a 250ms timer.
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
+    // Dismiss through openSheet so its modal stack and inert state stay synchronized.
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
     }
-    mCreate.openModelSheet();
 });
+await page.waitForTimeout(300);
+await page.evaluate(() => mCreate.openModelSheet());
 const modelRows = await page.evaluate(() => [...document.querySelectorAll('.m-model-results .m-model-result')]
     .map(row => row.querySelector('.m-model-name').textContent));
 check('checkpoint picker: starred first there too', modelRows[0] == 'zzz_starred', JSON.stringify(modelRows));
@@ -820,10 +826,13 @@ check('star without .safetensors still lifts the ListModels row',
     extless[0] == 'zzz_starred.safetensors', JSON.stringify(extless));
 
 // LoRA heading is the metadata title whenever it is non-empty, including when it equals the file stem.
-await page.evaluate(pixel => {
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
+await page.evaluate(() => {
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
     }
+});
+await page.waitForTimeout(300);
+await page.evaluate(pixel => {
     mState.starredModels = {};
     mCreate.indexLoras([
         { name: 'ill/epoch_1.safetensors', title: 'Azenda', trigger_phrase: '', preview_image: pixel },
@@ -847,10 +856,11 @@ check('LoRA picker: missing title falls back to the file stem', !!titledPlain, J
 check('LoRA picker: title equal to the file stem is still the heading', !!titledSame, JSON.stringify(titled));
 
 await page.evaluate(() => {
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
     }
 });
+await page.waitForTimeout(300);
 
 // Folder-prefix architecture filter: a qwen LoRA must not survive an ill pick just because both report SDXL.
 const arch = await page.evaluate(() => {
@@ -1083,11 +1093,12 @@ const wordSearch = await page.evaluate(async () => {
         [...sheet.querySelectorAll('.m-arch-note')].find(e => e.textContent == hint).click();
         out.afterReveal = [...sheet.querySelectorAll('.m-model-result')].length;
     }
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
     }
     return out;
 });
+await page.waitForTimeout(300);
 check('LoRA search matches every word in any order', wordSearch.ariaZen.length == 1 && wordSearch.zenAria.length == 1
     && wordSearch.nikke.length == 1 && wordSearch.trigger.length == 1, JSON.stringify(wordSearch));
 check('a search the filters hide says so and can reveal it', wordSearch.hint == '1 more match outside the filters - tap to show all'
@@ -1137,10 +1148,11 @@ check('Load More appends distinct pages rather than re-fetching the first rows',
 check('the sheet status counts what is loaded against the real total, and Load More hides at the end',
     loadMore.status == '400 matches' && loadMore.moreHidden, JSON.stringify(loadMore));
 await page.evaluate(() => {
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
     }
 });
+await page.waitForTimeout(300);
 
 // Sampler and Scheduler picklists: hidden until the session advertises the params with a value list, then
 // one option per server value behind a leading "default" option. Picking writes the raw value into state;

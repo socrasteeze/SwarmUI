@@ -62,7 +62,19 @@ await page.evaluate(source => {
         load() {}, loadParamMeta() {}, changed() {}, onChange() {},
         presets: [], starredModels: {}, paramMeta: {}, params: {},
     };
-    window.MCreate = { paramValueLabel: (id, v) => `${v}` };
+    window.MCreate = {
+        paramValueLabel: (id, v) => `${v}`,
+        genTargetName: (target, rows) => {
+            if (target && target.kind == 'local') {
+                return 'Hub';
+            }
+            if (target && target.kind == 'remote') {
+                let row = (rows || []).find(candidate => candidate.kind == 'remote' && candidate.parent == `${target.parent}`);
+                return row ? row.label : `Backend ${target.parent}`;
+            }
+            return 'Auto';
+        }
+    };
     window.mGen = { queueTotal: 0, pollStatus() {} };
     window.mUI = {
         warnings: [],

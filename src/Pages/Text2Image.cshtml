@@ -23,6 +23,18 @@
     return;
 }
 <script>
+    (() => {
+        let layout = 'auto';
+        try {
+            layout = localStorage.getItem('layout_mobileDesktop') || 'auto';
+        }
+        catch (e) {
+        }
+        let isSmall = layout == 'auto' ? window.innerWidth < 768 : layout == 'mobile';
+        document.body.classList.toggle('small-window', isSmall);
+        document.body.classList.toggle('large-window', !isSmall);
+        document.body.classList.toggle('coarse-pointer', window.matchMedia('(pointer: coarse)').matches);
+    })();
     window.alwaysRefreshOnLoad = @pageModel.AlwaysRefreshOnLoad;
     window.instanceTitle = "@pageModel.InstanceTitle";
     window.comfy_features = {};
@@ -48,6 +60,7 @@
     }
 </script>
 
+<a class="skip-navigation translate" href="#genpage-main-content" tabindex="0">Skip Navigation</a>
 <ul class="nav nav-tabs" role="tablist" id="toptablist">
     <li class="nav-item" role="presentation" data-requiredpermission="comfy_dynamic_custom_workflows,simple_tab">
         <a class="nav-link translate" data-bs-toggle="tab" href="#Simple" id="simpletabbutton" aria-selected="false" tabindex="-1" role="tab">Simple</a>
@@ -69,11 +82,11 @@
         <a class="nav-link translate" style="opacity:0" data-bs-toggle="tab" aria-selected="false" tabindex="-1" role="tab" disabled>Quick Tools Space</a>
     </li>
 </ul>
-<div class="tab-content tab-hundred">
+<div class="tab-content tab-hundred" id="genpage-main-content" tabindex="-1" role="main">
     <div class="tab-pane tab-pane-vw" id="Simple" role="tabpanel">
         @await Html.PartialAsync("_Generate/SimpleTab.cshtml", pageModel)
     </div>
-    <div class="tab-pane show active" style="line-height:0" id="Text2Image" role="tabpanel">
+    <div class="tab-pane show active genpage-generate-root" style="line-height:0" id="Text2Image" role="tabpanel">
         @await Html.PartialAsync("_Generate/GenerateTab.cshtml", pageModel)
     </div>
     @WebServer.T2ITabBody

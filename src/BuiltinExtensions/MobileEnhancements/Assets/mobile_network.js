@@ -112,9 +112,16 @@ class MobileNetwork {
             this.onTransportFailure();
             return original(...args);
         };
-        // A phone that was backgrounded through a restart sees nothing until it is foregrounded; probe then.
+        // A phone can be backgrounded while the server restarts, before any transport error set serverDown.
+        // Probe on either resume signal so an idle status loop cannot leave the installed PWA stale for up to
+        // its long background interval. probeServer's in-flight guard coalesces duplicate signals.
         document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState == 'visible' && this.serverDown) {
+            if (document.visibilityState == 'visible' && navigator.onLine) {
+                this.probeServer();
+            }
+        });
+        window.addEventListener('pageshow', () => {
+            if (navigator.onLine) {
                 this.probeServer();
             }
         });

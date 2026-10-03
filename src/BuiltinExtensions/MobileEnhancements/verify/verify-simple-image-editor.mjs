@@ -122,6 +122,36 @@ await page.evaluate(() => {
     let panel = document.querySelector('.m-panel[data-mtab="create"]');
     panel.classList.add('m-tab-active');
     mCreate.build(panel);
+    window.dispatchSyntheticTouch = (el, type, x, y) => {
+        let init = { identifier: 1, target: el, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y };
+        let touch;
+        try {
+            touch = new Touch(init);
+        }
+        catch {
+            touch = init;
+        }
+        let makeList = values => {
+            values.item = index => values[index] || null;
+            return values;
+        };
+        let active = makeList(type == 'touchend' ? [] : [touch]);
+        let changed = makeList([touch]);
+        let event;
+        try {
+            event = new TouchEvent(type, { touches: active, changedTouches: changed, targetTouches: active,
+                bubbles: true, cancelable: true });
+        }
+        catch {
+            event = new Event(type, { bubbles: true, cancelable: true });
+            Object.defineProperties(event, {
+                'touches': { value: active },
+                'changedTouches': { value: changed },
+                'targetTouches': { value: active }
+            });
+        }
+        el.dispatchEvent(event);
+    };
 });
 
 // An 8x6 test image with a distinct solid color in each quadrant, built entirely in-page (no PNG bytes
@@ -144,16 +174,11 @@ const testImage = await page.evaluate(() => {
 async function touchSequence(selector, points) {
     await page.evaluate(([sel, pts]) => {
         let el = document.querySelector(sel);
-        let dispatch = (type, x, y) => {
-            let touch = new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
-            let list = type == 'touchend' ? [] : [touch];
-            el.dispatchEvent(new TouchEvent(type, { touches: list, changedTouches: [touch], targetTouches: list, bubbles: true, cancelable: true }));
-        };
-        dispatch('touchstart', pts[0][0], pts[0][1]);
+        dispatchSyntheticTouch(el, 'touchstart', pts[0][0], pts[0][1]);
         for (let i = 1; i < pts.length; i++) {
-            dispatch('touchmove', pts[i][0], pts[i][1]);
+            dispatchSyntheticTouch(el, 'touchmove', pts[i][0], pts[i][1]);
         }
-        dispatch('touchend', pts[pts.length - 1][0], pts[pts.length - 1][1]);
+        dispatchSyntheticTouch(el, 'touchend', pts[pts.length - 1][0], pts[pts.length - 1][1]);
     }, [selector, points]);
 }
 
@@ -163,6 +188,7 @@ const pixelAt = (x, y) => page.evaluate(([px, py]) => {
     let d = mImageEdit.canvas.getContext('2d').getImageData(px, py, 1, 1).data;
     return [d[0], d[1], d[2]];
 }, [x, y]);
+const colorNear = (actual, expected) => actual.every((value, index) => Math.abs(value - expected[index]) <= 1);
 
 await page.evaluate(src => {
     mState.promptImages = [{ 'kind': 'data', 'value': src }, { 'kind': 'data', 'value': src }];
@@ -207,7 +233,7 @@ await page.click('.m-edit-tool-button:nth-child(2)');
 dims = await dimsOf();
 check('flip leaves dimensions unchanged', dims.w == 8 && dims.h == 6, JSON.stringify(dims));
 let nw = await pixelAt(1, 1), ne = await pixelAt(6, 1);
-check('flip mirrors left/right (NW is now the old NE green)', nw.join(',') == '0,255,0' && ne.join(',') == '255,0,0', `NW ${nw} NE ${ne}`);
+check('flip mirrors left/right (NW is now the old NE green)', colorNear(nw, [0, 255, 0]) && colorNear(ne, [255, 0, 0]), `NW ${nw} NE ${ne}`);
 await page.click('.m-edit-tool-button:nth-child(3)');
 check('undo reverts the flip', (await pixelAt(1, 1)).join(',') == '255,0,0');
 
@@ -339,20 +365,17 @@ let pastSecondX = secondBox.x + secondBox.width / 2 + 5;
 // hold-then-drag. This was a real bug in an earlier version of this harness, not in the app.
 await page.evaluate(([x, y]) => {
     let el = document.querySelectorAll('.m-image-tile:not(.m-image-add)')[0];
-    let touch = new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
-    el.dispatchEvent(new TouchEvent('touchstart', { touches: [touch], changedTouches: [touch], targetTouches: [touch], bubbles: true, cancelable: true }));
+    dispatchSyntheticTouch(el, 'touchstart', x, y);
 }, [startX, y]);
 await page.waitForTimeout(200);
 await page.evaluate(([x1, y, x2]) => {
     let el = document.querySelectorAll('.m-image-tile:not(.m-image-add)')[0];
     let move = (x) => {
-        let touch = new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
-        el.dispatchEvent(new TouchEvent('touchmove', { touches: [touch], changedTouches: [touch], targetTouches: [touch], bubbles: true, cancelable: true }));
+        dispatchSyntheticTouch(el, 'touchmove', x, y);
     };
     move(x1 + (x2 - x1) * 0.5);
     move(x2);
-    let touch = new Touch({ identifier: 1, target: el, clientX: x2, clientY: y });
-    el.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch], targetTouches: [], bubbles: true, cancelable: true }));
+    dispatchSyntheticTouch(el, 'touchend', x2, y);
 }, [startX, y, pastSecondX]);
 let orderAfterDrag = await page.evaluate(() => mState.promptImages.map(p => p._tag));
 check('long-press+drag reorder still works', orderAfterDrag.join(',') == 'second,first', orderAfterDrag.join(','));

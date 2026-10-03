@@ -234,9 +234,17 @@ class GenerateHandler {
         }
         if (data.gen_progress) {
             let thisBatchId = `${data.gen_progress.request_id}_${data.gen_progress.batch_index}`;
-            let metadataRaw = data.gen_progress.metadata ?? '{}';
+            let metadataRaw = typeof data.gen_progress.metadata == 'string' ? data.gen_progress.metadata : '{}';
             if (!(data.gen_progress.batch_index in images)) {
-                let metadataParsed = JSON.parse(metadataRaw);
+                let metadataParsed = {};
+                try {
+                    let parsed = JSON.parse(metadataRaw);
+                    if (parsed && typeof parsed == 'object' && !Array.isArray(parsed)) {
+                        metadataParsed = parsed;
+                    }
+                }
+                catch (e) {
+                }
                 let batch_div = this.gotImagePreview(data.gen_progress.preview ?? `DOPLACEHOLDER:${metadataParsed.sui_image_params?.model || actualInput.model || ''}`, metadataRaw, thisBatchId);
                 if (batch_div) {
                     images[data.gen_progress.batch_index] = {div: batch_div, image: null, metadata: metadataRaw, overall_percent: 0, current_percent: 0};

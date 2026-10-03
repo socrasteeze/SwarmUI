@@ -166,21 +166,21 @@ await page.evaluate(() => {
     });
 });
 
-// Coach vacated the prompt-header pill for Prompt Enhance; it registers under More and opens only via
+// Coach vacated the prompt toolbar for Prompt Enhance; it registers under More and opens only via
 // openSheet() (or that More row). The sheet must not auto-open on model selection.
 const entry = await page.evaluate(() => {
     let enhance = document.querySelector('.m-enhance-pill');
     let coachPill = document.querySelector('.m-coach-pill');
     let more = (mUI.moreItems || []).some(item => item.label == 'Prompt Coach');
     return {
-        enhanceOnHead: !!(enhance && enhance.parentElement.classList.contains('m-prompt-head')),
+        enhanceOnToolbar: !!(enhance && enhance.parentElement.classList.contains('m-prompt-toolbar')),
         coachPillGone: !coachPill,
         moreRegistered: more,
         sheets: document.querySelectorAll('.m-sheet').length
     };
 });
-check('Enhance owns the prompt-header pill; Coach is under More and opens nothing by itself',
-    entry.enhanceOnHead && entry.coachPillGone && entry.moreRegistered && entry.sheets == 0, JSON.stringify(entry));
+check('Enhance owns the prompt toolbar; Coach is under More and opens nothing by itself',
+    entry.enhanceOnToolbar && entry.coachPillGone && entry.moreRegistered && entry.sheets == 0, JSON.stringify(entry));
 
 // ---- 1. Profile resolution: Anima official name vs a generic (non-Anima) checkpoint ----
 const officialResolve = await page.evaluate(() => {

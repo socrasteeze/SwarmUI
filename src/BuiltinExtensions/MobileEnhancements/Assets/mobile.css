@@ -32,6 +32,30 @@ body.small-window {
     font-size: 13px;
 }
 
+/* Before layout.js takes ownership, keep Generate in the same top-area + bottom-peek geometry that its first
+   mobile pass computes. This prevents the core 50vh defaults from placing the prompt halfway up the screen
+   during first paint. The first completed mobile layout pass adds mobile-layout-ready and removes these
+   bootstrap-only rules. */
+body.small-window:not(.mobile-layout-ready) .genpage-generate-root {
+    height: 100%;
+    min-height: 0;
+}
+body.small-window:not(.mobile-layout-ready) .t2i-top-bar-container {
+    height: calc(100% - 3.625rem);
+    min-height: 120px;
+    overflow: hidden;
+}
+body.coarse-pointer.small-window:not(.mobile-layout-ready) .t2i-top-bar-container {
+    height: calc(100% - 4.875rem);
+}
+body.small-window:not(.mobile-layout-ready) .t2i-top-bar,
+body.small-window:not(.mobile-layout-ready) .main-image-area {
+    height: 100%;
+}
+body.small-window:not(.mobile-layout-ready) .alt_prompt_textbox {
+    height: 50px;
+}
+
 /* Bounded bottom safe-area inset. iOS standalone PWAs can report env(safe-area-inset-bottom) wildly
    inflated (observed ~100px on the target device - the physical-pixel value of the 34pt home indicator
    instead of the CSS-px one), which ballooned every bottom-inset consumer below into a huge dead band.
@@ -309,8 +333,8 @@ body.coarse-pointer .image-block .model-block-menu-button {
    loading" signal a fully blank screen can't give. See busy_indicator.js's runDeferred() for why the paint
    happens at all before a blocking task starts. */
 @keyframes swarm-busybar-slide {
-    0% { left: -35%; }
-    100% { left: 100%; }
+    0% { transform: translateX(0); }
+    100% { transform: translateX(385.714%); }
 }
 
 /* --- Model/preset browser cards: fit the phone column instead of overflowing it --- */
@@ -486,6 +510,24 @@ body.small-window .mobile-fullview-overlay-index {
 }
 .mobile-firstrun-toast.visible {
     transform: translateX(-50%) translateY(0);
+}
+
+/* Keep visible state feedback for people who reduce motion, but remove automated travel and the continuous
+   busy-bar sweep. The viewer's JavaScript transitions use the same preference independently. */
+@media (prefers-reduced-motion: reduce) {
+    .mobile-connection-banner,
+    .mobile-firstrun-toast {
+        transform: translateX(-50%) translateY(0);
+        opacity: 0;
+        transition: opacity 0.12s ease-out;
+    }
+    .mobile-connection-banner.visible,
+    .mobile-firstrun-toast.visible {
+        opacity: 1;
+    }
+    .swarm-busybar-fill {
+        animation: none;
+    }
 }
 .mobile-firstrun-toast-close {
     flex: 0 0 auto;

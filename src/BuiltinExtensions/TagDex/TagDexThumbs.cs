@@ -18,6 +18,9 @@ namespace SwarmUI.Builtin_TagDexExtension;
 
 public partial class TagDexExtension
 {
+    /// <summary>Serializes final thumbnail publication so concurrent same-target moves cannot contend on Windows.</summary>
+    private static readonly object AtomicWriteLock = new();
+
     /// <summary>Serializes thumbnail generation across the whole extension.
     /// <para>Deliberately a single slot. A "generate all visible" sweep over a filtered page is an obvious thing to
     /// want, and fanning it out would occupy every backend for as long as it ran - a typical install has one to four,
@@ -259,13 +262,30 @@ public partial class TagDexExtension
     /// file that the thumbnail listing would treat as valid.</summary>
     public static void WriteAtomic(string path, byte[] data)
     {
-        string temp = $"{path}.tmp";
-        File.WriteAllBytes(temp, data);
-        if (File.Exists(path))
+        lock (AtomicWriteLock)
         {
-            File.Delete(path);
+            string folder = Path.GetDirectoryName(path) ?? ".";
+            string temp = Path.Combine(folder, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                File.WriteAllBytes(temp, data);
+                File.Move(temp, path, true);
+            }
+            finally
+            {
+                if (File.Exists(temp))
+                {
+                    try
+                    {
+                        File.Delete(temp);
+                    }
+                    catch (Exception)
+                    {
+                        // Preserve the original write or publish error. A later cleanup can remove a failed temp file.
+                    }
+                }
+            }
         }
-        File.Move(temp, path);
     }
 
     /// <summary>Proportional WebP at the configured height.

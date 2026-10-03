@@ -100,16 +100,12 @@ public partial class TagDexExtension : Extension
     }
 
     /// <summary>Serves the lean typeahead index as a tab-separated blob.
-    /// <para>A dedicated route rather than an API call so the response can carry an immutable cache header. The
-    /// version segment is the loaded list's fingerprint, so a rebuilt dataset produces a new URL and the browser
-    /// re-fetches automatically - while an unchanged one is served from cache and never touches the network. That
-    /// matters most on a phone, where this is a few hundred kilobytes.</para></summary>
+    /// <para>A dedicated route rather than an API call so the response can carry an ETag. Authorized clients revalidate
+    /// unchanged content to a bodyless 304 response, while every request still checks current TagDex permission.</para></summary>
     public async Task ServeIndexBlob(HttpContext context)
     {
-        if (!WebUtil.HasValidLogin(context))
+        if (!await AuthorizeAssetRequest(context))
         {
-            context.Response.StatusCode = 401;
-            await context.Response.CompleteAsync();
             return;
         }
         string sourceId = $"{context.Request.RouteValues["source"]}";
@@ -126,8 +122,16 @@ public partial class TagDexExtension : Extension
             minCount = Math.Clamp(parsed, 1, 1000000);
         }
         string body = TagDexIndexBlob.Build(list, minCount);
+        string etag = $"\"{TagDexIndexBlob.Fingerprint(list, minCount)}\"";
         context.Response.ContentType = "text/plain; charset=utf-8";
-        context.Response.Headers["Cache-Control"] = "private, max-age=31536000, immutable";
+        context.Response.Headers["Cache-Control"] = "private, no-cache";
+        context.Response.Headers.ETag = etag;
+        if (context.Request.Headers.IfNoneMatch == etag)
+        {
+            context.Response.StatusCode = StatusCodes.Status304NotModified;
+            await context.Response.CompleteAsync();
+            return;
+        }
         context.Response.StatusCode = 200;
         await context.Response.WriteAsync(body);
         await context.Response.CompleteAsync();
@@ -136,10 +140,8 @@ public partial class TagDexExtension : Extension
     /// <summary>Serves one thumbnail image out of the TagDex data folder.</summary>
     public async Task ServeThumbnail(HttpContext context)
     {
-        if (!WebUtil.HasValidLogin(context))
+        if (!await AuthorizeAssetRequest(context))
         {
-            context.Response.StatusCode = 401;
-            await context.Response.CompleteAsync();
             return;
         }
         string sourceId = $"{context.Request.RouteValues["source"]}";
@@ -160,11 +162,40 @@ public partial class TagDexExtension : Extension
             await context.Response.CompleteAsync();
             return;
         }
+        FileInfo info = new(path);
+        string etag = $"\"{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}\"";
         context.Response.ContentType = file.EndsWith(".webp") ? "image/webp" : (file.EndsWith(".png") ? "image/png" : "image/jpeg");
-        context.Response.Headers["Cache-Control"] = "private, max-age=604800";
+        context.Response.Headers["Cache-Control"] = "private, no-cache";
+        context.Response.Headers.ETag = etag;
+        if (context.Request.Headers.IfNoneMatch == etag)
+        {
+            context.Response.StatusCode = StatusCodes.Status304NotModified;
+            await context.Response.CompleteAsync();
+            return;
+        }
         context.Response.StatusCode = 200;
         await context.Response.Body.WriteAsync(await File.ReadAllBytesAsync(path));
         await context.Response.CompleteAsync();
+    }
+
+    /// <summary>Checks the same login and use permission as the TagDex read APIs before an asset route resolves
+    /// a dataset, index, thumbnail path, or file. Assets are private to authorized TagDex users.</summary>
+    public static async Task<bool> AuthorizeAssetRequest(HttpContext context)
+    {
+        User user = WebServer.GetUserFor(context);
+        if (user is null)
+        {
+            context.Response.StatusCode = 401;
+            await context.Response.CompleteAsync();
+            return false;
+        }
+        if (!user.HasPermission(PermUseTagDex))
+        {
+            context.Response.StatusCode = 403;
+            await context.Response.CompleteAsync();
+            return false;
+        }
+        return true;
     }
 }
 

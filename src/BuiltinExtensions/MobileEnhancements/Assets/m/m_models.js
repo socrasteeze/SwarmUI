@@ -12,6 +12,12 @@ class MModels {
         this.folder = '';
         /** True while a Load CivitAI run is in flight, so a second tap does not stack requests. */
         this.civitaiBusy = false;
+        /** Current folder's starred-first model rows. */
+        this.folderModels = [];
+        /** Number of folder cards currently attached to the DOM. */
+        this.folderRendered = 0;
+        /** Monotonic token that invalidates stale folder listing callbacks. */
+        this.folderRequestVersion = 0;
     }
 
     /** Builds the Models panel once. */
@@ -35,6 +41,10 @@ class MModels {
         this.search.type = 'search';
         this.search.className = 'm-lora-search m-models-search';
         this.search.addEventListener('input', () => {
+            // The debounce only delays the replacement search. It must not leave the old folder request
+            // eligible to repaint the grid during that 150ms window.
+            this.invalidateFolderRender();
+            this.grid.innerHTML = '';
             clearTimeout(this.searchTimer);
             this.searchTimer = setTimeout(() => this.refresh(), 150);
         });
@@ -43,6 +53,27 @@ class MModels {
         panel.appendChild(this.folderChips);
         this.grid = mUI.el('div', 'm-model-grid');
         panel.appendChild(this.grid);
+        this.folderSentinel = mUI.el('div', 'm-scroll-sentinel');
+        panel.appendChild(this.folderSentinel);
+        this.folderLoadMore = mUI.el('button', 'm-model-plain-row', 'Load More');
+        this.folderLoadMore.type = 'button';
+        this.folderLoadMore.hidden = true;
+        this.folderLoadMore.addEventListener('click', () => this.renderFolderMore());
+        panel.appendChild(this.folderLoadMore);
+        this.panel = panel;
+        if (typeof IntersectionObserver != 'undefined') {
+            this.folderObserver = new IntersectionObserver(entries => {
+                if (!this.panel.classList.contains('m-tab-active')) {
+                    return;
+                }
+                for (let entry of entries) {
+                    if (entry.isIntersecting) {
+                        this.renderFolderMore();
+                        return;
+                    }
+                }
+            }, { 'root': panel, 'rootMargin': '100% 0px' });
+        }
     }
 
     /** Every activation: fetch fresh (models change rarely; the call is cheap at depth 1). */
@@ -52,6 +83,7 @@ class MModels {
 
     /** Fetches and renders the current folder. */
     refresh() {
+        this.invalidateFolderRender();
         for (let btn of this.toggle.querySelectorAll('.m-seg-button')) {
             btn.classList.toggle('m-selected', btn.dataset.subtype == this.subtype);
         }
@@ -64,23 +96,85 @@ class MModels {
         this.folderChips.style.display = '';
         this.grid.innerHTML = '';
         this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
+        let version = this.folderRequestVersion;
         genericRequest('ListModels', { 'path': this.folder, 'depth': 1, 'subtype': this.subtype, 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
+            if (version != this.folderRequestVersion) {
+                return;
+            }
             this.renderFolders(data.folders || []);
             this.grid.innerHTML = '';
-            // Starred first, same as the Create-tab pickers and the genpage's own browsers. This list is one
-            // folder deep rather than capped, so it is ordering for its own sake here, not rescuing rows from
-            // a truncated list - but a favourite that sorts to the top in one place and the middle in another
-            // is just two different apps.
-            for (let model of mState.starredFirst(data.files || [], this.subtype)) {
-                this.grid.appendChild(this.buildCard(model));
-            }
-            if ((data.files || []).length == 0) {
+            // Starred first, same as the Create-tab pickers and the genpage's own browsers. The folder result
+            // remains complete, then renders in chunks: a favourite belongs in the first visible chunk even
+            // when the folder has hundreds of rows.
+            this.folderModels = mState.starredFirst(data.files || [], this.subtype);
+            if (this.folderModels.length == 0) {
                 this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
+                return;
             }
+            this.renderFolderMore();
         }, 0, err => {
+            if (version != this.folderRequestVersion) {
+                return;
+            }
             mUI.warn(`Could not list models: ${err}`);
         });
     }
+
+    /** Clears folder-listing state and prevents an older request from changing the current view. */
+    invalidateFolderRender() {
+        this.folderRequestVersion++;
+        this.folderModels = [];
+        this.folderRendered = 0;
+        if (this.folderObserver) {
+            this.folderObserver.disconnect();
+        }
+        if (this.folderObserveFrame) {
+            cancelAnimationFrame(this.folderObserveFrame);
+            this.folderObserveFrame = null;
+        }
+        if (this.folderLoadMore) {
+            this.folderLoadMore.hidden = true;
+        }
+    }
+
+    /** Renders the next bounded group of folder cards and keeps the sentinel active while rows remain. */
+    renderFolderMore() {
+        if (!this.folderModels || this.folderRendered >= this.folderModels.length || !this.panel.classList.contains('m-tab-active')) {
+            return;
+        }
+        let target = Math.min(this.folderRendered + MModels.FolderChunkSize, this.folderModels.length);
+        let fragment = document.createDocumentFragment();
+        for (let i = this.folderRendered; i < target; i++) {
+            fragment.appendChild(this.buildCard(this.folderModels[i]));
+        }
+        this.grid.appendChild(fragment);
+        this.folderRendered = target;
+        let more = this.folderRendered < this.folderModels.length;
+        this.folderLoadMore.hidden = !more;
+        if (more && this.folderObserver) {
+            this.queueFolderObserve();
+        }
+        else if (this.folderObserver) {
+            this.folderObserver.disconnect();
+        }
+    }
+
+    /** Re-arms the sentinel after layout so a still-visible sentinel can request another bounded chunk. */
+    queueFolderObserve() {
+        this.folderObserver.disconnect();
+        if (this.folderObserveFrame) {
+            cancelAnimationFrame(this.folderObserveFrame);
+        }
+        this.folderObserveFrame = requestAnimationFrame(() => {
+            this.folderObserveFrame = null;
+            if (this.panel.classList.contains('m-tab-active') && this.folderRendered < this.folderModels.length) {
+                this.folderObserver.observe(this.folderSentinel);
+            }
+        });
+    }
+
+    /** Number of model cards inserted per folder-listing pass. */
+    static FolderChunkSize = 40;
 
     /** Search results across every folder of the current subtype, capped like the Create-tab pickers. The
      * lists are loaded on first search and cached on mCreate, which the pickers share. */
@@ -177,6 +271,8 @@ class MModels {
      * Local models with edit permission also get Load CivitAI (stopPropagation so it does not select/add). */
     buildCard(model) {
         let card = mUI.el('div', 'm-model-card');
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
         let thumb = mUI.modelThumb(model, null);
         if (thumb) {
             card.appendChild(thumb);
@@ -201,7 +297,7 @@ class MModels {
         if (this.subtype == 'Stable-Diffusion' && mState.params['model'] == model.name) {
             card.classList.add('m-selected');
         }
-        card.addEventListener('click', () => {
+        let activate = () => {
             if (this.subtype == 'Stable-Diffusion') {
                 mState.params['model'] = model.name;
                 mState.changed();
@@ -218,6 +314,18 @@ class MModels {
                     mState.setLoras(cur);
                 }
                 mUI.note(`LoRA added: ${mUI.modelLines(model, true).primary}`);
+            }
+        };
+        card.addEventListener('click', e => {
+            if (e.target.closest('button, a, input, select, textarea')) {
+                return;
+            }
+            activate();
+        });
+        card.addEventListener('keydown', e => {
+            if (e.target == card && (e.key == 'Enter' || e.key == ' ')) {
+                e.preventDefault();
+                activate();
             }
         });
         return card;
