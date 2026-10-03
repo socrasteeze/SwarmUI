@@ -221,6 +221,63 @@ class MFramePrep {
         return true;
     }
 
+    /** MiniMax H3 hybrid and/or FL2VA. Other arches (Krea, Qwen, ...) stay on the 1024 floor.
+     * Hybrid is not enough on its own: the name or preset must also be MiniMax/H3, or say FL2VA. */
+    static isLowResAspectContext() {
+        if (typeof mState == 'undefined' || !mState) {
+            return false;
+        }
+        let parts = [];
+        let push = (v) => {
+            if (v != null && String(v) != '') {
+                parts.push(String(v));
+            }
+        };
+        push(mState.params && mState.params['videomodel']);
+        push(mState.params && mState.params['model']);
+        for (let title of (mState.activePresets || [])) {
+            push(title);
+            let preset = (mState.presets || []).find(p => p.title == title);
+            if (!preset) {
+                continue;
+            }
+            push(preset.description);
+            let map = preset.param_map || {};
+            push(map['videomodel']);
+            push(map['model']);
+        }
+        let blob = parts.join('\n').toLowerCase();
+        let fl2va = blob.includes('fl2va');
+        let hybridH3 = blob.includes('hybrid') && (blob.includes('minimax') || blob.includes('h3'));
+        return fl2va || hybridH3;
+    }
+
+    /** Side length for a closest-aspect pick. Short side is the image's own short side, but never
+     * below 768, and the side length is aligned up to *32 so rounding cannot slip back under that floor.
+     * aspectRefs are the 512-base pairs; extraAspects are numeric width/height ratios. */
+    static sideLengthForClosest(aspect, imageW, imageH, aspectRefs, extraAspects) {
+        let short = Math.min(imageW || 0, imageH || 0);
+        if (!(short > 0)) {
+            short = MFramePrep.Shortest;
+        }
+        short = Math.max(MFramePrep.Shortest, MFramePrep.roundNearest(short, MFramePrep.Multiple));
+        let ref = aspectRefs && aspectRefs[aspect];
+        let side;
+        if (ref) {
+            let refShort = Math.min(ref[0], ref[1]);
+            side = refShort > 0 ? short * 512 / refShort : MFramePrep.Shortest;
+        }
+        else {
+            let ratio = extraAspects && extraAspects[aspect];
+            if (!(ratio > 0)) {
+                return MFramePrep.Shortest;
+            }
+            side = short * Math.sqrt(Math.max(ratio, 1 / ratio));
+        }
+        let aligned = Math.ceil((side / MFramePrep.Multiple) - 1e-6) * MFramePrep.Multiple;
+        return Math.max(MFramePrep.Shortest, aligned);
+    }
+
     /** Scales Start (and End when Same-as-start / End is filled) for qualifying presets.
      * Mutates mState; caller should mState.changed() / rebuild input afterward. */
     async prepareFramesForGenerate() {

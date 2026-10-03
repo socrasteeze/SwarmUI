@@ -1565,39 +1565,63 @@ class MCreate {
             this.imageStrip.appendChild(tile);
         }
         this.imageStrip.style.display = mState.promptImages.length > 0 ? '' : 'none';
-        this.ratioRow.style.display = mState.promptImages.length > 0 ? '' : 'none';
+        // Closest-aspect is normally a prompt-image action. MiniMax hybrid / FL2VA frames live on
+        // the start slot, so that option has to show up there too or it cannot be used.
+        let frameAspect = typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext() && mState.initImage;
+        this.ratioRow.style.display = (mState.promptImages.length > 0 || frameAspect) ? '' : 'none';
     }
 
-    /** Reads the natural size of the first prompt image (the primary one) and reports its width/height
-     * ratio, or 0 if it cannot be measured. */
-    primaryImageRatio(callback) {
-        let entry = mState.promptImages[0];
+    /** Prompt image when one is attached; otherwise the FL2VA start frame, but only for MiniMax
+     * hybrid / FL2VA where closest-aspect has to be usable without a prompt image. */
+    aspectSourceEntry() {
+        if (mState.promptImages.length > 0) {
+            return mState.promptImages[0];
+        }
+        if (typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext() && mState.initImage) {
+            return mState.initImage;
+        }
+        return null;
+    }
+
+    /** Natural size of an image entry, or null. Prepared frames already carry width/height. */
+    measureEntry(entry, callback) {
         if (!entry) {
-            callback(0);
+            callback(null);
+            return;
+        }
+        let done = (w, h) => callback(w > 0 && h > 0 ? { 'w': w, 'h': h, 'ratio': w / h } : null);
+        if (entry.width && entry.height) {
+            done(entry.width, entry.height);
             return;
         }
         let img = new Image();
-        img.onload = () => callback(img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 0);
-        img.onerror = () => callback(0);
+        img.onload = () => done(img.naturalWidth, img.naturalHeight);
+        img.onerror = () => callback(null);
         img.src = entry.kind == 'data' ? entry.value : `${getImageOutPrefix()}/${entry.value}`;
     }
 
-    /** Sets the aspect ratio from the primary prompt image. Exact keeps the image's real ratio (sent as
-     * Custom with computed pixels, and still scaled by whatever the Size setting says); otherwise it snaps
-     * to the nearest ratio in the picker. */
+    /** Sets the aspect ratio from the primary prompt image, or the start frame for MiniMax hybrid / FL2VA.
+     * Exact keeps the image's real ratio (sent as Custom with computed pixels, and still scaled by whatever
+     * the Size setting says). Closest snaps to the nearest ratio in the picker. For MiniMax hybrid / FL2VA
+     * that snap also sets the side length from the image, floored at 768 (x32) instead of the 1024 res floor. */
     applyImageRatio(exact) {
-        this.primaryImageRatio(ratio => {
-            if (!ratio) {
+        this.measureEntry(this.aspectSourceEntry(), box => {
+            if (!box) {
                 mUI.warn('Could not read that image\'s size.');
                 return;
             }
             if (exact) {
                 mState.params['aspectratio'] = 'Custom';
-                mState.customRatio = ratio;
+                mState.customRatio = box.ratio;
             }
             else {
-                mState.params['aspectratio'] = MState.closestAspect(ratio);
+                let aspect = MState.closestAspect(box.ratio);
+                mState.params['aspectratio'] = aspect;
                 mState.customRatio = 0;
+                if (typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext()) {
+                    let side = MFramePrep.sideLengthForClosest(aspect, box.w, box.h, MState.AspectReferences, MState.ExtraAspects);
+                    mState.params['sidelength'] = `${side}`;
+                }
             }
             mState.changed();
         });
@@ -1931,9 +1955,12 @@ class MCreate {
         let meta = mState.paramMeta['sidelength'];
         let min = meta && parseInt(meta.min) ? parseInt(meta.min) : 0;
         let max = meta && parseInt(meta.max) ? parseInt(meta.max) : 16384;
-        let ladder = MCreate.SideLengths.filter(v => v >= min && v <= max);
+        // 1024 floor stays for Krea/Qwen/etc. MiniMax hybrid and FL2VA may step down to 768.
+        let lengths = (typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext())
+            ? MCreate.MiniMaxSideLengths : MCreate.SideLengths;
+        let ladder = lengths.filter(v => v >= min && v <= max);
         if (ladder.length == 0) {
-            ladder.push(Math.min(max, Math.max(min, MCreate.SideLengths[0])));
+            ladder.push(Math.min(max, Math.max(min, lengths[0])));
         }
         let rungs = ladder.map(v => `${v}`);
         let current = mState.params['sidelength'];
@@ -2681,7 +2708,10 @@ class MCreate {
 
 /** The size rungs the Create panel's size stepper walks. Floored at 1024 and capped at 1536: every current
  * architecture is 1024-native, the sub-1024 rungs only ever served SD1.x, and past 1536 a base generation
- * costs more than upscaling the same image would. Kept short on purpose - this is a stepper, not a list. */
+ * costs more than upscaling the same image would. Kept short on purpose - this is a stepper, not a list.
+ * MiniMax H3 hybrid and FL2VA are the exception: their canvas floor is 768 (x32), same as FL2VA frame prep,
+ * so those presets use MiniMaxSideLengths instead of this list. */
 MCreate.SideLengths = [1024, 1152, 1280, 1536];
+MCreate.MiniMaxSideLengths = [768, 1024, 1152, 1280, 1536];
 
 mCreate = new MCreate();

@@ -60,5 +60,38 @@ assert(mState.videoEndImage && mState.videoEndImage.value === 'raw/a.png', 'end 
 assert(mState.videoEndImage !== mState.initImage, 'end is a clone, not same object');
 assert(mFramePrep.mirrorStartToEnd() === false, 'second mirror is a no-op');
 
+
+const refs = { '1:1': [512, 512], '16:9': [672, 384], '4:3': [576, 448] };
+assert(MFramePrep.sideLengthForClosest('1:1', 1024, 1024, refs, {}) === 1024, 'square 1024 stays 1024, not forced up');
+assert(MFramePrep.sideLengthForClosest('1:1', 768, 768, refs, {}) === 768, 'square 768 is allowed, not bumped to 1024');
+assert(MFramePrep.sideLengthForClosest('1:1', 400, 300, refs, {}) === 768, 'below 768 floors at 768');
+assert(MFramePrep.sideLengthForClosest('16:9', 1344, 768, refs, {}) === 1024, '16:9 at short 768 uses side 1024 got ' + MFramePrep.sideLengthForClosest('16:9', 1344, 768, refs, {}));
+assert(MFramePrep.sideLengthForClosest('4:3', 1024, 768, refs, {}) === 896, '4:3 short 768 aligns up to *32 without dropping under 768 got ' + MFramePrep.sideLengthForClosest('4:3', 1024, 768, refs, {}));
+
+mState.params = {};
+mState.presets = [];
+mState.activePresets = ['krea/portrait'];
+mState.presets = [{ title: 'krea/portrait', description: 'krea edit', param_map: { model: 'krea/foo' } }];
+assert(MFramePrep.isLowResAspectContext() === false, 'krea does not get the 768 floor');
+
+mState.activePresets = ['qwen/edit'];
+mState.presets = [{ title: 'qwen/edit', description: 'qwen', param_map: { model: 'qwen/image' } }];
+assert(MFramePrep.isLowResAspectContext() === false, 'qwen does not get the 768 floor');
+
+mState.params = { videomodel: 'minimax/10Eros_Max_h3_TURBO-hybrid_beta5' };
+mState.activePresets = [];
+mState.presets = [];
+assert(MFramePrep.isLowResAspectContext() === true, 'hybrid H3 video model gets the 768 floor');
+
+mState.params = {};
+mState.activePresets = ['minimax/FL2VA'];
+mState.presets = [{ title: 'minimax/FL2VA', description: '', param_map: {} }];
+assert(MFramePrep.isLowResAspectContext() === true, 'FL2VA preset gets the 768 floor');
+
+mState.params = {};
+mState.activePresets = ['minimax/something'];
+mState.presets = [{ title: 'minimax/something', description: 'plain t2v', param_map: { videomodel: 'minimax/base' } }];
+assert(MFramePrep.isLowResAspectContext() === false, 'plain minimax without hybrid or FL2VA keeps 1024');
+
 if (failed) { console.error(failed + ' failed'); process.exit(1); }
 console.log('ALL PASSED');
