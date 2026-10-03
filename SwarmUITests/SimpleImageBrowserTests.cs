@@ -132,6 +132,26 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(previewImage.Height, Is.EqualTo(128));
     }
 
+    /// <summary>TIFF selections become lossless browser-readable PNG attachments without changing the source.</summary>
+    [Test]
+    public void ReadImage_ConvertsTiffToPngWithoutChangingSource()
+    {
+        string path = Path.Combine(TempRoot, "valid.tiff");
+        using ISImage source = new(8, 4);
+        source[2, 1] = new SixLabors.ImageSharp.PixelFormats.Rgba32(12, 34, 56, 255);
+        source.SaveAsTiff(path);
+        byte[] originalBytes = File.ReadAllBytes(path);
+
+        string selected = (string)SimpleImageBrowserAPI.ReadImage(path, false)["image"];
+        Assert.That(selected.StartsWith("data:image/png;base64,", StringComparison.Ordinal), Is.True);
+        byte[] selectedBytes = Convert.FromBase64String(selected.Split(',')[1]);
+        using ISImage decoded = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(selectedBytes);
+        Assert.That(decoded.Width, Is.EqualTo(source.Width));
+        Assert.That(decoded.Height, Is.EqualTo(source.Height));
+        Assert.That(decoded[2, 1], Is.EqualTo(source[2, 1]));
+        Assert.That(File.ReadAllBytes(path), Is.EqualTo(originalBytes));
+    }
+
     /// <summary>Direct API entry points deny callers before they inspect a path.</summary>
     [Test]
     public async System.Threading.Tasks.Task Api_DeniesUsersWithoutBrowsePermission()

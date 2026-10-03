@@ -328,6 +328,7 @@ class MCreate {
             // Single pick: the selection IS the active preset, so picking replaces rather than accumulates.
             // See renderPresets for why this client does not offer the full UI's multi-preset merge.
             let title = this.presetSelect.value;
+            this.noteAspectOverride();
             mState.activePresets = title ? [title] : [];
             // A newly chosen preset's aspect is the default again. Tapping the aspect stepper pins over it.
             mState.aspectPinned = false;
@@ -1551,6 +1552,9 @@ class MCreate {
     /** Prompt-image strip: thumbs, remove, and long-press drag reorder (DOM order == request order). */
     renderImageStrip() {
         this.promptImageClear.disabled = mState.promptImages.length == 0;
+        // Start and preset changes affect the ratio actions even when the prompt thumbnails are unchanged.
+        let frameAspect = typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext() && mState.initImage;
+        this.ratioRow.style.display = (mState.promptImages.length > 0 || frameAspect) ? '' : 'none';
         // Same reason as syncOptions: rebuilding unconditionally re-creates every <img> on every state
         // change, which re-decodes the thumbnails and, on a browser with no scroll anchoring, shifts the
         // panel under the finger.
@@ -1584,10 +1588,6 @@ class MCreate {
             this.imageStrip.appendChild(tile);
         }
         this.imageStrip.style.display = mState.promptImages.length > 0 ? '' : 'none';
-        // Closest-aspect is normally a prompt-image action. MiniMax hybrid / FL2VA frames live on
-        // the start slot, so that option has to show up there too or it cannot be used.
-        let frameAspect = typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext() && mState.initImage;
-        this.ratioRow.style.display = (mState.promptImages.length > 0 || frameAspect) ? '' : 'none';
     }
 
     /** Prompt image when one is attached; otherwise the FL2VA start frame, but only for MiniMax
@@ -1655,7 +1655,7 @@ class MCreate {
         });
     }
 
-    /** A manual aspect or size step, or the ratio buttons, cancel an in-flight start-frame aspect apply. */
+    /** A preset selection, manual aspect or size step, or ratio button cancels an in-flight start-frame aspect apply. */
     noteAspectOverride() {
         this.startAspectGen = (this.startAspectGen || 0) + 1;
     }
