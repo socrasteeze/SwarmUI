@@ -24,6 +24,8 @@ Implemented in Assets/m/m_frame_prep.js (wired from m_create.js). Restart the Sw
 
 ## /simple image folders
 
+Image history omits folders with no images, video, or audio anywhere below them. Backend placeholders and preview sidecars do not count as saved media. Folders appear automatically when they contain saved media. Listing history does not create or delete folders.
+
 Use an image attachment **+**, or a Start/End frame **+**, to open the image browser. **Output** keeps the existing output favorites in a dropdown, with **Edit** beside it. **Drives** lists the drives on the SwarmUI host. The folder list and image grid scroll separately. Open folders, use **Up**, or enter an absolute folder path and select **Go**. Image previews load as they enter view. **Load More** adds the next page in large folders.
 
 Drives requires the **Browse Server Images** role permission (`browse_server_images`), enabled by default for administrators. The permission grants image access across the host's filesystem, including mounted drives and readable network shares. Operating system access restrictions still apply. The browser shows folders and supported bitmap images only. It does not change source files. Selected images become normal attachments for prompt images and Start/End frames, including when the PWA runs on a phone.
