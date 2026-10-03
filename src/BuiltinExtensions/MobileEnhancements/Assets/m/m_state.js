@@ -20,6 +20,9 @@ class MState {
         this.videoEndImage = null;
         /** True when the seed is locked (kept between generations) rather than randomized (-1). */
         this.seedLocked = false;
+        /** True after the /simple aspect stepper (or an image-ratio match) is used, so that pick wins over
+         * a preset aspectratio. Left false, a preset's own aspect stays the default. */
+        this.aspectPinned = false;
         /** True once a save() has failed, so the "not being saved" warning fires once and not per keystroke. */
         this.saveFailed = false;
         /** Param metadata map (id -> param object) from ListT2IParams. */
@@ -411,6 +414,21 @@ class MState {
                 input[key] = this.params[key];
             }
         }
+        // First-frame MiniMax hybrid / FL2VA (Eros included) sizes the video from Video Resolution, not
+        // from Aspect Ratio. With the param absent the server falls back to "Model Preferred", and MiniMax
+        // H3's standard is square 960, so the /simple aspect stepper changed its label while the video stayed
+        // 1:1. A start frame therefore sends "Image Aspect, Model Res": the stepper's ratio fitted to the
+        // model's pixel count (2:3 lands on 768x1152 for that square). An explicit Image or Image Aspect
+        // value is left alone. A pinned stepper also replaces a preset aspectratio; until the button is used,
+        // the preset's own aspect stays the default.
+        let firstFrameVideoAspect = !!this.initImage
+            && typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext();
+        if (firstFrameVideoAspect && this.aspectPinned && this.params['aspectratio']) {
+            input['aspectratio'] = this.params['aspectratio'];
+            if (this.params['sidelength'] != null && `${this.params['sidelength']}` != '') {
+                input['sidelength'] = this.params['sidelength'];
+            }
+        }
         // Resolution. An aspect ratio on its own does nothing server-side: T2IParamInput.GetImageWidth only
         // consults the aspect table when a side length is ALSO present, and otherwise falls through to raw
         // width/height (default 512) - so a picked aspect ratio was silently ignored. Whenever a known
@@ -436,6 +454,12 @@ class MState {
                 input['height'] = `${dims[1]}`;
             }
             delete input['sidelength'];
+        }
+        if (firstFrameVideoAspect) {
+            let videoRes = `${input['videoresolution'] || ''}`;
+            if (!videoRes || videoRes == 'Model Preferred') {
+                input['videoresolution'] = 'Image Aspect, Model Res';
+            }
         }
         if (this.promptImages.length > 0) {
             // Path entries must be output-root-relative (raw/..., Starred/..., inputs/...). A leftover
@@ -588,6 +612,7 @@ class MState {
         this.initImage = null;
         this.videoEndImage = null;
         this.seedLocked = false;
+        this.aspectPinned = false;
         this.customRatio = 0;
         this.changed();
     }
@@ -961,6 +986,7 @@ class MState {
                 'params': this.params,
                 'activePresets': this.activePresets,
                 'seedLocked': this.seedLocked,
+                'aspectPinned': this.aspectPinned,
                 'customRatio': this.customRatio,
                 'archFilter': this.archFilter,
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
@@ -1000,6 +1026,7 @@ class MState {
             // written before that change can still carry a whole merge stack that nothing on screen shows.
             this.activePresets = (data.activePresets || []).slice(0, 1);
             this.seedLocked = !!data.seedLocked;
+            this.aspectPinned = !!data.aspectPinned;
             this.customRatio = data.customRatio || 0;
             this.archFilter = data.archFilter || '';
             this.promptImages = (data.promptImagePaths || []).map(path => ({ 'kind': 'path', 'value': path }));
