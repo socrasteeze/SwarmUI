@@ -45,8 +45,8 @@ public static class SimpleImageBrowserAPI
         return Task.FromResult(ListFolder(path, offset, limit));
     }
 
-    /// <summary>Reads one validated image as a data URI, optionally producing a small JPEG preview.</summary>
-    [API.APIDescription("Reads one validated server image as a data URI. Preview responses are JPEG images no larger than 256 by 256 pixels.", "{ \"image\": \"data:image/png;base64,...\" }")]
+    /// <summary>Reads one validated image as a data URI, converting TIFF to PNG or optionally producing a small JPEG preview.</summary>
+    [API.APIDescription("Reads one validated server image as a data URI. TIFF selections are converted to PNG. Preview responses are JPEG images no larger than 256 by 256 pixels.", "{ \"image\": \"data:image/png;base64,...\" }")]
     public static Task<JObject> ReadSimpleImage(Session session,
         [API.APIParameter("Fully qualified server image path with an allowed image filename extension.")] string path,
         [API.APIParameter("If true, return a JPEG preview no larger than 256 by 256 pixels.")] bool preview = false)
@@ -131,6 +131,12 @@ public static class SimpleImageBrowserAPI
             if (!preview)
             {
                 using ISImage image = ISImage.Load(validationOptions, data);
+                if (format.Name == "TIFF")
+                {
+                    using MemoryStream png = new();
+                    image.SaveAsPng(png);
+                    return new JObject() { ["image"] = $"data:image/png;base64,{Convert.ToBase64String(png.ToArray())}" };
+                }
                 return new JObject() { ["image"] = $"data:{format.DefaultMimeType};base64,{Convert.ToBase64String(data)}" };
             }
             DecoderOptions options = new() { MaxFrames = 1, TargetSize = new Size(256, 256) };

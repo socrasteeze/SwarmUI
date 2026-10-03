@@ -28,7 +28,7 @@ Use an image attachment **+**, or a Start/End frame **+**, to open the image bro
 
 Drives requires the **Browse Server Images** role permission (`browse_server_images`), enabled by default for administrators. The permission grants image access across the host's filesystem, including mounted drives and readable network shares. Operating system access restrictions still apply. The browser shows folders and supported bitmap images only. It does not change source files. Selected images become normal attachments for prompt images and Start/End frames, including when the PWA runs on a phone.
 
-Supported formats: PNG, JPEG, WebP, GIF, BMP, and TIFF. Files must decode as images and must be no larger than 32 MiB. The **From Phone** option continues to use the device picker.
+Supported formats: PNG, JPEG, WebP, GIF, BMP, and TIFF. TIFF selections become PNG attachments so the browser can display and edit them. The source TIFF file stays unchanged. Files must decode as images and must be no larger than 32 MiB. The **From Phone** option continues to use the device picker.
 
 Restart SwarmUI after installing the change, then reload the PWA with its cache cleared. Release servers hold extension assets in memory until restart.
 

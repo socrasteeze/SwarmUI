@@ -368,6 +368,67 @@ await page.waitForFunction(() => mState.promptImages.length == 1);
 let rapid = await page.evaluate(() => ({ reads: window.__fullReads, images: mState.promptImages.length }));
 check('rapid double selection allows one full read and one attachment', rapid.reads == readsBeforeRapid + 1 && rapid.images == 1, JSON.stringify(rapid));
 
+await page.goto('http://localhost/simple');
+await page.waitForFunction(() => typeof mCreate != 'undefined' && typeof mFramePrep != 'undefined');
+let frameAspect = await page.evaluate(pixel => {
+    let panel = document.querySelector('.m-panel[data-mtab="create"]');
+    panel.classList.add('m-tab-active');
+    mState.presets = [
+        { title: 'minimax/FL2VA', param_map: { videomodel: 'minimax/fl2va', aspectratio: '1:1' } },
+        { title: 'minimax/Wide FL2VA', param_map: { videomodel: 'minimax/fl2va', aspectratio: '16:9' } },
+        { title: 'krea/Image', param_map: { model: 'krea/image', aspectratio: '1:1' } },
+        { title: 'minimax/FL2VA_360_Orbit_Eros', param_map: { videomodel: 'minimax/fl2va', aspectratio: '1:1' } }
+    ];
+    mState.activePresets = ['minimax/FL2VA'];
+    mCreate.build(panel);
+    mCreate.startFrameSlot.setEntry({ kind: 'data', value: pixel, width: 900, height: 1200 });
+    mCreate.render();
+    let attached = mCreate.ratioRow.style.display != 'none';
+    mCreate.presetSelect.value = 'krea/Image';
+    mCreate.presetSelect.dispatchEvent(new Event('change'));
+    mCreate.render();
+    let unrelatedHidden = mCreate.ratioRow.style.display == 'none';
+    mCreate.presetSelect.value = 'minimax/FL2VA';
+    mCreate.presetSelect.dispatchEvent(new Event('change'));
+    mCreate.render();
+    let returned = mCreate.ratioRow.style.display != 'none';
+    mCreate.startFrameSlot.setEntry(null);
+    mCreate.render();
+    return { attached, unrelatedHidden, returned, clearedHidden: mCreate.ratioRow.style.display == 'none' };
+}, PIXEL);
+check('Start alone exposes ratio actions without changing prompt images', frameAspect.attached, JSON.stringify(frameAspect));
+check('ratio actions follow preset changes with the same Start frame', frameAspect.unrelatedHidden && frameAspect.returned, JSON.stringify(frameAspect));
+check('clearing Start hides ratio actions when no prompt images remain', frameAspect.clearedHidden, JSON.stringify(frameAspect));
+
+let measurementRace = await page.evaluate(pixel => {
+    let originalMeasure = mCreate.measureEntry;
+    let finish;
+    mCreate.measureEntry = (entry, callback) => { finish = callback; };
+    mCreate.startFrameSlot.setEntry({ kind: 'data', value: pixel });
+    mCreate.presetSelect.value = 'minimax/Wide FL2VA';
+    mCreate.presetSelect.dispatchEvent(new Event('change'));
+    finish({ w: 900, h: 1200, ratio: 0.75 });
+    mCreate.measureEntry = originalMeasure;
+    return { aspect: mState.buildGenInput().aspectratio, pinned: mState.aspectPinned };
+}, PIXEL);
+check('preset selection cancels an earlier Start measurement', measurementRace.aspect == '16:9' && !measurementRace.pinned, JSON.stringify(measurementRace));
+
+let scalingRace = await page.evaluate(async pixel => {
+    mCreate.presetSelect.value = 'minimax/FL2VA_360_Orbit_Eros';
+    mCreate.presetSelect.dispatchEvent(new Event('change'));
+    let originalScale = mFramePrep.scaleEntry;
+    let finish;
+    mFramePrep.scaleEntry = () => new Promise(resolve => { finish = resolve; });
+    mCreate.startFrameSlot.setEntry({ kind: 'data', value: pixel });
+    mCreate.presetSelect.value = 'minimax/Wide FL2VA';
+    mCreate.presetSelect.dispatchEvent(new Event('change'));
+    finish({ kind: 'data', value: pixel, width: 768, height: 1024 });
+    await Promise.resolve();
+    mFramePrep.scaleEntry = originalScale;
+    return { aspect: mState.buildGenInput().aspectratio, pinned: mState.aspectPinned };
+}, PIXEL);
+check('preset selection cancels aspect snapping after an earlier Start scale', scalingRace.aspect == '16:9' && !scalingRace.pinned, JSON.stringify(scalingRace));
+
 if (process.env.SWARM_SCREENSHOT == '1') {
     mkdirSync(`${REPO}/.local/simple-image-browser`, { recursive: true });
     await page.screenshot({ path: `${REPO}/.local/simple-image-browser/primary.png`, fullPage: false });
