@@ -2,6 +2,8 @@
 
 Date: 2026-09-12. Reviewed checkout: `dd4ffcbd` on `main`.
 
+Latest follow-up: [Full desktop and PWA audit, 2026-10-03](#full-desktop-and-pwa-audit-2026-10-03).
+
 Implementation status: the initial handoff and review were committed as `251db0ec`. The first implementation tranche has passed source validation and is included in the clean delivery snapshot. See the checkpoint at the end of this document for results and remaining gates.
 
 ## Recommendation
@@ -205,3 +207,206 @@ A detached worktree at the documentation checkpoint received all 16 publishable 
 This check covers tracked source without ignored user extensions. It does not clear the root checkout's VideoStages compatibility issue. The local tracker now separates completed source work, remaining performance work, that extension bug, and physical-device acceptance. Local tracker bodies were read back successfully; collaborative body storage remains unavailable after retry.
 
 The outgoing history had one prohibited attribution trailer in an unpublished fork commit. Message-only repair preserved file trees, author/committer identity, timestamps, and upstream commits. Its descendant documentation checkpoint now has an equivalent new commit ID; references above use that ID. No force-push is required.
+
+## PWA and desktop optimization checkpoint, 2026-10-03
+
+Reviewed base: `d27b1ec8` on `main`. This follow-up implements four bounded changes. The existing `/simple` keyboard-inset change, its image-browser regression checks, and the untracked user-data file were preserved. No runtime settings, generation data, backend dependencies, or live processes were changed. This checkpoint records local source work, not a commit, push, or deployment.
+
+| Area | Change | Verified effect |
+|---|---|---|
+| Genpage History, desktop and mobile | Set the existing progressive renderer's initial cap to 50 | A 600-record browser fixture built 50 cards instead of 512; descriptor calls fell from 513 to 51. All 137 records in a separate fixture remained reachable with unique action-menu IDs in List, Cards, and Thumbnails. |
+| `/simple` Models | Render folder cards in groups of 40, with a scroll observer and Load More fallback | The first render attached 40 cards. Real scrolling loaded subsequent groups. Starred ordering, checkpoint/LoRA selection, CivitAI actions, and the existing search cap remain intact. Old folder success/error callbacks cannot overwrite a newer folder or search. |
+| `/simple` fallback status | Stop interval polling while hidden and reconcile status on wake | A controlled timer fixture changed hidden fallback traffic from 20 calls per minute to zero. Busy/idle replies, late replies after hide/wake, socket changes, and request errors retain recovery. Single-flight requests use the existing transport's 15-second timeout. |
+| PWA cache lifecycle | Retain cache writes with `waitUntil`, delete only owned cache namespaces, and honor explicit cache modes | An isolated Chromium worker fixture confirmed warm hits, retained cold writes, reload replacement, no-store pass-through, one preload navigation request, unrelated-cache preservation, and the offline page after fixture-server shutdown. |
+
+These counts measure bounded work, not field latency or an overall application speedup. The History fixture recorded approximately 9.9 ms versus 0.7 ms for its first render on this machine; that single diagnostic sample is not a performance guarantee. The Models API still returns the full folder listing. This change bounds browser card, image, and listener construction, not response size.
+
+### UI Stability Audit - SwarmUI
+
+Scope: `/simple` Models fixture with shipped CSS and native browser scrolling; existing Genpage/mobile and Create regression harnesses. Viewports: 360, 768, 1024, 1440 for Models. Runtime: Models and Create ran in Chromium and WebKit. Full application/device matrix NOT RUN.
+
+#### Verdict
+
+SHIP for the tested source changes. Live adoption and physical-device acceptance remain unverified.
+
+#### Findings
+
+| # | Check | Status | Severity | Evidence | Fix |
+|---|---|---|---|---|---|
+| 1 | Installed iOS/Android PWA resume, keyboard, and generation | NOT RUN | Not graded | No physical-device run or live-server restart | Verify after a deliberate server restart and client reload. |
+| 2 | Models controls during selection and incremental loading | PASS | SHIFT | `verify-simple-model-loading.mjs`: header, toggle, search, and folder row moved 0 px at each tested width; no horizontal overflow | None. |
+| 3 | Sentinel remains visible after an append | PASS | SHIFT | Native observer tests with 1,000 no-preview models; one bounded append per observer pass, then successful scroll loading | Re-arm observation on the next animation frame; keep Load More available. |
+| 4 | Existing responsive and failure behavior | PASS | Not graded | Mobile layout/performance, Create, CivitAI, and failure-recovery harnesses passed | None. |
+
+Screenshots were inspected at the narrow and wide widths. Local evidence is under `.local/pwa-desktop-review/`; screenshots use a synthetic no-preview model fixture rather than the live library.
+
+### Verification and remaining work
+
+- Release solution build passed with zero warnings/errors. NUnit passed **209/209**, with no skips. Both repository formatting checks passed.
+- The tracked-source snapshot booted with fresh temporary data on a free loopback port and exited **0**. This isolates the check from ignored user extensions and live configuration; it does not validate those extensions.
+- New harnesses cover History batching, Models batching/races/native scrolling, PWA caching, and hidden/wake polling. Existing startup/model-loading, mobile layout **11/11**, mobile performance **50/50**, Create **178/178** in Chromium and WebKit, CivitAI **14/14**, and failure recovery **22/22** passed.
+- The existing image-browser harness also passed **50/50**, including the preserved keyboard/bounce regression checks.
+- Release extension assets remain cached in the running server. Adoption requires a server restart and a client reload that bypasses old cached assets. The live server was left running; no generation was submitted.
+- Next candidates from this review are early filtering before expensive Genpage descriptors, metadata reuse during History rendering, and server paging for large listings. History paging needs a compatible recursive contract: the existing positive `ListImages.limit` switches to direct-folder listing, so adding it to the current recursive History request would change visible results. These candidates were not implemented in this pass.
+
+## Full desktop and PWA audit, 2026-10-03
+
+This follow-up expands the optimization pass into a correctness, accessibility, motion, caching, and data-safety audit. It covers the tracked Genpage frontend, `/simple`, fork mobile extensions, TagDex asset routes and file publication, user-database backup rotation, the Desktop wrapper source, and the build/dependency configuration. The existing local changes were retained. Tests use synthetic browser data or an isolated server with fresh temporary data. No live generation, runtime configuration change, commit, push, or live restart is part of this checkpoint.
+
+### Confirmed findings and applied changes
+
+| ID | Priority | Reproduced problem | Applied correction | Evidence |
+|---|---|---|---|---|
+| A1 | High | Worker caches could replay authenticated HTML and private previews after an authorization change. | Cache only public static assets; navigations use the network or the dedicated offline page. Private media passes through. Activation removes old private caches, and offline installation rejects redirects. | `Assets/sw.js`; VM worker and real Chromium server fixtures. |
+| A2 | High | TagDex index/thumbnail routes checked login but bypassed the TagDex read permission; long cache lifetimes could bypass later permission changes. | Enforce the same permission as the APIs before resolving data or responding 304. Use private ETag revalidation. | `TagDexExtension.cs`; `TagDexAssetAuthorizationTests.cs`. |
+| A3 | High | Concurrent TagDex publishers collided on a shared temporary filename; deletion preceded replacement. A 64-writer baseline produced 59-60 failures. | Use unique temporary files and serialized atomic publication. Preserve the last good destination on failure and clean temporary files. | `TagDexThumbs.cs`; `TagDexAtomicWriteTests.cs`; isolated compiled-method baseline. |
+| A4 | High | Retention one deleted the only previous user backup and then threw `ArgumentOutOfRangeException`. Lexicographic week sorting also misordered weeks 9 and 10. | Publish a complete temporary backup before rotation. Keep the exact requested count, sort numeric year/week values, and preserve unrecognized filenames. | `SessionHandler.cs`; `SessionBackupTests.cs`; isolated startup reproduction. |
+| A5 | Medium | Shared model/history browser selection and menus were inaccessible from the keyboard. | Add keyboard selection and action entry, with Escape focus recovery and no duplicate activation. | `helpers/browsers.js`; `verify-genpage-accessibility.mjs`. |
+| A6 | Medium | Rebuilding 160 action cards as one card left 160 body-level menus and their callbacks. | Remove only the rebuilding browser's old popovers. Preserve other browsers' menus and progressive IDs. | `helpers/browsers.js`; before/after DOM-count fixture. |
+| A7 | Medium | Malformed optional progress metadata threw before the first preview. | Parse defensively and retain progress handling with a safe metadata fallback. | `helpers/generatehandler.js`; malformed, null, array, scalar, and empty metadata cases. |
+| A8 | Medium | Fork sheets, queued previews, toasts, viewer travel, and busy indicators ignored reduced motion. | Remove automatic travel and looping movement when reduction is requested; retain short opacity and state feedback. Use transforms for the normal busy-bar sweep. | `m.css`, `mobile.css`, `mobile_fullview_touch.js`, `site.css`; browser media-emulation checks. |
+| A9 | Medium | An idle PWA could return after a server restart and wait for the long status interval before detecting the outage. | Probe on foreground/pageshow using the existing request-coalescing guard and timeout. | `mobile_network.js`; `verify-mobile-network.mjs`. |
+| A10 | Medium | `/simple` sheets and the History viewer lacked keyboard containment, dismissal, and focus recovery; model/history tiles were click-only. | Add named dialogs, an active-sheet stack, background isolation, keyboard activation, and labeled History tiles. Preserve nested and rapid close/reopen behavior without stealing later user focus. | `m_ui.js`, `m_models.js`, `m_images.js`; native Chromium/WebKit keyboard checks. |
+| A11 | Medium | Keyboard users had no direct way to skip repeated navigation. | Add a focus-visible Skip Navigation control on both main surfaces without changing the active `/simple` tab. | `Text2Image.cshtml`, `m/index.html`, shared CSS; native focus checks. |
+| A12 | Test maintenance | Some harnesses expected retired markup, removed dialogs without their close lifecycle, or assumed constructible WebKit touch events. | Preserve behavior assertions while updating collaborators, real dialog dismissal, and synthetic touch compatibility. Allow only one RGB unit of transformed-canvas raster variance. | Coach, Enhance, Create, Restart, and image-editor harnesses. |
+| A13 | Medium | Genpage first painted desktop/50vh geometry at 360 px, then moved the mobile prompt and page content after initialization. Measured CLS was 0.239. | Apply the saved layout/pointer classes before paint and reserve mobile geometry until the normal layout takes ownership. No content is hidden and no startup wait is added. | `Text2Image.cshtml`, `layout.js`, `mobile.css`; initial-layout matrix and actual served-page CLS 0.0036. |
+
+### UI Stability Audit — SwarmUI
+
+Scope: Genpage tabs and `/simple` Create, Images, Models, Characters, More, sheets, card actions, and editor fixtures. Viewports: 360, 768, 1024, 1440. Runtime: isolated rendered application plus source-backed Chromium/WebKit fixtures.
+
+#### Verdict
+
+SHIP for the verified source paths. Physical devices, native Desktop hosting, and live generation remain separate acceptance gates.
+
+#### Findings
+
+| # | Check | Status | Severity | Evidence | Fix |
+|---|---|---|---|---|---|
+| 1 | Physical iOS/Android keyboard, safe areas, and installed-PWA resume | NOT RUN | Not graded | No physical device session | Complete device acceptance after deployment. |
+| 2 | Native Desktop WebView host | NOT RUN | Not graded | Source review and solution build only | Run the native host on each supported OS. |
+| 3 | Keyboard browser menus and sheet lifecycle | PASS | BLOCKER | New native keyboard fixtures, page-error checks, nested/rapid close coverage | A5 and A10. |
+| 4 | Card append, selection, and inspected tab transitions | PASS | SHIFT | 0 px movement of measured unaffected Models controls; Genpage prompt/top navigation unchanged through exercised tabs | Retain bounded rendering and existing geometry. |
+| 5 | Responsive horizontal overflow | PASS | SHIFT | Isolated Genpage and `/simple` route sweeps at all four widths | No new layout adjustment required. |
+| 6 | Image picker/editor keyboard-inset and drag behavior | PASS | SHIFT | Existing source-backed regression harnesses | Preserve the pre-existing keyboard-inset fix. |
+| 7 | Genpage mobile first paint | PASS | SHIFT | Matched 360 x 844 baseline CLS 0.239; rebuilt served page 0.0036. Touch-profile candidate 0.0060. | A13 reserves the initial mobile geometry. |
+
+The empty isolated server cannot establish populated-library latency or hardware generation behavior. Synthetic catalog fixtures cover record reachability, action ownership, and deterministic construction counts. Screenshots and probe output are stored under ignored `.local/full-audit/`.
+
+### Animate Audit - SwarmUI
+
+Stack: plain CSS/JavaScript, Bootstrap, and fork gesture handlers. Mode: VERIFY. Runtime: Chromium/WebKit media emulation and browser fixtures.
+
+#### Verdict
+
+SHIP for the corrected motion paths; physical gesture performance remains unverified.
+
+#### Motion inventory
+
+| State change | Currently | Should be | Status |
+|---|---|---|---|
+| Shared popover open/close | 200 ms ease-out; 100 ms reduced-motion opacity | Short feedback without travel | PASS |
+| `/simple` sheets and toasts | Existing normal motion; no reduced-motion travel; short opacity cues | Maintain dismissal and feedback under either preference | PASS |
+| Queued preview and busy indicator | Normal loops; stable visible indication under reduced motion | Indicate work without forced movement | PASS |
+| Full-view image navigation | Existing normal gesture animation; immediate reduced-motion settling | Preserve selected image and navigation boundaries | PASS |
+| Catalog filtering, route content, and progress updates | Kept direct; no new animation added | Avoid delaying repeated work | N/A, deliberately unanimated |
+
+#### Findings
+
+| # | Rule | Status | Severity | Evidence | Fix |
+|---|---|---|---|---|---|
+| 1 | Reduced motion | PASS | BLOCKER | Emulated preference against shipped styles and behavior | A8. |
+| 2 | Interrupt and modal ownership | PASS | BLOCKER | Close-before-frame, nested close, and close/reopen fixtures | A10. |
+| 3 | Busy-bar layout animation | PASS | FEEL | `mobile.css` uses translate transforms instead of animated `left` | A8. |
+| 4 | Permanent compositor hint | WARN | POLISH | Existing coarse-pointer viewer `will-change` | Measure device memory/frame behavior before adding gesture-time bookkeeping. |
+| 5 | Whole-app and physical-device frame budget | NOT RUN | Not graded | No full gesture trace | Do not infer frame-rate guarantees from the scoped sheet sample. |
+| 6 | Checkpoint-sheet animation sample | PASS | FEEL | Actual served `/simple`, Chromium 4x CPU: minimum 60 fps, no frames over 32 ms; reduced-motion backdrop changed only opacity over 126 ms | No further change. This sample does not establish a whole-app frame budget. |
+
+#### Tokens
+
+Existing local timing conventions are retained. Reduced-motion feedback uses 100-120 ms opacity. No new app-wide animation system was introduced. Three classes of state change remain deliberately unanimated: catalog filtering, route content replacement, and progress-value updates.
+
+### Web Polish Audit - SwarmUI
+
+Type: self-hosted generation tool. Audience: local/authenticated operators. Pages: two main surfaces plus account/setup pages. Evidence: code and isolated runtime.
+
+#### Verdict
+
+Eleven of twenty checklist items apply. Ten are covered in the audited flows; password visibility remains an optional product addition.
+
+#### Do now
+
+| # | Item | Status | Impact | Effort | Evidence | Fix |
+|---|---|---|---|---|---|---|
+| 5 | Mobile navigation | PRESENT | High | M, done | Genpage native panels; `/simple` bottom navigation and modal fixtures | A10 closes keyboard sheet gaps. |
+| 6 | Loading states | PRESENT | High | S, done | Reserved Create preview, model/history loading states, error harnesses | Preserve geometry and surfaced failures. |
+| 7 | Focus and interaction states | PRESENT | High | M, done | Shared browser and `/simple` tile keyboard fixtures | A5/A10. |
+| 12 | Skip navigation | PRESENT | High | S, done | Focus-visible links on both main surfaces | A11. |
+| 15 | Form success | PRESENT | Medium | Existing | Create, presets, CivitAI, and editor fixtures | Retain existing successful-state contracts. |
+| 16 | Form errors | PRESENT | High | Existing | Error banner/recovery and stale-request fixtures | Retain user-visible errors and retry recovery. |
+
+#### Worth doing
+
+| # | Item | Status | Impact | Effort | Evidence | Fix |
+|---|---|---|---|---|---|---|
+| 1 | Dark theme | PRESENT | Medium | Existing | `_Layout.cshtml` theme cookie; settings theme selector; `/simple` dark style | No additional theme system. |
+| 3 | Search | PRESENT | High | Existing | Models, History, TagDex, and image-browser search | Preserve current search semantics; profile remaining descriptor work separately. |
+| 9 | Copy controls | PRESENT | Medium | Existing | Clipboard/editor/prompt workflows | Keep native clipboard/device acceptance separate. |
+| 13 | Password visibility | MISSING | Low | S | Existing masked account inputs have no reveal control | Optional account-form enhancement; not added to this fix pass. |
+| 17 | Destructive confirmation | PRESENT | High | Existing | `/simple` delete confirmation and Genpage delete action | Preserve confirmation and server-result handling. |
+
+#### Skip
+
+| # | Item | Why not |
+|---|---|---|
+| 2 | Cookie banner | No advertising/analytics trackers were found in the audited first-party sources; application cookies support the tool. |
+| 4 | Back to top | The main surfaces use viewport panels with persistent navigation. |
+| 8 | Scroll progress | This is an editing/generation tool rather than a long-form reader. |
+| 10 | Print stylesheet | Generated-media download is the intended export path. |
+| 11 | Additional sticky header | Both main surfaces already retain navigation; another sticky layer would duplicate it. |
+| 14 | UTM tracking | No acquisition or campaign workflow is present. |
+| 18 | Last-updated badges | Live state and server version are already shown; per-panel editorial dates do not apply. |
+| 19 | FAQ accordion | No in-app support-content requirement was identified. |
+| 20 | Floating contact | No staffed support channel exists inside this self-hosted tool. |
+
+### Production Readiness - SwarmUI
+
+#### Context
+
+Self-hosted Windows application with optional authentication, persistent user records and generated media, and external generation/writer services. Actual proxy exposure, live account policy, backup restore history, and external-service state were not changed or certified by this source audit. No payments or regulated business-record workflow was identified.
+
+#### Verdict
+
+The reproduced publication, retention, permission, and worker-cache defects are corrected. This is source acceptance, not certification of the running installation or its backups.
+
+#### Fix before ship
+
+The confirmed High items A1-A4 are addressed with regression coverage. No database migration, dependency upgrade, or production-data operation was needed.
+
+#### Worth doing next
+
+- Measure large-library API payloads and descriptor/filter work before choosing additional caching or paging. Preserve recursive History behavior when designing paging.
+- Perform a backup restore drill from a separate copy. Creating and retaining a backup does not prove recoverability.
+- Check live TLS/proxy/account configuration before exposing a deployment outside its trusted network.
+
+#### Deliberately skipped
+
+Horizontal scaling, CDN deployment, new telemetry services, payment idempotency, and marketing consent infrastructure have no demonstrated requirement here. Existing generation controls, login throttling, permissions, response compression, and bounded caches were retained.
+
+#### Unresolved
+
+Physical PWA and native Desktop behavior, external backend/GPU execution, real account-switch workflows, large-library field latency, and backup restoration remain unrun. Downloaded/ignored extensions and backend repositories require their own version-specific review. The configured NuGet vulnerability check reported no known vulnerable packages; that result is limited to the configured advisory source and installed dependency graph.
+
+### Final validation
+
+- Release solution build, including Desktop: passed with zero warnings/errors. NUnit: **228 passed, zero skipped** on Windows. The platform-specific locked-file test is marked Windows-only; the separate publication-failure test is portable.
+- Both formatting checks, JavaScript syntax checks, and `git diff --check`: passed.
+- Final tracked-source boot with fresh temporary data and the complete Release runtime: exit **0**. An initial copied test package omitted Windows platform assemblies; using the complete build resolved that fixture error. All isolated test-server processes were stopped. The production process was left running.
+- Actual compiled-method probe: **64 concurrent writes, zero failures**, compared with 59-60 failures before the fix. Backup-operation tests cover disabled retention, same-week no-op, failed copy/publication, exact retention, numeric ordering, and preservation of unknown files.
+- Native Chromium and WebKit `/simple` keyboard suites passed for sheet ownership/focus, cards, and skip navigation. Shared Genpage browser actions passed in Chromium. Create **178/178** and image editor **60/60** passed in both engines. Image browser **50/50**, CivitAI **14/14**, Characters **36/36**, Grid **30/30**, Presets **43/43**, Coach **55/55**, Enhance **12/12**, and restart watcher **20/20** passed.
+- Existing startup, model/history loading, autocomplete, LoRA, polling, error recovery, clipboard, frame-preparation, TagDex editor, and PromptEnhance harnesses passed. The rendered Genpage clipboard harness passed **27/27** against the isolated server. TagDex Genpage editor passed **12/12**; PromptEnhance passed **80/80**.
+- The rebuilt application rendered both main routes at all four viewport widths with zero horizontal overflow and zero page errors. Actual served Genpage code accepted malformed preview metadata and then processed a later valid progress frame; no generation request was submitted.
+- Worker VM and real Chromium fixtures passed private-route bypass, encoded paths, old private-cache removal, response cache directives, public warm-cache reuse, reload/no-store handling, and offline behavior. Reduced-motion and network-resume fixtures passed.
+- The original keyboard-inset and image-browser patch still reverse-applies cleanly as a check of preservation. The untracked user-data file was not read or changed.
+
+All work remains local. The verified source, this review, and the delivery handoff are included in the authorized local commit; no push, restart, deployment, physical-device acceptance, or live generation is complete. Live adoption requires a deliberate server restart and removal of old browser HTTP caches as well as a client reload. The new worker removes its own legacy private Cache Storage namespaces, but cannot retroactively change the freshness policy of old entries in the browser's HTTP cache.

@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-02 (18:18 PT, live Windows) · **Branch:** main · **Base:** 335c69c9 · **Tree:** clean
+**Updated:** 2026-10-03 · **Branch:** main · **Base:** 3fda2d2c · **Tree:** clean
 
 ## State
-Mobile/PWA fixes and the 2026-09-15 upstream merge (`5f804cce`) are built and pushed; none are verified on a phone and the live server has not been restarted to serve them.
-The user waived the handoff line cap; the H3 reference sections below were logged at the user's request.
+This commit contains the verified 2026-10-03 web UI, PWA, accessibility, and data-safety delivery. Publication, live restart/deployment, physical-device checks, and live generation remain pending.
+The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
+
+- 2026-10-03: completed the local delivery set for UI stability, reduced motion, keyboard access, PWA/private-cache behavior, TagDex publication safety, and user-backup retention. Final source validation is recorded in [docs/WebUI-Performance-Review.md](docs/WebUI-Performance-Review.md); the current docs and source changes are included in the authorized local commit.
 
 - 2026-10-02 (18:18 PT, live Windows box): routine automated sync -- upstream/master at d9ecb52d, already an ancestor of HEAD (335c69c9); nothing to merge, no SwarmUI source gates. Fast-forwarded bundled ComfyUI 36c0b0a68->4d981c9b0 (pinned-memory auto-disable on iGPUs; no requirements change) and DLNode ReActor a7628cc->a12c5b1 (26 commits, was clean again this pass). GPU accel check OK on both Main ComfyUI and SwarmUI backend. Skipped dirty: TeaCache (nodes.py), WD14-Tagger / RMBG (requirements.txt; RMBG 15 behind), Skimmed_CFG (__pycache__; 2 behind). Left .disabled folders alone. Logged in AGENTS.md Upstream Sync Log and pushed via /clean. All earlier handoff detail above is unchanged.
 
@@ -59,10 +61,10 @@ equirements.txt; RMBG 15 behind). Left .disabled folders alone. Logged in AGENTS
 - 2026-09-22: routine automated sync check, nothing to merge. Fresh container (no `dotnet`, no `upstream` remote, checked-out branch was a leftover `noble/trusting-dijkstra-cgxoc7` matching `origin/main` at `9fc4fe0`) — `upstream` remote and git identity set up from scratch. `git fetch upstream master` showed `upstream/master` at `33dc339`, already an ancestor of HEAD via `git merge-base --is-ancestor` — 0 new commits, nothing to merge, no gates run (no source changed; `dotnet` unavailable in this container regardless). Stale local `main` ref updated with `git branch -f main HEAD` only. `dlbackend/`, `Data/`, `Models/`, `Output/` all still absent in this checkout (bare source checkout, symlink trap not applicable); `/home/user/ComfyUI` again confirmed out of scope and left untouched. Logged in AGENTS.md Upstream Sync Log and pushed via `/clean`. Ran unattended (scheduled, no human watching live). All earlier handoff detail above is unchanged.
 
 ## Open
-1. Restart Swarm, bypass the PWA cache, then on the iPhone confirm: preset edit opens without freezing, "Add Temporary Image" Files picker opens as fast as `/simple`, "+" is level with Generate.
+1. When deployment is authorized, restart Swarm and clear old browser HTTP/PWA caches. Then complete the physical PWA, native Desktop, keyboard/reduced-motion, and live-generation checks in [docs/WebUI-Performance-Review.md](docs/WebUI-Performance-Review.md). Retain the iPhone preset-editor, Files-picker, and Generate-row checks.
 2. DONE 2026-09-29: `/simple` has Start frame / End frame slots, a collapsible create-panel section that sends `initimage` / `videoendimage` (`initimagecreativity` defaults to 0 when unset), shipped in `57c8dfbb`. The server image browser that fills them shipped in `9b1453c0` (2a).
 2a. DONE 2026-09-30: `/simple` server image browser for Start/End frame + prompt-image attach (`m_image_browser.js`). Configurable roots (localStorage `m_client_img_browser_roots`, defaults Output/Inputs/Starred/MixStudio). Reuses `ListImages`; attaches output-relative paths. Server `IsOutputRelativeMediaPath` widens path accept beyond inputs/raw/Starred to any output-root media path (sandboxed by CheckFilePath). Classic `isValidMediaPath` matched. Not Classic Genpage modal in this pass. Restart Server so GetLazy/OtherAssets picks up `m_image_browser.js`.
-3. Classic preset editor's first open still costs ~1.6 s desktop: `ensurePresetInputsBuilt()` calls full `genInputs()`, rebuilding the main panel too — `presets.js:197`.
+3. Re-profile the first Classic preset-editor open on a populated library. The historical desktop sample was about 1.6 s; this audit did not refresh that measurement. Follow the remaining performance work in `docs/WebUI-Performance-Review.md`.
 4. Run the FL2VA baseline test listed under Reference and record results. **Note:** its FBC-off-vs-on arm is superseded for turbo checkpoints — see "Turbo H3 acceleration". Still valid on the non-distilled 25-step path.
 4b. Run the sampler shootout: Grid Gen presets axis, fixed seed + init image, four `AB/s8` presets. The only open H3 question research cannot answer (author's style/motion/audio claims are subjective and untested on this content).
 4c. Write prompts in ref2va/t2va format in preference to i2v style — all 19 new presets carry **no prompt** by design, so the operator supplies it and the Grid Gen override trap does not apply. See the softened prompt-format note under "Eros Max author guidance": the failure case is a thin prompt plus i2v style, not i2v style alone. The two original `minimax/FL2VA*` presets still carry their own prompt scaffold.

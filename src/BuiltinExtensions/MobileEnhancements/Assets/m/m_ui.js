@@ -158,6 +158,13 @@ class MUI {
 
     /** Wires the router and bottom nav. Call once after all tabs are registered. */
     initRouter() {
+        let skipNavigation = document.querySelector('.skip-navigation');
+        if (skipNavigation) {
+            skipNavigation.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.getElementById('m-main-content').focus({ preventScroll: true });
+            });
+        }
         for (let btn of document.querySelectorAll('.m-nav-item')) {
             btn.addEventListener('click', () => {
                 location.hash = btn.dataset.mdest;
@@ -194,39 +201,156 @@ class MUI {
     /** Opens a bottom sheet with the given content element. Returns a close function. Drag-down on the grip
      * or backdrop tap dismisses. The optional onClose callback runs as soon as dismissal starts. */
     openSheet(contentElem, onClose = null) {
+        let previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        this.sheetStack = this.sheetStack || [];
+        let parentEntry = this.sheetStack.length > 0 ? this.sheetStack[this.sheetStack.length - 1] : null;
+        this.sheetFocusVersion = (this.sheetFocusVersion || 0) + 1;
         this.openSheets++;
         this.applyKeyboardInset();
         let backdrop = this.el('div', 'm-sheet-backdrop');
         let sheet = this.el('div', 'm-sheet');
         let grip = this.el('div', 'm-sheet-grip');
+        sheet.tabIndex = -1;
+        sheet.setAttribute('role', 'dialog');
+        sheet.setAttribute('aria-modal', 'true');
+        let title = contentElem.querySelector('.m-sheet-title');
+        if (title) {
+            if (!title.id) {
+                this.sheetTitleCounter = (this.sheetTitleCounter || 0) + 1;
+                title.id = `m-sheet-title-${this.sheetTitleCounter}`;
+            }
+            sheet.setAttribute('aria-labelledby', title.id);
+        }
+        else {
+            sheet.setAttribute('aria-label', contentElem.getAttribute('aria-label') || 'Dialog');
+        }
+        let app = document.querySelector('.m-app');
+        if (app && !this.sheetAppState) {
+            this.sheetAppState = { 'element': app, 'hadAriaHidden': app.hasAttribute('aria-hidden'),
+                'ariaHidden': app.getAttribute('aria-hidden'), 'inert': !!app.inert };
+        }
         sheet.appendChild(grip);
         sheet.appendChild(contentElem);
         document.body.appendChild(backdrop);
         document.body.appendChild(sheet);
+        let entry = { 'sheet': sheet, 'backdrop': backdrop, 'previousFocus': previousFocus,
+            'hadAriaHidden': sheet.hasAttribute('aria-hidden'), 'ariaHidden': sheet.getAttribute('aria-hidden'),
+            'inert': !!sheet.inert, 'parent': parentEntry, 'closed': false };
+        this.sheetStack.push(entry);
+        this.syncSheetAccessibility();
         requestAnimationFrame(() => {
+            if (entry.closed || this.sheetStack[this.sheetStack.length - 1] != entry) {
+                return;
+            }
             backdrop.classList.add('m-open');
             sheet.classList.add('m-open');
+            sheet.focus({ preventScroll: true });
         });
-        let closed = false;
         let close = () => {
             // Guarded: backdrop tap, grip drag and the caller's own returned close() can all fire for one sheet,
             // and the open-sheet count below must not go negative or the keyboard watch stops publishing.
-            if (closed) {
+            if (entry.closed) {
                 return;
             }
-            closed = true;
+            entry.closed = true;
+            let closeFocusVersion = ++this.sheetFocusVersion;
+            /** Retries focus lost during dismissal without overriding a newer user-selected control. */
+            let shouldRetryFocus = target => {
+                let active = document.activeElement;
+                return this.sheetFocusVersion == closeFocusVersion && this.sheetStack.length == 0 && target.isConnected
+                    && (active == document.body || active == document.documentElement || sheet.contains(active));
+            };
             if (onClose) {
                 onClose();
             }
             this.openSheets--;
+            let entryIndex = this.sheetStack.indexOf(entry);
+            if (entryIndex >= 0) {
+                this.sheetStack.splice(entryIndex, 1);
+            }
+            sheet.setAttribute('aria-hidden', 'true');
+            sheet.inert = true;
+            sheet.tabIndex = -1;
+            this.syncSheetAccessibility();
             backdrop.classList.remove('m-open');
             sheet.classList.remove('m-open');
+            let activeEntry = this.sheetStack.length > 0 ? this.sheetStack[this.sheetStack.length - 1] : null;
+            if (entryIndex == this.sheetStack.length) {
+                if (activeEntry) {
+                    let target = previousFocus && activeEntry.sheet.contains(previousFocus) ? previousFocus : activeEntry.sheet;
+                    target.focus({ preventScroll: true });
+                }
+                else {
+                    let restoreEntry = entry;
+                    let target = restoreEntry.previousFocus;
+                    while (restoreEntry.parent && (!target || !target.isConnected || restoreEntry.sheet.contains(target)
+                        || (restoreEntry.parent.closed && restoreEntry.parent.sheet.contains(target)))) {
+                        restoreEntry = restoreEntry.parent;
+                        target = restoreEntry.previousFocus;
+                    }
+                    if (target && target.isConnected) {
+                        entry.restoreTarget = target;
+                        target.focus({ preventScroll: true });
+                        // WebKit can reject a focus move made inside the same Escape keydown that made the
+                        // active dialog inert. Retry after event dispatch, but only if no newer sheet opened.
+                        if (document.activeElement != target) {
+                            setTimeout(() => {
+                                if (shouldRetryFocus(target)) {
+                                    target.focus({ preventScroll: true });
+                                }
+                            }, 0);
+                        }
+                        // WebKit can briefly report the new focus during keydown and then put focus back on
+                        // the closing dialog. The next frame check catches that second phase as well.
+                        requestAnimationFrame(() => {
+                            if (document.activeElement != target && shouldRetryFocus(target)) {
+                                target.focus({ preventScroll: true });
+                            }
+                        });
+                    }
+                }
+            }
             setTimeout(() => {
                 backdrop.remove();
                 sheet.remove();
+                if (this.sheetFocusVersion == closeFocusVersion && this.sheetStack.length == 0
+                    && entry.restoreTarget && entry.restoreTarget.isConnected) {
+                    setTimeout(() => {
+                        if (document.activeElement != entry.restoreTarget && shouldRetryFocus(entry.restoreTarget)) {
+                            entry.restoreTarget.focus({ preventScroll: true });
+                        }
+                    }, 50);
+                }
             }, 250);
         };
         backdrop.addEventListener('click', close);
+        sheet.addEventListener('keydown', e => {
+            if (e.key == 'Escape') {
+                e.preventDefault();
+                close();
+                return;
+            }
+            if (e.key != 'Tab') {
+                return;
+            }
+            let focusable = [...sheet.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+                .filter(elem => elem.offsetParent !== null);
+            if (focusable.length == 0) {
+                e.preventDefault();
+                sheet.focus({ preventScroll: true });
+                return;
+            }
+            let first = focusable[0];
+            let last = focusable[focusable.length - 1];
+            if (e.shiftKey && (document.activeElement == sheet || document.activeElement == first || !sheet.contains(document.activeElement))) {
+                e.preventDefault();
+                last.focus();
+            }
+            else if (!e.shiftKey && (document.activeElement == sheet || document.activeElement == last || !sheet.contains(document.activeElement))) {
+                e.preventDefault();
+                first.focus();
+            }
+        });
         let startY = -1;
         // Set when a touch gesture has been fully handled by touchend below, so the synthetic click that iOS
         // fires afterwards does not ALSO run the click handler. Without this the drag threshold was decorative:
@@ -276,6 +400,46 @@ class MUI {
             close();
         });
         return close;
+    }
+
+    /** Makes the top sheet the only exposed modal, while preserving the page's prior accessibility state. */
+    syncSheetAccessibility() {
+        let activeEntry = this.sheetStack.length > 0 ? this.sheetStack[this.sheetStack.length - 1] : null;
+        for (let entry of this.sheetStack) {
+            let active = entry == activeEntry;
+            if (active) {
+                if (entry.hadAriaHidden) {
+                    entry.sheet.setAttribute('aria-hidden', entry.ariaHidden);
+                }
+                else {
+                    entry.sheet.removeAttribute('aria-hidden');
+                }
+                entry.sheet.inert = entry.inert;
+            }
+            else {
+                entry.sheet.setAttribute('aria-hidden', 'true');
+                entry.sheet.inert = true;
+            }
+        }
+        if (this.sheetAppState) {
+            let app = this.sheetAppState.element;
+            if (activeEntry) {
+                app.setAttribute('aria-hidden', 'true');
+                app.inert = true;
+            }
+            else {
+                if (this.sheetAppState.hadAriaHidden) {
+                    app.setAttribute('aria-hidden', this.sheetAppState.ariaHidden);
+                }
+                else {
+                    app.removeAttribute('aria-hidden');
+                }
+                app.inert = this.sheetAppState.inert;
+                // Force WebKit to apply the restored inert state before close() returns focus to an app child.
+                app.getBoundingClientRect();
+                this.sheetAppState = null;
+            }
+        }
     }
 
     /** Small confirm helper (native confirm is fine on mobile and needs no DOM). */
@@ -423,7 +587,8 @@ class MUI {
             // and published for nobody - and publishing it still costs a full-document style recalc. Held at 0
             // instead, which is what a closed sheet would read anyway; openSheet() re-runs apply() so a sheet
             // that opens under a live keyboard gets the real inset immediately rather than one frame late.
-            let inset = this.openSheets > 0 ? this.keyboardInset() : 0;
+            // iOS bounce scrolling can produce a negative viewport offset without a keyboard covering anything.
+            let inset = this.openSheets > 0 && open ? this.keyboardInset() : 0;
             if (inset !== lastInset) {
                 lastInset = inset;
                 document.documentElement.style.setProperty('--m-kb-inset', `${inset}px`);

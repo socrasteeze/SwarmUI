@@ -382,6 +382,7 @@ function runImageHistoryServerFilter() {
 
 let imageHistoryBrowser = new GenPageBrowserClass('image_history', listOutputHistoryFolderAndFiles, 'imagehistorybrowser', 'Thumbnails', describeOutputFile, selectOutputInHistory,
     `<label for="image_history_sort_by">Sort:</label> <select id="image_history_sort_by"><option>Name</option><option>Date</option></select> <input type="checkbox" id="image_history_sort_reverse"> <label for="image_history_sort_reverse">Reverse</label> &emsp; <input type="checkbox" id="image_history_allow_anims" checked autocomplete="off"> <label for="image_history_allow_anims">Allow Animation</label>`);
+imageHistoryBrowser.maxPreBuild = 50;
 imageHistoryBrowser.allowMultiSelect = true;
 imageHistoryBrowser.filterEvent = scheduleImageHistoryServerFilter;
 

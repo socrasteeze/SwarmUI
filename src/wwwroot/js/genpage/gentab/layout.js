@@ -298,7 +298,7 @@ class GenTabLayout {
         this.altRegion.style.visibility = '';
         document.documentElement.style.removeProperty('--mobile-keyboard-inset');
         document.documentElement.style.removeProperty('--mobile-topbar-collapse');
-        document.body.classList.remove('mobile-panel-left-open', 'mobile-panel-right-open', 'mobile-panel-bottom-open', 'mobile-panels-all-shut', 'mobile-panel-dragging', 'mobile-keyboard-pin', 'mobile-keyboard-open');
+        document.body.classList.remove('mobile-layout-ready', 'mobile-panel-left-open', 'mobile-panel-right-open', 'mobile-panel-bottom-open', 'mobile-panels-all-shut', 'mobile-panel-dragging', 'mobile-keyboard-pin', 'mobile-keyboard-open');
         this.mobileTopbarCollapsePx = 0;
         this.mobileTopbarDragging = false;
     }
@@ -883,6 +883,7 @@ class GenTabLayout {
         if (!this.mobileDragActive) {
             this.clearMobileDragTransforms();
         }
+        document.body.classList.add('mobile-layout-ready');
     }
 
     /** Desktop split-bar positioning path (large-window only). */

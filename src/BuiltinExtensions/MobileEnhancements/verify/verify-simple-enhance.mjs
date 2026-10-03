@@ -114,14 +114,14 @@ const chrome = await page.evaluate(() => {
     let coach = document.querySelector('.m-coach-pill');
     let more = (mUI.moreItems || []).some(item => item.label == 'Prompt Coach');
     return {
-        enhanceOnHead: !!(enhance && enhance.parentElement.classList.contains('m-prompt-head')),
+        enhanceOnToolbar: !!(enhance && enhance.parentElement.classList.contains('m-prompt-toolbar')),
         coachGone: !coach,
         moreCoach: more,
         sheets: document.querySelectorAll('.m-sheet').length
     };
 });
-check('Enhance pill sits on the prompt heading row', chrome.enhanceOnHead && chrome.sheets == 0, JSON.stringify(chrome));
-check('Coach pill is gone from the prompt heading', chrome.coachGone, JSON.stringify(chrome));
+check('Enhance pill sits on the prompt toolbar', chrome.enhanceOnToolbar && chrome.sheets == 0, JSON.stringify(chrome));
+check('Coach pill is gone from the prompt toolbar', chrome.coachGone, JSON.stringify(chrome));
 check('Prompt Coach is registered under More', chrome.moreCoach, JSON.stringify(chrome));
 
 // Status: no profile -> disabled label/title; with profile -> enabled (even if unhealthy).

@@ -2,15 +2,23 @@
 
 Fork-owned builtin extension that makes SwarmUI feel robust, fluid, and intuitive on phones and as an installed Progressive Web App (PWA).
 
-It is intentionally built as a self-contained extension (new files only, zero edits to core SwarmUI files) so that upstream merges stay clean. See [`docs/MobilePWA-Optimization-Plan.md`](/docs/MobilePWA-Optimization-Plan.md) for the full phased plan, verified design facts, verification gates, and the coupling watchlist to re-check after upstream merges.
+Fork-owned assets live in this extension. Small core integration changes are recorded in the Fork Delta in [`AGENTS.md`](/AGENTS.md). See [`docs/MobilePWA-Optimization-Plan.md`](/docs/MobilePWA-Optimization-Plan.md) for the phased plan and coupling watchlist, and [`docs/WebUI-Performance-Review.md`](/docs/WebUI-Performance-Review.md) for the current desktop/PWA audit and verification limits.
 
 ## What it does
 
-- **PWA installability**: serves a web manifest (`/manifest.json`) and a root-scoped service worker (`/sw.js`), and injects the `theme-color` / apple-mobile-web-app / touch-icon `<head>` tags. The service worker is deliberately conservative — network-first for HTML/JS/CSS (so a server update is never stuck behind a stale cache), cache-first only for long-lived static assets (icons, fonts), and an offline fallback page for navigations. It never touches `/API/`, `/View/`, `/Output/`, or `/Audio/`.
+- **PWA installability**: serves a web manifest (`/manifest.json`) and a root-scoped service worker (`/sw.js`), and injects the `theme-color` / apple-mobile-web-app / touch-icon `<head>` tags. Navigations always use the network; failed navigations can show only the dedicated offline page. Authenticated HTML is never saved in worker caches. Versioned scripts/styles, public icons, and fonts use bounded caches first. API calls, generated media including previews, and TagDex thumbnails pass through to normal HTTP handling. The worker removes its legacy private-media caches during activation and preserves unrelated cache namespaces. Cache writes remain active until complete without delaying the response. Explicit `reload` requests refresh entries, and `no-store` requests bypass worker caching.
 - **Viewport fix**: replaces the core `maximum-scale=1.0` viewport (which blocks pinch zoom) with a mobile-friendly one that restores pinch zoom, enables iOS safe-area insets, and lets the on-screen keyboard resize content.
 - **Mobile CSS**: scoped under `body.small-window` / `body.coarse-pointer` / `body.pwa-standalone` so desktop is untouched.
 - **Civitai share-to-download**: the manifest declares a `share_target`, so when installed the app appears in the OS share sheet. Sharing a Civitai model link routes to the `/ShareTarget` route, which redirects into the app; `mobile_share.js` then opens the Utilities > Model Downloader tab and prefills the shared URL so its Civitai metadata loads automatically. Non-Civitai shares open the downloader empty.
 
+
+## Browsing and keyboard access
+
+The `/simple` Models tab builds folder cards in batches of 40. Scrolling loads more; **Load More** remains available as a fallback. Genpage History uses its existing progressive renderer with a 50-card first batch. Search, starred ordering, and image actions retain their existing behavior.
+
+**Skip Navigation** moves keyboard focus into the main content. Model and History tiles support Enter and Space. Open sheets and the History viewer contain Tab navigation; Escape closes them and restores focus. The History viewer also supports Left and Right arrow navigation. Sheets, toasts, preview indicators, and viewer travel honor the device's reduced-motion setting.
+
+Genpage applies the saved mobile/desktop layout choice before first paint. The standalone client's fallback status polling pauses while hidden and reconciles the queue when the app returns. These changes require a server restart and client cache refresh before a running Release installation adopts them.
 
 ## /simple FL2VA same-frame prep
 
@@ -50,4 +58,4 @@ Open an attached photo to edit it. On desktop, drag across the image to create a
 
 ## Coupling notes
 
-This extension has zero git-level coupling to core (no shared files), but some behavioral coupling to core internals it drives at runtime (fullview viewer methods, layout bar classes, `site.js` request functions). Those are listed in the plan doc's coupling watchlist — re-check them after each upstream merge.
+Core integration points are listed in the Fork Delta. Runtime coupling includes full-view viewer methods, layout classes, `site.js` requests, and the initial mobile geometry used before `mobile-layout-ready`. Re-check these contracts after upstream merges, especially when the bottom information bar, tab strip, or prompt sizing changes.

@@ -552,6 +552,51 @@ let scalingRace = await page.evaluate(async pixel => {
 }, PIXEL);
 check('preset selection cancels aspect snapping after an earlier Start scale', scalingRace.aspect == '16:9' && !scalingRace.pinned, JSON.stringify(scalingRace));
 
+// Keep this in a final fresh document. It replaces visualViewport only for this regression, then uses the
+// real picker and bottom-sheet path to cover iOS elastic overscroll without changing other harness cases.
+await page.goto('http://localhost/simple');
+await page.waitForFunction(() => typeof mImageBrowser != 'undefined');
+await page.evaluate(() => {
+    let viewport = new EventTarget();
+    Object.assign(viewport, { width: 390, height: 844, offsetTop: 0 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    window.__keyboardViewport = viewport;
+    mUI.initKeyboardWatch();
+});
+await openBrowser();
+await page.waitForTimeout(300);
+let bounce = await page.evaluate(() => {
+    let sheet = document.querySelector('.m-sheet').getBoundingClientRect();
+    let pager = document.querySelector('.m-imgbrowser-pager').getBoundingClientRect();
+    window.__keyboardViewport.offsetTop = -240;
+    window.__keyboardViewport.dispatchEvent(new Event('scroll'));
+    let bouncedSheet = document.querySelector('.m-sheet').getBoundingClientRect();
+    let bouncedPager = document.querySelector('.m-imgbrowser-pager').getBoundingClientRect();
+    return { inset: document.documentElement.style.getPropertyValue('--m-kb-inset'),
+        sheetShift: Math.abs(sheet.y - bouncedSheet.y), pagerShift: Math.abs(pager.y - bouncedPager.y) };
+});
+check('iOS bounce offset leaves the image picker inset and positions unchanged', bounce.inset == '0px' && bounce.sheetShift <= 1 && bounce.pagerShift <= 1, JSON.stringify(bounce));
+let keyboardInset = await page.evaluate(() => {
+    window.__keyboardViewport.height = 600;
+    window.__keyboardViewport.offsetTop = 0;
+    window.__keyboardViewport.dispatchEvent(new Event('resize'));
+    return document.documentElement.style.getPropertyValue('--m-kb-inset');
+});
+check('keyboard height contraction publishes the covered bottom strip', keyboardInset == '244px', keyboardInset);
+let scrolledKeyboardInset = await page.evaluate(() => {
+    window.__keyboardViewport.offsetTop = 50;
+    window.__keyboardViewport.dispatchEvent(new Event('scroll'));
+    return document.documentElement.style.getPropertyValue('--m-kb-inset');
+});
+check('keyboard viewport scroll reduces the covered bottom strip', scrolledKeyboardInset == '194px', scrolledKeyboardInset);
+let dismissedKeyboardInset = await page.evaluate(() => {
+    window.__keyboardViewport.height = 844;
+    window.__keyboardViewport.offsetTop = -240;
+    window.__keyboardViewport.dispatchEvent(new Event('resize'));
+    return document.documentElement.style.getPropertyValue('--m-kb-inset');
+});
+check('keyboard dismissal clears the inset despite a residual bounce offset', dismissedKeyboardInset == '0px', dismissedKeyboardInset);
+
 if (process.env.SWARM_SCREENSHOT == '1') {
     mkdirSync(`${REPO}/.local/simple-image-browser`, { recursive: true });
     await page.screenshot({ path: `${REPO}/.local/simple-image-browser/primary.png`, fullPage: false });

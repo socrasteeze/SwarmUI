@@ -2358,6 +2358,11 @@ html:has(.m-body) {
     border-color: var(--emphasis);
     outline: 1px solid var(--emphasis);
 }
+.m-model-card:focus-visible,
+.m-image-tile-cell:focus-visible {
+    outline: 2px solid var(--emphasis);
+    outline-offset: 2px;
+}
 
 
 /* Load CivitAI on Models-tab cards: compact secondary action under the text, not competing with select/add. */
@@ -2632,6 +2637,26 @@ html:has(.m-body) {
 }
 .m-toast.m-toast-warn {
     border-color: var(--emphasis);
+}
+
+/* Keep a brief opacity acknowledgement for state changes, but remove movement and continuous motion for users
+   who request reduced motion. Keyboard positioning stays outside these transitions by design. */
+@media (prefers-reduced-motion: reduce) {
+    .m-preview-canvas-bar {
+        animation: none;
+    }
+    .m-sheet {
+        transition: none;
+    }
+    .m-sheet-backdrop {
+        transition: opacity 0.12s linear;
+    }
+    .m-tile-progress {
+        transition: none;
+    }
+    .m-toast {
+        transition: opacity 0.12s linear;
+    }
 }
 
 /* --- Misc --- */

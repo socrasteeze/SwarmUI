@@ -206,33 +206,8 @@ public class SessionHandler
         int backupCount = Program.ServerSettings.Maintenance.UserDBBackups;
         if (backupCount > 0 && File.Exists(userDbFile))
         {
-            DateTimeOffset dateNow = DateTimeOffset.UtcNow;
-            string backupDateStr = $"{dateNow.Year}_{dateNow.DayOfYear / 7}";
             string folder = $"{Program.DataDir}/UsersBackups";
-            Directory.CreateDirectory(folder);
-            string backupFile = $"{folder}/UsersBackup_{backupDateStr}.ldb";
-            if (!File.Exists(backupFile))
-            {
-                Logs.Init($"Will backup user database to '{backupFile}'");
-                List<string> backups = [.. Directory.EnumerateFiles(folder, "UsersBackup_*.ldb")];
-                backupCount--;
-                if (backups.Count > backupCount)
-                {
-                    backups.Sort();
-                    for (int i = 0; i <= backups.Count - backupCount; i++)
-                    {
-                        try
-                        {
-                            File.Delete(backups[i]);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logs.Error($"Failed to delete old user database backup '{backups[i]}': {ex.ReadableString()}");
-                        }
-                    }
-                }
-                File.Copy(userDbFile, backupFile);
-            }
+            BackupUserDatabase(userDbFile, folder, backupCount, DateTimeOffset.UtcNow);
         }
         Database = new LiteDatabase(userDbFile);
         UserDatabase = Database.GetCollection<User.DatabaseEntry>("users");
@@ -338,6 +313,80 @@ public class SessionHandler
             }
             CleanOldSessions();
         });
+    }
+
+    /// <summary>Publishes the current weekly user-database backup, then applies retention only after the copy succeeds.</summary>
+    public static void BackupUserDatabase(string userDbFile, string folder, int backupCount, DateTimeOffset dateNow)
+    {
+        if (backupCount <= 0)
+        {
+            return;
+        }
+        string backupDateStr = $"{dateNow.Year}_{dateNow.DayOfYear / 7}";
+        Directory.CreateDirectory(folder);
+        string backupFile = $"{folder}/UsersBackup_{backupDateStr}.ldb";
+        if (File.Exists(backupFile))
+        {
+            return;
+        }
+        Logs.Init($"Will backup user database to '{backupFile}'");
+        string temp = Path.Combine(folder, $".{Path.GetFileName(backupFile)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.Copy(userDbFile, temp);
+            File.Move(temp, backupFile);
+            TrimUserDatabaseBackups(folder, backupCount);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                try
+                {
+                    File.Delete(temp);
+                }
+                catch (Exception)
+                {
+                    // Preserve the copy or publish error. A later cleanup can remove a failed temporary file.
+                }
+            }
+        }
+    }
+
+    /// <summary>Deletes only the oldest recognized user-database backups after a new backup was published.
+    /// Unknown matching filenames remain untouched so an operator's manual copy cannot be mistaken for a rotation entry.</summary>
+    public static void TrimUserDatabaseBackups(string folder, int backupCount)
+    {
+        List<(string Path, int Year, int Week)> backups = [];
+        foreach (string path in Directory.EnumerateFiles(folder, "UsersBackup_*.ldb"))
+        {
+            string name = Path.GetFileNameWithoutExtension(path);
+            string prefix = "UsersBackup_";
+            if (!name.StartsWith(prefix))
+            {
+                continue;
+            }
+            string[] parts = name[prefix.Length..].Split('_');
+            if (parts.Length != 2 || !int.TryParse(parts[0], out int year) || year < 1 || year > 9999
+                || !int.TryParse(parts[1], out int week) || week < 0 || week > 52)
+            {
+                continue;
+            }
+            backups.Add((path, year, week));
+        }
+        backups.Sort((a, b) => a.Year != b.Year ? a.Year.CompareTo(b.Year) : a.Week.CompareTo(b.Week));
+        int deleteCount = Math.Max(0, backups.Count - backupCount);
+        for (int i = 0; i < deleteCount; i++)
+        {
+            try
+            {
+                File.Delete(backups[i].Path);
+            }
+            catch (Exception ex)
+            {
+                Logs.Error($"Failed to delete old user database backup '{backups[i].Path}': {ex.ReadableString()}");
+            }
+        }
     }
 
     public void CleanOldSessions()

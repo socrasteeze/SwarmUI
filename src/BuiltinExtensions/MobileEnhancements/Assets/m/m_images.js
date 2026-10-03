@@ -185,6 +185,9 @@ class MImages {
         for (let i = this.rendered; i < target; i++) {
             let entry = this.entries[i];
             let tile = mUI.el('div', 'm-image-tile-cell');
+            tile.tabIndex = 0;
+            tile.setAttribute('role', 'button');
+            tile.setAttribute('aria-label', entry.src || entry.fullsrc || 'Image');
             let img = document.createElement('img');
             img.loading = 'lazy';
             // Off the main thread: a grid chunk is 40 images, and synchronous decode of that many at once is a
@@ -193,24 +196,69 @@ class MImages {
             img.src = entry.thumb;
             tile.appendChild(img);
             tile.addEventListener('click', () => this.openViewer(entry, i));
+            tile.addEventListener('keydown', e => {
+                if (e.key == 'Enter' || e.key == ' ') {
+                    e.preventDefault();
+                    this.openViewer(entry, i);
+                }
+            });
             this.grid.appendChild(tile);
         }
         this.rendered = target;
     }
 
     /** Fullscreen viewer overlay: swipe left/right = prev/next history entry, action row below. */
-    openViewer(entry, index) {
+    openViewer(entry, index, viewerState = null) {
+        let state = viewerState || {
+            'previousFocus': document.activeElement instanceof HTMLElement ? document.activeElement : null,
+            'background': [...document.querySelectorAll('.m-app, .m-sheet')].map(element => ({
+                'element': element,
+                'hadAriaHidden': element.hasAttribute('aria-hidden'),
+                'ariaHidden': element.getAttribute('aria-hidden'),
+                'inert': !!element.inert
+            }))
+        };
+        for (let item of state.background) {
+            item.element.setAttribute('aria-hidden', 'true');
+            item.element.inert = true;
+        }
         let overlay = mUI.el('div', 'm-viewer');
+        overlay.tabIndex = -1;
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', 'Image Viewer');
         let imgWrap = mUI.el('div', 'm-viewer-imgwrap');
         let img = document.createElement('img');
         img.src = entry.url;
         imgWrap.appendChild(img);
         overlay.appendChild(imgWrap);
         let actions = mUI.el('div', 'm-viewer-actions');
-        let close = () => overlay.remove();
-        let show = (newEntry, newIndex) => {
+        let closed = false;
+        let close = (restore = true) => {
+            if (closed) {
+                return;
+            }
+            closed = true;
             overlay.remove();
-            this.openViewer(newEntry, newIndex);
+            if (!restore) {
+                return;
+            }
+            for (let item of state.background) {
+                if (item.hadAriaHidden) {
+                    item.element.setAttribute('aria-hidden', item.ariaHidden);
+                }
+                else {
+                    item.element.removeAttribute('aria-hidden');
+                }
+                item.element.inert = item.inert;
+            }
+            if (state.previousFocus && state.previousFocus.isConnected) {
+                state.previousFocus.focus({ preventScroll: true });
+            }
+        };
+        let show = (newEntry, newIndex) => {
+            close(false);
+            this.openViewer(newEntry, newIndex, state);
         };
         let addAction = (label, handler) => {
             let btn = mUI.el('button', 'm-viewer-action', label);
@@ -292,6 +340,42 @@ class MImages {
         });
         addAction('Close', close);
         overlay.appendChild(actions);
+        overlay.addEventListener('keydown', e => {
+            if (e.key == 'Escape') {
+                e.preventDefault();
+                close();
+                return;
+            }
+            if (e.key == 'ArrowLeft' && index != null && index > 0) {
+                e.preventDefault();
+                show(this.entries[index - 1], index - 1);
+                return;
+            }
+            if (e.key == 'ArrowRight' && index != null && index + 1 < this.entries.length) {
+                e.preventDefault();
+                show(this.entries[index + 1], index + 1);
+                return;
+            }
+            if (e.key != 'Tab') {
+                return;
+            }
+            let buttons = [...actions.querySelectorAll('button:not([disabled])')];
+            if (buttons.length == 0) {
+                e.preventDefault();
+                overlay.focus({ preventScroll: true });
+                return;
+            }
+            let first = buttons[0];
+            let last = buttons[buttons.length - 1];
+            if (e.shiftKey && (document.activeElement == overlay || document.activeElement == first)) {
+                e.preventDefault();
+                last.focus();
+            }
+            else if (!e.shiftKey && (document.activeElement == overlay || document.activeElement == last)) {
+                e.preventDefault();
+                first.focus();
+            }
+        });
         let startX = -1;
         let startY = -1;
         imgWrap.addEventListener('touchstart', (e) => {
@@ -336,6 +420,11 @@ class MImages {
             }
         });
         document.body.appendChild(overlay);
+        requestAnimationFrame(() => {
+            if (overlay.isConnected) {
+                actions.querySelector('button').focus({ preventScroll: true });
+            }
+        });
     }
 }
 

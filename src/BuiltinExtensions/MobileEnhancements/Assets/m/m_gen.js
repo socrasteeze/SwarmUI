@@ -12,6 +12,8 @@ class MGenSocket {
         this.queueTotal = 0;
         /** Interval handle for the no-socket status polling fallback. */
         this.pollTimer = null;
+        /** True while a fallback status request is in flight. */
+        this.pollInFlight = false;
         /** Screen wake lock sentinel while generating, or null. */
         this.wakeLock = null;
         /** Timestamp of the last haptic pulse (debounce). */
@@ -19,7 +21,10 @@ class MGenSocket {
         /** Listeners: fn(kind, data) with kind in 'status'|'progress'|'image'|'discard'|'error'. */
         this.listeners = [];
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
+            if (document.hidden) {
+                this.stopPolling();
+            }
+            else {
                 this.onWake();
             }
         });
@@ -143,13 +148,33 @@ class MGenSocket {
 
     /** One-shot status poll (used when no socket is open to push status for free). */
     pollStatus() {
-        genericRequest('GetCurrentStatus', {}, data => this.applyStatus(data));
+        if (this.pollInFlight) {
+            return false;
+        }
+        this.pollInFlight = true;
+        genericRequest('GetCurrentStatus', {}, data => {
+            this.pollInFlight = false;
+            this.applyStatus(data);
+            this.startPollingIfBusy();
+        }, 0, error => {
+            this.pollInFlight = false;
+            console.error('status poll failed', error);
+            showError(error);
+            this.startPollingIfBusy();
+        }, 15000);
+        return true;
     }
 
     /** Starts the 3s status polling fallback if work may be outstanding. */
     startPollingIfBusy() {
-        if (this.queueTotal > 0 && !this.pollTimer) {
-            this.pollTimer = setInterval(() => this.pollStatus(), 3000);
+        if (this.queueTotal > 0 && !this.pollTimer && !document.hidden && (!this.socket || this.socket.readyState != WebSocket.OPEN)) {
+            this.pollTimer = setInterval(() => {
+                if (document.hidden || (this.socket && this.socket.readyState == WebSocket.OPEN)) {
+                    this.stopPolling();
+                    return;
+                }
+                this.pollStatus();
+            }, 3000);
         }
     }
 
@@ -164,7 +189,7 @@ class MGenSocket {
     /** On page wake: the socket may have died silently (iOS kills sockets on lock/app-switch). Poll once and
      * let listeners (Images tab) refresh history for any finals that arrived while asleep. */
     onWake() {
-        if (typeof session_id == 'undefined' || !session_id) {
+        if (document.hidden || typeof session_id == 'undefined' || !session_id) {
             return;
         }
         if (!this.socket || this.socket.readyState != WebSocket.OPEN) {

@@ -49,6 +49,7 @@ let triggerChangeFor = () => {};
 // Read by runAutoEnhance (getRequiredElementById('current_model').value) and by the generate-click tests
 // (makeWSRequest, MouseEvent) - reassigned per test the same way document/triggerChangeFor are above.
 let getRequiredElementById = () => ({ value: '' });
+let getParamById = () => null;
 let makeWSRequest = () => null;
 // Read by refreshStatus() (genericRequest('ListPromptEnhanceStatus', ...)). Reassigned per test the same way
 // makeWSRequest is above, so a test can capture the dispatched callbacks and invoke them in whatever order it
@@ -76,6 +77,16 @@ function extractMethod(src, name) {
     if (sigIdx < 0) {
         throw new Error(`method ${name} not found in source`);
     }
+    // This method tests JSON object text and therefore contains literal "{" characters. The simple brace
+    // counter below intentionally serves the older methods, but cannot distinguish those string bytes from
+    // code. Its next class-level doc block is the exact method boundary.
+    if (name == 'unwrapEnhanceResult') {
+        let nextDoc = src.indexOf('\n    /**', sigIdx + 1);
+        if (nextDoc < 0) {
+            throw new Error(`method ${name} has no following class member`);
+        }
+        return src.slice(sigIdx + 1, nextDoc).trimEnd();
+    }
     let i = src.indexOf('{', sigIdx);
     let depth = 0;
     for (let j = i; j < src.length; j++) {
@@ -96,6 +107,14 @@ function extractMethod(src, name) {
  * exactly as they do in the real class - eval runs in this function's scope, so the assembled methods still
  * close over whatever fake globals (document, triggerChangeFor) this file has declared at the point of call. */
 function buildHost(methodNames, extraProps) {
+    methodNames = [...methodNames];
+    if (methodNames.some(name => name == 'handleFrame' || name == 'applyResult' || name == 'runAutoEnhance')
+        && !methodNames.includes('unwrapEnhanceResult')) {
+        methodNames.push('unwrapEnhanceResult');
+    }
+    if (methodNames.some(name => name == 'open' || name == 'runAutoEnhance') && !methodNames.includes('videoRequestFields')) {
+        methodNames.push('videoRequestFields');
+    }
     let pieces = [];
     for (let i = 0; i < methodNames.length; i++) {
         pieces.push(extractMethod(source, methodNames[i]));

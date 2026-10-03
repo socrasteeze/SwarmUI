@@ -151,8 +151,9 @@ All registered in `TagDexAPI.cs`, `TagDexFavorites.cs`, and `TagDexThumbs.cs` vi
 | `TagDexDeleteCustomCharacter` | Deletes one of your own characters and its reference image. |
 
 Two more routes are plain `WebServer.WebApp.MapGet` handlers, not API calls: `/TagDexIndex/{source}/{version}`
-serves the lean typeahead index as an immutably-cached, tab-separated blob, and `/TagDexThumb/{source}/{**file}`
-serves one thumbnail image out of the data folder.
+serves the lean typeahead index as a tab-separated blob, and `/TagDexThumb/{source}/{**file}`
+serves one thumbnail image out of the data folder. Both routes require `tagdex_use`. Private HTTP caches
+must revalidate permission; unchanged authorized responses use ETags and return 304 without the body.
 
 ## Browsing on `/simple`
 

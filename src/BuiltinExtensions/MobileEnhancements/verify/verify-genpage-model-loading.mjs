@@ -135,7 +135,7 @@ const renderContext = {
     createSpan() { return renderNode(); }, doPopover() {},
 };
 function renderNode() {
-    return { children: [], dataset: {}, classList: { add() {} }, appendChild(child) { this.children.push(child); }, insertBefore(child) { this.children.push(child); }, addEventListener(type, callback) { this[`on${type}`] = callback; }, getElementsByTagName() { return []; }, getElementsByClassName() { return []; } };
+    return { children: [], dataset: {}, classList: { add() {} }, appendChild(child) { this.children.push(child); }, insertBefore(child) { this.children.push(child); }, addEventListener(type, callback) { this[`on${type}`] = callback; }, setAttribute() {}, getElementsByTagName() { return []; }, getElementsByClassName() { return []; } };
 }
 vm.runInNewContext(`class TestBrowser {\n${renderMethod}\n}\nthis.TestBrowser = TestBrowser;`, renderContext);
 let renderedContainer = renderNode();

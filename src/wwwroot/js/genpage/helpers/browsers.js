@@ -434,6 +434,17 @@ class GenPageBrowserClass {
      * Fills the container with the content list.
      */
     buildContentList(container, files, before = null, startId = 0) {
+        /** Makes a non-native browser control keyboard-operable without changing its styling. */
+        let bindKeyboardActivation = (elem, callback) => {
+            elem.tabIndex = 0;
+            elem.setAttribute('role', 'button');
+            elem.addEventListener('keydown', e => {
+                if (e.key == 'Enter' || e.key == ' ') {
+                    e.preventDefault();
+                    callback();
+                }
+            });
+        };
         let id = startId;
         let maxBuildNow = this.maxPreBuild;
         if (startId == 0) {
@@ -468,6 +479,8 @@ class GenPageBrowserClass {
             }
             let div = createDiv(null, `${desc.className}`);
             let popoverId = `${this.id}-${id}`;
+            let menu = null;
+            let menuDiv = null;
             let buttons = desc.buttons.filter(b => !b.multi_only);
             if (buttons.length > 0) {
                 // popoverId is index-based, so a stale popover from a previous render (eg before a
@@ -477,7 +490,7 @@ class GenPageBrowserClass {
                 // before creating the new one, so getElementById/doPopover can't resolve to a stale popover
                 // still bound (via its buttons' onclick closures) to the wrong file.
                 document.getElementById(`popover_${popoverId}`)?.remove();
-                let menuDiv = createDiv(`popover_${popoverId}`, 'sui-popover sui_popover_model');
+                menuDiv = createDiv(`popover_${popoverId}`, 'sui-popover sui_popover_model');
                 for (let button of buttons) {
                     let buttonElem;
                     if (button.href) {
@@ -495,8 +508,19 @@ class GenPageBrowserClass {
                     if (button.onclick) {
                         buttonElem.onclick = () => button.onclick(div);
                     }
+                    if (!button.href) {
+                        bindKeyboardActivation(buttonElem, () => buttonElem.click());
+                    }
                     menuDiv.appendChild(buttonElem);
                 }
+                menuDiv.addEventListener('keydown', e => {
+                    if (e.key == 'Escape') {
+                        hidePopover(popoverId);
+                        menu.focus();
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                });
                 // Appended to document.body (not `container`) so this position:fixed popover isn't
                 // trapped inside a -webkit-overflow-scrolling:touch ancestor on iOS Safari, which turns
                 // it into a new containing block and makes the popup render clipped/covered instead of
@@ -511,13 +535,14 @@ class GenPageBrowserClass {
                 this.select(file, div);
             });
             img.classList.add('image-block-img-inner');
+            img.alt = desc.display || desc.name;
+            bindKeyboardActivation(img, () => img.click());
             div.appendChild(img);
             if (this.format.includes('Cards')) {
                 div.className += ' model-block model-block-hoverable';
                 if (this.format.startsWith('Small')) { div.classList.add('model-block-small'); }
                 else if (this.format.startsWith('Big')) { div.classList.add('model-block-big'); }
                 let textBlock = createDiv(null, 'model-descblock');
-                textBlock.tabIndex = 0;
                 textBlock.innerHTML = desc.description;
                 div.appendChild(textBlock);
             }
@@ -590,10 +615,23 @@ class GenPageBrowserClass {
                 }
             }
             if (buttons.length > 0) {
-                let menu = createDiv(null, 'model-block-menu-button');
+                menu = createDiv(null, 'model-block-menu-button');
                 menu.innerHTML = '&#x2630;';
-                menu.addEventListener('click', () => {
-                    doPopover(popoverId);
+                menu.title = 'Actions';
+                bindKeyboardActivation(menu, () => menu.click());
+                menu.addEventListener('click', e => {
+                    let wasVisible = menuDiv.dataset.visible == 'true';
+                    doPopover(popoverId, e);
+                    if (!wasVisible && e.detail == 0) {
+                        let firstAction = menuDiv.querySelector('a, [role="button"]');
+                        if (firstAction) {
+                            setTimeout(() => {
+                                if (menuDiv.dataset.visible == 'true') {
+                                    firstAction.focus();
+                                }
+                            }, 0);
+                        }
+                    }
                 });
                 div.appendChild(menu);
             }
@@ -625,6 +663,20 @@ class GenPageBrowserClass {
         setTimeout(() => {
             browserUtil.makeVisible(container);
         }, 100);
+    }
+
+    /** Removes popovers owned by this browser before its content is rebuilt. */
+    clearOwnedPopovers() {
+        let prefix = `popover_${this.id}-`;
+        for (let popover of document.querySelectorAll('.sui-popover')) {
+            if (!popover.id.startsWith(prefix)) {
+                continue;
+            }
+            if (popover.dataset.visible == 'true') {
+                hidePopover(popover.id.substring('popover_'.length));
+            }
+            popover.remove();
+        }
     }
 
     /**
@@ -868,6 +920,7 @@ class GenPageBrowserClass {
                     this.preservedMultiSelect.add(el.dataset.name);
                 }
             }
+            this.clearOwnedPopovers();
             this.folderTreeDiv.innerHTML = '';
             this.contentDiv.innerHTML = '';
             this.headerPath.remove();

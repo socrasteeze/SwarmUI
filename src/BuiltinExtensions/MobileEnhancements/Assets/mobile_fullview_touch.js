@@ -106,6 +106,12 @@ class MobileFullViewTouch {
         return document.body.classList.contains('small-window');
     }
 
+    /** True when the user has requested reduced motion. Gesture-following still tracks the finger, while
+     * automated spring and navigation travel below settle immediately. */
+    reduceMotion() {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
     /** True if the touch should be left to the browser: native media controls, the scrollable metadata /
      *  action-button area under the image, or the floating Share button (T7) overlaid on the image itself -
      *  without this it would otherwise read as "tap on the image" and get swallowed by the pan/tap gesture
@@ -573,6 +579,10 @@ class MobileFullViewTouch {
         if (!inner) {
             return;
         }
+        if (this.reduceMotion()) {
+            this.clearInner();
+            return;
+        }
         inner.style.transition = 'transform 0.18s ease-out';
         inner.style.transform = 'translate(0, 0)';
         setTimeout(() => this.clearInner(), 200);
@@ -601,6 +611,22 @@ class MobileFullViewTouch {
                 shiftToNextImagePreview(next, true, true);
             }
             this.clearInner();
+            return;
+        }
+        if (this.reduceMotion()) {
+            let moved = false;
+            try {
+                moved = shiftToNextImagePreview(next, true, true);
+            }
+            catch (err) {
+                console.log(`Mobile swipe navigation failed: ${err}`);
+            }
+            if (moved) {
+                this.haptic();
+                this.preloadAdjacent();
+            }
+            this.clearInner();
+            this.animating = false;
             return;
         }
         this.animating = true;

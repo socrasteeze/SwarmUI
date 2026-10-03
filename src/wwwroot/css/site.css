@@ -448,7 +448,7 @@ textarea, input, select {
     top: 0;
     width: fit-content;
     z-index: 10000;
-    transition: visibility 0s, opacity 0.3s linear;
+    transition: visibility 0s, opacity 0.2s ease-out;
     min-width: 10rem;
 }
 .sui-info-popover {
@@ -457,10 +457,30 @@ textarea, input, select {
 .sui-popover-visible {
     visibility: visible;
     opacity: 1;
-    transition: visibility 0s, opacity 0.3s linear;
+    transition: visibility 0s, opacity 0.2s ease-out;
 }
 .sui-popover-notransition {
     transition: none;
+}
+.skip-navigation {
+    position: fixed;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 100000;
+    padding: 0.5rem 0.75rem;
+    color: var(--text);
+    background: var(--background);
+    border: 2px solid var(--emphasis);
+    transform: translateY(-200%);
+}
+.skip-navigation:focus {
+    transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+    .sui-popover:not(.sui-popover-notransition),
+    .sui-popover-visible:not(.sui-popover-notransition) {
+        transition: visibility 0s, opacity 0.1s ease-out;
+    }
 }
 .slight-left-margin-block {
     display: block;
