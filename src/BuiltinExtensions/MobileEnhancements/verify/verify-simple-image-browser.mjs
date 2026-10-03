@@ -5,14 +5,14 @@
  * Run: node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-image-browser.mjs
  * Set SWARM_CHROMIUM to override Chromium. Set SWARM_SCREENSHOT=1 to save a local review PNG.
  */
-import { chromium } from 'playwright';
-import { readFileSync, mkdirSync } from 'fs';
+import { chromium, webkit } from 'playwright';
+import { readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
 let REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 let M = `${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m`;
-let PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+let PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAA3ElEQVR4nO3WwU3EMBBG4bdPe6cDOqADcuBMB1AfNJLGOHBBHGBY0Jon5btFceR/PLbi0+3dPWUSJ3ESJ3ESJ3ESJ3ESd14dgP3l6ePj9vz6o89PC68Sn6JfVob/MD3fvV1fwCTfPqshf4i9/pTz7bEPRh4dWE3iJM7rTzn/SW2DkUcHLjJZ2m3WqGUd+DrfNt5mKy9z78K30T9xHOLVJE7iJE7iJE7iJE7iJE7iJE7izjcPj5RJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMRJnMS5OsBvvQEvTB44dH3nYQAAAABJRU5ErkJggg==';
 let TOAST = '<div class="center-toast toast-error-box" id="center_toast"><div class="toast hide" id="error_toast_box"><div class="toast-body" id="error_toast_content"></div></div></div>';
 let html = readFileSync(`${M}/index.html`, 'utf8').replace('[HEADEXTRA]', '').replace('[REMAPS]', '[]').replaceAll('[TOAST]', TOAST).replaceAll('[VARY]', '1');
 let client = ['m.css', 'm_state.js', 'm_gen.js', 'm_ui.js', 'm_autocomplete.js', 'm_coach.js', 'm_enhance.js', 'm_frame_prep.js', 'm_image_browser.js', 'm_create.js', 'm_grid.js', 'm_presets.js', 'm_images.js', 'm_models.js'];
@@ -33,7 +33,8 @@ function check(name, pass, detail = '') {
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  ${detail}` : ''}`);
 }
 
-let browser = await chromium.launch(process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
+let engine = process.env.SWARM_WEBKIT == '1' ? webkit : chromium;
+let browser = await engine.launch(process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
 let page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 page.setDefaultTimeout(5000);
 await page.route('**/*', async route => {
@@ -70,7 +71,17 @@ await page.addInitScript(pixel => {
         let respond = data => setTimeout(() => callback(data), 0);
         let reject = message => setTimeout(() => fail && fail(message), 0);
         if (route == 'ListImages') {
-            return respond({ folders: ['inputs'], files: [{ src: 'output.png', metadata: '' }] });
+            if (window.__failNext && args.offset == 48) {
+                return reject('temporary page error');
+            }
+            let images = args.path == 'paged-output'
+                ? Array.from({ length: 130 }, (_, i) => ({ src: `output-${i}.png`, metadata: '' }))
+                : [{ src: 'output.png', metadata: '' }];
+            images = images.filter(file => file.src.toLowerCase().includes((args.search || '').toLowerCase()));
+            let offset = args.offset || 0;
+            let limit = args.limit || images.length;
+            return respond({ folders: ['inputs'], files: images.slice(offset, offset + limit), total: images.length,
+                next_offset: offset + limit < images.length ? offset + limit : null });
         }
         if (route == 'ListSimpleImageFolder') {
             let path = args.path || '';
@@ -92,22 +103,24 @@ await page.addInitScript(pixel => {
                 return respond({ path, parent: '', folders: [{ name: 'Shots', path: 'E:\\Shots' }], files: [], total: 0, next_offset: null });
             }
             if (path == 'E:\\Shots') {
-                let files = [];
-                for (let i = args.offset; i < Math.min(args.offset + args.limit, 102); i++) {
-                    files.push({ name: `shot-${i}.png`, path: `E:\\Shots\\shot-${i}.png` });
+                let files = Array.from({ length: 102 }, (_, i) => ({ name: `shot-${i}.png`, path: `E:\\Shots\\shot-${i}.png` }));
+                files = files.filter(file => file.name.toLowerCase().includes((args.search || '').toLowerCase()));
+                let data = { path, parent: 'E:\\', folders: [{ name: 'Nested', path: 'E:\\Shots\\Nested' }],
+                    files: files.slice(args.offset, args.offset + args.limit), total: files.length,
+                    next_offset: args.offset + args.limit < files.length ? args.offset + args.limit : null };
+                if (args.search == 'late-search') {
+                    window.__pending.push(() => callback(data));
+                    return;
                 }
-                return respond({ path, parent: 'E:\\', folders: [{ name: 'Nested', path: 'E:\\Shots\\Nested' }], files, total: 102, next_offset: args.offset + args.limit < 102 ? args.offset + args.limit : null });
+                return respond(data);
             }
             if (path == 'E:\\Shots\\Nested') {
                 return respond({ path, parent: 'E:\\Shots', folders: [], files: [{ name: 'pick.png', path: 'E:\\Shots\\Nested\\pick.png' }], total: 1, next_offset: null });
             }
             if (path == 'folder-pages') {
-                let folders = [];
-                for (let i = args.offset; i < Math.min(args.offset + args.limit, 102); i++) {
-                    folders.push({ name: `folder-${i}`, path: `folder-pages\\folder-${i}` });
-                }
-                let files = args.offset >= 100 ? [{ name: 'after-folders.png', path: 'folder-pages\\after-folders.png' }] : [];
-                return respond({ path, parent: '', folders, files, total: 103, next_offset: args.offset + args.limit < 102 ? args.offset + args.limit : null });
+                let folders = Array.from({ length: 102 }, (_, i) => ({ name: `folder-${i}`, path: `folder-pages\\folder-${i}` }));
+                return respond({ path, parent: '', folders, files: [{ name: 'after-folders.png', path: 'folder-pages\\after-folders.png' }],
+                    total: 1, next_offset: null });
             }
             if (path == 'rapid') {
                 return respond({ path, parent: '', folders: [], files: [{ name: 'first.png', path: 'rapid\\first.png' }, { name: 'second.png', path: 'rapid\\second.png' }], total: 2, next_offset: null });
@@ -225,25 +238,59 @@ await page.locator('.m-imgbrowser-up').click();
 check('drive, nested-folder, and Up navigation preserve server paths', await page.locator('.m-imgbrowser-path').textContent() == 'E:\\Shots');
 await go('E:\\A folder\\caf\u00e9 #1 & two', true);
 let unicodeCall = await page.evaluate(() => window.__calls.filter(c => c.route == 'ListSimpleImageFolder' && c.args.path == 'E:\\A folder\\caf\u00e9 #1 & two').at(-1));
-check('Go accepts a Windows path with Unicode, spaces, #, and ampersand', unicodeCall.args.path == 'E:\\A folder\\caf\u00e9 #1 & two' && unicodeCall.args.offset == 0 && unicodeCall.args.limit == 100, JSON.stringify(unicodeCall));
+check('Go accepts a Windows path with Unicode, spaces, #, and ampersand', unicodeCall.args.path == 'E:\\A folder\\caf\u00e9 #1 & two' && unicodeCall.args.offset == 0 && unicodeCall.args.limit == 48 && unicodeCall.args.image_page, JSON.stringify(unicodeCall));
 await go('\\\\files.example\\media');
 check('Go accepts a UNC path', await page.locator('.m-imgbrowser-path').textContent() == '\\\\files.example\\media');
 
 await go('E:\\Shots');
-await page.waitForSelector('.m-imgbrowser-more');
-let firstPage = await page.locator('.m-imgbrowser-tile').count();
-await page.locator('.m-imgbrowser-more').click();
-await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 102);
-let paging = await page.evaluate(() => { let paths = [...document.querySelectorAll('.m-imgbrowser-tile')].map(tile => tile.dataset.path); return { unique: new Set(paths).size, count: paths.length, calls: window.__calls.filter(c => c.route == 'ListSimpleImageFolder' && c.args.path == 'E:\\Shots').map(c => c.args.offset) }; });
-check('Load More appends exactly one second page without duplicate files', firstPage == 100 && paging.count == 102 && paging.unique == 102 && JSON.stringify(paging.calls.slice(-2)) == '[0,100]', JSON.stringify(paging));
-await page.waitForTimeout(160);
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+await page.getByRole('button', { name: 'Next Page', exact: true }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-48.png');
+let secondPage = await page.locator('.m-imgbrowser-tile-name').allTextContents();
+await page.getByRole('button', { name: 'Next Page', exact: true }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-96.png');
+let lastPage = await page.locator('.m-imgbrowser-tile-name').allTextContents();
+check('Next replaces pages and disables at the final image page', secondPage.length == 48 && new Set(secondPage).size == 48
+    && lastPage.length == 6 && await page.getByRole('button', { name: 'Next Page' }).isDisabled(), JSON.stringify({ second: secondPage.length, last: lastPage.length }));
+await page.getByRole('button', { name: 'Previous Page', exact: true }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-48.png');
+await page.getByRole('button', { name: 'Previous Page', exact: true }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-0.png');
+check('Prev returns to the first page without duplicate tiles', await page.locator('.m-imgbrowser-tile').count() == 48
+    && await page.getByRole('button', { name: 'Previous Page' }).isDisabled());
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile img')?.src.startsWith('data:image/'));
 let previews = await page.evaluate(() => ({ peak: window.__previewPeak, visible: [...document.querySelectorAll('.m-imgbrowser-tile img')].filter(i => i.src.startsWith('data:image/')).length }));
-check('lazy previews have a bounded maximum of four requests', previews.peak <= 4, JSON.stringify(previews));
+check('lazy previews have a bounded maximum of four requests', previews.peak <= 4 && previews.visible > 0, JSON.stringify(previews));
+
+let fixedBefore = await page.locator('.m-imgbrowser-pager').boundingBox();
+await page.locator('.m-imgbrowser-grid').evaluate(grid => { grid.scrollTop = grid.scrollHeight; });
+let fixedAfter = await page.locator('.m-imgbrowser-pager').boundingBox();
+check('Prev and Next remain fixed while the image grid scrolls', Math.abs(fixedBefore.y - fixedAfter.y) <= 1 && Math.abs(fixedBefore.x - fixedAfter.x) <= 1);
+await page.getByRole('button', { name: 'Next Page' }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-page')?.textContent == '2 / 3');
+let search = page.getByRole('searchbox', { name: 'Search Filenames' });
+await search.fill('SHOT-100');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-100.png');
+check('filename search reaches images beyond page one and resets the page', await page.locator('.m-imgbrowser-page').textContent() == '1 / 1'
+    && await page.locator('.m-imgbrowser-tile').count() == 1 && await page.getByRole('button', { name: 'Previous Page' }).isDisabled());
+check('search keeps folder navigation available', await page.getByRole('button', { name: 'Nested', exact: true }).count() == 1);
+let searchAfter = await page.locator('.m-imgbrowser-pager').boundingBox();
+check('pagination controls do not shift between full and filtered pages', Math.abs(fixedBefore.y - searchAfter.y) <= 1);
+await search.fill('late-search');
+await page.waitForFunction(() => window.__pending.length == 1);
+await search.fill('shot-101');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-101.png');
+await page.evaluate(() => window.__pending.splice(0).forEach(reply => reply()));
+check('late search response cannot overwrite a newer search', await page.locator('.m-imgbrowser-tile-name').textContent() == 'shot-101.png');
+await search.fill('no-such-image');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'No matching images.');
+check('empty search disables both paging buttons and retains navigation', await page.getByRole('button', { name: 'Previous Page' }).isDisabled()
+    && await page.getByRole('button', { name: 'Next Page' }).isDisabled() && await page.getByRole('button', { name: 'Nested', exact: true }).count() == 1);
+await search.fill('');
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
 
 await go('folder-pages');
-await page.waitForSelector('.m-imgbrowser-more');
-await page.locator('.m-imgbrowser-more').click();
-await page.waitForFunction(() => [...document.querySelectorAll('.m-imgbrowser-folder-row')].some(row => row.textContent.includes('folder-101')) && [...document.querySelectorAll('.m-imgbrowser-tile-name')].some(name => name.textContent == 'after-folders.png'));
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-folder-row').length == 102);
 let hierarchy = await page.evaluate(() => ({
     body: !!document.querySelector('.m-imgbrowser-body'),
     folders: !!document.querySelector('.m-imgbrowser-folders-panel .m-imgbrowser-folders'),
@@ -254,7 +301,7 @@ let hierarchy = await page.evaluate(() => ({
 check('directory layout uses panels and rows without folder chips', hierarchy.body && hierarchy.folders && hierarchy.images && hierarchy.chips == 0 && hierarchy.longName, JSON.stringify(hierarchy));
 await page.getByRole('button', { name: 'folder-101', exact: true }).click();
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-path')?.textContent == 'folder-pages\\folder-101');
-check('Load More appends later folders and makes the final folder navigable', true);
+check('all folder navigation remains available independently of image pages', true);
 
 await page.evaluate(() => { document.querySelector('.m-imgbrowser-machine-path').value = 'late'; [...document.querySelectorAll('.m-imgbrowser-tool')].find(button => button.textContent == 'Go').click(); });
 await page.waitForFunction(() => window.__pending.length == 1);
@@ -331,6 +378,33 @@ await page.waitForTimeout(60);
 let phonePick = await page.evaluate(() => window.__picked);
 check('phone fallback remains a data entry path', phonePick?.kind == 'data' && `${phonePick.value}`.startsWith('data:image/png'), JSON.stringify(phonePick));
 
+await page.evaluate(() => { mImageBrowser.source = 'output'; mImageBrowser.path = 'paged-output'; });
+await openBrowser();
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+await page.getByRole('button', { name: 'Next Page' }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'output-48.png');
+check('Output uses server pages instead of appending or truncating history', await page.locator('.m-imgbrowser-tile').count() == 48
+    && await page.locator('.m-imgbrowser-page').textContent() == '2 / 3');
+await page.getByRole('searchbox', { name: 'Search Filenames' }).fill('OUTPUT-120');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'output-120.png');
+check('Output filename search finds an image past the original page', await page.locator('.m-imgbrowser-tile').count() == 1
+    && await page.locator('.m-imgbrowser-page').textContent() == '1 / 1');
+await page.getByRole('searchbox', { name: 'Search Filenames' }).fill('');
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+await page.evaluate(() => { window.__failNext = true; });
+await page.getByRole('button', { name: 'Next Page' }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent.includes('temporary page error'));
+await page.evaluate(() => { window.__failNext = false; });
+await page.getByRole('button', { name: 'Previous Page' }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'output-0.png');
+check('Prev recovers from a failed page request', await page.locator('.m-imgbrowser-tile').count() == 48);
+let requestsBeforeClose = await page.evaluate(() => window.__calls.filter(call => call.route == 'ListImages').length);
+await page.getByRole('searchbox', { name: 'Search Filenames' }).fill('pending');
+await page.locator('.m-imgbrowser-close').click();
+await page.waitForTimeout(300);
+check('closing cancels a pending search debounce', requestsBeforeClose == await page.evaluate(() => window.__calls.filter(call => call.route == 'ListImages').length));
+await page.evaluate(() => { mImageBrowser.path = ''; });
+
 await page.evaluate(() => { window.__permission = false; });
 await openBrowser();
 check('permission denial hides Drives but keeps Output', await picker().evaluate(node => ![...node.querySelectorAll('.m-imgbrowser-source')].some(button => button.textContent == 'Drives') && [...node.querySelectorAll('.m-imgbrowser-source')].some(button => button.textContent == 'Output')));
@@ -341,11 +415,56 @@ for (let width of [360, 768, 1024, 1440]) {
     await openBrowser();
     await drives();
     await shots();
-    let geometry = await page.evaluate(() => { let sheet = document.querySelector('.m-sheet-content') || document.querySelector('.m-imgbrowser'); let grid = document.querySelector('.m-imgbrowser-grid'); return { overflow: document.documentElement.scrollWidth <= window.innerWidth, grid: Math.round(grid.getBoundingClientRect().height), sheetTop: Math.round(sheet.getBoundingClientRect().top) }; });
+    await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+    let geometry = await page.evaluate(() => {
+        let grid = document.querySelector('.m-imgbrowser-grid');
+        let pager = document.querySelector('.m-imgbrowser-pager');
+        let before = pager.getBoundingClientRect();
+        grid.scrollTop = grid.scrollHeight;
+        let after = pager.getBoundingClientRect();
+        return { overflow: document.documentElement.scrollWidth <= window.innerWidth,
+            grid: Math.round(grid.getBoundingClientRect().height), columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+            tileWidth: grid.querySelector('.m-imgbrowser-tile').getBoundingClientRect().width,
+            folderWidth: document.querySelector('.m-imgbrowser-folders-panel').getBoundingClientRect().width,
+            pagerVisible: before.bottom <= window.innerHeight && before.top >= 0,
+            pagerShift: Math.abs(before.y - after.y) };
+    });
     check(`responsive ${width}px has no horizontal overflow and a usable grid`, geometry.overflow && geometry.grid >= 96, JSON.stringify(geometry));
+    check(`responsive ${width}px has four touch-sized columns and fixed paging`, geometry.columns == 4 && geometry.tileWidth >= 44
+        && geometry.pagerVisible && geometry.pagerShift <= 1, JSON.stringify(geometry));
+    if (process.env.SWARM_SCREENSHOT == '1') {
+        await page.waitForFunction(() => {
+            let grid = document.querySelector('.m-imgbrowser-grid');
+            let bounds = grid.getBoundingClientRect();
+            let visible = [...grid.querySelectorAll('img')].filter(img => {
+                let box = img.getBoundingClientRect();
+                return box.top < bounds.bottom && box.bottom > bounds.top;
+            });
+            return visible.length > 0 && visible.every(img => img.complete && img.naturalWidth > 0);
+        });
+        mkdirSync(`${REPO}/.local/simple-image-browser`, { recursive: true });
+        await page.screenshot({ path: `${REPO}/.local/simple-image-browser/browser-${width}.png` });
+    }
     await page.locator('.m-imgbrowser-close').click();
     await page.waitForTimeout(300);
 }
+
+await page.setViewportSize({ width: 680, height: 420 });
+await openBrowser();
+await drives();
+await shots();
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+let shortViewport = await page.evaluate(() => {
+    let pager = document.querySelector('.m-imgbrowser-pager').getBoundingClientRect();
+    let grid = document.querySelector('.m-imgbrowser-grid').getBoundingClientRect();
+    let search = document.querySelector('.m-imgbrowser-search').getBoundingClientRect();
+    return { pagerBottom: pager.bottom, gridHeight: grid.height, searchTop: search.top,
+        overflow: document.documentElement.scrollWidth <= window.innerWidth };
+});
+check('landscape keeps search, images, and sticky paging reachable', shortViewport.pagerBottom <= 420 && shortViewport.gridHeight >= 80
+    && shortViewport.searchTop >= 0 && shortViewport.overflow, JSON.stringify(shortViewport));
+await page.locator('.m-imgbrowser-close').click();
+await page.setViewportSize({ width: 390, height: 844 });
 
 // Run this race in a fresh document. Earlier cases deliberately leave delayed callbacks and closing sheets
 // behind, which is useful for their own guards but not valid setup for the independent dual-tap contract.
@@ -361,9 +480,13 @@ await page.getByRole('button', { name: /Browse Folders/i }).click();
 await drives();
 await picker().getByRole('button', { name: 'Rapid', exact: true }).click();
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-path')?.textContent == 'rapid');
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 2);
 let readsBeforeRapid = await page.evaluate(() => window.__fullReads);
-await picker().locator('.m-imgbrowser-tile').nth(0).click();
-await picker().locator('.m-imgbrowser-tile').nth(1).click();
+await picker().evaluate(node => {
+    let tiles = node.querySelectorAll('.m-imgbrowser-tile');
+    tiles[0].click();
+    tiles[1].click();
+});
 await page.waitForFunction(() => mState.promptImages.length == 1);
 let rapid = await page.evaluate(() => ({ reads: window.__fullReads, images: mState.promptImages.length }));
 check('rapid double selection allows one full read and one attachment', rapid.reads == readsBeforeRapid + 1 && rapid.images == 1, JSON.stringify(rapid));
@@ -435,5 +558,16 @@ if (process.env.SWARM_SCREENSHOT == '1') {
 }
 await browser.close();
 let failed = results.filter(result => !result.pass);
+if (process.env.SWARM_SCREENSHOT == '1') {
+    let report = '# UI Stability Audit — /simple Image Browser\n'
+        + 'Scope: image picker | Viewports: 360, 768, 1024, 1440 | Runtime: ran\n\n'
+        + '## Verdict\n' + (failed.length ? 'FIX FIRST' : 'SHIP') + '\n\n'
+        + '## Findings\n| # | Check | Status | Severity | Evidence | Fix |\n|---|---|---|---|---|---|\n';
+    for (let i = 0; i < results.length; i++) {
+        let result = results[i];
+        report += `| ${i + 1} | ${result.name} | ${result.pass ? 'PASS' : 'FAIL'} | ${result.pass ? 'N/A' : 'SHIFT'} | Browser harness; browser-360.png | ${result.pass ? 'None' : 'Resolve failed check'} |\n`;
+    }
+    writeFileSync(`${REPO}/.local/simple-image-browser/ui-stability.md`, report);
+}
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

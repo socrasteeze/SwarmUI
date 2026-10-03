@@ -6,6 +6,9 @@ class MImageBrowser {
 
     static StorageKey = 'm_client_img_browser_roots';
 
+    /** Four columns with twelve rows per page. */
+    static PageSize = 48;
+
     /** Default roots under the user OutputPath. Paths are ListImages-relative (empty = output root). */
     static DefaultRoots = [
         { 'label': 'Output', 'path': '' },
@@ -156,6 +159,14 @@ class MImageBrowser {
             phoneBtn.addEventListener('click', () => phoneInput.click());
         }
         content.appendChild(navigation);
+        let searchInput = document.createElement('input');
+        searchInput.type = 'search';
+        searchInput.className = 'm-imgbrowser-search';
+        searchInput.placeholder = 'Search filenames';
+        searchInput.setAttribute('aria-label', 'Search Filenames');
+        searchInput.autocomplete = 'off';
+        searchInput.spellcheck = false;
+        content.appendChild(searchInput);
         let body = mUI.el('div', 'm-imgbrowser-body');
         let foldersPanel = mUI.el('div', 'm-imgbrowser-folders-panel');
         foldersPanel.appendChild(mUI.el('div', 'm-imgbrowser-panel-title', 'Folders'));
@@ -169,11 +180,29 @@ class MImageBrowser {
         body.appendChild(imagesPanel);
         content.appendChild(body);
         let footer = mUI.el('div', 'm-imgbrowser-footer');
+        let footerInfo = mUI.el('div', 'm-imgbrowser-footer-info');
         let status = mUI.el('div', 'm-imgbrowser-status', 'Loading...');
-        footer.appendChild(status);
+        status.setAttribute('role', 'status');
+        footerInfo.appendChild(status);
         if (phoneBtn) {
-            footer.appendChild(phoneBtn);
+            footerInfo.appendChild(phoneBtn);
         }
+        footer.appendChild(footerInfo);
+        let pager = mUI.el('div', 'm-imgbrowser-pager');
+        pager.setAttribute('aria-label', 'Image Pages');
+        let previousBtn = mUI.el('button', 'm-imgbrowser-tool m-imgbrowser-prev', 'Prev');
+        previousBtn.type = 'button';
+        previousBtn.setAttribute('aria-label', 'Previous Page');
+        previousBtn.disabled = true;
+        let pageLabel = mUI.el('span', 'm-imgbrowser-page', '1 / 1');
+        let nextBtn = mUI.el('button', 'm-imgbrowser-tool m-imgbrowser-next', 'Next');
+        nextBtn.type = 'button';
+        nextBtn.setAttribute('aria-label', 'Next Page');
+        nextBtn.disabled = true;
+        pager.appendChild(previousBtn);
+        pager.appendChild(pageLabel);
+        pager.appendChild(nextBtn);
+        footer.appendChild(pager);
         content.appendChild(footer);
         let close = null;
         let closed = false;
@@ -182,6 +211,9 @@ class MImageBrowser {
         let selectionInFlight = false;
         let previewQueue = [];
         let previewsInFlight = 0;
+        let pageOffset = 0;
+        let nextOffset = null;
+        let searchTimer = null;
         let observer = typeof IntersectionObserver == 'undefined' ? null : new IntersectionObserver(entries => {
             for (let entry of entries) {
                 if (entry.isIntersecting) {
@@ -276,13 +308,12 @@ class MImageBrowser {
             }
             refresh();
         });
-        let renderFolderRows = (folders, append) => {
-            if (!append) {
-                foldersList.innerHTML = '';
-            }
+        let renderFolderRows = (folders) => {
+            foldersList.innerHTML = '';
             for (let folder of folders) {
                 let row = mUI.el('button', 'm-imgbrowser-folder-row');
                 row.type = 'button';
+                row.title = folder.name || folder;
                 row.appendChild(mUI.el('span', 'm-imgbrowser-folder-name', folder.name || folder));
                 let chevron = mUI.el('span', 'm-imgbrowser-folder-chevron', '\u203A');
                 chevron.setAttribute('aria-hidden', 'true');
@@ -303,12 +334,11 @@ class MImageBrowser {
             folders = [...folders]
                 .filter(f => !this.isHiddenFolder(f))
                 .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-            renderFolderRows(folders, false);
+            renderFolderRows(folders);
         };
-        let renderFiles = (files) => {
+        let renderFiles = (files, version) => {
             grid.innerHTML = '';
             let prefix = this.path == '' ? '' : `${this.path}/`;
-            let shown = 0;
             for (let f of files) {
                 let fullsrc = `${prefix}${f.src}`;
                 let type = typeof getMediaType == 'function' ? getMediaType(fullsrc) : 'image';
@@ -327,21 +357,14 @@ class MImageBrowser {
                 let name = mUI.el('div', 'm-imgbrowser-tile-name', f.src);
                 tile.appendChild(name);
                 tile.addEventListener('click', () => {
+                    if (closed || version != requestVersion) {
+                        return;
+                    }
                     this.dismissKeyboard();
                     pick({ 'kind': 'path', 'value': fullsrc });
                 });
                 grid.appendChild(tile);
-                shown++;
             }
-            if (shown == 0) {
-                status.textContent = files.length == 0 ? 'No files in this folder.' : 'No matching images in this folder.';
-            }
-            else {
-                status.textContent = `${shown} image${shown == 1 ? '' : 's'}`;
-            }
-        };
-        let renderMachineFolders = (folders, parent, append) => {
-            renderFolderRows(folders || [], append);
         };
         let loadPreviews = () => {
             while (previewsInFlight < 4 && previewQueue.length > 0) {
@@ -413,27 +436,60 @@ class MImageBrowser {
             }
             loadPreviews();
         };
-        let refresh = (offset = 0, append = false) => {
-            let version = append ? requestVersion : ++requestVersion;
-            if (!append) {
-                selectionInFlight = false;
-                selectionVersion++;
-                previewQueue = [];
-                if (observer) {
-                    observer.disconnect();
-                }
-                grid.innerHTML = '';
-                foldersList.innerHTML = '';
-                parentPath = null;
-                upBtn.disabled = true;
+        let refresh = (offset = 0) => {
+            clearTimeout(searchTimer);
+            searchTimer = null;
+            let version = ++requestVersion;
+            pageOffset = offset;
+            nextOffset = null;
+            previousBtn.disabled = true;
+            nextBtn.disabled = true;
+            selectionInFlight = false;
+            selectionVersion++;
+            previewQueue = [];
+            if (observer) {
+                observer.disconnect();
             }
+            grid.innerHTML = '';
+            grid.scrollTop = 0;
+            foldersList.innerHTML = '';
+            parentPath = null;
+            upBtn.disabled = true;
+            status.textContent = 'Loading...';
+            let search = searchInput.value.trim();
+            let finishPage = data => {
+                let total = Number(data.total) || 0;
+                let lastOffset = Math.max(0, Math.ceil(total / MImageBrowser.PageSize) - 1) * MImageBrowser.PageSize;
+                if (offset > lastOffset) {
+                    refresh(lastOffset);
+                    return;
+                }
+                nextOffset = data.next_offset ?? null;
+                previousBtn.disabled = offset == 0;
+                nextBtn.disabled = nextOffset == null;
+                let page = Math.floor(offset / MImageBrowser.PageSize) + 1;
+                let pages = Math.max(1, Math.ceil(total / MImageBrowser.PageSize));
+                pageLabel.textContent = `${page} / ${pages}`;
+                pageLabel.setAttribute('aria-label', `Page ${page} of ${pages}`);
+                let shown = grid.querySelectorAll('.m-imgbrowser-tile').length;
+                status.textContent = shown ? `${offset + 1}\u2013${offset + shown} of ${total}`
+                    : (search ? 'No matching images.' : 'No images in this folder.');
+            };
+            let failPage = err => {
+                if (closed || !content.isConnected || version != requestVersion) {
+                    return;
+                }
+                previousBtn.disabled = offset == 0;
+                status.textContent = `Could not list folder: ${err}`;
+            };
             if (this.source == 'machine') {
-                this.dismissKeyboard();
                 machinePathInput.value = this.machinePath;
                 pathLabel.textContent = this.machinePath || 'Drives';
-                status.textContent = 'Loading...';
                 let requestedPath = this.machinePath;
-                genericRequest('ListSimpleImageFolder', { 'path': this.machinePath, 'offset': offset, 'limit': 100 }, data => {
+                genericRequest('ListSimpleImageFolder', {
+                    'path': this.machinePath, 'offset': offset, 'limit': MImageBrowser.PageSize,
+                    'search': search, 'image_page': true
+                }, data => {
                     if (closed || !content.isConnected || version != requestVersion) {
                         return;
                     }
@@ -443,61 +499,54 @@ class MImageBrowser {
                     }
                     pathLabel.textContent = this.machinePath || 'Drives';
                     parentPath = data.parent;
-                    upBtn.disabled = parentPath === null || parentPath === undefined;
-                    renderMachineFolders(data.folders, data.parent, append);
+                    upBtn.disabled = parentPath == null;
+                    renderFolderRows(data.folders || []);
                     appendMachineFiles(data.files, version);
-                    let oldMore = grid.querySelector('.m-imgbrowser-more');
-                    if (oldMore) {
-                        oldMore.remove();
-                    }
-                    if (data.next_offset !== null && data.next_offset !== undefined) {
-                        let more = mUI.el('button', 'm-imgbrowser-more', 'Load More');
-                        more.type = 'button';
-                        more.addEventListener('click', () => {
-                            more.disabled = true;
-                            refresh(data.next_offset, true);
-                        });
-                        grid.appendChild(more);
-                    }
-                    let count = grid.querySelectorAll('.m-imgbrowser-tile').length;
-                    status.textContent = count ? `${count} image${count == 1 ? '' : 's'}` : 'No images in this folder.';
-                }, 0, err => {
-                    if (!closed && content.isConnected && version == requestVersion) {
-                        if (!append) {
-                            grid.innerHTML = '';
-                            foldersList.innerHTML = '';
-                            parentPath = null;
-                            upBtn.disabled = true;
-                        }
-                        let more = grid.querySelector('.m-imgbrowser-more');
-                        if (more) {
-                            more.remove();
-                        }
-                        status.textContent = `Could not list folder: ${err}`;
-                    }
-                });
+                    finishPage(data);
+                }, 0, failPage);
                 return;
             }
             pathLabel.textContent = this.path || '(output root)';
             parentPath = this.path == '' ? null : true;
-            upBtn.disabled = parentPath === null;
+            upBtn.disabled = parentPath == null;
             renderRoots();
-            status.textContent = 'Loading...';
-            grid.innerHTML = '';
-            genericRequest('ListImages', { 'path': this.path, 'depth': 1, 'sortBy': 'Date', 'sortReverse': true }, data => {
+            genericRequest('ListImages', {
+                'path': this.path, 'depth': 1, 'sortBy': 'Date', 'sortReverse': true,
+                'offset': offset, 'limit': MImageBrowser.PageSize, 'search': search, 'media_types': mediaTypes
+            }, data => {
                 if (closed || !content.isConnected || version != requestVersion) {
                     return;
                 }
                 renderFolders(data.folders || []);
-                renderFiles(data.files || []);
-            }, 0, err => {
-                if (closed || !content.isConnected || version != requestVersion) {
-                    return;
-                }
-                status.textContent = `Could not list folder: ${err}`;
-                mUI.warn(`Could not list folder: ${err}`);
-            });
+                renderFiles(data.files || [], version);
+                finishPage(data);
+            }, 0, failPage);
         };
+        previousBtn.addEventListener('click', () => {
+            this.dismissKeyboard();
+            refresh(Math.max(0, pageOffset - MImageBrowser.PageSize));
+        });
+        nextBtn.addEventListener('click', () => {
+            if (nextOffset != null) {
+                this.dismissKeyboard();
+                refresh(nextOffset);
+            }
+        });
+        searchInput.addEventListener('input', () => {
+            // Invalidate stale page and selection responses before the debounce expires.
+            requestVersion++;
+            previousBtn.disabled = true;
+            nextBtn.disabled = true;
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => refresh(), 250);
+        });
+        searchInput.addEventListener('keydown', e => {
+            if (e.key == 'Enter') {
+                e.preventDefault();
+                this.dismissKeyboard();
+                refresh();
+            }
+        });
         outputBtn.addEventListener('click', () => {
             setSource('output');
             refresh();
@@ -546,6 +595,7 @@ class MImageBrowser {
         grid.addEventListener('scroll', dismissKb, { passive: true });
         grid.addEventListener('touchmove', dismissKb, { passive: true });
         close = mUI.openSheet(content, () => {
+            clearTimeout(searchTimer);
             closed = true;
             requestVersion++;
             selectionInFlight = false;

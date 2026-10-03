@@ -1044,13 +1044,21 @@ public static class T2IAPI
         [API.APIParameter("Maximum depth (number of recursive folders) to search.")] int depth,
         [API.APIParameter("What to sort the list by - `Name` or `Date`.")] string sortBy = "Name",
         [API.APIParameter("If true, the sorting should be done in reverse.")] bool sortReverse = false,
-        [API.APIParameter("Optional case-insensitive text filter. When set, scans up to MaxImagesScannedInHistory and returns matching files.")] string filter = null)
+        [API.APIParameter("Optional case-insensitive text filter. When set, scans up to MaxImagesScannedInHistory and returns matching files.")] string filter = null,
+        [API.APIParameter("Zero-based direct-file page offset. Requires limit greater than zero.")] int offset = 0,
+        [API.APIParameter("Maximum direct files to return. Zero preserves the legacy recursive response; values from 1 to 250 enable direct-folder paging.")] int limit = 0,
+        [API.APIParameter("Optional case-insensitive direct filename substring filter used with paging.")] string search = "",
+        [API.APIParameter("Optional media types to include with paging: image, video, and/or audio.")] string[] media_types = null)
     {
         if (!Enum.TryParse(sortBy, true, out ImageHistorySortMode sortMode))
         {
             return new JObject() { ["error"] = $"Invalid sort mode '{sortBy}'." };
         }
         string root = Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, session.User.OutputDirectory);
+        if (limit != 0)
+        {
+            return SimpleImageBrowserAPI.ListOutputImagePage(session, path, root, offset, limit, sortBy, sortReverse, search, media_types);
+        }
         return GetListAPIInternal(session, path, root, HistoryExtensions, f => true, depth, sortMode, sortReverse, filter);
     }
 
