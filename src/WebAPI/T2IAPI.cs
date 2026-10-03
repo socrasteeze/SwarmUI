@@ -4,6 +4,7 @@ using Newtonsoft.Json.Linq;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
 using SwarmUI.Accounts;
+using SwarmUI.Builtin_MobileEnhancementsExtension;
 using SwarmUI.Core;
 using SwarmUI.Media;
 using SwarmUI.Text2Image;
@@ -950,7 +951,7 @@ public static class T2IAPI
             Logs.Verbose($"Listed {files.Count} images in {(timeEnd - timeStart) / 1000.0:0.###} seconds.");
             return new JObject()
             {
-                ["folders"] = JToken.FromObject(dirs.Union(finalDirs.Keys).ToList()),
+                ["folders"] = JToken.FromObject(dirs.Union(finalDirs.Keys).Where(folder => ImageHistoryFolders.ContainsMedia(UserImageHistoryHelper.GetRealPathFor(session.User, $"{path}/{folder}", root: root), extensions)).ToList()),
                 ["files"] = JToken.FromObject(files.Take(maxInHistory).Select(f => new JObject() { ["src"] = f.Name, ["metadata"] = f.Metadata.Metadata }).ToList())
             };
         }
