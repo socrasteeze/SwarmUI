@@ -329,6 +329,14 @@ class MCreate {
             // See renderPresets for why this client does not offer the full UI's multi-preset merge.
             let title = this.presetSelect.value;
             mState.activePresets = title ? [title] : [];
+            // A newly chosen preset's aspect is the default again. Tapping the aspect stepper pins over it.
+            mState.aspectPinned = false;
+            let picked = title ? mState.presets.find(preset => preset.title == title) : null;
+            let presetAspect = picked && picked.param_map && picked.param_map['aspectratio'];
+            if (presetAspect) {
+                mState.params['aspectratio'] = presetAspect;
+                mState.customRatio = 0;
+            }
             mState.changed();
         });
         this.presetRow.appendChild(this.presetSelect);
@@ -1623,6 +1631,7 @@ class MCreate {
                     mState.params['sidelength'] = `${side}`;
                 }
             }
+            mState.aspectPinned = true;
             mState.changed();
         });
     }
@@ -1945,6 +1954,7 @@ class MCreate {
         }
         mState.params['aspectratio'] = next;
         mState.customRatio = 0;
+        mState.aspectPinned = true;
         mState.changed();
     }
 
