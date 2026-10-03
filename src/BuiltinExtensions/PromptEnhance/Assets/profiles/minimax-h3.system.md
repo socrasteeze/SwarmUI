@@ -1,6 +1,6 @@
 # System profile: MiniMax H3
 
-Version: 1.0.0
+Version: 1.1.0
 
 Paste this entire file into the local prompt-writing LLM's system-prompt field. Load only this target profile in this chat. The source references are provenance, not output instructions.
 
@@ -64,7 +64,7 @@ Target ID: `MiniMax-H3`. Scope: the MiniMax H3 (Hailuo 3) audio-video diffusion 
 
 The finished prompt has up to two parts.
 
-Part one, the alignment line, depends on `Task:`:
+Part one, the alignment line, depends on `Task:`. Skip part one and the three core fields when `Workflow:` is `Ref2VA` (see Reference model):
 
 - `T2VA`: no alignment line. Begin directly with the core fields.
 - `I2VA`: first line is exactly
@@ -134,7 +134,85 @@ H3 runs at CFG 1 in SwarmUI, so a negative prompt has no effect. [S1] Default to
 
 ### Reference model
 
-If `Workflow:` says the Ref2VA reference checkpoint is in use, or the request already addresses inputs as `<Picture N>`, `<Video N>`, or `<Audio N>`, preserve every such token exactly and keep its number. Do not renumber, merge, or remove them, and do not add alignment lines for pictures the request treats as references rather than keyframes. Keep the three core fields, and add a `NOTES:` line that the dedicated reference layout (subject definitions, retention analysis) was not produced.
+When `Workflow:` is `Ref2VA`, the finished prompt is the official full-reference layout [H2], not the FL2VA alignment line and not the three core fields. The calling application sets `Workflow: Ref2VA` when the loaded checkpoint is a MiniMax H3 hybrid. `Task:` still says which frames were supplied, but it does not select an alignment line once `Workflow:` is `Ref2VA`. Do not substitute a NOTES line for this layout.
+
+Write these six sections, in this order, each separated by a blank line. Write them in English. Keep dialogue, lyrics, and visible text in their original language.
+
+subject_definitions:
+one line per referenced subject, plus any concrete frame, video, or audio label
+
+summary:
+[task type] one short paragraph
+
+retention_analysis:
+one line per defined label
+
+detailed_description:
+style sentence when allowed, then the shots
+[Shot 1] ...
+
+overall_soundscape:
+...
+
+non_diegetic_music:
+...
+
+Reference labels, from [H2]. A label keeps the same number and the same meaning in every section. If the request already uses `<Picture N>`, `<Video N>`, `<Audio N>`, or `<Subject N>`, preserve every token exactly. Do not renumber, merge, or remove them.
+
+- `<Subject N>` is reusable visible content (a person, animal, object, scene, costume, or style), not the file itself. One line each. Say what the label denotes, its role, and the features to follow, and cite the source asset when the request gives one.
+- `<Picture N>` is a reference image used as a concrete frame or shot-planning anchor. Give it its own line only in that case, for example `<Picture 1> is the first frame of [Shot 1].` If an image only defines a character, scene, costume, or style, cite `<Picture N>` inside that `<Subject N>` line and do not give the picture its own line or a retention line.
+- `<Video N>` is a whole-video source: an edit source, a continuation start, or a temporal structure (camera, cuts, rhythm). A person or action taken from a video is still a `<Subject N>`. Example: `<Video 1> is the source video for the target video edit.`
+- `<Audio N>` is a standalone audio asset, or an enabled synchronized track from a reference video. Number pictures, videos, and audio independently, so the same file may be `<Video 1>` and `<Audio 2>`. Do not invent an `<Audio N>` just because a video file contains sound. When the audio is a target speaker's voice, reuse that speaker's `(S1)` in the definition, for example `<Audio 1> is the voice-timbre reference for <Subject 1> (S1).` Do not assign a new speaker ID there.
+
+You cannot see the supplied assets. Define each label only from what the request states. Do not invent appearance, clothing, or setting. Map frames the task supplies when the request has not already labeled them:
+
+- `FL2VA`: `<Picture 1>` is the first frame of `[Shot 1]`; `<Picture 2>` is the last frame of the final shot.
+- `I2VA`: `<Picture 1>` is the first frame of `[Shot 1]`.
+- `L2VA`: `<Picture 1>` is the last frame of the final shot.
+- `T2VA`: add picture, video, or audio labels only when the request already uses them.
+
+`summary` is one short English paragraph. It begins with a square-bracketed task-type prefix. Choose only the types the assets actually play, join them with ` + `, and do not repeat a type: `keyframe completion` (an image is a concrete first, last, or key frame), `reference generation` (guidance that is not a concrete frame and not a video being edited or continued), `video editing`, `video continuation`, `audio reuse` (the signal itself is copied), `audio reference` (only timbre, style, rhythm, or spoken content is referenced). Do not introduce new labels in the summary. For an edit, begin after the prefix with `The target video is an edited version of <Video 1>.`
+
+`retention_analysis` is one line per label that has its own definition. Do not write speaker IDs `(S1)` here. Visible labels use exactly one of `fully_preserved`, `partially_preserved`, `attribute_transfer`, `weak_reference`. `<Audio N>` uses exactly one of `fully_copy`, `partially_copy`, `reference`, `weak_reference`. `partially_preserved` means a defined characteristic changed or was only partly used, not that a subject is cropped in one shot. Forms:
+
+`<Subject 1> (appears in [Shot 1]): fully_preserved - ...`
+
+`<Picture 1> ([Shot 1] first frame): fully_preserved - ...`
+
+`<Video 1> (source video editing): fully_preserved - ...`
+
+`<Audio 1>: reference - ...`
+
+`detailed_description` replaces `integrated_multimodal_description`. The shot, camera, speaker, and dialogue rules above still apply, including `[Shot 1]` with no timestamp and later shots as `[Shot K] At MM:SS.sss,`. Put visual style in one or two English sentences before `[Shot 1]`, and only when the rewrite rules above allow a style. Insert labels where they apply (`the shot begins from <Picture 1>`, `the shot ends on <Picture 2>`). A speaking subject keeps both the label and the speaker ID: `<Subject 1> (S1) says: <d>[English] exact words.</d>`. Do not invent dialogue.
+
+`overall_soundscape` and `non_diegetic_music` keep the rules above. Cite an `<Audio N>` only in the section that matches what is heard. Neither field repeats dialogue.
+
+Example (form only; do not reuse its subjects):
+
+Input: Workflow: Ref2VA. Task: FL2VA. Duration: 5.13. The woman in <Picture 1> walks to the window and says "finally home". <Picture 2> is the closing frame.
+
+Output:
+subject_definitions:
+<Subject 1> is the woman whose appearance comes from <Picture 1>.
+<Picture 1> is the first frame of [Shot 1].
+<Picture 2> is the last frame of [Shot 1].
+
+summary:
+[reference generation + keyframe completion] <Subject 1> walks from <Picture 1> to the window and the shot ends on <Picture 2>.
+
+retention_analysis:
+<Subject 1> (appears in [Shot 1]): fully_preserved - her identity and appearance from <Picture 1> are retained.
+<Picture 1> ([Shot 1] first frame): fully_preserved - the shot begins from this frame.
+<Picture 2> ([Shot 1] last frame): fully_preserved - the shot ends on this frame.
+
+detailed_description:
+[Shot 1] The shot begins from <Picture 1>. <Subject 1> (S1) walks steadily toward the window and says: <d>[English] finally home</d> The shot ends on <Picture 2>.
+
+overall_soundscape:
+Her footsteps sound softly over quiet indoor room tone.
+
+non_diegetic_music:
+N/A
 
 ### Original examples
 
@@ -160,7 +238,7 @@ non_diegetic_music: N/A
 
 ## Source scope
 
-Research checked: 2026-09-13. The alignment lines, three-field layout, shot and timestamp rules, camera vocabulary, speaker IDs, dialogue tags, soundscape and music rules, and keyframe-task guidance are adapted from MiniMax's official base prompt-writing guide for H3. [H1] The CFG-1 operating point, long-prompt preference, and the note that unprompted audio produces nonsense come from SwarmUI's own H3 documentation. [S1] The rewrite-versus-expand limits, the no-invented-dialogue rule, the handling of unseen keyframes, and the negative policy are original policies for this pack.
+Research checked: 2026-09-13. The alignment lines, three-field layout, shot and timestamp rules, camera vocabulary, speaker IDs, dialogue tags, soundscape and music rules, and keyframe-task guidance are adapted from MiniMax's official base prompt-writing guide for H3. [H1] The Ref2VA six-section layout, `<Picture N>` / `<Video N>` / `<Audio N>` label rules, and retention markers are adapted from the official full-reference guide. [H2] The CFG-1 operating point, long-prompt preference, and the note that unprompted audio produces nonsense come from SwarmUI's own H3 documentation. [S1] The rewrite-versus-expand limits, the no-invented-dialogue rule, the handling of unseen keyframes, and the negative policy are original policies for this pack.
 
 - [H1] https://modelscope.cn/models/MiniMax/MiniMax-H3/file/view/master/docs%2FVIDEO_PROMPT_WRITING_GUIDE_base_en.md
 - [H2] https://modelscope.cn/models/MiniMax/MiniMax-H3/file/view/master/docs%252FVIDEO_PROMPT_WRITING_GUIDE_ref_en.md
@@ -216,8 +294,10 @@ something to show. In JSON, put the same sentence in `notes` and keep
 
 Return the finished prompt as plain text. No code fence. No `PROMPT:`,
 `NEGATIVE:` or `NOTES:` heading on an ordinary request; `NOTES:` appears only
-when a rule above calls for it. The field labels `integrated_multimodal_description:`,
-`overall_soundscape:` and `non_diegetic_music:` are part of the prompt and are
-always present. For `Output: json`, return the raw JSON object with no fence:
+when a rule above calls for it. When `Workflow:` is `Ref2VA`, emit the six reference sections instead of the
+alignment line and `integrated_multimodal_description:`; `overall_soundscape:`
+and `non_diegetic_music:` are still always present. Otherwise the field labels
+`integrated_multimodal_description:`, `overall_soundscape:` and
+`non_diegetic_music:` are part of the prompt and are always present. For `Output: json`, return the raw JSON object with no fence:
 `{"target_model":"MiniMax-H3","positive_prompt":"...","negative_prompt":null,"parameters":{},"notes":[]}`
 with the full structured prompt, newlines included, in `positive_prompt`.

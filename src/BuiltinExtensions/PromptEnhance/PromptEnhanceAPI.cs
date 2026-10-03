@@ -135,7 +135,12 @@ public static class PromptEnhanceAPI
             string shielded = PromptEnhanceClient.Shield(prompt, out List<string> extracted);
             if (PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID))
             {
-                shielded = $"{PromptEnhanceClient.BuildVideoHeader(videoTask, videoDuration)}{shielded}";
+                // Hybrid H3 filenames require the Ref2VA layout. The task itself is unchanged, so a
+                // non-hybrid FL2VA checkpoint keeps the FL2VA rewrite.
+                string workflow = profile.ID.Equals("minimax-h3", StringComparison.OrdinalIgnoreCase)
+                    ? PromptEnhanceClient.WorkflowForModel(model)
+                    : null;
+                shielded = $"{PromptEnhanceClient.BuildVideoHeader(videoTask, videoDuration, workflow)}{shielded}";
             }
             // Strength is applied after Shield, on the already-shielded prompt, so the directive text can never
             // interact with shielding - Unshield below re-appends the extracted tokens exactly as it always did.
