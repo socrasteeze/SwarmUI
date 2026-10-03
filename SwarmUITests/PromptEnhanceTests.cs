@@ -200,6 +200,25 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(resolved?.ID, Is.EqualTo("minimax-h3"));
         Assert.That(reason, Is.Null);
         Assert.That(PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(resolved.ID), Is.True);
+        Assert.That(PromptEnhanceClient.WorkflowForModel(model.Name), Is.Null);
+    }
+
+    /// <summary>A hybrid H3 filename (case-insensitive, including TURBO-hybrid) gets the Ref2VA workflow
+    /// tag. A plain FL2VA checkpoint does not, so its header stays the FL2VA rewrite.</summary>
+    [Test]
+    public void HybridCheckpoint_SetsRef2VAWorkflow()
+    {
+        Assert.That(PromptEnhanceClient.WorkflowForModel("MiniMaxH3/10Eros_Max_h3_TURBO-hybrid.safetensors"), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForModel(@"E:\models\10Eros_Max_h3_TURBO-HYBRID_fp8.safetensors"), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForModel("minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForModel("minimax_h3_fl2va_pruned_int8_convrot.safetensors"), Is.Null);
+        Assert.That(PromptEnhanceClient.WorkflowForModel(null), Is.Null);
+        Assert.That(
+            PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForModel("10Eros_Max_h3_TURBO-hybrid.safetensors")),
+            Is.EqualTo("Task: FL2VA\nDuration: 5.13\nWorkflow: Ref2VA\n\n"));
+        Assert.That(
+            PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForModel("minimax_h3_fl2va_pruned_int8_convrot.safetensors")),
+            Is.EqualTo("Task: FL2VA\nDuration: 5.13\n\n"));
     }
 
     /// <summary>A model that matches no filename override, class, or compat class resolves to null with a

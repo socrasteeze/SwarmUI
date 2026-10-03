@@ -364,16 +364,36 @@ public static class PromptEnhanceClient
     /// <summary>Video tasks a video profile's <c>Task:</c> header accepts (see <c>minimax-h3.system.md</c>).</summary>
     private static readonly HashSet<string> VideoTasks = ["T2VA", "I2VA", "FL2VA", "L2VA"];
 
+    /// <summary>True when <paramref name="modelName"/> is a MiniMax H3 hybrid checkpoint.
+    /// Match is a case-insensitive substring <c>hybrid</c>, which covers <c>TURBO-hybrid</c> and names
+    /// such as <c>10Eros_Max_h3_TURBO-hybrid</c>. Non-hybrid FL2VA checkpoints return false.</summary>
+    public static bool IsHybridCheckpoint(string modelName)
+    {
+        return (modelName ?? "").Contains("hybrid", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Writer workflow tag for a hybrid H3 checkpoint (<c>Ref2VA</c>), or null so a non-hybrid
+    /// checkpoint keeps the task rewrite (FL2VA and the rest).</summary>
+    public static string WorkflowForModel(string modelName)
+    {
+        return IsHybridCheckpoint(modelName) ? "Ref2VA" : null;
+    }
+
     /// <summary>Builds the <c>Task:</c> / <c>Duration:</c> header prepended to a video profile's shielded prompt, from
     /// the frontend's current video settings. An unrecognized task falls back to <c>T2VA</c>; a non-positive duration
-    /// is left out so the profile applies its own default. Always ends with a blank line.</summary>
-    public static string BuildVideoHeader(string task, double durationSeconds)
+    /// is left out so the profile applies its own default. A non-empty <paramref name="workflow"/> adds
+    /// <c>Workflow:</c> (hybrid H3 checkpoints pass <c>Ref2VA</c>). Always ends with a blank line.</summary>
+    public static string BuildVideoHeader(string task, double durationSeconds, string workflow = null)
     {
         string normalized = (task ?? "").Trim().ToUpperInvariant();
         string header = $"Task: {(VideoTasks.Contains(normalized) ? normalized : "T2VA")}\n";
         if (durationSeconds > 0 && double.IsFinite(durationSeconds))
         {
             header += $"Duration: {durationSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}\n";
+        }
+        if (!string.IsNullOrWhiteSpace(workflow))
+        {
+            header += $"Workflow: {workflow.Trim()}\n";
         }
         return $"{header}\n";
     }
