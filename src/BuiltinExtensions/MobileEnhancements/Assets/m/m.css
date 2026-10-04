@@ -3088,3 +3088,20 @@ html:has(.m-body) {
     border: 1px solid var(--border-color);
     font-weight: 500;
 }
+/* Vertical scrollers never scroll sideways. overflow-y: auto alone computes overflow-x to auto, so one
+   child even 1px too wide (iOS sizes selects and long labels differently) lets the whole sheet or list be
+   dragged sideways - the same fix .m-panel carries. Strips that are meant to scroll horizontally
+   (.m-image-strip, .m-ac-strip, .m-viewer-actions) are separate elements and are not listed here. */
+.m-header-error-detail,
+.m-preview-grid,
+.m-model-results,
+.m-coach-sheet,
+.m-enhance-sheet,
+.m-sheet,
+.m-grid-cards,
+.m-grid-options,
+.m-preset-results,
+.m-imgbrowser-folders,
+.m-imgbrowser-grid {
+    overflow-x: hidden;
+}

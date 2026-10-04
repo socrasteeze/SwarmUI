@@ -1,7 +1,8 @@
 /** MobileEnhancements standalone client - server-backed image folder browser for /simple.
  * Output lists Swarm output folders through ListImages and returns relative path entries. Drives, when the
  * user has browse_server_images, lists machine folders through ListSimpleImageFolder and returns image data.
- * Configurable roots only apply to Output. An optional phone picker remains available for device images. */
+ * Favorites hold Output-relative paths, or full host paths (D:\Pictures, \\server\share) that open in Drives.
+ * An optional phone picker remains available for device images. */
 class MImageBrowser {
 
     static StorageKey = 'm_client_img_browser_roots';
@@ -42,6 +43,32 @@ class MImageBrowser {
         return MImageBrowser.HiddenFolderRes.some(re => re.test(n));
     }
 
+    /** True for a full host path (drive letter or UNC share), which opens in Drives rather than Output. */
+    isMachinePath(path) {
+        return /^[A-Za-z]:([\\/]|$)/.test(path) || /^[\\/]{2}[^\\/]/.test(path);
+    }
+
+    /** Normalizes one favorite. Output paths become slash-separated and relative; host paths keep their
+     * own separators and lose only trailing ones (a bare drive keeps its root, so D: becomes D:\). */
+    cleanRoot(r) {
+        let raw = `${r.path || ''}`.trim();
+        let label = `${r.label || ''}`.trim();
+        if (this.isMachinePath(raw)) {
+            let path = raw.replace(/[\\/]+$/, '');
+            if (/^[A-Za-z]:$/.test(path)) {
+                path += '\\';
+            }
+            return { 'label': label || path, 'path': path, 'machine': true };
+        }
+        let path = raw.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+        return { 'label': label || path || 'Root', 'path': path };
+    }
+
+    /** Duplicate-check key: host paths compare case-insensitively and separator-blind, Output paths exactly. */
+    rootKey(r) {
+        return r.machine ? `m:${r.path.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()}` : `o:${r.path}`;
+    }
+
     /** Loads configured roots from localStorage, falling back to DefaultRoots. */
     loadRoots() {
         try {
@@ -49,10 +76,7 @@ class MImageBrowser {
             if (raw) {
                 let parsed = JSON.parse(raw);
                 if (Array.isArray(parsed) && parsed.length > 0) {
-                    return parsed.map(r => ({
-                        'label': `${r.label || r.path || 'Root'}`.trim() || 'Root',
-                        'path': `${r.path || ''}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-                    })).filter(r => !this.isHiddenFolder(r.path || r.label));
+                    return parsed.map(r => this.cleanRoot(r)).filter(r => r.machine || !this.isHiddenFolder(r.path || r.label));
                 }
             }
         }
@@ -96,9 +120,10 @@ class MImageBrowser {
             this.path = opts.startPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
             this.rootPath = this.path;
         }
-        else if (!this.path && roots.length) {
-            this.path = roots[0].path;
-            this.rootPath = roots[0].path;
+        else if (!this.path) {
+            let first = roots.find(r => !r.machine);
+            this.path = first ? first.path : '';
+            this.rootPath = this.path;
         }
         let content = mUI.el('div', 'm-imgbrowser');
         let titleRow = mUI.el('div', 'm-imgbrowser-title-row');
@@ -119,13 +144,15 @@ class MImageBrowser {
             sourceRow.appendChild(drivesBtn);
         }
         content.appendChild(sourceRow);
-        let machineHint = mUI.el('div', 'm-imgbrowser-hint', 'Folders on the SwarmUI host.');
-        content.appendChild(machineHint);
         let favorites = mUI.el('div', 'm-imgbrowser-favorites');
         let favoritesSelect = document.createElement('select');
         favoritesSelect.className = 'm-imgbrowser-favorites-select';
         favoritesSelect.setAttribute('aria-label', 'Favorites');
         favorites.appendChild(favoritesSelect);
+        let saveRootBtn = mUI.el('button', 'm-imgbrowser-tool', 'Save');
+        saveRootBtn.type = 'button';
+        saveRootBtn.setAttribute('aria-label', 'Save Folder to Favorites');
+        favorites.appendChild(saveRootBtn);
         let rootsBtn = mUI.el('button', 'm-imgbrowser-tool', 'Edit');
         rootsBtn.type = 'button';
         favorites.appendChild(rootsBtn);
@@ -265,17 +292,36 @@ class MImageBrowser {
                 phoneInput.value = '';
             });
         }
+        let isCurrentMachine = (root) => root.machine && this.rootKey(root) == this.rootKey({ 'machine': true, 'path': this.machinePath });
         let renderRoots = () => {
             favoritesSelect.innerHTML = '';
-            for (let root of roots) {
+            let machine = this.source == 'machine';
+            let matched = false;
+            for (let i = 0; i < roots.length; i++) {
+                let root = roots[i];
+                if (root.machine && !canBrowseMachine) {
+                    continue;
+                }
                 let option = document.createElement('option');
-                option.value = root.path;
+                option.value = `${i}`;
                 option.textContent = root.label;
-                if (this.rootPath == root.path || (this.path == root.path)) {
+                let isCurrent = machine ? isCurrentMachine(root) : !root.machine && (this.rootPath == root.path || this.path == root.path);
+                if (isCurrent && !matched) {
                     option.selected = true;
+                    matched = true;
                 }
                 favoritesSelect.appendChild(option);
             }
+            if (!matched) {
+                // Browsing somewhere that is not itself a favorite: say so instead of showing a wrong label.
+                let option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'Favorites';
+                option.disabled = true;
+                option.selected = true;
+                favoritesSelect.insertBefore(option, favoritesSelect.firstChild);
+            }
+            saveRootBtn.hidden = !machine || !this.machinePath || roots.some(isCurrentMachine);
         };
         let setSource = (source) => {
             this.source = source;
@@ -285,10 +331,8 @@ class MImageBrowser {
             if (drivesBtn) {
                 drivesBtn.classList.toggle('m-selected', machine);
             }
-            favorites.hidden = machine;
             machinePathInput.hidden = !machine;
             goBtn.hidden = !machine;
-            machineHint.hidden = !machine;
             if (machine) {
                 machinePathInput.value = this.machinePath;
             }
@@ -302,7 +346,7 @@ class MImageBrowser {
             }
             else {
                 this.path = this.path.includes('/') ? this.path.substring(0, this.path.lastIndexOf('/')) : '';
-                let match = roots.filter(r => r.path == this.path || (r.path && this.path.startsWith(`${r.path}/`)))
+                let match = roots.filter(r => !r.machine && (r.path == this.path || (r.path && this.path.startsWith(`${r.path}/`))))
                     .sort((a, b) => b.path.length - a.path.length)[0];
                 this.rootPath = match ? match.path : '';
             }
@@ -485,6 +529,7 @@ class MImageBrowser {
             if (this.source == 'machine') {
                 machinePathInput.value = this.machinePath;
                 pathLabel.textContent = this.machinePath || 'Drives';
+                renderRoots();
                 let requestedPath = this.machinePath;
                 genericRequest('ListSimpleImageFolder', {
                     'path': this.machinePath, 'offset': offset, 'limit': MImageBrowser.PageSize,
@@ -500,6 +545,7 @@ class MImageBrowser {
                     pathLabel.textContent = this.machinePath || 'Drives';
                     parentPath = data.parent;
                     upBtn.disabled = parentPath == null;
+                    renderRoots();
                     renderFolderRows(data.folders || []);
                     appendMachineFiles(data.files, version);
                     finishPage(data);
@@ -574,17 +620,42 @@ class MImageBrowser {
             }
         });
         favoritesSelect.addEventListener('change', () => {
-            this.path = favoritesSelect.value;
-            this.rootPath = this.path;
+            let root = roots[Number(favoritesSelect.value)];
+            if (!root) {
+                return;
+            }
+            if (root.machine) {
+                setSource('machine');
+                this.machinePath = root.path;
+            }
+            else {
+                setSource('output');
+                this.path = root.path;
+                this.rootPath = this.path;
+            }
             refresh();
+        });
+        saveRootBtn.addEventListener('click', () => {
+            if (!this.machinePath) {
+                return;
+            }
+            let name = this.machinePath.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+            let root = this.cleanRoot({ 'label': name, 'path': this.machinePath });
+            if (!roots.some(r => this.rootKey(r) == this.rootKey(root))) {
+                roots = [...roots, root];
+                this.saveRoots(roots);
+            }
+            renderRoots();
+            status.textContent = `Saved ${root.label} to favorites.`;
         });
         rootsBtn.addEventListener('click', () => {
             this.openRootsEditor(roots, (next) => {
                 roots = next;
                 this.saveRoots(roots);
                 // If the current path vanished from the configured set, jump to the first root.
-                if (!roots.some(r => r.path == this.rootPath || r.path == this.path || (r.path && this.path.startsWith(`${r.path}/`)))) {
-                    this.path = roots[0] ? roots[0].path : '';
+                if (this.source != 'machine' && !roots.some(r => !r.machine && (r.path == this.rootPath || r.path == this.path || (r.path && this.path.startsWith(`${r.path}/`))))) {
+                    let first = roots.find(r => !r.machine);
+                    this.path = first ? first.path : '';
                     this.rootPath = this.path;
                 }
                 refresh();
@@ -613,17 +684,17 @@ class MImageBrowser {
     /** Nested sheet for editing the configured folder roots (label + path under OutputPath). */
     openRootsEditor(currentRoots, onSave) {
         this.dismissKeyboard();
-        let roots = currentRoots.map(r => ({ 'label': r.label, 'path': r.path }));
+        let roots = currentRoots.map(r => ({ ...r }));
         let content = mUI.el('div', 'm-imgbrowser-roots-edit');
         let titleRow = mUI.el('div', 'm-imgbrowser-title-row');
-        titleRow.appendChild(mUI.el('div', 'm-sheet-title', 'Output Favorites'));
+        titleRow.appendChild(mUI.el('div', 'm-sheet-title', 'Favorites'));
         let closeBtn = mUI.el('button', 'm-imgbrowser-close', '\u00D7');
         closeBtn.type = 'button';
         closeBtn.setAttribute('aria-label', 'Close');
         titleRow.appendChild(closeBtn);
         content.appendChild(titleRow);
         content.appendChild(mUI.el('div', 'm-imgbrowser-hint',
-            'Use paths relative to Output. Select Drives in the browser for other drives.'));
+            'Use a path inside Output, or a full path like D:\\Pictures for another drive.'));
         let list = mUI.el('div', 'm-imgbrowser-roots-list');
         content.appendChild(list);
         let close = null;
@@ -649,7 +720,7 @@ class MImageBrowser {
                 pathInput.placeholder = 'path (empty = output root)';
                 pathInput.value = roots[i].path;
                 pathInput.addEventListener('input', () => {
-                    roots[i].path = pathInput.value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+                    roots[i].path = pathInput.value;
                 });
                 let remove = mUI.el('button', 'm-imgbrowser-tool m-imgbrowser-root-remove', '\u00D7');
                 remove.addEventListener('click', () => {
@@ -674,9 +745,7 @@ class MImageBrowser {
         addPath.placeholder = 'New path';
         let addBtn = mUI.el('button', 'm-imgbrowser-tool', 'Add');
         addBtn.addEventListener('click', () => {
-            let label = addLabel.value.trim() || addPath.value.trim() || 'Root';
-            let path = addPath.value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-            roots.push({ 'label': label, 'path': path });
+            roots.push(this.cleanRoot({ 'label': addLabel.value, 'path': addPath.value }));
             addLabel.value = '';
             addPath.value = '';
             render();
@@ -699,7 +768,7 @@ class MImageBrowser {
             for (let folder of folders) {
                 let chip = mUI.el('button', 'm-folder-chip', folder);
                 chip.addEventListener('click', () => {
-                    if (!roots.some(r => r.path == folder)) {
+                    if (!roots.some(r => !r.machine && r.path == folder)) {
                         roots.push({ 'label': folder, 'path': folder });
                         render();
                     }
@@ -722,9 +791,9 @@ class MImageBrowser {
         save.type = 'button';
         save.addEventListener('click', () => {
             let cleaned = roots
-                .map(r => ({ 'label': `${r.label || r.path || 'Root'}`.trim() || 'Root', 'path': `${r.path || ''}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '') }))
-                .filter(r => !this.isHiddenFolder(r.path || r.label))
-                .filter((r, idx, arr) => arr.findIndex(x => x.path == r.path) == idx);
+                .map(r => this.cleanRoot(r))
+                .filter(r => r.machine || !this.isHiddenFolder(r.path || r.label))
+                .filter((r, idx, arr) => arr.findIndex(x => this.rootKey(x) == this.rootKey(r)) == idx);
             if (cleaned.length == 0) {
                 cleaned = MImageBrowser.DefaultRoots.map(r => ({ 'label': r.label, 'path': r.path }));
             }

@@ -597,6 +597,46 @@ let dismissedKeyboardInset = await page.evaluate(() => {
 });
 check('keyboard dismissal clears the inset despite a residual bounce offset', dismissedKeyboardInset == '0px', dismissedKeyboardInset);
 
+// Favorites: a full host path saved in the editor opens in Drives; Output paths stay relative.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => localStorage.removeItem('m_client_img_browser_roots'));
+await openBrowser();
+await picker().getByRole('button', { name: 'Edit', exact: true }).click();
+let editor = page.locator('.m-imgbrowser-roots-edit');
+await editor.locator('.m-imgbrowser-add-row .m-imgbrowser-root-label').fill('Shots');
+await editor.locator('.m-imgbrowser-add-row .m-imgbrowser-root-path').fill('E:\\Shots\\');
+await editor.getByRole('button', { name: 'Add', exact: true }).click();
+await editor.locator('.m-imgbrowser-add-row .m-imgbrowser-root-path').fill('/inputs/');
+await editor.getByRole('button', { name: 'Add', exact: true }).click();
+await editor.getByRole('button', { name: 'Save', exact: true }).click();
+let savedRoots = await page.evaluate(() => JSON.parse(localStorage.getItem('m_client_img_browser_roots')));
+check('editor saves a full drive path as a Drives favorite without mangling it',
+    savedRoots.some(r => r.label == 'Shots' && r.path == 'E:\\Shots' && r.machine), JSON.stringify(savedRoots));
+check('editor still normalizes Output favorites and drops duplicates',
+    savedRoots.filter(r => r.path == 'inputs' && !r.machine).length == 1, JSON.stringify(savedRoots));
+let callsBeforeFavorite = await page.evaluate(() => window.__calls.length);
+await picker().locator('.m-imgbrowser-favorites-select').selectOption({ label: 'Shots' });
+await page.waitForFunction(count => window.__calls.slice(count).some(call => call.route == 'ListSimpleImageFolder' && call.args.path == 'E:\\Shots'), callsBeforeFavorite);
+let favoriteState = await page.evaluate(() => ({
+    machine: document.querySelector('.m-imgbrowser').classList.contains('m-imgbrowser-machine'),
+    selected: document.querySelector('.m-imgbrowser-favorites-select').selectedOptions[0]?.textContent,
+    saveHidden: [...document.querySelectorAll('.m-imgbrowser-favorites .m-imgbrowser-tool')].find(b => b.textContent == 'Save').hidden
+}));
+check('picking a drive favorite switches to Drives at that folder', favoriteState.machine && favoriteState.selected == 'Shots' && favoriteState.saveHidden, JSON.stringify(favoriteState));
+await go('E:\\Shots\\Nested');
+await picker().getByRole('button', { name: 'Save Folder to Favorites', exact: true }).click();
+let quickSaved = await page.evaluate(() => ({
+    roots: JSON.parse(localStorage.getItem('m_client_img_browser_roots')),
+    selected: document.querySelector('.m-imgbrowser-favorites-select').selectedOptions[0]?.textContent
+}));
+check('Save adds the current Drives folder to favorites once', quickSaved.roots.filter(r => r.path == 'E:\\Shots\\Nested' && r.machine && r.label == 'Nested').length == 1
+    && quickSaved.selected == 'Nested', JSON.stringify(quickSaved));
+await page.evaluate(() => { window.__permission = false; });
+await openBrowser();
+let noPermissionLabels = await page.evaluate(() => [...document.querySelectorAll('.m-imgbrowser-favorites-select option')].map(o => o.textContent));
+check('drive favorites are hidden without browse permission', !noPermissionLabels.includes('Shots') && noPermissionLabels.includes('Output'), JSON.stringify(noPermissionLabels));
+await page.evaluate(() => { window.__permission = true; localStorage.removeItem('m_client_img_browser_roots'); });
+
 if (process.env.SWARM_SCREENSHOT == '1') {
     mkdirSync(`${REPO}/.local/simple-image-browser`, { recursive: true });
     await page.screenshot({ path: `${REPO}/.local/simple-image-browser/primary.png`, fullPage: false });
