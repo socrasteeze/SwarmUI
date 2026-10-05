@@ -223,6 +223,7 @@ public class User
         {
             return;
         }
+        bool saved = false;
         lock (SessionHandlerSource.DBLock)
         {
             if (!MayCreateSessions)
@@ -236,6 +237,11 @@ public class User
                 Data.Presets.Add(preset.ID);
             }
             Save();
+            saved = true;
+        }
+        if (saved)
+        {
+            PresetOutputRoot.RefreshAfterPresetChange(SessionHandlerSource);
         }
     }
 
@@ -246,6 +252,7 @@ public class User
         {
             return false;
         }
+        bool deleted = false;
         lock (SessionHandlerSource.DBLock)
         {
             string id = $"{UserID}///{name.ToLowerFast()}";
@@ -253,10 +260,14 @@ public class User
             {
                 SessionHandlerSource.T2IPresets.Delete(id);
                 Save();
-                return true;
+                deleted = true;
             }
-            return false;
         }
+        if (deleted)
+        {
+            PresetOutputRoot.RefreshAfterPresetChange(SessionHandlerSource);
+        }
+        return deleted;
     }
 
     /// <summary>The relevant sessions handler backend.</summary>

@@ -458,7 +458,8 @@ public static class BasicAPIFeatures
                     "description": "Preset Description",
                     "param_map": { "key": "value" },
                     "preview_image": "data:image/jpeg;base64,...",
-                    "is_starred": false
+                    "is_starred": false,
+                    "output_root": ""
                 }
             ]
         """)]
@@ -518,7 +519,8 @@ public static class BasicAPIFeatures
         [API.APIParameter("Optional raw text of metadata to inject to the preview image.")] string preview_image_metadata = null,
         [API.APIParameter("If true, edit an existing preset. If false, do not override pre-existing presets of the same name.")] bool is_edit = false,
         [API.APIParameter("If is_edit is set, include the original preset name here.")] string editing = null,
-        [API.APIParameter("Whether the preset is starred.")] bool is_starred = false)
+        [API.APIParameter("Whether the preset is starred.")] bool is_starred = false,
+        [API.APIParameter("Optional full path used as this preset's output root. Blank uses the server output root.")] string output_root = null)
     {
         title = Utilities.StrictFilenameClean(title);
         if (string.IsNullOrWhiteSpace(title))
@@ -549,6 +551,12 @@ public static class BasicAPIFeatures
         {
             preview_image = existingPreset.PreviewImage;
         }
+        string outputRoot = output_root;
+        if (outputRoot is null)
+        {
+            outputRoot = is_edit && existingPreset is not null ? existingPreset.OutputRoot ?? "" : "";
+        }
+        outputRoot = outputRoot.Trim();
         T2IPreset preset = new()
         {
             Author = session.User.UserID,
@@ -556,7 +564,8 @@ public static class BasicAPIFeatures
             Description = description,
             ParamMap = paramData.Properties().Select(p => (p.Name, p.Value.ToString())).PairsToDictionary(),
             PreviewImage = string.IsNullOrWhiteSpace(preview_image) ? "imgs/model_placeholder.jpg" : preview_image,
-            IsStarred = is_starred
+            IsStarred = is_starred,
+            OutputRoot = outputRoot
         };
         Interlocked.Increment(ref ModelsAPI.ModelEditID);
         if (is_edit && existingPreset is not null && editing != title)
@@ -591,7 +600,8 @@ public static class BasicAPIFeatures
             Description = existingPreset.Description,
             ParamMap = new(existingPreset.ParamMap),
             PreviewImage = existingPreset.PreviewImage,
-            IsStarred = existingPreset.IsStarred
+            IsStarred = existingPreset.IsStarred,
+            OutputRoot = existingPreset.OutputRoot ?? ""
         };
         session.User.SavePreset(newPreset);
         return new JObject() { ["success"] = true };

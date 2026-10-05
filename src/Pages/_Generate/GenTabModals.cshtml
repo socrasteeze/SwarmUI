@@ -418,6 +418,7 @@
 @WebUtil.ModalHeader("add_preset_modal", """<span id="new_preset_modal_title">Create New Preset</span>: <input type="text" id="new_preset_name" placeholder="Preset Name" />""")
     <div class="modal-body">
         <textarea class="auto-text auto-text-block translate" id="preset_description" rows="3" placeholder="Preset description text..."></textarea>
+        <input type="text" class="auto-text auto-text-block" id="preset_output_root" placeholder="Output Root (blank uses the server output folder)" autocomplete="off" spellcheck="false" />
         <div id="new_preset_image_block"></div>
         <hr>
         <h5 class="translate">Parameters in the Preset</h5>

@@ -137,6 +137,9 @@ public class T2IParamInput
     /// <summary>A list of any user requested presets not yet applied.</summary>
     public List<T2IPreset> PendingPresets = [];
 
+    /// <summary>History folder name for a preset Output Root, or null when the server output root is used.</summary>
+    public string OutputRootFolder;
+
     /// <summary>Optional action, if present, takes raw backend data, as a pair of data-type and raw binary data.</summary>
     public Action<string, byte[]> ReceiveRawBackendData = null;
 
