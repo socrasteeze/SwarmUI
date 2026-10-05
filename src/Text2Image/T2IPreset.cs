@@ -26,6 +26,9 @@ public class T2IPreset
     /// <summary>Whether this preset is starred by the user.</summary>
     public bool IsStarred { get; set; }
 
+    /// <summary>Optional full path used as this preset's output root. Blank uses the server output root.</summary>
+    public string OutputRoot { get; set; }
+
     /// <summary>Mapping of parameters to values.</summary>
     public Dictionary<string, string> ParamMap { get; set; } = [];
 
@@ -61,6 +64,7 @@ public class T2IPreset
             ["description"] = Description,
             ["preview_image"] = PreviewImage.StartsWith("data:") && !includeImage ? $"/ViewSpecial/Preset/{Title}?editid={ModelsAPI.ModelEditID}" : PreviewImage,
             ["is_starred"] = IsStarred,
+            ["output_root"] = OutputRoot ?? "",
             ["param_map"] = JObject.FromObject(ParamMap)
         };
     }

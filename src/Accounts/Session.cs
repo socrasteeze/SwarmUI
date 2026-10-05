@@ -248,6 +248,7 @@ public class Session : IEquatable<Session>
             return (image.File.AsDataString(), null);
         }
         string rawImagePath = User.BuildImageOutputPath(user_input, batchIndex);
+        rawImagePath = PresetOutputRoot.PrefixHistoryPath(rawImagePath, user_input.OutputRootFolder);
         string imagePath = rawImagePath.Replace("[number]", "1");
         string format = user_input.Get(T2IParamTypes.ImageFormat, User.Settings.FileFormat.ImageFormat);
         string extension;

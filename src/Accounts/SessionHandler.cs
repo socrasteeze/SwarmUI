@@ -313,6 +313,14 @@ public class SessionHandler
             }
             CleanOldSessions();
         });
+        try
+        {
+            PresetOutputRoot.RefreshAfterPresetChange(this);
+        }
+        catch (Exception ex)
+        {
+            Logs.Warning($"Output Root startup refresh failed: {ex.Message}");
+        }
     }
 
     /// <summary>Publishes the current weekly user-database backup, then applies retention only after the copy succeeds.</summary>

@@ -1,8 +1,8 @@
 /** MobileEnhancements standalone client - preset editor.
  *
  * The Create tab could select presets but never change one: every edit meant opening the classic UI on a
- * desktop. This is the missing half - create, rename, retitle, re-describe, star, edit the parameter map,
- * duplicate and delete - reached from More > Presets rather than from the Create tab, because it is a
+ * desktop. This is the missing half - create, rename, retitle, re-describe, star, set an output root,
+ * edit the parameter map, duplicate and delete - reached from More > Presets rather than from the Create tab, because it is a
  * management surface rather than part of the generate flow.
  *
  * Server-side this is entirely the existing routes (AddNewPreset with is_edit, DuplicatePreset,
@@ -166,6 +166,14 @@ class MPresets {
         descInput.placeholder = 'Optional';
         descInput.value = preset ? (preset.description || '') : '';
         content.appendChild(descInput);
+        content.appendChild(mUI.el('div', 'm-preset-label', 'Output Root'));
+        let rootInput = mUI.el('input', 'm-preset-field');
+        rootInput.type = 'text';
+        rootInput.autocomplete = 'off';
+        rootInput.spellcheck = false;
+        rootInput.placeholder = 'Blank uses the server output folder';
+        rootInput.value = preset ? (preset.output_root || '') : '';
+        content.appendChild(rootInput);
         let starred = preset ? !!preset.is_starred : false;
         let starButton = mUI.el('button', 'm-preset-star-toggle');
         let renderStar = () => {
@@ -272,7 +280,8 @@ class MPresets {
                 'description': descInput.value.trim(),
                 'param_map': working,
                 'is_starred': starred,
-                'is_edit': !!preset
+                'is_edit': !!preset,
+                'output_root': rootInput.value.trim()
             };
             if (preset) {
                 payload['editing'] = preset.title;

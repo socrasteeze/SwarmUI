@@ -206,6 +206,7 @@ function clearPresetView() {
     preset_toggle_advanced();
     getRequiredElementById('new_preset_name').value = '';
     getRequiredElementById('preset_description').value = '';
+    getRequiredElementById('preset_output_root').value = '';
     getRequiredElementById('new_preset_modal_error').value = '';
     clearMediaFileInput(presetHelpers.imageElem);
     presetHelpers.enableImageElem.checked = false;
@@ -317,11 +318,12 @@ function save_new_preset() {
             data[type.id] = elem.value;
         }
     }
-    if (Object.keys(data).length == 0) {
+    let outputRoot = getRequiredElementById('preset_output_root').value.trim();
+    if (Object.keys(data).length == 0 && outputRoot == '') {
         errorOut.innerText = "Must enable at least one parameter.";
         return;
     }
-    let toSend = { title: name, description: description, param_map: data };
+    let toSend = { title: name, description: description, param_map: data, output_root: outputRoot };
     if (preset_to_edit) {
         toSend['preview_image'] = preset_to_edit.preview_image;
         toSend['is_edit'] = true;
@@ -505,6 +507,7 @@ function editPreset(preset) {
         presetHelpers.enableImageElem.checked = false;
         getRequiredElementById('new_preset_name').value = preset.title;
         getRequiredElementById('preset_description').value = preset.description;
+        getRequiredElementById('preset_output_root').value = preset.output_root || '';
         getRequiredElementById('new_preset_modal_title').innerText = editPresetTitle.get();
         for (let key of Object.keys(preset.param_map)) {
             let type = gen_param_types.filter(p => p.id == key)[0];
@@ -929,7 +932,7 @@ function importPresetsActivate() {
     console.log(JSON.stringify(data));
     for (let key of Object.keys(data)) {
         let preset = data[key];
-        let toSend = { title: key, description: preset.description, preview_image: preset.preview_image, param_map: preset.param_map, is_edit: overwrite, editing: key };
+        let toSend = { title: key, description: preset.description, preview_image: preset.preview_image, param_map: preset.param_map, is_edit: overwrite, editing: key, output_root: preset.output_root || '' };
         genericRequest('AddNewPreset', toSend, data => {
             ranCount++;
             if (Object.keys(data).includes("preset_fail")) {

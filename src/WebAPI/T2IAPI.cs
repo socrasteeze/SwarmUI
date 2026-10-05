@@ -224,6 +224,7 @@ public static class T2IAPI
         }
         if (rawInput.TryGetValue("presets", out JToken presets) && presets.Any())
         {
+            List<string> outputRoots = [];
             foreach (JToken presetName in presets.Values())
             {
                 T2IPreset presetObj = session.User.GetPreset(presetName.ToString());
@@ -232,6 +233,7 @@ public static class T2IAPI
                     Logs.Warning($"User {session.User.UserID} tried to use preset '{presetName}', but it does not exist!");
                     continue;
                 }
+                outputRoots.Add(presetObj.OutputRoot);
                 if (applyPresets)
                 {
                     presetObj.ApplyTo(user_input);
@@ -242,6 +244,11 @@ public static class T2IAPI
                 }
             }
             user_input.ExtraMeta["presets_used"] = presets.Values().Select(v => v.ToString()).ToList();
+            string outputRoot = PresetOutputRoot.ChooseOutputRoot(outputRoots);
+            if (!string.IsNullOrWhiteSpace(outputRoot))
+            {
+                PresetOutputRoot.UseForGeneration(user_input, outputRoot);
+            }
         }
         return user_input;
     }

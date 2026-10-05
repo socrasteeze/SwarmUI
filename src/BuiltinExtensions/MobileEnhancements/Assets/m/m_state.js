@@ -27,7 +27,7 @@ class MState {
         this.saveFailed = false;
         /** Param metadata map (id -> param object) from ListT2IParams. */
         this.paramMeta = {};
-        /** Preset objects from GetMyUserData ({title, description, param_map, preview_image, is_starred}). */
+        /** Preset objects from GetMyUserData ({title, description, param_map, preview_image, is_starred, output_root}). */
         this.presets = [];
         /** Model name lists from ListT2IParams (subtype -> [[name, classId], ...]). */
         this.models = {};
