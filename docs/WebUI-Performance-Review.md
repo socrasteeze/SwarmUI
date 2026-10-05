@@ -247,7 +247,7 @@ Screenshots were inspected at the narrow and wide widths. Local evidence is unde
 - New harnesses cover History batching, Models batching/races/native scrolling, PWA caching, and hidden/wake polling. Existing startup/model-loading, mobile layout **11/11**, mobile performance **50/50**, Create **178/178** in Chromium and WebKit, CivitAI **14/14**, and failure recovery **22/22** passed.
 - The existing image-browser harness also passed **50/50**, including the preserved keyboard/bounce regression checks.
 - Release extension assets remain cached in the running server. Adoption requires a server restart and a client reload that bypasses old cached assets. The live server was left running; no generation was submitted.
-- Next candidates from this review are early filtering before expensive Genpage descriptors, metadata reuse during History rendering, and server paging for large listings. History paging needs a compatible recursive contract: the existing positive `ListImages.limit` switches to direct-folder listing, so adding it to the current recursive History request would change visible results. These candidates were not implemented in this pass.
+- Next candidates from this review are early filtering before expensive Genpage descriptors, metadata reuse during History rendering, and server paging for large Genpage listings. `/simple` Images now uses the positive `ListImages.limit` direct-folder page (48 files, then `next_offset`). Genpage History still needs its own recursive contract: passing that positive limit to the recursive History request would hide nested files. The Genpage candidates were not implemented in this pass.
 
 ## Full desktop and PWA audit, 2026-10-03
 

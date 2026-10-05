@@ -403,7 +403,35 @@ await page.getByRole('searchbox', { name: 'Search Filenames' }).fill('pending');
 await page.locator('.m-imgbrowser-close').click();
 await page.waitForTimeout(300);
 check('closing cancels a pending search debounce', requestsBeforeClose == await page.evaluate(() => window.__calls.filter(call => call.route == 'ListImages').length));
-await page.evaluate(() => { mImageBrowser.path = ''; });
+await page.evaluate(() => { mImageBrowser.path = ''; mImageBrowser.sessionPlaces = {}; });
+
+await page.evaluate(() => { mImageBrowser.path = 'paged-output'; mImageBrowser.source = 'output'; });
+await openBrowser();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-page')?.textContent == '1 / 3');
+await page.getByRole('button', { name: 'Next Page' }).click();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'output-48.png');
+let keptScroll = await page.locator('.m-imgbrowser-grid').evaluate(grid => { grid.scrollTop = 80; return grid.scrollTop; });
+check('the image grid can leave the top of the page', keptScroll > 0, `${keptScroll}`);
+await page.locator('.m-imgbrowser-close').click();
+await page.waitForTimeout(320);
+await openBrowser();
+await page.waitForFunction(scroll => document.querySelector('.m-imgbrowser-page')?.textContent == '2 / 3' && document.querySelector('.m-imgbrowser-grid')?.scrollTop == scroll, keptScroll);
+let kept = await page.evaluate(() => ({
+    page: document.querySelector('.m-imgbrowser-page')?.textContent,
+    scroll: document.querySelector('.m-imgbrowser-grid')?.scrollTop,
+    place: mImageBrowser.sessionPlaces['output\npaged-output'],
+    stored: localStorage.getItem('m_client_img_browser_place')
+}));
+check('reopening the image browser keeps the page and scroll for this page load', kept.page == '2 / 3' && kept.scroll == keptScroll && kept.place?.offset == 48 && !kept.stored, JSON.stringify(kept));
+await page.locator('.m-imgbrowser-close').click();
+await page.waitForTimeout(320);
+await page.evaluate(() => { mImageBrowser.sessionPlaces = {}; });
+await openBrowser();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-page')?.textContent == '1 / 3');
+check('a cleared session place opens the folder on page one', await page.locator('.m-imgbrowser-page').textContent() == '1 / 3');
+await page.locator('.m-imgbrowser-close').click();
+await page.waitForTimeout(320);
+await page.evaluate(() => { mImageBrowser.path = ''; mImageBrowser.sessionPlaces = {}; });
 
 await page.evaluate(() => { window.__permission = false; });
 await openBrowser();
