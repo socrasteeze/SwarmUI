@@ -417,9 +417,10 @@ class MCreate {
         this.promptBox.rows = 3;
         this.promptBox.addEventListener('input', () => {
             mState.params['prompt'] = this.promptBox.value;
-            mState.save();
+            this.schedulePromptSave();
             this.autoGrow(this.promptBox);
         });
+        this.promptBox.addEventListener('blur', () => this.flushPromptSave());
         this.promptBox.addEventListener('paste', (e) => this.onPaste(e));
         // Remember where the caret was. By the time a trigger chip is tapped the box has long since lost
         // focus to a bottom sheet, so "insert at the cursor" has to mean the last cursor position.
@@ -465,8 +466,9 @@ class MCreate {
         this.negBox.rows = 2;
         this.negBox.addEventListener('input', () => {
             mState.params['negativeprompt'] = this.negBox.value;
-            mState.save();
+            this.schedulePromptSave();
         });
+        this.negBox.addEventListener('blur', () => this.flushPromptSave());
         negWrap.appendChild(this.negBox);
         this.negWrap = negWrap;
         panel.appendChild(negWrap);
@@ -491,8 +493,36 @@ class MCreate {
         this.fileInput = fileInput;
         mAutoComplete.enableFor(this.promptBox, 'prompt', this.promptCompletionHost);
         mAutoComplete.enableFor(this.negBox, 'negativeprompt');
+        if (!this.promptLeaveBound) {
+            this.promptLeaveBound = true;
+            window.addEventListener('pagehide', () => this.flushPromptSave());
+        }
         mState.onChange(() => this.render());
         this.render();
+    }
+
+    /** How long a prompt keystroke waits before it is written. A burst collapses to one write. */
+    static PromptSavePauseMs = 300;
+
+    /** Persists the prompt after typing pauses. Seed, steps, and every other save() stay immediate. */
+    schedulePromptSave() {
+        if (this.promptSaveTimer) {
+            clearTimeout(this.promptSaveTimer);
+        }
+        this.promptSaveTimer = setTimeout(() => {
+            this.promptSaveTimer = null;
+            mState.save();
+        }, MCreate.PromptSavePauseMs);
+    }
+
+    /** Writes a prompt edit that is still waiting on the pause. */
+    flushPromptSave() {
+        if (!this.promptSaveTimer) {
+            return;
+        }
+        clearTimeout(this.promptSaveTimer);
+        this.promptSaveTimer = null;
+        mState.save();
     }
 
     /** How far a finger may travel and still count as a tap rather than a scroll, in CSS pixels. */
@@ -565,6 +595,7 @@ class MCreate {
      * For FL2VA same-frame presets, m_frame_prep.js scales Start/End to shortest-768 / *32 without padding
      * before the request is built so the phone does not have to pre-size frames by hand. */
     doGenerate() {
+        this.flushPromptSave();
         let kick = (input) => {
             if (!`${input['prompt'] || ''}`.trim() && !input['promptimages'] && mState.activePresets.length == 0) {
                 mUI.warn('Type a prompt or pick a preset first.');
@@ -1485,7 +1516,7 @@ class MCreate {
      * never re-decodes its thumbnail and shifts the panel under a finger on iOS. */
     renderFrameSlot(slot) {
         let entry = slot.getEntry();
-        let signature = JSON.stringify(entry);
+        let signature = MCreate.mediaIdentity(entry);
         if (slot.signature == signature) {
             return false;
         }
@@ -1558,7 +1589,7 @@ class MCreate {
         // Same reason as syncOptions: rebuilding unconditionally re-creates every <img> on every state
         // change, which re-decodes the thumbnails and, on a browser with no scroll anchoring, shifts the
         // panel under the finger.
-        let signature = JSON.stringify(mState.promptImages);
+        let signature = MCreate.mediaListIdentity(mState.promptImages);
         if (this.imageStripSignature == signature) {
             return;
         }
@@ -1588,6 +1619,28 @@ class MCreate {
             this.imageStrip.appendChild(tile);
         }
         this.imageStrip.style.display = mState.promptImages.length > 0 ? '' : 'none';
+    }
+
+    /** Locator for one attached image. A path is itself. A data URI contributes its length, not its bytes. */
+    static mediaIdentity(entry) {
+        if (!entry) {
+            return '';
+        }
+        let kind = `${entry.kind || ''}`;
+        let value = entry.value == null ? '' : `${entry.value}`;
+        if (kind == 'data' || value.startsWith('data:')) {
+            return `data:${value.length}`;
+        }
+        return `${kind}:${value}`;
+    }
+
+    /** Locator for the prompt-image list, in order. */
+    static mediaListIdentity(entries) {
+        let parts = [];
+        for (let i = 0; i < (entries || []).length; i++) {
+            parts.push(MCreate.mediaIdentity(entries[i]));
+        }
+        return parts.join('\n');
     }
 
     /** Prompt image when one is attached; otherwise the FL2VA start frame, but only for MiniMax

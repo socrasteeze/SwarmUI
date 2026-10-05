@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-03 · **Branch:** main · **Base:** 3fda2d2c · **Tree:** clean
+**Updated:** 2026-10-05 · **Branch:** main · **Tree:** `/simple` history paging, prompt-save timing, and image-browser place retention, pending the clean push
 
 ## State
 This commit contains the verified 2026-10-03 web UI, PWA, accessibility, and data-safety delivery. Publication, live restart/deployment, physical-device checks, and live generation remain pending.
 The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
+
+- 2026-10-05: `/simple` Images loads one 48-file folder page and requests the next offset after that page is shown. Prompt and negative-prompt typing save once after a short pause; blur, Generate, and leaving the page flush a pending write. Attached-photo rebuild checks no longer serialize image bytes. The image browser keeps each folder's page and scroll until the page reloads. Covered by `verify-simple-page-identity-save.mjs` and `verify-simple-image-browser.mjs` (58/58). Genpage History is unchanged. Recorded in the AGENTS.md Fork Delta. There is no separate `FORK_NOTES.md`.
 
 - 2026-10-03: completed the local delivery set for UI stability, reduced motion, keyboard access, PWA/private-cache behavior, TagDex publication safety, and user-backup retention. Final source validation is recorded in [docs/WebUI-Performance-Review.md](docs/WebUI-Performance-Review.md); the current docs and source changes are included in the authorized local commit.
 

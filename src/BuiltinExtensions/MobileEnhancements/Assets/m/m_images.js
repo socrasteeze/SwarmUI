@@ -27,8 +27,17 @@ class MImages {
         this.rendered = 0;
         /** Whether a refresh is needed on next show (set when images complete while elsewhere). */
         this.dirty = true;
+        /** Next ListImages file offset, or null when the folder has no further page. */
+        this.nextOffset = null;
+        /** True while a history page request is in flight. */
+        this.pageLoading = false;
+        /** Bumped on every refresh so a late page cannot append into a newer folder. */
+        this.listVersion = 0;
         mGen.onFrame((kind, data) => this.onFrame(kind, data));
     }
+
+    /** Direct-folder page size. ListImages treats 1–250 as a page and 0 as the whole folder. */
+    static PageSize = 48;
 
     /** Builds the Images panel once. */
     build(panel) {
@@ -63,7 +72,11 @@ class MImages {
         // requests fired at the exact moment the finger is still moving - the list stops dead at every chunk
         // boundary. One viewport of lead time means the chunk lands while there is still content to scroll
         // through, which is the difference between a pause and no pause.
-        let observer = new IntersectionObserver(() => this.renderMore(), { root: panel, rootMargin: '100% 0px' });
+        let observer = new IntersectionObserver((observed) => {
+            if (observed.some(entry => entry.isIntersecting)) {
+                this.renderMore();
+            }
+        }, { root: panel, rootMargin: '100% 0px' });
         observer.observe(this.sentinel);
     }
 
@@ -114,14 +127,34 @@ class MImages {
         return { 'kind': 'path', 'value': path };
     }
 
-    /** Fetches the current folder's history. */
+    /** Reloads the current folder from the first page. */
     refresh() {
         this.dirty = false;
+        this.listVersion++;
+        this.nextOffset = null;
+        this.fetchPage(0, true);
+    }
+
+    /** Loads one direct-folder page. `replace` starts over; a later page appends and does not repeat earlier files. */
+    fetchPage(offset, replace) {
+        let version = this.listVersion;
         let [sortBy, sortReverse] = MImages.SortModes[this.sortMode];
-        genericRequest('ListImages', { 'path': this.folder, 'depth': 1, 'sortBy': sortBy, 'sortReverse': sortReverse }, data => {
+        this.pageLoading = true;
+        genericRequest('ListImages', {
+            'path': this.folder,
+            'depth': 1,
+            'sortBy': sortBy,
+            'sortReverse': sortReverse,
+            'offset': offset,
+            'limit': MImages.PageSize
+        }, data => {
+            if (version != this.listVersion) {
+                return;
+            }
+            this.pageLoading = false;
             this.renderFolders(data.folders || []);
             let prefix = this.folder == '' ? '' : `${this.folder}/`;
-            this.entries = (data.files || []).map(f => {
+            let mapped = (data.files || []).map(f => {
                 let fullsrc = `${prefix}${f.src}`;
                 let url = `${getImageOutPrefix()}/${fullsrc}`;
                 // 'thumb' is what the grid renders; 'url' stays full-resolution for the viewer.
@@ -136,10 +169,23 @@ class MImages {
                 // (audio, unsupported formats), so this degrades to the previous behaviour rather than breaking.
                 return { 'src': f.src, 'fullsrc': fullsrc, 'url': url, 'thumb': `${url}?preview=true`, 'metadata': f.metadata || '' };
             });
-            this.grid.innerHTML = '';
-            this.rendered = 0;
+            if (replace) {
+                this.entries = mapped;
+                this.grid.innerHTML = '';
+                this.rendered = 0;
+            }
+            else {
+                for (let entry of mapped) {
+                    this.entries.push(entry);
+                }
+            }
+            this.nextOffset = data.next_offset == null ? null : data.next_offset;
             this.renderMore();
         }, 0, err => {
+            if (version != this.listVersion) {
+                return;
+            }
+            this.pageLoading = false;
             mUI.warn(`Could not load history: ${err}`);
         });
     }
@@ -205,6 +251,9 @@ class MImages {
             this.grid.appendChild(tile);
         }
         this.rendered = target;
+        if (this.rendered >= this.entries.length && this.nextOffset != null && !this.pageLoading) {
+            this.fetchPage(this.nextOffset, false);
+        }
     }
 
     /** Fullscreen viewer overlay: swipe left/right = prev/next history entry, action row below. */

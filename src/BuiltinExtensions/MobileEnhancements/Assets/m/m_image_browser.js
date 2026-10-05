@@ -35,6 +35,8 @@ class MImageBrowser {
         this.machinePath = '';
         /** Last selected source in this browser instance. */
         this.source = 'output';
+        /** Page and scroll for each folder visited during this page load. A reload clears it. */
+        this.sessionPlaces = {};
     }
 
     /** True when a folder segment should stay out of the /simple image browser. */
@@ -116,9 +118,11 @@ class MImageBrowser {
         let roots = this.loadRoots();
         let canBrowseMachine = typeof permissions != 'undefined' && permissions.hasPermission
             && permissions.hasPermission('browse_server_images');
+        let forcedPath = false;
         if (typeof opts.startPath == 'string') {
             this.path = opts.startPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
             this.rootPath = this.path;
+            forcedPath = true;
         }
         else if (!this.path) {
             let first = roots.find(r => !r.machine);
@@ -350,7 +354,7 @@ class MImageBrowser {
                     .sort((a, b) => b.path.length - a.path.length)[0];
                 this.rootPath = match ? match.path : '';
             }
-            refresh();
+            openCurrent();
         });
         let renderFolderRows = (folders) => {
             foldersList.innerHTML = '';
@@ -369,7 +373,7 @@ class MImageBrowser {
                     else {
                         this.path = this.path == '' ? folder : `${this.path}/${folder}`;
                     }
-                    refresh();
+                    openCurrent();
                 });
                 foldersList.appendChild(row);
             }
@@ -480,7 +484,26 @@ class MImageBrowser {
             }
             loadPreviews();
         };
-        let refresh = (offset = 0) => {
+        /** Key for the folder currently on screen. Output and Drives do not share a page. */
+        let placeKey = () => this.source == 'machine' ? `machine\n${this.machinePath}` : `output\n${this.path}`;
+        let suppressRemember = false;
+        /** Writes the current page and scroll. Skipped while a refresh is forcing the grid back to the top. */
+        let remember = () => {
+            if (suppressRemember) {
+                return;
+            }
+            this.sessionPlaces[placeKey()] = {
+                'offset': pageOffset,
+                'scroll': grid.scrollTop,
+                'folderScroll': foldersList.scrollTop
+            };
+        };
+        /** Reopens the current folder on the page and scroll it had earlier in this page load. */
+        let openCurrent = () => {
+            let saved = this.sessionPlaces[placeKey()];
+            refresh(saved ? saved.offset : 0, saved || null);
+        };
+        let refresh = (offset = 0, restore = null) => {
             clearTimeout(searchTimer);
             searchTimer = null;
             let version = ++requestVersion;
@@ -495,7 +518,9 @@ class MImageBrowser {
                 observer.disconnect();
             }
             grid.innerHTML = '';
+            suppressRemember = true;
             grid.scrollTop = 0;
+            suppressRemember = false;
             foldersList.innerHTML = '';
             parentPath = null;
             upBtn.disabled = true;
@@ -518,6 +543,20 @@ class MImageBrowser {
                 let shown = grid.querySelectorAll('.m-imgbrowser-tile').length;
                 status.textContent = shown ? `${offset + 1}\u2013${offset + shown} of ${total}`
                     : (search ? 'No matching images.' : 'No images in this folder.');
+                remember();
+                if (!restore) {
+                    return;
+                }
+                requestAnimationFrame(() => {
+                    if (closed || !content.isConnected || version != requestVersion) {
+                        return;
+                    }
+                    suppressRemember = true;
+                    grid.scrollTop = restore.scroll || 0;
+                    foldersList.scrollTop = restore.folderScroll || 0;
+                    suppressRemember = false;
+                    remember();
+                });
             };
             let failPage = err => {
                 if (closed || !content.isConnected || version != requestVersion) {
@@ -594,13 +633,15 @@ class MImageBrowser {
             }
         });
         outputBtn.addEventListener('click', () => {
+            remember();
             setSource('output');
-            refresh();
+            openCurrent();
         });
         if (drivesBtn) {
             drivesBtn.addEventListener('click', () => {
+                remember();
                 setSource('machine');
-                refresh();
+                openCurrent();
             });
         }
         let goMachine = () => {
@@ -610,7 +651,7 @@ class MImageBrowser {
                 return;
             }
             this.machinePath = next;
-            refresh();
+            openCurrent();
         };
         goBtn.addEventListener('click', goMachine);
         machinePathInput.addEventListener('keydown', e => {
@@ -633,7 +674,7 @@ class MImageBrowser {
                 this.path = root.path;
                 this.rootPath = this.path;
             }
-            refresh();
+            openCurrent();
         });
         saveRootBtn.addEventListener('click', () => {
             if (!this.machinePath) {
@@ -658,14 +699,19 @@ class MImageBrowser {
                     this.path = first ? first.path : '';
                     this.rootPath = this.path;
                 }
-                refresh();
+                openCurrent();
             });
         });
         // Dismiss the keyboard when the user scrolls the file grid (same contract as the grid-axis LoRA search).
         let dismissKb = () => this.dismissKeyboard();
-        grid.addEventListener('scroll', dismissKb, { passive: true });
+        grid.addEventListener('scroll', () => {
+            dismissKb();
+            remember();
+        }, { passive: true });
+        foldersList.addEventListener('scroll', () => remember(), { passive: true });
         grid.addEventListener('touchmove', dismissKb, { passive: true });
         close = mUI.openSheet(content, () => {
+            remember();
             clearTimeout(searchTimer);
             closed = true;
             requestVersion++;
@@ -677,7 +723,12 @@ class MImageBrowser {
             }
         });
         setSource(canBrowseMachine && this.source == 'machine' ? 'machine' : 'output');
-        refresh();
+        if (forcedPath) {
+            refresh(0);
+        }
+        else {
+            openCurrent();
+        }
         return close;
     }
 
