@@ -419,9 +419,11 @@ html:has(.m-body) {
     gap: 0.5rem;
     margin-top: 0.4rem;
 }
+/* Suggestion row above the prompt. Empty until a match exists, then a full-width strip.
+   It is not in the toolbar: that row is below the caret, and the keyboard covers it while typing. */
 .m-prompt-completion {
-    flex: 1 1 0;
     min-width: 0;
+    width: 100%;
 }
 .m-prompt-toolbar > .m-prompt-image-add,
 .m-prompt-toolbar > .m-prompt-image-clear,
@@ -898,10 +900,11 @@ html:has(.m-body) {
 }
 
 /* --- Autocomplete suggestion strip --- */
-/* Prompt suggestions use the existing action row. Other fields own a row below their textarea. */
+/* The slot is the row above its textarea. Hidden while empty so the prompt does not sit under a blank gap. */
 .m-ac-slot {
     height: 44px;
     min-width: 0;
+    width: 100%;
 }
 .m-ac-slot:has(> .m-ac-strip:empty) {
     display: none;

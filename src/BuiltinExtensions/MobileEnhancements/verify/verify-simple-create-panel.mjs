@@ -576,15 +576,33 @@ const tagDexTypeahead = await page.evaluate(() => {
         chip.click();
         return getTextContent(box);
     };
+    let single = accept('miku');
+    let multiple = accept('hatsune mi');
+    tagDexCore.recordAt = () => ({
+        source: 'danbooru_character',
+        kind: 'character',
+        tagType: 4,
+        name: 'saber_(fate)',
+        trigger: 'saber (fate), fate (series)',
+        copyright: 'fate_(series)',
+        tags: [],
+        count: 17175
+    });
     return {
-        single: accept('miku'),
-        multiple: accept('hatsune mi')
+        single: single,
+        multiple: multiple,
+        series: accept('sab'),
+        protected: tagDexCore.escapePromptParens('saber (fate), fate \\(series\\), <lora:folder/name (v2):0.8>')
     };
 });
 check('TagDex typeahead keeps single-word trigger insertion intact', tagDexTypeahead.single == 'hatsune miku, vocaloid', JSON.stringify(tagDexTypeahead));
 check('TagDex typeahead does not duplicate an already typed name prefix', tagDexTypeahead.multiple == 'hatsune miku, vocaloid', JSON.stringify(tagDexTypeahead));
+check('TagDex typeahead escapes series parentheses and leaves LoRA tags alone',
+    tagDexTypeahead.series == 'saber \\(fate\\), fate \\(series\\)'
+    && tagDexTypeahead.protected == 'saber \\(fate\\), fate \\(series\\), <lora:folder/name (v2):0.8>',
+    JSON.stringify(tagDexTypeahead));
 
-// Suggestions must remain in their own toolbar space, without covering Generate or its neighboring actions.
+// Suggestions sit above the prompt, under Generate, so the keyboard does not cover them.
 for (let width of [360, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: HEIGHT });
     const autocompleteGeometry = await page.evaluate(async () => {
@@ -605,15 +623,14 @@ for (let width of [360, 768, 1024, 1440]) {
         let strip = mAutoComplete.slots.get(box);
         let rect = strip.getBoundingClientRect();
         let generate = mCreate.genButton.getBoundingClientRect();
-        let add = mCreate.promptImageAdd.getBoundingClientRect();
-        let clear = mCreate.promptImageClear.getBoundingClientRect();
-        let enhance = document.querySelector('.m-enhance-pill').getBoundingClientRect();
+        let prompt = box.getBoundingClientRect();
         let after = toolbar.getBoundingClientRect();
         let hit = document.elementFromPoint(generate.x + generate.width / 2, generate.y + generate.height / 2);
         let result = {
             chipCount: strip.querySelectorAll('.m-ac-chip').length,
-            belowGenerate: rect.top >= generate.bottom,
-            betweenActions: rect.left >= add.right && rect.left >= clear.right && rect.right <= enhance.left,
+            abovePrompt: rect.bottom <= prompt.top + 1,
+            belowGenerate: rect.top >= generate.bottom - 1,
+            fullWidth: rect.width >= prompt.width - 2,
             stableHeight: Math.abs(before.height - after.height) <= 1,
             generateReachable: !!hit && (hit == mCreate.genButton || mCreate.genButton.contains(hit)),
             hit: hit ? `${hit.tagName}.${hit.className}#${hit.id}` : 'none',
@@ -629,8 +646,9 @@ for (let width of [360, 768, 1024, 1440]) {
         await settle();
         return result;
     });
-    check(`autocomplete ${width}px stays clear of Generate, Add, and Enhance`, autocompleteGeometry.chipCount == 4
-        && autocompleteGeometry.belowGenerate && autocompleteGeometry.betweenActions && autocompleteGeometry.generateReachable,
+    check(`autocomplete ${width}px sits above the prompt and clear of Generate`, autocompleteGeometry.chipCount == 4
+        && autocompleteGeometry.abovePrompt && autocompleteGeometry.belowGenerate && autocompleteGeometry.fullWidth
+        && autocompleteGeometry.generateReachable,
         JSON.stringify(autocompleteGeometry));
     check(`autocomplete ${width}px does not resize the toolbar or widen the panel`, autocompleteGeometry.stableHeight
         && autocompleteGeometry.noOverflow, JSON.stringify(autocompleteGeometry));

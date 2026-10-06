@@ -82,7 +82,7 @@ class TagDexPromptHookClass {
                 if (record.copyright) {
                     html += ` <span class="parens">${escapeHtmlNoBr(record.copyright.replaceAll('_', ' '))}</span>`;
                 }
-                let entry = { raw: true, name: record.trigger, clean_html: html };
+                let entry = { raw: true, name: tagDexCore.escapePromptParens(record.trigger), clean_html: html };
                 if (record.count > 0) {
                     entry.count_display = largeCountStringify(record.count);
                 }

@@ -188,6 +188,28 @@ const tabs = await page.evaluate(() => {
 check('Simple top tab visible at small-window', tabs.simple.display != 'none' && tabs.simple.visible, JSON.stringify(tabs.simple));
 check('Comfy Workflow top tab visible at small-window', tabs.comfy.display != 'none' && tabs.comfy.visible, JSON.stringify(tabs.comfy));
 
+// The bottom tab strip is position:fixed. Body padding alone leaves it on the physical bottom edge,
+// under the iOS home indicator. With a 34px inset the tab links themselves must end at or above that line.
+const tabClearance = await page.evaluate(() => {
+    document.body.classList.add('pwa-standalone');
+    document.body.style.setProperty('--safe-bottom', '34px');
+    let bar = document.getElementById('t2i_bottom_bar');
+    bar.style.height = '48px';
+    bar.innerHTML = '<ul class="nav nav-tabs" id="bottombartabcollection"><li class="nav-item"><a class="nav-link" href="#">History</a></li></ul>';
+    let link = bar.querySelector('.nav-link');
+    let linkBox = link.getBoundingClientRect();
+    let barBox = bar.getBoundingClientRect();
+    return {
+        barBottom: Math.round(barBox.bottom),
+        linkBottom: Math.round(linkBox.bottom),
+        inner: window.innerHeight,
+        linkGap: Math.round(window.innerHeight - linkBox.bottom)
+    };
+});
+check('bottom tab links clear a 34px home-indicator inset',
+    tabClearance.linkGap >= 34 && tabClearance.barBottom <= tabClearance.inner - 34,
+    JSON.stringify(tabClearance));
+
 await browser.close();
 
 const failed = results.filter(r => !r.pass);
