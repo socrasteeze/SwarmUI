@@ -206,8 +206,9 @@ class GenTabLayout {
      * each call site is deliberate: every mobile consumer - the panel height math, the topbar-collapse height
      * math, the follow-finger drag distances, and the edge-gesture trigger zones - then agrees on one
      * definition of "how tall is the content area". The desktop path does its own equivalent subtraction
-     * inline, since it composes CSS calc() strings rather than pixel numbers. On desktop this subtracts 0
-     * (nothing outside body.pwa-standalone sets a bottom padding), so large-window layout is unchanged. */
+     * inline, since it composes CSS calc() strings rather than pixel numbers. A phone also sets this
+     * padding from --safe-bottom on body.small-window, so the home-indicator inset is reserved in Safari
+     * as well as the installed app. A desktop window's inset is 0, so large-window layout is unchanged. */
     getViewportHeight() {
         return window.innerHeight - (parseFloat(getComputedStyle(document.body).paddingBottom) || 0);
     }

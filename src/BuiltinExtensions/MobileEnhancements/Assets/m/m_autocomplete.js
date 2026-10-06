@@ -446,8 +446,8 @@ class MAutoComplete {
         });
     }
 
-    /** Attaches a permanent completion strip to a textarea. A supplied host keeps suggestions inside an
-     * existing action row. Other fields get a strip below the box, without covering neighboring controls. */
+    /** Attaches a permanent completion strip to a textarea. A supplied host is the row above the prompt.
+     * Other fields get the strip immediately above the box. Below the caret, the on-screen keyboard covers it. */
     enableFor(box, paramId, host = null) {
         box.dataset.mParam = paramId;
         let slot = mUI.el('div', 'm-ac-slot');
@@ -457,7 +457,7 @@ class MAutoComplete {
             host.appendChild(slot);
         }
         else {
-            box.parentElement.insertBefore(slot, box.nextSibling);
+            box.parentElement.insertBefore(slot, box);
         }
         this.slots.set(box, strip);
         box.addEventListener('focus', () => this.ensureLoaded(box));
@@ -535,6 +535,21 @@ class MAutoComplete {
         localStorage.setItem('m_client_enter_accepts', on ? 'yes' : 'no');
     }
 
+    /** Scrolls a strip that just became visible into the panel. A strip already on screen stays put,
+     * so showing suggestions does not yank the page when the row is already above the caret. */
+    revealStrip(strip) {
+        let panel = strip.closest('.m-panel');
+        if (!panel) {
+            return;
+        }
+        let stripBox = strip.getBoundingClientRect();
+        let panelBox = panel.getBoundingClientRect();
+        if (stripBox.top >= panelBox.top && stripBox.bottom <= panelBox.bottom) {
+            return;
+        }
+        strip.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
     /** Empties one box's strip. */
     clearSlot(box) {
         let strip = this.slots.get(box);
@@ -566,6 +581,7 @@ class MAutoComplete {
             strip.innerHTML = '';
             return;
         }
+        let wasEmpty = strip.childElementCount == 0;
         strip.innerHTML = '';
         if (possible.length == 0) {
             return;
@@ -579,6 +595,9 @@ class MAutoComplete {
         let shown = Math.min(possible.length, MAutoComplete.MaxChips);
         for (let i = 0; i < shown; i++) {
             strip.appendChild(this.buildChip(box, possible[i], prompt, lastBrace, wordIndex));
+        }
+        if (wasEmpty && shown > 0) {
+            this.revealStrip(strip);
         }
         // Mark what Enter would take - but ONLY when Enter would in fact take it. The highlight is the only
         // signal the user has about whether return is about to edit their prompt or insert a newline, so

@@ -412,6 +412,10 @@ class MCreate {
         genBar.appendChild(genSplit);
         panel.appendChild(genBar);
         let promptWrap = mUI.el('div', 'm-prompt-wrap');
+        // Suggestions sit above the prompt, directly under Generate. The on-screen keyboard covers
+        // everything below the caret, so a strip in the toolbar under the box is not reachable while typing.
+        this.promptCompletionHost = mUI.el('div', 'm-prompt-completion');
+        promptWrap.appendChild(this.promptCompletionHost);
         this.promptBox = mUI.el('textarea', 'm-prompt-box');
         this.promptBox.placeholder = 'Type your prompt, or paste an image...';
         this.promptBox.rows = 3;
@@ -443,8 +447,6 @@ class MCreate {
             mState.changed();
         });
         this.promptActions.appendChild(this.promptImageClear);
-        this.promptCompletionHost = mUI.el('div', 'm-prompt-completion');
-        this.promptActions.appendChild(this.promptCompletionHost);
         this.promptActions.appendChild(mEnhance.buildPill());
         promptWrap.appendChild(this.promptActions);
         this.imageStrip = mUI.el('div', 'm-image-strip');

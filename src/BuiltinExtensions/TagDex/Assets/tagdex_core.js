@@ -318,6 +318,34 @@ class TagDexCoreClass {
         }
     }
 
+    /** Escapes bare parentheses so "saber (fate)" is not read as prompt weighting.
+     * Parentheses already escaped, and parentheses inside a <...> tag, are left alone: a LoRA name
+     * such as <lora:folder/name (v2):0.8> must reach the server unchanged. */
+    escapePromptParens(text) {
+        let source = `${text || ''}`;
+        let out = '';
+        let depth = 0;
+        for (let i = 0; i < source.length; i++) {
+            let ch = source[i];
+            if (ch == '\\' && depth == 0 && i + 1 < source.length && (source[i + 1] == '(' || source[i + 1] == ')')) {
+                out += ch + source[i + 1];
+                i++;
+                continue;
+            }
+            if (ch == '<') {
+                depth++;
+            }
+            else if (ch == '>' && depth > 0) {
+                depth--;
+            }
+            else if (depth == 0 && (ch == '(' || ch == ')')) {
+                out += '\\';
+            }
+            out += ch;
+        }
+        return out;
+    }
+
     /** Returns the part of a trigger that still needs inserting at the host's current word boundary.
      *
      * The stock completers search and replace one space-delimited word. A TagDex trigger can span several words,
@@ -395,7 +423,9 @@ class TagDexCoreClass {
                 continue;
             }
             let entry = this.entryAt(hit, plainOnly);
-            entry.name = this.insertionForPrompt(entry.name, prompt, wordIndex);
+            // Escape after the prefix trim. The trim compares the raw trigger to what was typed;
+            // escaping first would make "saber (f" fail to line up with "saber \(fate\)".
+            entry.name = this.escapePromptParens(this.insertionForPrompt(entry.name, prompt, wordIndex));
             if (seen.has(entry.tagdex.name)) {
                 continue;
             }

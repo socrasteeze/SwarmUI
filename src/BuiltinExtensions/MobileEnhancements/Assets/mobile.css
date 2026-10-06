@@ -91,6 +91,20 @@ body.pwa-standalone {
     padding-bottom: var(--safe-bottom);
 }
 
+/* Classic mobile layout: the History/Models/… strip is #t2i_bottom_bar, position:fixed to the
+   physical bottom. Body padding does not move a fixed bar, so the tab labels sit in the iOS home
+   indicator curve and the lower half of each tab cannot be tapped. Lift the bar by the same capped
+   inset, and reserve that inset on every small window (not only the installed app) so the layout
+   height math, which reads body padding-bottom, ends the image area where the bar now starts.
+   env() is 0 on a desktop window, so this adds nothing there. */
+body.small-window {
+    box-sizing: border-box;
+    padding-bottom: var(--safe-bottom);
+}
+body.small-window #t2i_bottom_bar {
+    bottom: var(--safe-bottom, 0px);
+}
+
 /* --- Phase 2: fullscreen image viewer touch --- */
 
 /* The fullscreen image-view modal is a Bootstrap modal fixed to the true physical viewport (body's own

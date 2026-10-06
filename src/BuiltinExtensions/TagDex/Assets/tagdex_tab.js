@@ -1183,6 +1183,11 @@ class TagDexTabClass {
         if (!text) {
             return;
         }
+        // Series disambiguators arrive as "saber (fate)". Unescaped, the prompt parser reads that as
+        // weighting and the resolved prompt no longer contains the tag. Same escape the typeahead uses.
+        if (typeof tagDexCore != 'undefined' && tagDexCore.escapePromptParens) {
+            text = tagDexCore.escapePromptParens(text);
+        }
         let wanted = text.split(',').map(s => s.trim()).filter(s => s.length > 0);
         if (wanted.length == 0) {
             return;

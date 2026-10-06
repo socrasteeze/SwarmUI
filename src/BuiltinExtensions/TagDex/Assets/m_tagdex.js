@@ -75,7 +75,7 @@ class MTagDexClass {
                 let record = tagDexCore.recordAt(hits[i]);
                 let comma = record.trigger.indexOf(',');
                 let primary = comma > 0 ? record.trigger.substring(0, comma) : record.trigger;
-                let entry = { raw: true, name: record.trigger, clean: primary };
+                let entry = { raw: true, name: tagDexCore.escapePromptParens(record.trigger), clean: primary };
                 if (record.count > 0) {
                     entry.count_display = largeCountStringify(record.count);
                 }
@@ -735,7 +735,7 @@ class MTagDexClass {
                 mUI.warn('Create panel is unavailable.');
                 return;
             }
-            mCreate.insertIntoPrompt(text);
+            mCreate.insertIntoPrompt(tagDexCore.escapePromptParens(text));
             mUI.note(note);
         };
         // The trigger alone is a character's name, not their appearance: on most checkpoints it produces the
