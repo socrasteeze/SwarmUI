@@ -105,6 +105,13 @@ class MGenSocket {
         if (data.discard_indices) {
             this.emit('discard', data.discard_indices);
         }
+        // A missing preset skips that cell. The rest of the grid keeps running, so this is a warning, not a failure.
+        if (data.grid_skip) {
+            console.error(data.grid_skip);
+            if (typeof mUI != 'undefined' && mUI.warn) {
+                mUI.warn(`${data.grid_skip}`);
+            }
+        }
     }
 
     /** Applies a status object (from a WS frame or a GetCurrentStatus poll). */
@@ -202,6 +209,22 @@ class MGenSocket {
         }
     }
 
+    /** How many cells an axis value string holds. `||` separates cells (LoRAs, presets). Otherwise a comma does.
+     * MState.toList only splits on commas, which would count a four-preset axis as one cell. */
+    static cellCount(vals) {
+        let str = `${vals ?? ''}`;
+        if (str.includes('||')) {
+            let count = 0;
+            for (let part of str.split('||')) {
+                if (part.trim() != '') {
+                    count++;
+                }
+            }
+            return count;
+        }
+        return MState.toList(vals).length;
+    }
+
     /** Runs a grid generation over the same WS helper. axes = [{mode, vals}] (vals comma-joined string).
      * opts.rows: preferred contact-sheet row count (0/omitted = Auto). Auto places the axis with the most
      * values first so the sheet is horizontal or square, never vertical (fork owner's rule). A positive
@@ -213,7 +236,7 @@ class MGenSocket {
         let sorted;
         if (rows > 0 && axes.length >= 2) {
             let pool = axes.map(a => ({ 'mode': a.mode, 'vals': a.vals,
-                'count': MState.toList(a.vals).length }));
+                'count': MGenSocket.cellCount(a.vals) }));
             let yIdx = pool.findIndex(a => a.count == rows);
             if (yIdx < 0) {
                 let best = { 'i': 0, 'd': Infinity };
@@ -234,7 +257,7 @@ class MGenSocket {
             }
         }
         else {
-            sorted = [...axes].sort((a, b) => MState.toList(b.vals).length - MState.toList(a.vals).length);
+            sorted = [...axes].sort((a, b) => MGenSocket.cellCount(b.vals) - MGenSocket.cellCount(a.vals));
         }
         let input = {
             'baseParams': baseParams,

@@ -49,6 +49,22 @@ public partial class GridGenCore
         return CleanIDMatcher.TrimToMatches(id.ToLowerFast().Trim());
     }
 
+    /// <summary>Contact-sheet label for one preset title. A single title keeps the name after the last slash.
+    /// A comma-joined cell (several presets at once) is left whole.</summary>
+    public static string ShortPresetTitle(string raw)
+    {
+        if (string.IsNullOrEmpty(raw) || raw.Contains(','))
+        {
+            return raw;
+        }
+        int slash = raw.LastIndexOf('/');
+        if (slash < 0 || slash >= raw.Length - 1)
+        {
+            return raw;
+        }
+        return raw[(slash + 1)..];
+    }
+
     public static List<string> ExpandNumericListRanges(List<string> inList, Type numType)
     {
         List<string> outList = [];
@@ -226,7 +242,12 @@ public partial class GridGenCore
                         key = $"{key}_2";
                     }
                     keys.Add(key);
-                    Values.Add(new AxisValue(grid, this, key, $"{id}={valStr}", rawValStr) { Skip = skip });
+                    string title = rawValStr;
+                    if (Mode is not null && Mode.ID == GridGeneratorExtension.PresetAxisId)
+                    {
+                        title = ShortPresetTitle(rawValStr);
+                    }
+                    Values.Add(new AxisValue(grid, this, key, $"{id}={valStr}", title) { Skip = skip });
                 }
                 catch (Exception ex)
                 {

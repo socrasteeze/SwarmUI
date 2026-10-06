@@ -100,7 +100,7 @@ await page.addInitScript(() => {
             ], folders: [] });
         }
         else if (route == 'GetMyUserData') {
-            callback({ presets: [], starred_models: {} });
+            callback({ presets: window.__gridPresets || [], starred_models: {} });
         }
         else {
             callback({});
@@ -135,8 +135,8 @@ await page.evaluate(() => mGrid.open());
 await page.waitForFunction(() => document.querySelectorAll('.m-grid-card').length > 0);
 const axisNames = await page.evaluate(() =>
     [...__sheet().querySelectorAll('.m-grid-card-name')].map(e => e.textContent));
-check('the five requested axes are offered, and only those',
-    axisNames.join(',') == 'LoRAs,Steps,CFG Scale,Sampler,Scheduler', axisNames.join(','));
+check('the six requested axes are offered, and only those',
+    axisNames.join(',') == 'Preset,LoRAs,Steps,CFG Scale,Sampler,Scheduler', axisNames.join(','));
 const startState = await page.evaluate(() => ({
     count: __sheet().querySelector('.m-grid-count').textContent,
     disabled: __sheet().querySelector('.m-grid-run').disabled,
@@ -174,7 +174,9 @@ await page.evaluate(() => {
 });
 const samplerPicked = await page.evaluate(() => ({
     selected: mGrid.valuesFor('sampler'),
-    summary: [...__sheet().querySelectorAll('.m-grid-card-summary')][3].textContent,
+    summary: [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Sampler')
+        .querySelector('.m-grid-card-summary').textContent,
     count: __sheet().querySelector('.m-grid-count').textContent,
     disabled: __sheet().querySelector('.m-grid-run').disabled
 }));
@@ -365,6 +367,104 @@ const kbDismiss = await page.evaluate(() => {
 check('picking a LoRA blurs the search field (dismisses the keyboard)',
     kbDismiss.focusedBefore && !kbDismiss.focusedAfter
     && kbDismiss.selected.includes('ill/style_a'), JSON.stringify(kbDismiss));
+
+const cellCounts = await page.evaluate(() => ({
+    presets: MGenSocket.cellCount('a||b||c||d'),
+    loras: MGenSocket.cellCount('ill/style_a||ill/style_b'),
+    steps: MGenSocket.cellCount('20,30'),
+    one: MGenSocket.cellCount('4.5')
+}));
+check('an axis joined with || counts one cell per value, and a comma axis still splits on commas',
+    cellCounts.presets == 4 && cellCounts.loras == 2 && cellCounts.steps == 2 && cellCounts.one == 1,
+    JSON.stringify(cellCounts));
+
+// ---- Preset axis ----
+const presetTitles = [
+    'anima/TrattoNero-niTratto_steeze',
+    'anima/TrattoNero-orenz_steeze',
+    'anima/TrattoNero-niTratto_steeze_cfg35',
+    'anima/TrattoNero-orenz_steeze_cfg35'
+];
+const presetOpen = await page.evaluate(titles => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    window.__gridPresets = titles.map(title => ({ title, description: '', param_map: {}, is_starred: false }))
+        .concat([{ title: 'other/noise', description: '', param_map: {}, is_starred: false }]);
+    mState.presets = window.__gridPresets;
+    mState.params['prompt'] = 'a cat';
+    mState.params['cfgscale'] = '7';
+    mGrid.selected = {};
+    mGrid.open();
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Preset');
+    card.open = true;
+    return [...card.querySelectorAll('.m-grid-option')].map(e => e.dataset.preset);
+}, presetTitles);
+check('the Preset axis lists saved preset titles, including the four TrattoNero presets',
+    presetTitles.every(title => presetOpen.includes(title)) && presetOpen.includes('other/noise'),
+    presetOpen.join(','));
+
+const presetSearch = await page.evaluate(() => {
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Preset');
+    card.querySelector('.m-grid-search').value = 'orenz';
+    card.querySelector('.m-grid-search').dispatchEvent(new Event('input'));
+    let shown = [...card.querySelectorAll('.m-grid-option')].map(e => e.dataset.preset);
+    card.querySelector('.m-grid-search').value = '';
+    card.querySelector('.m-grid-search').dispatchEvent(new Event('input'));
+    return shown;
+});
+check('preset search matches the title, so orenz shows the two orenz presets',
+    presetSearch.join(',') == 'anima/TrattoNero-orenz_steeze,anima/TrattoNero-orenz_steeze_cfg35',
+    presetSearch.join(','));
+
+const presetPicked = await page.evaluate(titles => {
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Preset');
+    for (let title of titles) {
+        [...card.querySelectorAll('.m-grid-option')].find(b => b.dataset.preset == title).click();
+    }
+    return {
+        selected: mGrid.valuesFor('preset'),
+        chips: [...card.querySelectorAll('.m-grid-chip')].map(e => e.childNodes[0].textContent.trim()),
+        count: __sheet().querySelector('.m-grid-count').textContent,
+        disabled: __sheet().querySelector('.m-grid-run').disabled
+    };
+}, presetTitles);
+check('the four TrattoNero presets can be multi-selected by their full titles',
+    presetPicked.selected.join('|') == presetTitles.join('|'), presetPicked.selected.join('|'));
+check('preset chips use the short name after the folder slash',
+    presetPicked.chips.join('|') == presetTitles.map(t => t.split('/').pop()).join('|'),
+    presetPicked.chips.join('|'));
+check('four presets is a runnable grid of four images',
+    presetPicked.count == '4 images' && !presetPicked.disabled, JSON.stringify(presetPicked));
+
+const presetPayload = await page.evaluate(() => {
+    window.__grid = null;
+    __sheet().querySelector('.m-grid-run').click();
+    return window.__grid;
+});
+check('the Preset axis is sent as gridgenpresets joined with ||, and is not baked into the base',
+    presetPayload.axes.length == 1
+    && presetPayload.axes[0].mode == 'gridgenpresets'
+    && presetPayload.axes[0].vals == presetTitles.join('||')
+    && presetPayload.base.prompt == 'a cat'
+    && presetPayload.base.cfgscale == '7'
+    && !('gridgenpresets' in presetPayload.base),
+    JSON.stringify(presetPayload));
+
+const presetEmpty = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.selected = { steps: ['20', '30'] };
+    mGrid.open();
+    __sheet().querySelector('.m-grid-run').click();
+    return window.__grid.axes.map(a => a.mode);
+});
+check('an empty Preset axis is left out of the run',
+    presetEmpty.join(',') == 'steps', presetEmpty.join(','));
 
 // ---- Permission ----
 const denied = await page.evaluate(() => {

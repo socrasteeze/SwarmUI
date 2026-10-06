@@ -5,9 +5,10 @@
  * separated text. It technically covered everything and was usable for nothing - the values that matter most
  * here are LoRA paths and sampler ids, which nobody types correctly from memory on a phone keyboard.
  *
- * This is the same GridGenRun call with a built surface instead: five fixed axes, each with a picker suited
- * to its own type. Model, prompt and resolution axes are deliberately not here - a grid over those is a
- * desk job, and the classic UI is one tap away in More.
+ * This is the same GridGenRun call with a built surface instead: six fixed axes, each with a picker suited
+ * to its own type. Preset is the shared [Grid Gen] Presets axis (mode gridgenpresets): one selected title
+ * per cell, applied on the server on top of the Create tab. Model, prompt and resolution axes are
+ * deliberately not here - a grid over those is a desk job, and the classic UI is one tap away in More.
  *
  * The axes are the four comparisons worth running from a phone, plus Sampler, which is what "scheduler"
  * usually means in practice - ER-SDE and the DPM family are samplers, and offering only the Scheduler
@@ -23,6 +24,8 @@ class MGrid {
      * comma-joined stack of LoRAs. Joining LoRAs with ',' would silently turn one three-LoRA stack into
      * three separate single-LoRA cells. */
     static Axes = [
+        { key: 'preset', mode: 'gridgenpresets', label: 'Preset', kind: 'preset', separator: '||',
+            hint: 'One cell per preset, on top of the Create tab. The preset wins where they disagree. {value} in the preset is the current prompt.' },
         { key: 'loras', mode: 'loras', label: 'LoRAs', kind: 'lora', separator: '||',
             hint: 'One cell per LoRA, stacked on top of the Create tab LoRAs. Same name -> grid wins. Weight is left at the model default.' },
         { key: 'steps', mode: 'steps', label: 'Steps', kind: 'number', separator: ',',
@@ -354,6 +357,80 @@ class MGrid {
             };
             renderOptions();
             body.appendChild(list);
+        }
+        else if (axis.kind == 'preset') {
+            let search = mUI.el('input', 'm-grid-search');
+            search.type = 'search';
+            search.placeholder = 'Search presets';
+            body.appendChild(search);
+            let list = mUI.el('div', 'm-grid-options m-grid-preset-options');
+            let settled = (mState.presets || []).length > 0;
+            renderOptions = () => {
+                list.innerHTML = '';
+                let presets = mState.presets || [];
+                if (!settled && presets.length == 0) {
+                    list.appendChild(mUI.el('div', 'm-strip-empty', 'Loading presets...'));
+                    return;
+                }
+                let term = search.value.trim().toLowerCase();
+                let matches = presets.filter(preset => !term
+                    || `${preset.title} ${preset.description || ''} ${MGrid.shortValue(preset.title)}`.toLowerCase().includes(term));
+                matches = [...matches].sort((a, b) => {
+                    if (!!a.is_starred != !!b.is_starred) {
+                        return a.is_starred ? -1 : 1;
+                    }
+                    return `${a.title}`.localeCompare(`${b.title}`);
+                });
+                if (matches.length == 0) {
+                    list.appendChild(mUI.el('div', 'm-strip-empty', presets.length == 0
+                        ? 'No presets yet.' : 'No presets match.'));
+                    return;
+                }
+                let limit = typeof MPresets != 'undefined' && MPresets.PickerLimit ? MPresets.PickerLimit : 60;
+                let shown = matches.slice(0, limit);
+                for (let preset of shown) {
+                    let label = MGrid.shortValue(preset.title);
+                    if (preset.is_starred) {
+                        label = `\u2605 ${label}`;
+                    }
+                    let button = mUI.el('button', 'm-grid-option', label);
+                    button.title = preset.title;
+                    button.dataset.preset = preset.title;
+                    button.classList.toggle('m-selected', this.valuesFor(axis.key).includes(preset.title));
+                    button.addEventListener('click', () => {
+                        if (search && search.blur) {
+                            search.blur();
+                        }
+                        toggle(preset.title);
+                    });
+                    list.appendChild(button);
+                }
+                if (matches.length > shown.length) {
+                    list.appendChild(mUI.el('div', 'm-list-count',
+                        `${matches.length - shown.length} more - search to narrow.`));
+                }
+            };
+            search.addEventListener('input', () => renderOptions());
+            let dismissKb = () => {
+                if (document.activeElement == search && search.blur) {
+                    search.blur();
+                }
+            };
+            list.addEventListener('scroll', dismissKb, { passive: true });
+            list.addEventListener('touchmove', dismissKb, { passive: true });
+            renderOptions();
+            body.appendChild(list);
+            // Boot may have loaded these already. Refresh anyway: a preset saved in the classic UI since
+            // boot would otherwise be missing, and the grid is the first place that needs the new title.
+            genericRequest('GetMyUserData', { 'includeAutocompletions': false }, data => {
+                mState.presets = data.presets || [];
+                settled = true;
+                renderOptions();
+            }, 0, error => {
+                settled = true;
+                list.innerHTML = '';
+                list.appendChild(mUI.el('div', 'm-strip-empty', `Could not load presets: ${error}`));
+            });
         }
         else if (axis.kind == 'lora') {
             let search = mUI.el('input', 'm-grid-search');
