@@ -460,11 +460,21 @@ class MAutoComplete {
             box.parentElement.insertBefore(slot, box);
         }
         this.slots.set(box, strip);
-        box.addEventListener('focus', () => this.ensureLoaded(box));
+        // The row is reserved for as long as the box has focus, not only while it holds chips. The slot sits
+        // ABOVE the textarea, so collapsing it whenever the match list goes empty (every space or comma, and
+        // until the second letter of each word) moved the focused box 44px up and back down again per word.
+        // On iOS each of those moves makes Safari re-scroll the caret into view above the keyboard, and the
+        // strip only became readable once that scroll settled - the lag before suggestions appear. Reserving
+        // the row on focus costs one shift, absorbed into the keyboard-open scroll, and none while typing.
+        box.addEventListener('focus', () => {
+            slot.classList.add('m-ac-open');
+            this.ensureLoaded(box);
+        });
         box.addEventListener('input', () => this.onInput(box));
         box.addEventListener('keydown', (e) => this.onKeyDown(box, e));
         box.addEventListener('blur', () => setTimeout(() => {
             if (document.activeElement != box) {
+                slot.classList.remove('m-ac-open');
                 this.clearSlot(box);
             }
         }, 200));
