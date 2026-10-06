@@ -900,13 +900,15 @@ html:has(.m-body) {
 }
 
 /* --- Autocomplete suggestion strip --- */
-/* The slot is the row above its textarea. Hidden while empty so the prompt does not sit under a blank gap. */
+/* The slot is the row above its textarea. Hidden while its box is unfocused and empty, so an idle prompt does
+   not sit under a blank gap. While the box has focus (.m-ac-open, set by MAutoComplete.enableFor) the row stays
+   reserved even with no chips: collapsing it would shift the focused textarea on every word boundary. */
 .m-ac-slot {
     height: 44px;
     min-width: 0;
     width: 100%;
 }
-.m-ac-slot:has(> .m-ac-strip:empty) {
+.m-ac-slot:not(.m-ac-open):has(> .m-ac-strip:empty) {
     display: none;
 }
 .m-ac-strip {
