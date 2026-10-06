@@ -2080,9 +2080,9 @@ html:has(.m-body) {
 .m-grid-options::-webkit-scrollbar {
     display: none;
 }
-/* The LoRA list is names rather than short tokens, so it stacks instead of wrapping - a row of half-elided
-   paths is unreadable where a column of full ones is not. */
-.m-grid-lora-options {
+/* LoRA and preset rows are names rather than short tokens, so they stack instead of wrapping. */
+.m-grid-lora-options,
+.m-grid-preset-options {
     flex-direction: column;
     flex-wrap: nowrap;
 }

@@ -29,6 +29,9 @@ public class GridGeneratorExtension : Extension
 {
     public static T2IRegisteredParam<string> PromptReplaceParameter, PromptAddParameter, PresetsParameter;
 
+    /// <summary>Cleaned id of <see cref="PresetsParameter"/>. Grid clients send this as the axis mode.</summary>
+    public const string PresetAxisId = "gridgenpresets";
+
     public static PermInfo PermGenerateGrids = Permissions.Register(new("gridgen_generate_grids", "[Grid Generator] Generate Grids", "Allows the user to generate grids with the Grid Generator tool.", PermissionDefault.USER, Permissions.GroupUser));
     public static PermInfo PermReadGrids = Permissions.Register(new("gridgen_read_grids", "[Grid Generator] Read Grids", "Allows the user to read their list of saved grids.", PermissionDefault.USER, Permissions.GroupUser));
     public static PermInfo PermSaveGrids = Permissions.Register(new("gridgen_save_grids", "[Grid Generator] Save Grids", "Allows the user to save new custom grids to their list of saved grids.", PermissionDefault.USER, Permissions.GroupUser));
@@ -197,15 +200,22 @@ public class GridGeneratorExtension : Extension
             T2IParamInput thisParams = param.Clone();
             if (thisParams.TryGet(PresetsParameter, out string presets))
             {
-                List<T2IPreset> userPresets = data.Session.User.GetAllPresets();
-                foreach (string preset in presets.ToLowerFast().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (!TryResolvePresetCell(data.Session.User.GetAllPresets(), presets, out List<T2IPreset> matches, out string missing))
                 {
-                    T2IPreset match = userPresets.FirstOrDefault(p => p.Title.ToLowerFast() == preset);
-                    if (match is null)
+                    string message = $"Could not find preset '{missing}'.";
+                    // Continue-on-error (always set by /simple) skips the cell. The sheet keeps the other cells.
+                    if (data.ContinueOnError)
                     {
-                        setError($"Could not find preset '{preset}'");
+                        string notice = $"Skipped grid cell: {message}";
+                        Logs.Error(notice);
+                        data.AddOutput(new JObject() { ["grid_skip"] = notice });
                         return Task.CompletedTask;
                     }
+                    setError(message);
+                    return Task.CompletedTask;
+                }
+                foreach (T2IPreset match in matches)
+                {
                     match.ApplyTo(thisParams);
                 }
             }
@@ -354,6 +364,31 @@ public class GridGeneratorExtension : Extension
             return [.. results];
         });
         return new JObject() { ["data"] = JArray.FromObject(data.ToArray()), ["history"] = JArray.FromObject(history) };
+    }
+
+    /// <summary>Resolves one preset-axis cell (one title, or a comma-separated list) against the user's presets.
+    /// Matching is case-insensitive. An unknown title returns false and the title as the user wrote it.</summary>
+    public static bool TryResolvePresetCell(List<T2IPreset> userPresets, string cell, out List<T2IPreset> matches, out string missing)
+    {
+        matches = [];
+        missing = null;
+        if (string.IsNullOrWhiteSpace(cell))
+        {
+            return true;
+        }
+        foreach (string preset in cell.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string want = preset.ToLowerFast();
+            T2IPreset match = userPresets?.FirstOrDefault(p => p.Title.ToLowerFast() == want);
+            if (match is null)
+            {
+                missing = preset;
+                matches = [];
+                return false;
+            }
+            matches.Add(match);
+        }
+        return true;
     }
 
     public class GridCallData
@@ -672,7 +707,13 @@ public class GridGeneratorExtension : Extension
                                     }
                                     imgPath = realPath;
                                 }
-                                ISImage img = (data.GeneratedOutputs[imgPath] as ImageFile).ToIS;
+                                // A skipped preset cell has no file. Leave the white gap and keep the other cells.
+                                if (!data.GeneratedOutputs.TryGetValue(imgPath, out MediaFile found) || found is not ImageFile gridCellImage)
+                                {
+                                    xIndex++;
+                                    continue;
+                                }
+                                ISImage img = gridCellImage.ToIS;
                                 m.DrawImage(img, new Point(xIndex * maxWidth + textWidth, (int)(yIndex * maxHeight + textHeight)), 1);
                                 xIndex++;
                             }
