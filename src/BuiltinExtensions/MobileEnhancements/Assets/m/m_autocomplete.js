@@ -349,7 +349,12 @@ class MAutoComplete {
         let prompt = getTextContent(box).substring(0, getTextSelRange(box)[0]);
         let word = prompt.substring(this.findLastWordIndex(prompt));
         let baseList = [];
-        if (word.length > 1 && this.entries) {
+        // Inside an unclosed '<', every return below is the prefix or completer list and baseList is discarded,
+        // so scanning the word list there is pure waste. Typing '<w' swept all ~137k Anima entries for nothing.
+        // Skipping it cannot poison the narrowing cache: a word that starts with lastWord also contains it, so
+        // lastResults stays a superset whether or not it was refreshed for this keystroke.
+        let openTag = prompt.lastIndexOf('<') > prompt.lastIndexOf('>');
+        if (!openTag && word.length > 1 && this.entries) {
             let completionSet = (this.lastWord && word.startsWith(this.lastWord)) ? this.lastResults : this.entries;
             let wordLow = word.toLowerCase();
             let rawMatchSet = [];
