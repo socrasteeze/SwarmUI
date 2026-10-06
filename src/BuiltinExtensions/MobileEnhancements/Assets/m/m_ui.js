@@ -103,8 +103,9 @@ class MUI {
         let trigger = `${model.trigger_phrase || ''}`.trim();
         if (trigger) {
             let row = this.el('div', 'm-model-trigger');
+            let shown = MUI.triggerPreview(trigger);
             if (onTrigger) {
-                let button = this.el('button', 'm-trigger-chip', `+ ${trigger}`);
+                let button = this.el('button', 'm-trigger-chip', `+ ${shown}`);
                 button.addEventListener('click', (e) => {
                     e.stopPropagation();
                     onTrigger(trigger);
@@ -112,11 +113,46 @@ class MUI {
                 row.appendChild(button);
             }
             else {
-                row.appendChild(this.el('span', 'm-trigger-text', trigger));
+                row.appendChild(this.el('span', 'm-trigger-text', shown));
             }
             text.appendChild(row);
         }
         return text;
+    }
+
+    /** Most phrases a model row shows from a trigger phrase. */
+    static TriggerPreviewPhrases = 6;
+
+    /** Most characters a model row shows from a trigger phrase. */
+    static TriggerPreviewChars = 120;
+
+    /** A short, display-only form of a trigger phrase.
+     *
+     * Some LoRAs carry their whole training caption vocabulary as the trigger phrase. On this install
+     * danmomo_ANIMA_V1 has 31,294 characters of comma-separated booru tags there, and 862 LoRAs exceed 300.
+     * Printed whole, one row filled the LoRA picker with a wall of tags. The row keeps the leading phrases
+     * (where trainers put the real trigger) and counts the rest. The full phrase is unchanged in metadata
+     * and still reaches onTrigger. */
+    static triggerPreview(trigger) {
+        if (trigger.length <= MUI.TriggerPreviewChars) {
+            return trigger;
+        }
+        let phrases = trigger.split(/[,;\n]/).map(p => p.trim()).filter(p => p.length > 0);
+        let kept = [];
+        let length = 0;
+        for (let phrase of phrases) {
+            if (kept.length >= MUI.TriggerPreviewPhrases || (kept.length > 0 && length + phrase.length > MUI.TriggerPreviewChars)) {
+                break;
+            }
+            kept.push(phrase);
+            length += phrase.length + 2;
+        }
+        let shown = kept.join(', ');
+        if (shown.length > MUI.TriggerPreviewChars) {
+            shown = `${shown.substring(0, MUI.TriggerPreviewChars - 1)}\u2026`;
+        }
+        let hidden = phrases.length - kept.length;
+        return hidden > 0 ? `${shown} +${hidden} more` : shown;
     }
 
     /** Registers a tab: build(panel) runs once lazily, onShow(panel) runs every activation. */
