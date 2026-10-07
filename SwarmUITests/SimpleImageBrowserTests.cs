@@ -119,6 +119,32 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(last["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
     }
 
+    /// <summary>Machine image pages sort the full match set before paging and keep Name A-Z as the default.</summary>
+    [Test]
+    public void ListFolder_ImagePagesSupportAllSortDirections()
+    {
+        string alpha = Path.Combine(TempRoot, "alpha.png");
+        string beta = Path.Combine(TempRoot, "beta.png");
+        string gamma = Path.Combine(TempRoot, "gamma.png");
+        string mixedUpper = Path.Combine(TempRoot, "Mixed.png");
+        WriteValidPng(alpha);
+        WriteValidPng(beta);
+        WriteValidPng(gamma);
+        WriteValidPng(mixedUpper);
+        File.SetLastWriteTimeUtc(alpha, DateTime.UnixEpoch.AddSeconds(10));
+        File.SetLastWriteTimeUtc(beta, DateTime.UnixEpoch.AddSeconds(30));
+        File.SetLastWriteTimeUtc(gamma, DateTime.UnixEpoch.AddSeconds(20));
+        File.SetLastWriteTimeUtc(mixedUpper, DateTime.UnixEpoch.AddSeconds(5));
+
+        string[] Names(Newtonsoft.Json.Linq.JObject result) => result["files"].Select(row => (string)row["name"]).ToArray();
+        Assert.That(Names(SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "", true)), Is.EqualTo(new[] { "alpha.png", "beta.png", "gamma.png", "Mixed.png" }));
+        Assert.That(Names(SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "", true, "Name", false)), Is.EqualTo(new[] { "Mixed.png", "gamma.png", "beta.png", "alpha.png" }));
+        Assert.That(Names(SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 3, "", true, "Date", false)), Is.EqualTo(new[] { "beta.png", "gamma.png", "alpha.png" }));
+        Assert.That(Names(SimpleImageBrowserAPI.ListFolder(TempRoot, 2, 3, "", true, "Date", true)).Take(1), Is.EqualTo(new[] { "gamma.png" }));
+        Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "", true, "Bogus", false)["error_id"], Is.EqualTo("bad_sort"));
+        Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "", true, "42", false)["error_id"], Is.EqualTo("bad_sort"));
+    }
+
     /// <summary>Output paging filters media before paging and keeps direct virtual folders visible.</summary>
     [Test]
     public void ListOutputImagePage_PagesFilesAndKeepsVirtualFolders()

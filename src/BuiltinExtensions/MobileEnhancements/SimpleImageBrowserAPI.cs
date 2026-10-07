@@ -40,13 +40,15 @@ public static class SimpleImageBrowserAPI
         [API.APIParameter("Zero-based result offset.")] int offset = 0,
         [API.APIParameter("Maximum results to return, from 1 to 250.")] int limit = 100,
         [API.APIParameter("Optional case-insensitive filename substring filter for direct files.")] string search = "",
-        [API.APIParameter("If true, return all direct folders and page only matching direct image files.")] bool image_page = false)
+        [API.APIParameter("If true, return all direct folders and page only matching direct image files.")] bool image_page = false,
+        [API.APIParameter("Image sort field: Name or Date. Defaults to Name for compatibility.")] string sortBy = "Name",
+        [API.APIParameter("Reverse the descending base order. Defaults true so Name remains A-Z for compatibility.")] bool sortReverse = true)
     {
         if (!HasBrowsePermission(session))
         {
             return Task.FromResult(Error("You lack permission to browse server images.", "bad_permissions"));
         }
-        return Task.FromResult(ListFolder(path, offset, limit, search, image_page));
+        return Task.FromResult(ListFolder(path, offset, limit, search, image_page, sortBy, sortReverse));
     }
 
     /// <summary>Reads one validated image as a data URI, converting TIFF to PNG or optionally producing a small JPEG preview.</summary>
@@ -63,11 +65,15 @@ public static class SimpleImageBrowserAPI
     }
 
     /// <summary>Lists a folder without session handling so focused tests can cover path and paging behavior.</summary>
-    public static JObject ListFolder(string path, int offset, int limit, string search = "", bool imagePage = false)
+    public static JObject ListFolder(string path, int offset, int limit, string search = "", bool imagePage = false, string sortBy = "Name", bool sortReverse = true)
     {
         if (offset < 0 || limit < 1 || limit > MaximumPageSize)
         {
             return Error("The requested page is invalid.", "bad_page");
+        }
+        if (!Enum.TryParse(sortBy, true, out T2IAPI.ImageHistorySortMode sortMode) || !Enum.IsDefined(sortMode))
+        {
+            return Error($"Invalid sort mode '{sortBy}'.", "bad_sort");
         }
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -84,7 +90,11 @@ public static class SimpleImageBrowserAPI
                 return Error("The folder does not exist or is unavailable.", "missing_folder");
             }
             List<string> folders = Directory.EnumerateDirectories(fullPath).OrderBy(GetName, PathNameComparer.Instance).ToList();
-            List<string> files = Directory.EnumerateFiles(fullPath).Where(IsAllowedImagePath).Where(file => string.IsNullOrWhiteSpace(search) || GetName(file).Contains(search, StringComparison.OrdinalIgnoreCase)).OrderBy(GetName, PathNameComparer.Instance).ToList();
+            List<string> files = Directory.EnumerateFiles(fullPath).Where(IsAllowedImagePath).Where(file => string.IsNullOrWhiteSpace(search) || GetName(file).Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
+            Dictionary<string, long> fileTimes = sortMode == T2IAPI.ImageHistorySortMode.Date
+                ? files.ToDictionary(file => file, file => File.GetLastWriteTimeUtc(file).Ticks)
+                : null;
+            files.Sort((first, second) => CompareImagePaths(first, second, sortMode, sortReverse, fileTimes));
             if (imagePage)
             {
                 return BuildImagePage(fullPath, GetParentPath(fullPath), folders, files, offset, limit);
@@ -104,6 +114,19 @@ public static class SimpleImageBrowserAPI
         {
             return Error("The folder path is invalid.", "bad_path");
         }
+    }
+
+    /// <summary>Sorts machine images before paging, with the same descending base order as ListImages.</summary>
+    private static int CompareImagePaths(string first, string second, T2IAPI.ImageHistorySortMode sortMode, bool sortReverse, Dictionary<string, long> fileTimes)
+    {
+        int result = sortMode == T2IAPI.ImageHistorySortMode.Date
+            ? fileTimes[second].CompareTo(fileTimes[first])
+            : PathNameComparer.Instance.Compare(second, first);
+        if (result == 0)
+        {
+            result = PathNameComparer.Instance.Compare(second, first);
+        }
+        return sortReverse ? -result : result;
     }
 
     /// <summary>Lists one direct output-history folder with folder navigation separate from media-file pagination.</summary>

@@ -91,7 +91,7 @@ class MUI {
     /** The text block of a model row: name, subtitle, and the trigger phrase when the model declares one.
      * Trigger phrases are the reason a LoRA row needs more than a name - onTrigger, when given, makes the
      * phrase a tappable chip. The chip shows the literal phrase (so you know what you are getting) but the
-     * callback is what decides what gets inserted; mCreate inserts the `<trigger>` tag rather than the text.
+     * callback receives the full phrase, even when the displayed preview is shortened.
      * preferTitle is the LoRA heading rule from modelLines - checkpoints omit it. */
     modelText(model, onTrigger, preferTitle) {
         let text = this.el('div', 'm-model-text');

@@ -1281,9 +1281,7 @@ class MCoach {
                     let actions = mUI.el('div', 'm-coach-lora-actions');
                     let insert = mUI.el('button', 'm-coach-lora-insert', 'Insert exact trigger');
                     insert.addEventListener('click', () => {
-                        // Literal phrase, via the same caret-aware insertion the prompt box itself uses - not
-                        // insertTriggerTag(), which inserts the bundled `<trigger>` shortcut and would silently
-                        // discard which exact phrase the user meant to place.
+                        // Keep the exact phrase the user chose, using caret-aware prompt insertion.
                         this.insertLiteralTrigger(trigger);
                     });
                     actions.appendChild(insert);

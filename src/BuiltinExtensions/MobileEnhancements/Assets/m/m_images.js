@@ -1,5 +1,5 @@
 /** MobileEnhancements standalone client - image history surface.
- * History tiles from ListImages (metadata arrives inline per file), chunk-rendered, with folder chips.
+ * History tiles from ListImages (metadata arrives inline per file), explicitly paged, with folder chips.
  * Tap opens a viewer overlay with swipe prev/next and the per-image actions - that viewer is shared,
  * mCreate's live preview tiles open it too. The live batch itself lives on the Create tab (mCreate),
  * not here, so generating never has to navigate away from the prompt box. */
@@ -7,31 +7,32 @@ class MImages {
 
     /** Sort options, label -> the ListImages sortBy/sortReverse pair it maps to. */
     static SortModes = {
-        'Newest first': ['Date', true],
-        'Oldest first': ['Date', false],
-        'Name A-Z': ['Name', false],
-        'Name Z-A': ['Name', true]
+        'Newest First': ['Date', false],
+        'Oldest First': ['Date', true],
+        'Name A-Z': ['Name', true],
+        'Name Z-A': ['Name', false]
     };
 
     constructor() {
         /** Current history folder path ('' = root). */
         this.folder = '';
         /** Current sort mode label (a key of MImages.SortModes), persisted across sessions. */
-        this.sortMode = localStorage.getItem('m_client_img_sort') || 'Newest first';
+        let storedSort = localStorage.getItem('m_client_img_sort') || 'Newest First';
+        this.sortMode = { 'Newest first': 'Newest First', 'Oldest first': 'Oldest First' }[storedSort] || storedSort;
         if (!MImages.SortModes[this.sortMode]) {
-            this.sortMode = 'Newest first';
+            this.sortMode = 'Newest First';
         }
         /** Parsed history entries: {src, fullsrc, url, metadata}. */
         this.entries = [];
-        /** How many history entries are currently rendered (chunked). */
-        this.rendered = 0;
+        /** Zero-based explicit result page. */
+        this.page = 0;
+        /** Total matching direct files reported by the server. */
+        this.total = 0;
         /** Whether a refresh is needed on next show (set when images complete while elsewhere). */
         this.dirty = true;
-        /** Next ListImages file offset, or null when the folder has no further page. */
-        this.nextOffset = null;
         /** True while a history page request is in flight. */
         this.pageLoading = false;
-        /** Bumped on every refresh so a late page cannot append into a newer folder. */
+        /** Bumped on every request so late folder, search, sort, and page responses stay inert. */
         this.listVersion = 0;
         mGen.onFrame((kind, data) => this.onFrame(kind, data));
     }
@@ -54,30 +55,41 @@ class MImages {
         this.sortSelect.addEventListener('change', () => {
             this.sortMode = this.sortSelect.value;
             localStorage.setItem('m_client_img_sort', this.sortMode);
-            this.refresh();
+            this.refresh(true);
         });
         bar.appendChild(this.sortSelect);
         let refreshButton = mUI.el('button', 'm-refresh-button', '⟳');
         refreshButton.addEventListener('click', () => this.refresh());
         bar.appendChild(refreshButton);
         panel.appendChild(bar);
+        this.search = document.createElement('input');
+        this.search.type = 'search';
+        this.search.className = 'm-images-search';
+        this.search.placeholder = 'Search images';
+        this.search.addEventListener('input', () => {
+            clearTimeout(this.searchTimer);
+            this.listVersion++;
+            this.setPagerLoading(true);
+            this.searchTimer = setTimeout(() => this.refresh(true), 150);
+        });
+        panel.appendChild(this.search);
+        this.breadcrumb = mUI.el('div', 'm-image-breadcrumb');
+        panel.appendChild(this.breadcrumb);
         this.folderChips = mUI.el('div', 'm-folder-chips');
         panel.appendChild(this.folderChips);
         this.grid = mUI.el('div', 'm-image-grid');
         panel.appendChild(this.grid);
-        this.sentinel = mUI.el('div', 'm-scroll-sentinel');
-        panel.appendChild(this.sentinel);
-        // rootMargin, not a bare intersection: without it the sentinel only crosses the viewport once the user
-        // has ALREADY scrolled to the end of what is rendered, so the next 40 tiles are built and their image
-        // requests fired at the exact moment the finger is still moving - the list stops dead at every chunk
-        // boundary. One viewport of lead time means the chunk lands while there is still content to scroll
-        // through, which is the difference between a pause and no pause.
-        let observer = new IntersectionObserver((observed) => {
-            if (observed.some(entry => entry.isIntersecting)) {
-                this.renderMore();
-            }
-        }, { root: panel, rootMargin: '100% 0px' });
-        observer.observe(this.sentinel);
+        this.pager = mUI.el('div', 'm-pagination');
+        this.prevPage = mUI.el('button', 'm-pagination-button', 'Previous');
+        this.pageStatus = mUI.el('span', 'm-pagination-status');
+        this.nextPage = mUI.el('button', 'm-pagination-button', 'Next');
+        this.prevPage.addEventListener('click', () => this.loadPage(this.page - 1));
+        this.nextPage.addEventListener('click', () => this.loadPage(this.page + 1));
+        this.pager.appendChild(this.prevPage);
+        this.pager.appendChild(this.pageStatus);
+        this.pager.appendChild(this.nextPage);
+        panel.appendChild(this.pager);
+        this.panel = panel;
     }
 
     /** Every activation: refresh history if marked dirty. */
@@ -128,25 +140,36 @@ class MImages {
     }
 
     /** Reloads the current folder from the first page. */
-    refresh() {
+    refresh(resetPage = false) {
         this.dirty = false;
-        this.listVersion++;
-        this.nextOffset = null;
-        this.fetchPage(0, true);
+        if (resetPage) {
+            this.page = 0;
+            this.entries = [];
+            this.total = 0;
+            this.breadcrumb.innerHTML = '';
+            this.folderChips.innerHTML = '';
+            this.grid.innerHTML = '';
+            this.grid.appendChild(mUI.el('div', 'm-strip-empty m-images-empty', 'Loading...'));
+            this.pageStatus.textContent = 'Loading...';
+        }
+        this.loadPage(this.page);
     }
 
-    /** Loads one direct-folder page. `replace` starts over; a later page appends and does not repeat earlier files. */
-    fetchPage(offset, replace) {
-        let version = this.listVersion;
+    /** Loads one direct-folder page. Each call invalidates every older response. */
+    loadPage(page) {
+        page = Math.max(0, page);
+        let version = ++this.listVersion;
         let [sortBy, sortReverse] = MImages.SortModes[this.sortMode];
         this.pageLoading = true;
+        this.setPagerLoading(true);
         genericRequest('ListImages', {
             'path': this.folder,
             'depth': 1,
             'sortBy': sortBy,
             'sortReverse': sortReverse,
-            'offset': offset,
-            'limit': MImages.PageSize
+            'offset': page * MImages.PageSize,
+            'limit': MImages.PageSize,
+            'search': this.search.value.trim()
         }, data => {
             if (version != this.listVersion) {
                 return;
@@ -169,30 +192,44 @@ class MImages {
                 // (audio, unsupported formats), so this degrades to the previous behaviour rather than breaking.
                 return { 'src': f.src, 'fullsrc': fullsrc, 'url': url, 'thumb': `${url}?preview=true`, 'metadata': f.metadata || '' };
             });
-            if (replace) {
-                this.entries = mapped;
-                this.grid.innerHTML = '';
-                this.rendered = 0;
+            this.entries = mapped;
+            this.total = Number.isFinite(Number(data.total)) ? Number(data.total) : mapped.length;
+            let pages = Math.max(1, Math.ceil(this.total / MImages.PageSize));
+            let validPage = Math.min(page, pages - 1);
+            if (validPage != page) {
+                this.loadPage(validPage);
+                return;
             }
-            else {
-                for (let entry of mapped) {
-                    this.entries.push(entry);
-                }
-            }
-            this.nextOffset = data.next_offset == null ? null : data.next_offset;
-            this.renderMore();
+            this.page = validPage;
+            this.renderPage();
         }, 0, err => {
             if (version != this.listVersion) {
                 return;
             }
             this.pageLoading = false;
+            if (this.entries.length == 0) {
+                this.grid.innerHTML = '';
+                this.grid.appendChild(mUI.el('div', 'm-strip-empty m-images-empty', 'Could not load images. Use Refresh to retry.'));
+                this.pageStatus.textContent = 'Unavailable';
+            }
+            this.setPagerLoading(false);
             mUI.warn(`Could not load history: ${err}`);
         });
+    }
+
+    /** Disables navigation during a request without clearing the current truthful page. */
+    setPagerLoading(loading) {
+        if (!this.pager) {
+            return;
+        }
+        this.prevPage.disabled = loading || this.page == 0;
+        this.nextPage.disabled = loading || (this.page + 1) * MImages.PageSize >= this.total;
     }
 
     /** Renders the folder chip row (".." when inside a folder). */
     renderFolders(folders) {
         this.folderChips.innerHTML = '';
+        this.breadcrumb.innerHTML = '';
         // Sorted here rather than trusted from the server: ListImages returns folders descending (its sort is
         // tuned for date-prefixed file names, where Z-A means newest-first), which on a folder strip is just
         // backwards. Matches the genpage history tree, which sorts the same way for the same reason. A copy,
@@ -210,25 +247,25 @@ class MImages {
             let up = mUI.el('button', 'm-folder-chip m-folder-up', '←');
             up.addEventListener('click', () => {
                 this.folder = this.folder.includes('/') ? this.folder.substring(0, this.folder.lastIndexOf('/')) : '';
-                this.refresh();
+                this.refresh(true);
             });
-            this.folderChips.appendChild(up);
-            this.folderChips.appendChild(mUI.el('span', 'm-folder-current', this.folder));
+            this.breadcrumb.appendChild(up);
+            this.breadcrumb.appendChild(mUI.el('span', 'm-folder-current', this.folder));
         }
         for (let folder of folders) {
             let chip = mUI.el('button', 'm-folder-chip', folder);
             chip.addEventListener('click', () => {
                 this.folder = this.folder == '' ? folder : `${this.folder}/${folder}`;
-                this.refresh();
+                this.refresh(true);
             });
             this.folderChips.appendChild(chip);
         }
     }
 
-    /** Renders the next chunk of history tiles (~40 per pass, images lazy-loaded). */
-    renderMore() {
-        let target = Math.min(this.rendered + 40, this.entries.length);
-        for (let i = this.rendered; i < target; i++) {
+    /** Renders the current complete API page and updates explicit navigation. */
+    renderPage() {
+        this.grid.innerHTML = '';
+        for (let i = 0; i < this.entries.length; i++) {
             let entry = this.entries[i];
             let tile = mUI.el('div', 'm-image-tile-cell');
             tile.tabIndex = 0;
@@ -236,7 +273,7 @@ class MImages {
             tile.setAttribute('aria-label', entry.src || entry.fullsrc || 'Image');
             let img = document.createElement('img');
             img.loading = 'lazy';
-            // Off the main thread: a grid chunk is 40 images, and synchronous decode of that many at once is a
+            // Off the main thread: a page is 48 images, and synchronous decode of that many at once is a
             // visible scroll stall on a phone.
             img.decoding = 'async';
             img.src = entry.thumb;
@@ -250,10 +287,23 @@ class MImages {
             });
             this.grid.appendChild(tile);
         }
-        this.rendered = target;
-        if (this.rendered >= this.entries.length && this.nextOffset != null && !this.pageLoading) {
-            this.fetchPage(this.nextOffset, false);
+        if (this.entries.length == 0) {
+            this.grid.appendChild(mUI.el('div', 'm-strip-empty m-images-empty', this.search && this.search.value.trim() ? 'No images match that search.' : 'No images here.'));
         }
+        let pages = Math.max(1, Math.ceil(this.total / MImages.PageSize));
+        if (this.pageStatus) {
+            this.pageStatus.textContent = `Page ${this.page + 1} of ${pages} · ${this.total}`;
+            this.setPagerLoading(false);
+        }
+        if (this.panel) {
+            this.panel.scrollTop = 0;
+        }
+    }
+
+    /** Renders the current page for callers that previously requested another render chunk. */
+    renderMore() {
+        this.total = Math.max(this.total, this.entries.length);
+        this.renderPage();
     }
 
     /** Fullscreen viewer overlay: swipe left/right = prev/next history entry, action row below. */

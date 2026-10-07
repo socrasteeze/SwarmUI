@@ -14,8 +14,10 @@ class MModels {
         this.civitaiBusy = false;
         /** Current folder's starred-first model rows. */
         this.folderModels = [];
-        /** Number of folder cards currently attached to the DOM. */
-        this.folderRendered = 0;
+        /** Warning shown when ListModels reports a capped folder result. */
+        this.folderIncomplete = false;
+        /** Current page in either the folder or global-search result set. */
+        this.page = 0;
         /** Monotonic token that invalidates stale folder listing callbacks. */
         this.folderRequestVersion = 0;
     }
@@ -29,6 +31,7 @@ class MModels {
             btn.addEventListener('click', () => {
                 this.subtype = sub;
                 this.folder = '';
+                this.page = 0;
                 this.refresh();
             });
             toggle.appendChild(btn);
@@ -45,35 +48,56 @@ class MModels {
             // eligible to repaint the grid during that 150ms window.
             this.invalidateFolderRender();
             this.grid.innerHTML = '';
+            this.page = 0;
             clearTimeout(this.searchTimer);
             this.searchTimer = setTimeout(() => this.refresh(), 150);
         });
         panel.appendChild(this.search);
+        this.sortRow = mUI.el('div', 'm-models-sort');
+        this.sortSelect = document.createElement('select');
+        this.sortSelect.className = 'm-sort-select';
+        this.sortSelect.setAttribute('aria-label', 'Sort Models');
+        for (let entry of MModels.SortModes) {
+            let option = document.createElement('option');
+            option.value = entry[0];
+            option.textContent = entry[1];
+            this.sortSelect.appendChild(option);
+        }
+        this.sortSelect.addEventListener('change', () => {
+            this.saveSortSetting(this.sortSelect.value, this.sortReverse.classList.contains('m-selected'));
+            this.page = 0;
+            this.refresh();
+        });
+        this.sortReverse = mUI.el('button', 'm-models-sort-reverse', 'Reverse');
+        this.sortReverse.type = 'button';
+        this.sortReverse.addEventListener('click', () => {
+            let selected = !this.sortReverse.classList.contains('m-selected');
+            this.sortReverse.classList.toggle('m-selected', selected);
+            this.sortReverse.setAttribute('aria-pressed', selected ? 'true' : 'false');
+            this.saveSortSetting(this.sortSelect.value, selected);
+            this.page = 0;
+            this.refresh();
+        });
+        this.sortRow.appendChild(this.sortSelect);
+        this.sortRow.appendChild(this.sortReverse);
+        panel.appendChild(this.sortRow);
+        this.breadcrumb = mUI.el('div', 'm-model-breadcrumb');
+        panel.appendChild(this.breadcrumb);
         this.folderChips = mUI.el('div', 'm-folder-chips');
         panel.appendChild(this.folderChips);
         this.grid = mUI.el('div', 'm-model-grid');
         panel.appendChild(this.grid);
-        this.folderSentinel = mUI.el('div', 'm-scroll-sentinel');
-        panel.appendChild(this.folderSentinel);
-        this.folderLoadMore = mUI.el('button', 'm-model-plain-row', 'Load More');
-        this.folderLoadMore.type = 'button';
-        this.folderLoadMore.hidden = true;
-        this.folderLoadMore.addEventListener('click', () => this.renderFolderMore());
-        panel.appendChild(this.folderLoadMore);
+        this.pager = mUI.el('div', 'm-pagination');
+        this.prevPage = mUI.el('button', 'm-pagination-button', 'Previous');
+        this.nextPage = mUI.el('button', 'm-pagination-button', 'Next');
+        this.pageStatus = mUI.el('span', 'm-pagination-status');
+        this.prevPage.addEventListener('click', () => this.changePage(-1));
+        this.nextPage.addEventListener('click', () => this.changePage(1));
+        this.pager.appendChild(this.prevPage);
+        this.pager.appendChild(this.pageStatus);
+        this.pager.appendChild(this.nextPage);
+        panel.appendChild(this.pager);
         this.panel = panel;
-        if (typeof IntersectionObserver != 'undefined') {
-            this.folderObserver = new IntersectionObserver(entries => {
-                if (!this.panel.classList.contains('m-tab-active')) {
-                    return;
-                }
-                for (let entry of entries) {
-                    if (entry.isIntersecting) {
-                        this.renderFolderMore();
-                        return;
-                    }
-                }
-            }, { 'root': panel, 'rootMargin': '100% 0px' });
-        }
     }
 
     /** Every activation: fetch fresh (models change rarely; the call is cheap at depth 1). */
@@ -88,30 +112,37 @@ class MModels {
             btn.classList.toggle('m-selected', btn.dataset.subtype == this.subtype);
         }
         let isLora = this.subtype == 'LoRA';
+        let sort = this.sortSetting();
+        this.sortSelect.value = sort.mode;
+        this.sortReverse.classList.toggle('m-selected', sort.reverse);
+        this.sortReverse.setAttribute('aria-pressed', sort.reverse ? 'true' : 'false');
         this.search.placeholder = isLora ? 'Search all LoRAs' : 'Search all checkpoints';
         if (this.search.value.trim()) {
+            this.breadcrumb.style.display = 'none';
             this.renderSearch();
             return;
         }
+        this.breadcrumb.style.display = '';
         this.folderChips.style.display = '';
         this.grid.innerHTML = '';
         this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
         let version = this.folderRequestVersion;
-        genericRequest('ListModels', { 'path': this.folder, 'depth': 1, 'subtype': this.subtype, 'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
+        genericRequest('ListModels', { 'path': this.folder, 'depth': 1, 'subtype': this.subtype, 'sortBy': sort.mode, 'allowRemote': true, 'sortReverse': sort.reverse, 'dataImages': false }, data => {
             if (version != this.folderRequestVersion) {
                 return;
             }
             this.renderFolders(data.folders || []);
             this.grid.innerHTML = '';
             // Starred first, same as the Create-tab pickers and the genpage's own browsers. The folder result
-            // remains complete, then renders in chunks: a favourite belongs in the first visible chunk even
+            // remains complete, then renders in pages: a favourite belongs in the first visible page even
             // when the folder has hundreds of rows.
             this.folderModels = mState.starredFirst(data.files || [], this.subtype);
             if (this.folderModels.length == 0) {
                 this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
                 return;
             }
-            this.renderFolderMore();
+            this.folderIncomplete = data.complete === false;
+            this.renderPage();
         }, 0, err => {
             if (version != this.folderRequestVersion) {
                 return;
@@ -124,60 +155,69 @@ class MModels {
     invalidateFolderRender() {
         this.folderRequestVersion++;
         this.folderModels = [];
-        this.folderRendered = 0;
-        if (this.folderObserver) {
-            this.folderObserver.disconnect();
-        }
-        if (this.folderObserveFrame) {
-            cancelAnimationFrame(this.folderObserveFrame);
-            this.folderObserveFrame = null;
-        }
-        if (this.folderLoadMore) {
-            this.folderLoadMore.hidden = true;
-        }
+        this.folderIncomplete = false;
+        this.pager.hidden = true;
     }
 
-    /** Renders the next bounded group of folder cards and keeps the sentinel active while rows remain. */
-    renderFolderMore() {
-        if (!this.folderModels || this.folderRendered >= this.folderModels.length || !this.panel.classList.contains('m-tab-active')) {
-            return;
-        }
-        let target = Math.min(this.folderRendered + MModels.FolderChunkSize, this.folderModels.length);
-        let fragment = document.createDocumentFragment();
-        for (let i = this.folderRendered; i < target; i++) {
-            fragment.appendChild(this.buildCard(this.folderModels[i]));
-        }
-        this.grid.appendChild(fragment);
-        this.folderRendered = target;
-        let more = this.folderRendered < this.folderModels.length;
-        this.folderLoadMore.hidden = !more;
-        if (more && this.folderObserver) {
-            this.queueFolderObserve();
-        }
-        else if (this.folderObserver) {
-            this.folderObserver.disconnect();
-        }
-    }
+    /** Number of cards on one explicit page. */
+    static PageSize = 48;
 
-    /** Re-arms the sentinel after layout so a still-visible sentinel can request another bounded chunk. */
-    queueFolderObserve() {
-        this.folderObserver.disconnect();
-        if (this.folderObserveFrame) {
-            cancelAnimationFrame(this.folderObserveFrame);
-        }
-        this.folderObserveFrame = requestAnimationFrame(() => {
-            this.folderObserveFrame = null;
-            if (this.panel.classList.contains('m-tab-active') && this.folderRendered < this.folderModels.length) {
-                this.folderObserver.observe(this.folderSentinel);
+    /** Sort choices shared with Classic. */
+    static SortModes = [['Name', 'Name'], ['Title', 'Title'], ['DateCreated', 'Date Created'], ['DateModified', 'Date Modified']];
+
+    /** Reads the current subtype's Classic-compatible sort setting. */
+    sortSetting() {
+        let mode = 'Name';
+        let reverse = false;
+        try {
+            let stored = localStorage.getItem(`models_${this.subtype}_sort_by`);
+            if (MModels.SortModes.some(entry => entry[0] == stored)) {
+                mode = stored;
             }
-        });
+            reverse = localStorage.getItem(`models_${this.subtype}_sort_reverse`) == 'true';
+        }
+        catch (e) { /* storage can be unavailable */ }
+        return { 'mode': mode, 'reverse': reverse };
     }
 
-    /** Number of model cards inserted per folder-listing pass. */
-    static FolderChunkSize = 40;
+    /** Saves the same keys Classic reads. */
+    saveSortSetting(mode, reverse) {
+        try {
+            localStorage.setItem(`models_${this.subtype}_sort_by`, mode);
+            localStorage.setItem(`models_${this.subtype}_sort_reverse`, reverse ? 'true' : 'false');
+        }
+        catch (e) { /* storage can be unavailable */ }
+    }
 
-    /** Search results across every folder of the current subtype, capped like the Create-tab pickers. The
-     * lists are loaded on first search and cached on mCreate, which the pickers share. */
+    /** Renders one complete page and updates the explicit controls. */
+    renderPage(models = this.folderModels) {
+        let pages = Math.max(1, Math.ceil(models.length / MModels.PageSize));
+        this.page = Math.min(this.page, pages - 1);
+        this.grid.innerHTML = '';
+        let start = this.page * MModels.PageSize;
+        let end = Math.min(start + MModels.PageSize, models.length);
+        for (let i = start; i < end; i++) {
+            this.grid.appendChild(this.buildCard(models[i]));
+        }
+        if (this.folderIncomplete) {
+            this.grid.appendChild(mUI.el('div', 'm-models-search-count m-list-count', 'The server capped this folder listing. Search or open a narrower folder to find more models.'));
+        }
+        this.pager.hidden = models.length <= MModels.PageSize;
+        this.prevPage.disabled = this.page == 0;
+        this.nextPage.disabled = this.page >= pages - 1;
+        this.pageStatus.textContent = `Page ${this.page + 1} of ${pages} · ${models.length}`;
+        this.pageModels = models;
+    }
+
+    /** Moves one page without issuing another request. */
+    changePage(delta) {
+        this.page = Math.max(0, this.page + delta);
+        this.renderPage(this.pageModels || this.folderModels);
+        this.sortRow.scrollIntoView({ 'block': 'start' });
+    }
+
+    /** Search results across every folder of the current subtype. The lists are loaded on first search and
+     * cached on mCreate, which the pickers share; explicit pages keep every cached match reachable. */
     renderSearch() {
         this.folderChips.style.display = 'none';
         this.grid.innerHTML = '';
@@ -188,16 +228,9 @@ class MModels {
             this.loadSearchList();
             return;
         }
-        let matches = mState.starredFirst(MCreate.filterModels(list, this.search.value), this.subtype);
-        let shown = 0;
-        for (let model of matches) {
-            if (shown >= MCreate.ListCap) {
-                break;
-            }
-            this.grid.appendChild(this.buildCard(model));
-            shown++;
-        }
-        let count = mCreate.buildCountRow(shown, matches.length, isLora ? 'LoRAs' : 'checkpoints');
+        let matches = mState.starredFirst(MCreate.sortModels(MCreate.filterModels(list, this.search.value), this.sortSetting()), this.subtype);
+        this.renderPage(matches);
+        let count = mCreate.buildCountRow(matches.length, matches.length, isLora ? 'LoRAs' : 'checkpoints');
         count.classList.add('m-models-search-count');
         this.grid.appendChild(count);
     }
@@ -240,19 +273,22 @@ class MModels {
     /** Folder chips with a back chip when nested. */
     renderFolders(folders) {
         this.folderChips.innerHTML = '';
+        this.breadcrumb.innerHTML = '';
         if (this.folder != '') {
             let up = mUI.el('button', 'm-folder-chip m-folder-up', '\u2190');
             up.addEventListener('click', () => {
                 this.folder = this.folder.includes('/') ? this.folder.substring(0, this.folder.lastIndexOf('/')) : '';
+                this.page = 0;
                 this.refresh();
             });
-            this.folderChips.appendChild(up);
-            this.folderChips.appendChild(mUI.el('span', 'm-folder-current', this.folder));
+            this.breadcrumb.appendChild(up);
+            this.breadcrumb.appendChild(mUI.el('span', 'm-folder-current', this.folder));
         }
         for (let folder of folders) {
             let chip = mUI.el('button', 'm-folder-chip', folder);
             chip.addEventListener('click', () => {
                 this.folder = this.folder == '' ? folder : `${this.folder}/${folder}`;
+                this.page = 0;
                 this.refresh();
             });
             this.folderChips.appendChild(chip);
@@ -277,6 +313,11 @@ class MModels {
         if (thumb) {
             card.appendChild(thumb);
         }
+        else {
+            card.appendChild(mUI.el('div', 'm-model-card-placeholder', 'No Preview'));
+        }
+        card.title = [model.title, model.name, model.author, model.trigger_phrase].filter(Boolean).join('\n');
+        card.setAttribute('aria-label', card.title.replace(/\n/g, '. '));
         let star = mUI.starBadge(this.subtype, model.name);
         if (star) {
             // On the card the star is a corner badge over the thumbnail rather than a row item - a card with
@@ -284,7 +325,7 @@ class MModels {
             star.classList.add('m-model-star-badge');
             card.appendChild(star);
         }
-        card.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag(), this.subtype == 'LoRA'));
+        card.appendChild(mUI.modelText(model, trigger => mCreate.insertTriggerPhrase(trigger), this.subtype == 'LoRA'));
         if (model.local !== false && this.canEditMetadata()) {
             let civitBtn = mUI.el('button', 'm-model-civitai-btn', 'Load CivitAI');
             civitBtn.type = 'button';
