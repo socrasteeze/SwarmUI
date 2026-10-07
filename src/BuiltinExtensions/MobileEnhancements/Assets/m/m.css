@@ -1746,6 +1746,32 @@ html:has(.m-body) {
     margin-top: 0.7rem;
     padding: 0.5rem;
 }
+/* Under the search, not beside it: the field stays full width so iOS does not zoom, and the sort
+   row uses the same modes as Classic's model browser. Dates read newest-first until Reverse is on. */
+.m-lora-sort {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin-top: 0.4rem;
+}
+.m-lora-sort .m-sort-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
+}
+.m-lora-sort-reverse {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 0.7rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text-soft);
+}
+.m-lora-sort-reverse.m-selected {
+    color: var(--emphasis);
+    border-color: var(--emphasis);
+}
 .m-lora-results {
     display: flex;
     flex-direction: column;

@@ -815,6 +815,84 @@ const searched = await page.evaluate(() => [...document.querySelectorAll('.m-lor
     .map(row => row.querySelector('.m-model-name').textContent));
 check('LoRA picker: starred still leads a filtered list', searched.join(',') == 'zzz_starred,zzz_unstarred', searched.join(','));
 
+// Classic's model browser sorts Name, Title, DateCreated, DateModified, plus Reverse.
+// Dates are newest first. A missing timestamp sorts as newest, the same fallback ListModels uses.
+await page.fill('.m-lora-sheet .m-lora-search', '');
+await page.evaluate(pixel => {
+    localStorage.setItem('models_LoRA_sort_by', 'Name');
+    localStorage.setItem('models_LoRA_sort_reverse', 'false');
+    mState.starredModels = {};
+    mCreate.indexLoras([
+        { name: 'old.safetensors', title: 'Zed', time_created: 1000, time_modified: 5000, preview_image: pixel },
+        { name: 'new.safetensors', title: 'Amy', time_created: 3000, time_modified: 2000, preview_image: pixel },
+        { name: 'mid.safetensors', title: 'Middle', time_created: 2000, time_modified: 9000, preview_image: pixel },
+        { name: 'nostamp.safetensors', title: '', time_created: 0, time_modified: 0, preview_image: pixel }
+    ]);
+    document.querySelector('.m-lora-sort select').value = 'Name';
+    document.querySelector('.m-lora-sheet .m-lora-search').dispatchEvent(new Event('input'));
+}, PIXEL);
+const loraKeys = () => page.evaluate(() => [...document.querySelectorAll('.m-lora-results .m-model-result')].map(row => {
+    let sub = row.querySelector('.m-model-sub');
+    return (sub && sub.textContent) || row.querySelector('.m-model-name').textContent;
+}));
+await page.locator('.m-lora-sort select').selectOption('Name');
+check('LoRA sort: Name is A-Z by file name', (await loraKeys()).join(',') == 'mid,new,nostamp,old');
+await page.locator('.m-lora-sort select').selectOption('DateCreated');
+check('LoRA sort: Date created is newest first, and a missing date counts as newest',
+    (await loraKeys()).join(',') == 'nostamp,new,mid,old');
+await page.click('.m-lora-sort-reverse');
+check('LoRA sort: Reverse flips Date created to oldest first',
+    (await loraKeys()).join(',') == 'old,mid,new,nostamp');
+await page.click('.m-lora-sort-reverse');
+await page.locator('.m-lora-sort select').selectOption('DateModified');
+check('LoRA sort: Date modified uses its own timestamp',
+    (await loraKeys()).join(',') == 'nostamp,mid,old,new');
+await page.locator('.m-lora-sort select').selectOption('Title');
+check('LoRA sort: Title is A-Z, with a blank title before named ones',
+    (await loraKeys()).join(',') == 'nostamp,new,mid,old');
+await page.evaluate(() => { mState.starredModels = { 'LoRA': ['old.safetensors'] }; });
+await page.locator('.m-lora-sort select').selectOption('DateCreated');
+check('LoRA sort: a star stays first when the date order would bury it',
+    (await loraKeys()).join(',') == 'old,nostamp,new,mid');
+await page.fill('.m-lora-sheet .m-lora-search', 'mid');
+check('LoRA sort: search still narrows the sorted list', (await loraKeys()).join(',') == 'mid');
+await page.fill('.m-lora-sheet .m-lora-search', '');
+const sortLayout = async (width, height) => {
+    await page.setViewportSize({ width, height });
+    return page.evaluate(() => {
+        let sheet = document.querySelector('.m-lora-sheet').getBoundingClientRect();
+        let search = document.querySelector('.m-lora-sheet .m-lora-search').getBoundingClientRect();
+        let sort = document.querySelector('.m-lora-sort').getBoundingClientRect();
+        let select = document.querySelector('.m-lora-sort select').getBoundingClientRect();
+        let reverse = document.querySelector('.m-lora-sort-reverse').getBoundingClientRect();
+        return {
+            searchBelow: sort.top >= search.bottom - 1,
+            searchFull: Math.abs(search.width - sort.width) <= 1,
+            sideBySide: select.right <= reverse.left + 1,
+            inside: reverse.right <= sheet.right + 1 && select.left >= sheet.left - 1,
+            selectH: select.height,
+            reverseH: reverse.height,
+            pageOverflow: reverse.right <= document.documentElement.clientWidth + 1
+        };
+    });
+};
+const sortPhone = await sortLayout(390, 844);
+check('LoRA sort row sits under a full-width search on a phone',
+    sortPhone.searchBelow && sortPhone.searchFull && sortPhone.sideBySide && sortPhone.inside && sortPhone.pageOverflow
+    && sortPhone.selectH >= 44 && sortPhone.reverseH >= 44, JSON.stringify(sortPhone));
+const sortDesktop = await sortLayout(1280, 800);
+check('LoRA sort row stays one line on a wide window',
+    sortDesktop.searchBelow && sortDesktop.searchFull && sortDesktop.sideBySide && sortDesktop.inside && sortDesktop.pageOverflow
+    && sortDesktop.selectH >= 44 && sortDesktop.reverseH >= 44, JSON.stringify(sortDesktop));
+await page.setViewportSize({ width: WIDTH, height: HEIGHT });
+await page.evaluate(pixel => {
+    localStorage.setItem('models_LoRA_sort_by', 'Name');
+    localStorage.setItem('models_LoRA_sort_reverse', 'false');
+    mState.starredModels = { 'LoRA': ['zzz_starred.safetensors'], 'Stable-Diffusion': ['zzz_starred.safetensors'] };
+    mCreate.indexLoras(['aaa_first.safetensors', 'bbb_middle.safetensors', 'zzz_starred.safetensors', 'zzz_unstarred.safetensors']
+        .map(name => ({ name, title: '', trigger_phrase: '', preview_image: pixel })));
+}, PIXEL);
+
 // The checkpoint sheet uses the same ordering, off its own subtype's star list.
 await page.evaluate(() => {
     // Dismiss through openSheet so its modal stack and inert state stay synchronized.

@@ -919,6 +919,65 @@ class MCreate {
     /** How many rows a picker renders at once. Truncation is reported rather than silent - see buildCountRow. */
     static ListCap = 120;
 
+    /** Classic model-browser sort. The stored value is ListModels' sortBy: Name, Title, DateCreated, DateModified. */
+    static LoraSortModes = [['Name', 'Name'], ['Title', 'Title'], ['DateCreated', 'Date created'], ['DateModified', 'Date modified']];
+
+    /** The LoRA sort Classic last saved, or Name. Shared keys, so the two layouts stay on the same choice. */
+    static loraSortSetting() {
+        let mode = 'Name';
+        let reverse = false;
+        try {
+            let stored = localStorage.getItem('models_LoRA_sort_by');
+            if (MCreate.LoraSortModes.some(entry => entry[0] == stored)) {
+                mode = stored;
+            }
+            reverse = localStorage.getItem('models_LoRA_sort_reverse') == 'true';
+        }
+        catch (e) {
+            /* private mode has no storage; Name is the same default Classic uses */
+        }
+        return { 'mode': mode, 'reverse': reverse };
+    }
+
+    /** Orders a LoRA list the way Classic's model browser does.
+     * Name and Title are A-Z, then by file name. Dates are newest first.
+     * A missing timestamp sorts as newest, matching ListModels' unset-metadata fallback.
+     * Reverse flips that whole order. Returns a copy. */
+    static sortLoras(list) {
+        let setting = MCreate.loraSortSetting();
+        let mode = setting.mode;
+        let reverse = setting.reverse;
+        let nameOf = (model) => `${model.name || ''}`;
+        let titleOf = (model) => model.title ? `${model.title}` : '';
+        let timeOf = (model, field) => {
+            let n = Number(model[field]);
+            if (!Number.isFinite(n) || n <= 0) {
+                return Number.MAX_SAFE_INTEGER;
+            }
+            return n;
+        };
+        return list.slice().sort((a, b) => {
+            let primary = 0;
+            if (mode == 'Title') {
+                primary = titleOf(a).localeCompare(titleOf(b));
+            }
+            if (mode == 'DateCreated' || mode == 'DateModified') {
+                let field = mode == 'DateCreated' ? 'time_created' : 'time_modified';
+                let delta = timeOf(b, field) - timeOf(a, field);
+                if (delta != 0) {
+                    primary = delta;
+                }
+            }
+            if (primary == 0) {
+                primary = nameOf(a).localeCompare(nameOf(b));
+            }
+            if (reverse) {
+                primary = -primary;
+            }
+            return primary;
+        });
+    }
+
     /** Footer telling you how much of the list you are actually looking at. A cap that says nothing is
      * indistinguishable from models that are missing. */
     buildCountRow(shown, total, noun) {
@@ -2684,6 +2743,42 @@ class MCreate {
         search.placeholder = 'Search LoRAs to add...';
         search.className = 'm-lora-search';
         addWrap.appendChild(search);
+        let sortRow = mUI.el('div', 'm-lora-sort');
+        let sortSelect = document.createElement('select');
+        sortSelect.className = 'm-sort-select';
+        sortSelect.setAttribute('aria-label', 'Sort LoRAs');
+        for (let entry of MCreate.LoraSortModes) {
+            let opt = document.createElement('option');
+            opt.value = entry[0];
+            opt.textContent = entry[1];
+            sortSelect.appendChild(opt);
+        }
+        let sortSetting = MCreate.loraSortSetting();
+        sortSelect.value = sortSetting.mode;
+        sortSelect.addEventListener('change', () => {
+            try {
+                localStorage.setItem('models_LoRA_sort_by', sortSelect.value);
+            }
+            catch (e) { /* ignore */ }
+            renderResults();
+        });
+        let reverseBtn = mUI.el('button', 'm-lora-sort-reverse', 'Reverse');
+        reverseBtn.type = 'button';
+        reverseBtn.setAttribute('aria-pressed', sortSetting.reverse ? 'true' : 'false');
+        reverseBtn.classList.toggle('m-selected', sortSetting.reverse);
+        reverseBtn.addEventListener('click', () => {
+            let on = !reverseBtn.classList.contains('m-selected');
+            reverseBtn.classList.toggle('m-selected', on);
+            reverseBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            try {
+                localStorage.setItem('models_LoRA_sort_reverse', on ? 'true' : 'false');
+            }
+            catch (e) { /* ignore */ }
+            renderResults();
+        });
+        sortRow.appendChild(sortSelect);
+        sortRow.appendChild(reverseBtn);
+        addWrap.appendChild(sortRow);
         let results = mUI.el('div', 'm-lora-results');
         addWrap.appendChild(results);
         let archState = { 'showAll': false };
@@ -2713,7 +2808,7 @@ class MCreate {
             for (let i = 0; i < curLoras.length; i++) {
                 active.add(MState.stripModelExt(curLoras[i].name));
             }
-            let matches = mState.starredFirst(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name))), 'LoRA');
+            let matches = mState.starredFirst(MCreate.sortLoras(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name)))), 'LoRA');
             let shown = 0;
             for (let model of matches) {
                 let item = mUI.el('div', 'm-model-result');
