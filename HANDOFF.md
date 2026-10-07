@@ -1,9 +1,9 @@
 # HANDOFF
 
-**Updated:** 2026-10-05 · **Branch:** main · **Tree:** `/simple` history paging, prompt-save timing, and image-browser place retention, pending the clean push
+**Updated:** 2026-10-05 · **Branch:** main · **Tree:** `/simple` history paging, prompt-save timing, and image-browser place retention, published through `23e6c0fb` at the October 6 review
 
 ## State
-This commit contains the verified 2026-10-03 web UI, PWA, accessibility, and data-safety delivery. Publication, live restart/deployment, physical-device checks, and live generation remain pending.
+The 2026-10-03 web UI, PWA, accessibility, and data-safety delivery is in local `origin/main` through `23e6c0fb`. Live restart/deployment, physical-device checks, and live generation remain separate.
 The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
@@ -181,3 +181,15 @@ node src/BuiltinExtensions/MobileEnhancements/verify/verify-mobile-perf.mjs
 node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-create-panel.mjs
 node tools/swarm_api.mjs GetCurrentStatus
 ```
+
+## Agent-ready follow-up - October 6, 2026 PDT
+
+**Reviewed:** `main` at `23e6c0fb7c`. This review used local source and the supplied audit.
+
+1. Cache lightweight search text by item identity and data revision. Filter before the full descriptor in `src/wwwroot/js/genpage/helpers/browsers.js`.
+2. Cache parsed history metadata in `src/wwwroot/js/genpage/gentab/outputhistory.js`. Invalidate when source metadata or the item revision changes.
+3. Check refreshed metadata, sort/filter changes, deletion, navigation, and scroll retention with offline regressions. Measure descriptor counts and repeatable input-to-paint cost on a synthetic large library.
+
+**Evidence/source:** `docs/WebUI-Performance-Review.md` early-filter/metadata-reuse findings and the two current source paths. Local `origin/main` already contains the prior handoff delivery; an old pending-push statement is stale.
+**Operator gates:** Keep recursive History semantics and existing publication safeguards. Preserve dirty custom-node checkouts during any later sync.
+**Runtime gates:** GPU generation, live restart/deployment, and physical PWA checks remain separate. No backend, dependency, test, or live-state operation ran here.
