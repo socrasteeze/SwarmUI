@@ -871,7 +871,7 @@ html:has(.m-body) {
 .m-sort-select {
     flex: 1 1 auto;
     min-width: 0;
-    min-height: 40px;
+    min-height: 44px;
     padding: 0 0.4rem;
 }
 .m-refresh-button {
@@ -881,7 +881,7 @@ html:has(.m-body) {
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     min-width: 44px;
-    min-height: 40px;
+    min-height: 44px;
     font-size: 17px;
 }
 
@@ -2263,6 +2263,9 @@ html:has(.m-body) {
     grid-template-columns: repeat(3, 1fr);
     gap: 0.3rem;
 }
+.m-images-empty {
+    grid-column: 1 / -1;
+}
 .m-live-grid {
     margin-bottom: 0.3rem;
 }
@@ -2360,6 +2363,79 @@ html:has(.m-body) {
     min-height: 44px;
     font-size: max(16px, 100%);
 }
+.m-models-sort {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+.m-models-sort-reverse {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 0.7rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text-soft);
+}
+.m-models-sort-reverse.m-selected {
+    color: var(--emphasis);
+    border-color: var(--emphasis);
+}
+.m-model-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    margin-bottom: 0.4rem;
+}
+.m-images-search {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 44px;
+    margin: 0 0 0.4rem 0;
+    padding: 0 0.5rem;
+    font-size: max(16px, 100%);
+}
+.m-image-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    margin-bottom: 0.4rem;
+}
+.m-image-breadcrumb:empty {
+    display: none;
+}
+.m-image-breadcrumb .m-folder-current {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.m-images-search + .m-image-breadcrumb + .m-folder-chips {
+    display: flex;
+    align-items: stretch;
+}
+.m-images-search + .m-image-breadcrumb + .m-folder-chips .m-folder-chip {
+    flex: 1 1 8rem;
+    width: auto;
+    border-radius: 0.5rem;
+}
+.m-model-breadcrumb:empty {
+    display: none;
+}
+.m-model-breadcrumb .m-folder-current {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.m-models-sort + .m-model-breadcrumb + .m-folder-chips {
+    display: flex;
+    align-items: stretch;
+}
+.m-models-sort + .m-model-breadcrumb + .m-folder-chips .m-folder-chip {
+    flex: 1 1 8rem;
+    width: auto;
+    border-radius: 0.5rem;
+}
 /* The count/truncation note spans the grid instead of sitting in one card-sized cell. */
 .m-models-search-count {
     grid-column: 1 / -1;
@@ -2368,6 +2444,12 @@ html:has(.m-body) {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
     gap: 0.4rem;
+    align-items: stretch;
+}
+@media (max-width: 767px) {
+    .m-model-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 .m-model-card {
     background: var(--background-panel);
@@ -2376,14 +2458,56 @@ html:has(.m-body) {
     overflow: hidden;
     /* Anchor for .m-model-star-badge. */
     position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding-bottom: 2.65rem;
 }
-.m-model-card img {
-    width: 100%;
+.m-model-card img,
+.m-model-card-placeholder {
+    width: auto;
+    align-self: stretch;
     aspect-ratio: 1;
     object-fit: cover;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+}
+.m-model-card-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--background) 65%, var(--background-panel));
+    color: var(--text-soft);
+    font-size: 11px;
 }
 .m-model-card .m-model-text {
     padding: 0.35rem 0.4rem;
+    flex: 0 0 auto;
+    min-height: 5rem;
+    max-height: 5rem;
+    overflow: hidden;
+}
+.m-model-card .m-model-name,
+.m-model-card .m-model-sub {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.m-model-card .m-model-name {
+    -webkit-line-clamp: 2;
+}
+.m-model-card .m-model-sub {
+    -webkit-line-clamp: 1;
+}
+.m-model-card .m-model-trigger {
+    max-height: 1.55rem;
+    overflow: hidden;
+}
+.m-model-card .m-trigger-chip {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    overflow: hidden;
 }
 .m-model-card.m-selected {
     border-color: var(--emphasis);
@@ -2409,6 +2533,35 @@ html:has(.m-body) {
     min-height: 36px;
     font-size: 12px;
     padding: 0.25rem 0.4rem;
+    position: absolute;
+    left: 0;
+    bottom: 0;
+}
+.m-pagination {
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 1fr) auto minmax(5.5rem, 1fr);
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.6rem;
+}
+.m-pagination[hidden] {
+    display: none;
+}
+.m-pagination-button {
+    min-height: 44px;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text);
+}
+.m-pagination-button:disabled {
+    opacity: 0.4;
+}
+.m-pagination-status {
+    color: var(--text-soft);
+    font-size: 12px;
+    text-align: center;
+    white-space: nowrap;
 }
 .m-model-civitai-btn:active {
     background: color-mix(in srgb, var(--emphasis) 18%, var(--background));
@@ -2910,6 +3063,22 @@ html:has(.m-body) {
     color: var(--text);
     font-size: max(16px, 100%);
 }
+.m-imgbrowser-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 0.55fr);
+    gap: 0.35rem;
+}
+.m-imgbrowser-sort {
+    min-width: 0;
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: 0 0.4rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background);
+    color: var(--text);
+    font-size: max(16px, 100%);
+}
 @media (min-width: 640px) {
     .m-imgbrowser-body {
         grid-template-columns: minmax(120px, 18%) minmax(0, 1fr);
@@ -2923,7 +3092,7 @@ html:has(.m-body) {
     }
     .m-imgbrowser-title-row,
     .m-imgbrowser-navigation,
-    .m-imgbrowser-search,
+    .m-imgbrowser-search-row,
     .m-imgbrowser-body,
     .m-imgbrowser-footer {
         grid-column: 1 / -1;
@@ -3008,11 +3177,16 @@ html:has(.m-body) {
     overflow-y: auto;
     overscroll-behavior: contain;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.2rem;
     scrollbar-gutter: stable;
     align-content: start;
     -webkit-overflow-scrolling: touch;
+}
+@media (min-width: 768px) {
+    .m-imgbrowser-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
 }
 .m-imgbrowser-tile {
     /* WebKit often ignores aspect-ratio on <button>; pad-box keeps a square cell. */

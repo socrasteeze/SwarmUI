@@ -1,7 +1,6 @@
 # Prompt Enhance — architecture-aware local-LLM prompt writer
 
 **Status:** design only. Nothing is implemented. Written 2026-09-12 against fork HEAD `64ba46f`.
-**Branch:** `claude/prompt-enhancer-local-llm-39bs9z` (SwarmUI and ComfyUI both).
 
 ## Mission
 

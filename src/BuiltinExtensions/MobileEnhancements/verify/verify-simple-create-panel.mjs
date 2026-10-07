@@ -786,6 +786,33 @@ const keyboardGeometry = await page.evaluate(() => {
 check('keyboard state keeps the compact preview and prompt position stable', keyboardGeometry.before.preview == keyboardGeometry.during.preview
     && keyboardGeometry.before.prompt == keyboardGeometry.during.prompt, JSON.stringify(keyboardGeometry));
 
+// ---- LoRA trigger chips insert the full metadata phrase ----
+const literalTrigger = await page.evaluate(() => {
+    let trigger = Array.from({ length: 12 }, (_, i) => `trigger_word_${i}`).join(', ');
+    let originalPrompt = mState.params.prompt;
+    let originalCaret = mCreate.promptCaret;
+    let originalSubtype = mModels.subtype;
+    mState.params.prompt = 'before after';
+    mCreate.promptCaret = 6;
+    let loras = JSON.stringify(mState.getLoras());
+    mModels.subtype = 'LoRA';
+    let card = mModels.buildCard({ name: 'trigger_test.safetensors', trigger_phrase: trigger, local: false });
+    card.querySelector('.m-trigger-chip').click();
+    let prompt = mState.params.prompt;
+    mCreate.insertTriggerPhrase('   ');
+    let result = { prompt, expected: `before ${trigger} after`, unchanged: prompt == mState.params.prompt,
+        previewShortened: card.querySelector('.m-trigger-chip').textContent.length < trigger.length,
+        sameLoras: loras == JSON.stringify(mState.getLoras()) };
+    mState.params.prompt = originalPrompt;
+    mCreate.promptCaret = originalCaret;
+    mModels.subtype = originalSubtype;
+    mState.changed();
+    return result;
+});
+check('LoRA card inserts every trigger word at the prompt caret', literalTrigger.prompt == literalTrigger.expected && !literalTrigger.prompt.includes('<trigger>'), JSON.stringify(literalTrigger));
+check('a shortened trigger chip inserts the full phrase without selecting the LoRA', literalTrigger.previewShortened && literalTrigger.sameLoras, JSON.stringify(literalTrigger));
+check('empty trigger words leave the prompt unchanged', literalTrigger.unchanged);
+
 // ---- Starred models sort first ----
 await page.evaluate(pixel => {
     let models = ['aaa_first.safetensors', 'bbb_middle.safetensors', 'zzz_starred.safetensors', 'zzz_unstarred.safetensors']
@@ -884,6 +911,54 @@ const sortDesktop = await sortLayout(1280, 800);
 check('LoRA sort row stays one line on a wide window',
     sortDesktop.searchBelow && sortDesktop.searchFull && sortDesktop.sideBySide && sortDesktop.inside && sortDesktop.pageOverflow
     && sortDesktop.selectH >= 44 && sortDesktop.reverseH >= 44, JSON.stringify(sortDesktop));
+
+// Explicit pages replace the old 120-row cutoff. Every match stays reachable without an automatic append.
+await page.setViewportSize({ width: WIDTH, height: HEIGHT });
+await page.evaluate(pixel => {
+    localStorage.setItem('models_LoRA_sort_by', 'Name');
+    localStorage.setItem('models_LoRA_sort_reverse', 'false');
+    mState.starredModels = {};
+    mCreate.indexLoras(Array.from({ length: 110 }, (_, i) => ({
+        name: `paged_${String(i).padStart(3, '0')}.safetensors`, preview_image: pixel
+    })));
+    document.querySelector('.m-lora-sheet .m-lora-search').value = '';
+    document.querySelector('.m-lora-sheet .m-lora-search').dispatchEvent(new Event('input'));
+}, PIXEL);
+let pickerPage = await page.evaluate(() => ({
+    rows: document.querySelectorAll('.m-lora-results .m-model-result').length,
+    status: document.querySelector('.m-lora-results .m-pagination-status').textContent,
+    previous: document.querySelector('.m-lora-results .m-pagination-button').disabled
+}));
+check('LoRA picker starts on an explicit 48-row page', pickerPage.rows == 48 && pickerPage.status == 'Page 1 of 3' && pickerPage.previous, JSON.stringify(pickerPage));
+await page.click('.m-lora-results .m-pagination-button:last-child');
+pickerPage = await page.evaluate(() => ({
+    first: document.querySelector('.m-lora-results .m-model-name').textContent,
+    rows: document.querySelectorAll('.m-lora-results .m-model-result').length,
+    status: document.querySelector('.m-lora-results .m-pagination-status').textContent
+}));
+check('LoRA picker Next reaches the second distinct page', pickerPage.first == 'paged_048' && pickerPage.rows == 48 && pickerPage.status == 'Page 2 of 3', JSON.stringify(pickerPage));
+await page.fill('.m-lora-sheet .m-lora-search', 'paged_109');
+pickerPage = await page.evaluate(() => ({
+    rows: document.querySelectorAll('.m-lora-results .m-model-result').length,
+    name: document.querySelector('.m-lora-results .m-model-name')?.textContent,
+    hidden: document.querySelector('.m-lora-results .m-pagination').hidden
+}));
+check('LoRA search resets to page one and can reach a last-page item', pickerPage.rows == 1 && pickerPage.name == 'paged_109' && pickerPage.hidden, JSON.stringify(pickerPage));
+await page.fill('.m-lora-sheet .m-lora-search', '');
+await page.click('.m-lora-results .m-pagination-button:last-child');
+await page.locator('.m-lora-sort select').selectOption('Title');
+pickerPage = await page.evaluate(() => document.querySelector('.m-lora-results .m-pagination-status').textContent);
+check('changing LoRA sort resets pagination', pickerPage == 'Page 1 of 3', pickerPage);
+await page.click('.m-lora-results .m-pagination-button:last-child');
+await page.click('.m-lora-results .m-pagination-button:last-child');
+await page.click('.m-lora-results .m-model-result');
+pickerPage = await page.evaluate(() => ({
+    status: document.querySelector('.m-lora-results .m-pagination-status').textContent,
+    rows: document.querySelectorAll('.m-lora-results .m-model-result').length,
+    active: mState.getLoras().some(row => row.name == 'paged_096.safetensors')
+}));
+check('selecting on the final LoRA page removes that row and keeps a valid page', pickerPage.status == 'Page 3 of 3' && pickerPage.rows == 13 && pickerPage.active, JSON.stringify(pickerPage));
+
 await page.setViewportSize({ width: WIDTH, height: HEIGHT });
 await page.evaluate(pixel => {
     localStorage.setItem('models_LoRA_sort_by', 'Name');

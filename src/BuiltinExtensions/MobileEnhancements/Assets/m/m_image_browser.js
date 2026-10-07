@@ -7,7 +7,18 @@ class MImageBrowser {
 
     static StorageKey = 'm_client_img_browser_roots';
 
-    /** Four columns with twelve rows per page. */
+    /** Persisted picker sort choice shared by Output and Drives. */
+    static SortStorageKey = 'm_client_img_browser_sort';
+
+    /** Labels and their descending-base API sort parameters. */
+    static SortModes = {
+        'Newest First': ['Date', false],
+        'Oldest First': ['Date', true],
+        'Name A-Z': ['Name', true],
+        'Name Z-A': ['Name', false]
+    };
+
+    /** Forty-eight images: sixteen mobile rows or twelve desktop rows. */
     static PageSize = 48;
 
     /** Default roots under the user OutputPath. Paths are ListImages-relative (empty = output root). */
@@ -35,6 +46,15 @@ class MImageBrowser {
         this.machinePath = '';
         /** Last selected source in this browser instance. */
         this.source = 'output';
+        /** Image order shared by Output and Drives in this browser instance. */
+        this.sortMode = 'Name A-Z';
+        try {
+            let stored = localStorage.getItem(MImageBrowser.SortStorageKey);
+            if (MImageBrowser.SortModes[stored]) {
+                this.sortMode = stored;
+            }
+        }
+        catch (e) { /* storage may be unavailable */ }
         /** Page and scroll for each folder visited during this page load. A reload clears it. */
         this.sessionPlaces = {};
     }
@@ -197,7 +217,20 @@ class MImageBrowser {
         searchInput.setAttribute('aria-label', 'Search Filenames');
         searchInput.autocomplete = 'off';
         searchInput.spellcheck = false;
-        content.appendChild(searchInput);
+        let searchRow = mUI.el('div', 'm-imgbrowser-search-row');
+        searchRow.appendChild(searchInput);
+        let sortSelect = document.createElement('select');
+        sortSelect.className = 'm-imgbrowser-sort';
+        sortSelect.setAttribute('aria-label', 'Sort Images');
+        for (let label in MImageBrowser.SortModes) {
+            let option = document.createElement('option');
+            option.value = label;
+            option.textContent = label;
+            sortSelect.appendChild(option);
+        }
+        sortSelect.value = this.sortMode;
+        searchRow.appendChild(sortSelect);
+        content.appendChild(searchRow);
         let body = mUI.el('div', 'm-imgbrowser-body');
         let foldersPanel = mUI.el('div', 'm-imgbrowser-folders-panel');
         foldersPanel.appendChild(mUI.el('div', 'm-imgbrowser-panel-title', 'Folders'));
@@ -485,7 +518,7 @@ class MImageBrowser {
             loadPreviews();
         };
         /** Key for the folder currently on screen. Output and Drives do not share a page. */
-        let placeKey = () => this.source == 'machine' ? `machine\n${this.machinePath}` : `output\n${this.path}`;
+        let placeKey = () => this.source == 'machine' ? `machine\n${this.machinePath}\n${this.sortMode}` : `output\n${this.path}\n${this.sortMode}`;
         let suppressRemember = false;
         /** Writes the current page and scroll. Skipped while a refresh is forcing the grid back to the top. */
         let remember = () => {
@@ -526,6 +559,7 @@ class MImageBrowser {
             upBtn.disabled = true;
             status.textContent = 'Loading...';
             let search = searchInput.value.trim();
+            let [sortBy, sortReverse] = MImageBrowser.SortModes[this.sortMode];
             let finishPage = data => {
                 let total = Number(data.total) || 0;
                 let lastOffset = Math.max(0, Math.ceil(total / MImageBrowser.PageSize) - 1) * MImageBrowser.PageSize;
@@ -572,7 +606,7 @@ class MImageBrowser {
                 let requestedPath = this.machinePath;
                 genericRequest('ListSimpleImageFolder', {
                     'path': this.machinePath, 'offset': offset, 'limit': MImageBrowser.PageSize,
-                    'search': search, 'image_page': true
+                    'search': search, 'image_page': true, 'sortBy': sortBy, 'sortReverse': sortReverse
                 }, data => {
                     if (closed || !content.isConnected || version != requestVersion) {
                         return;
@@ -596,7 +630,7 @@ class MImageBrowser {
             upBtn.disabled = parentPath == null;
             renderRoots();
             genericRequest('ListImages', {
-                'path': this.path, 'depth': 1, 'sortBy': 'Date', 'sortReverse': true,
+                'path': this.path, 'depth': 1, 'sortBy': sortBy, 'sortReverse': sortReverse,
                 'offset': offset, 'limit': MImageBrowser.PageSize, 'search': search, 'media_types': mediaTypes
             }, data => {
                 if (closed || !content.isConnected || version != requestVersion) {
@@ -631,6 +665,19 @@ class MImageBrowser {
                 this.dismissKeyboard();
                 refresh();
             }
+        });
+        sortSelect.addEventListener('change', () => {
+            remember();
+            this.sortMode = sortSelect.value;
+            try {
+                localStorage.setItem(MImageBrowser.SortStorageKey, this.sortMode);
+            }
+            catch (e) { /* storage may be unavailable */ }
+            requestVersion++;
+            selectionVersion++;
+            previousBtn.disabled = true;
+            nextBtn.disabled = true;
+            refresh(0);
         });
         outputBtn.addEventListener('click', () => {
             remember();

@@ -1,349 +1,129 @@
-/**
- * /simple Models-tab bounded rendering harness.
- *
- * Checks the live m_models.js source with a small browser fixture. It covers bounded folder cards, all-model
- * reachability, stale ListModels callbacks, hidden-tab observer behavior, search invalidation, and the manual
- * Load More fallback. Run from the repository root:
- *     node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-model-loading.mjs
- * Set SWARM_WEBKIT=1 for WebKit; SWARM_CHROMIUM can select a Chromium executable.
- */
+/** /simple Models-tab pagination, sorting, stale-request, and layout harness. */
 import { chromium, webkit } from 'playwright';
 import { mkdirSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const SOURCE = readFileSync(`${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m/m_models.js`, 'utf8');
+const MODELS = readFileSync(`${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m/m_models.js`, 'utf8');
+const CREATE = readFileSync(`${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m/m_create.js`, 'utf8');
 const CSS = readFileSync(`${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m/m.css`, 'utf8');
-const results = [];
-
-function check(name, pass, detail = '') {
-    results.push({ name, pass });
-    console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  ${detail}` : ''}`);
-}
-
 const engine = process.env.SWARM_WEBKIT == '1' ? webkit : chromium;
 const browser = await engine.launch(engine == chromium && process.env.SWARM_CHROMIUM ? { executablePath: process.env.SWARM_CHROMIUM } : {});
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-page.on('pageerror', error => check(`no page errors (${error.message})`, false));
-await page.setContent('<main id="host"></main>');
+let failed = false;
+function check(name, pass, detail = '') {
+    failed ||= !pass;
+    console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  ${detail}` : ''}`);
+}
+page.on('pageerror', error => check(`no page errors: ${error.message}`, false));
+await page.setContent('<style>:root{--background:#111;--background-panel:#222;--text:#eee;--text-soft:#aaa;--border-color:#555;--emphasis:#85f}</style><main><section class="m-panel m-tab-active"></section></main>');
+await page.addStyleTag({ content: CSS });
 await page.evaluate(() => {
     window.__requests = [];
     window.__warnings = [];
-    window.__notes = [];
-    window.__observers = [];
-    window.IntersectionObserver = class {
-        constructor(callback, options) {
-            this.callback = callback;
-            this.options = options;
-            this.targets = new Set();
-            this.disconnects = 0;
-            window.__observers.push(this);
-        }
-        observe(target) {
-            this.targets.add(target);
-        }
-        disconnect() {
-            this.targets.clear();
-            this.disconnects++;
-        }
-    };
+    let stored = new Map();
+    Object.defineProperty(window, 'localStorage', { value: { getItem: key => stored.has(key) ? stored.get(key) : null, setItem: (key, value) => stored.set(key, `${value}`) } });
     window.mUI = {
-        el: (tag, classes, text = '') => {
-            let el = document.createElement(tag);
-            el.className = classes;
-            el.textContent = text;
-            return el;
-        },
-        modelThumb: model => {
-            let image = document.createElement('img');
-            image.alt = model.name;
-            return image;
-        },
+        el: (tag, classes, text = '') => { let el = document.createElement(tag); el.className = classes; el.textContent = text; return el; },
+        modelThumb: model => model.preview ? Object.assign(document.createElement('img'), { src: model.preview }) : null,
         starBadge: () => null,
-        modelText: model => {
-            let text = document.createElement('div');
-            text.className = 'm-model-text';
-            text.textContent = model.name;
-            return text;
-        },
-        modelName: name => `${name}`.split('/').pop(),
-        modelLines: model => ({ primary: model.name }),
-        note: message => window.__notes.push(message),
-        warn: message => window.__warnings.push(message),
-        openSheet: () => () => { }
+        modelText: model => { let wrap = document.createElement('div'); wrap.className = 'm-model-text'; let name = document.createElement('div'); name.className = 'm-model-name'; name.textContent = model.name; wrap.appendChild(name); return wrap; },
+        modelName: name => name, modelLines: model => ({ primary: model.name }), note: () => {}, warn: message => window.__warnings.push(message), openSheet: () => () => {}
     };
-    window.mState = {
-        params: {},
-        loras: [],
-        starredFirst: files => [...files].sort((a, b) => a.starred == b.starred ? a.name.localeCompare(b.name) : (a.starred ? -1 : 1)),
-        getLoras: () => [...window.mState.loras],
-        setLoras: rows => { window.mState.loras = rows; },
-        changed: () => { }
-    };
-    window.MState = { sameModel: (a, b) => a == b };
-    window.MCreate = {
-        ListCap: 120,
-        filterModels: (models, query) => models.filter(model => model.name.toLowerCase().includes(query.toLowerCase()))
-    };
-    window.mCreate = {
-        insertTriggerTag: () => { },
-        loraList: null,
-        modelList: null,
-        indexLoras: () => { },
-        enrichLoraMetadata: done => done(),
-        buildCountRow: (shown, total) => {
-            let row = document.createElement('div');
-            row.textContent = `${shown}/${total}`;
-            return row;
-        }
-    };
+    window.mState = { params: {}, starredFirst: files => [...files].sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)), getLoras: () => [], setLoras: () => {}, changed: () => {} };
+    window.MState = { sameModel: (a, b) => a == b, stripModelExt: name => name };
+    window.mCreate = { loraList: null, modelList: null, insertTriggerPhrase: () => {}, indexLoras: () => {}, enrichLoraMetadata: done => done(), buildCountRow: (shown, total) => mUI.el('div', 'm-list-count', `${shown}/${total}`) };
     window.permissions = { hasPermission: () => false };
-    window.genericRequest = (route, args, success, depth, fail) => {
-        window.__requests.push({ route, args, success, fail });
-    };
+    window.genericRequest = (route, args, success, depth, fail) => window.__requests.push({ route, args, success, fail });
 });
-await page.addScriptTag({ content: SOURCE });
-
+await page.addScriptTag({ content: CREATE.replace(/mCreate = new MCreate\(\);[\s\S]*$/, '') });
+await page.addScriptTag({ content: MODELS });
+await page.evaluate(() => { mModels.build(document.querySelector('.m-panel')); mModels.refresh(); });
 let report = await page.evaluate(() => {
-    let host = document.getElementById('host');
-    let panel = document.createElement('section');
-    panel.className = 'm-panel m-tab-active';
-    host.appendChild(panel);
-    mModels.build(panel);
-    let models = Array.from({ length: 125 }, (_, i) => ({
-        name: `folder/Model-${String(i).padStart(3, '0')}.safetensors`,
-        local: false,
-        starred: i == 124
-    }));
+    let request = window.__requests.shift();
+    let files = Array.from({ length: 125 }, (_, i) => ({ name: `Model-${String(i).padStart(3, '0')}`, local: false, starred: i == 124 }));
+    request.success({ files, folders: ['anima', 'character', 'trained', 'style', 'concepts'] });
+    return { cards: document.querySelectorAll('.m-model-card').length, status: mModels.pageStatus.textContent, prev: mModels.prevPage.disabled, next: mModels.nextPage.disabled, first: document.querySelector('.m-model-name').textContent };
+});
+check('first folder page is explicit, bounded, and favourites-first', report.cards == 48 && report.status == 'Page 1 of 3 · 125' && report.prev && !report.next && report.first == 'Model-124', JSON.stringify(report));
+let seen = await page.evaluate(() => [...document.querySelectorAll('.m-model-name')].map(el => el.textContent));
+await page.click('.m-pagination-button:last-child');
+seen.push(...await page.evaluate(() => [...document.querySelectorAll('.m-model-name')].map(el => el.textContent)));
+await page.click('.m-pagination-button:last-child');
+seen.push(...await page.evaluate(() => [...document.querySelectorAll('.m-model-name')].map(el => el.textContent)));
+report = await page.evaluate(() => ({ cards: document.querySelectorAll('.m-model-card').length, status: mModels.pageStatus.textContent, next: mModels.nextPage.disabled }));
+check('Next reaches the final folder page', report.cards == 29 && report.status == 'Page 3 of 3 · 125' && report.next, JSON.stringify(report));
+check('page traversal reaches every row once', seen.length == 125 && new Set(seen).size == 125, `rows=${seen.length}, unique=${new Set(seen).size}`);
+report = await page.evaluate(() => {
+    localStorage.setItem('models_Stable-Diffusion_sort_by', 'DateModified');
+    localStorage.setItem('models_Stable-Diffusion_sort_reverse', 'true');
+    mModels.page = 0;
     mModels.refresh();
     let request = window.__requests.shift();
-    let started = performance.now();
-    request.success({ files: models, folders: ['folder'] });
-    let candidateMs = performance.now() - started;
-    let candidateCards = panel.querySelectorAll('.m-model-card').length;
-    let baselineHost = document.createElement('div');
-    let baselineStart = performance.now();
-    for (let model of models) {
-        baselineHost.appendChild(mModels.buildCard(model));
-    }
-    let baselineMs = performance.now() - baselineStart;
-    return { candidateCards, baselineCards: baselineHost.querySelectorAll('.m-model-card').length,
-        candidateMs, baselineMs, first: panel.querySelector('.m-model-card .m-model-text').textContent,
-        loadMore: !mModels.folderLoadMore.hidden };
+    return { sortBy: request.args.sortBy, reverse: request.args.sortReverse, selected: mModels.sortSelect.value, pressed: mModels.sortReverse.getAttribute('aria-pressed') };
 });
-check('folder view starts at the 40-card chunk', report.candidateCards == 40, JSON.stringify(report));
-check('starred ordering survives bounded rendering', report.first == 'folder/Model-124.safetensors', report.first);
-check('Load More is available after the initial chunk', report.loadMore);
-check('baseline versus candidate card count is deterministic', report.baselineCards == 125 && report.candidateCards == 40,
-    `baseline=${report.baselineCards}, candidate=${report.candidateCards}, baselineMs=${report.baselineMs.toFixed(2)}, candidateMs=${report.candidateMs.toFixed(2)}`);
-
+check('Models tab reads Classic sort keys and sends them to ListModels', report.sortBy == 'DateModified' && report.reverse && report.selected == 'DateModified' && report.pressed == 'true', JSON.stringify(report));
 report = await page.evaluate(() => {
-    mModels.folderLoadMore.click();
-    mModels.folderLoadMore.click();
-    mModels.folderLoadMore.click();
-    let names = [...mModels.grid.querySelectorAll('.m-model-text')].map(el => el.textContent);
-    return { cards: names.length, unique: new Set(names).size, finalButtonHidden: mModels.folderLoadMore.hidden };
-});
-check('manual fallback reaches every folder model exactly once', report.cards == 125 && report.unique == 125 && report.finalButtonHidden, JSON.stringify(report));
-
-report = await page.evaluate(() => {
-    let checkpoint = mModels.grid.querySelector('.m-model-card');
-    checkpoint.click();
-    let selected = mState.params.model;
+    localStorage.setItem('models_LoRA_sort_by', 'Title');
+    localStorage.setItem('models_LoRA_sort_reverse', 'false');
     mModels.subtype = 'LoRA';
     mModels.refresh();
-    let request = window.__requests.shift();
-    request.success({ files: [{ name: 'folder/LoRA-A.safetensors', local: false }], folders: [] });
-    mModels.grid.querySelector('.m-model-card').click();
-    return { selected, loras: mState.loras.map(row => row.name) };
+    let request = window.__requests.pop();
+    return { sortBy: request.args.sortBy, reverse: request.args.sortReverse };
 });
-check('bounded cards retain checkpoint and LoRA action bindings', report.selected && report.loras.includes('folder/LoRA-A.safetensors'), JSON.stringify(report));
-
+check('checkpoint and LoRA sort preferences remain independent', report.sortBy == 'Title' && !report.reverse, JSON.stringify(report));
 report = await page.evaluate(() => {
-    mModels.subtype = 'Stable-Diffusion';
-    mModels.folder = 'old';
     mModels.refresh();
     let oldRequest = window.__requests.shift();
     mModels.folder = 'fresh';
     mModels.refresh();
     let freshRequest = window.__requests.shift();
-    freshRequest.success({ files: [{ name: 'fresh/New.safetensors', local: false }], folders: [] });
-    oldRequest.success({ files: [{ name: 'old/Old.safetensors', local: false }], folders: [] });
-    oldRequest.fail('old failure');
-    return { names: [...mModels.grid.querySelectorAll('.m-model-text')].map(el => el.textContent), warnings: [...window.__warnings] };
+    freshRequest.success({ files: [{ name: 'fresh', local: false }], folders: [] });
+    oldRequest.success({ files: [{ name: 'stale', local: false }], folders: [] });
+    oldRequest.fail('stale failure');
+    return { names: [...document.querySelectorAll('.m-model-name')].map(el => el.textContent), warnings: window.__warnings };
 });
-check('stale success and error callbacks cannot replace or warn over the current folder',
-    report.names.length == 1 && report.names[0] == 'fresh/New.safetensors' && report.warnings.length == 0, JSON.stringify(report));
-
-report = await page.evaluate(() => {
-    mModels.refresh();
-    let request = window.__requests.shift();
-    request.success({ files: Array.from({ length: 85 }, (_, i) => ({ name: `repeat/${i}`, local: false })), folders: [] });
-    let firstCount = mModels.grid.querySelectorAll('.m-model-card').length;
-    mModels.refresh();
-    request = window.__requests.shift();
-    request.success({ files: Array.from({ length: 85 }, (_, i) => ({ name: `repeat/${i}`, local: false })), folders: [] });
-    return { firstCount, refreshedCount: mModels.grid.querySelectorAll('.m-model-card').length, disconnects: mModels.folderObserver.disconnects };
-});
-check('repeat refresh resets cards instead of appending a second copy', report.firstCount == 40 && report.refreshedCount == 40 && report.disconnects >= 2, JSON.stringify(report));
-
-report = await page.evaluate(() => {
-    let before = mModels.folderRendered;
-    mModels.panel.classList.remove('m-tab-active');
-    mModels.folderObserver.callback([{ isIntersecting: true }]);
-    let hidden = mModels.folderRendered;
-    mModels.panel.classList.add('m-tab-active');
-    mModels.folderObserver.callback([{ isIntersecting: true }]);
-    return { before, hidden, visible: mModels.folderRendered };
-});
-check('observer does not drain while hidden and fills more while visible', report.hidden == report.before && report.visible > report.hidden, JSON.stringify(report));
-
+check('stale folder callbacks stay inert', report.names.join(',') == 'fresh' && report.warnings.length == 0, JSON.stringify(report));
 report = await page.evaluate(async () => {
-    mModels.folder = 'pending';
     mModels.refresh();
-    let oldRequest = window.__requests.shift();
+    let oldRequest = window.__requests.pop();
     mModels.search.value = 'needle';
     mModels.search.dispatchEvent(new Event('input', { bubbles: true }));
-    oldRequest.success({ files: [{ name: 'pending/old', local: false }], folders: [] });
-    let afterOld = mModels.grid.querySelectorAll('.m-model-card').length;
-    mCreate.modelList = [{ name: 'search/needle', local: false }];
+    oldRequest.success({ files: [{ name: 'old', local: false }], folders: [] });
+    mCreate.loraList = [{ name: 'needle', local: false }];
     await new Promise(resolve => setTimeout(resolve, 180));
-    return { afterOld, searchCards: mModels.grid.querySelectorAll('.m-model-card').length,
-        observerTargets: mModels.folderObserver.targets.size };
+    return [...document.querySelectorAll('.m-model-name')].map(el => el.textContent);
 });
-check('search invalidates folder responses before its debounce and leaves no folder observer',
-    report.afterOld == 0 && report.searchCards == 1 && report.observerTargets == 0, JSON.stringify(report));
-
+check('search invalidates an in-flight folder response during debounce', report.join(',') == 'needle', JSON.stringify(report));
 report = await page.evaluate(() => {
-    let oldObserver = window.IntersectionObserver;
-    window.IntersectionObserver = undefined;
-    let fallback = new MModels();
-    let panel = document.createElement('section');
-    panel.className = 'm-panel m-tab-active';
-    document.getElementById('host').appendChild(panel);
-    fallback.build(panel);
-    fallback.folderModels = Array.from({ length: 45 }, (_, i) => ({ name: `fallback/${i}`, local: false }));
-    fallback.renderFolderMore();
-    let initial = fallback.grid.querySelectorAll('.m-model-card').length;
-    let visible = !fallback.folderLoadMore.hidden;
-    fallback.folderLoadMore.click();
-    window.IntersectionObserver = oldObserver;
-    return { initial, final: fallback.grid.querySelectorAll('.m-model-card').length, visible };
+    mModels.folder = 'root/nested';
+    mModels.renderFolders(['one', 'two', 'three', 'four', 'five']);
+    let breadcrumb = mModels.breadcrumb.getBoundingClientRect();
+    let chips = [...mModels.folderChips.children].map(el => el.getBoundingClientRect());
+    let card = mModels.buildCard({ name: 'A very long model name that must stay bounded and not make one card taller than its peers', local: false });
+    mModels.grid.innerHTML = '';
+    mModels.grid.appendChild(card);
+    return { breadcrumbAbove: chips.every(box => breadcrumb.bottom <= box.top + 1), chipGap: mModels.folderChips.clientWidth - Math.max(...chips.map(box => box.right - mModels.folderChips.getBoundingClientRect().left)), placeholderSquare: Math.abs(card.querySelector('.m-model-card-placeholder').clientWidth - card.querySelector('.m-model-card-placeholder').clientHeight), title: card.title, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
 });
-check('no-IntersectionObserver browsers retain a working Load More fallback', report.initial == 40 && report.final == 45 && report.visible, JSON.stringify(report));
-
-/** Installs the minimum real-DOM collaborators needed to exercise m_models.js with the browser's observer. */
-async function prepareRealPage(realPage, models) {
-    await realPage.setContent('<style>:root { --background-panel: #222; --background: #111; --text: #eee; --border-color: #555; --emphasis: #8cf; --m-safe-left: 0px; --m-safe-right: 0px; --m-safe-bottom: 0px; } html, body, #host { width: 100%; height: 100%; margin: 0; overflow: hidden; } body { color: var(--text); background: var(--background); }</style><header class="m-header">Models</header><main id="host"><section class="m-panel m-tab-active"></section></main>');
-    await realPage.addStyleTag({ content: CSS });
-    await realPage.evaluate((rows) => {
-        window.mUI = {
-            el: (tag, classes, text = '') => {
-                let el = document.createElement(tag);
-                el.className = classes;
-                el.textContent = text;
-                return el;
-            },
-            // Deliberately no preview: this is the shortest practical card shape and stresses a sentinel that
-            // remains visible after a chunk at desktop widths.
-            modelThumb: () => null,
-            starBadge: () => null,
-            modelText: model => {
-                let text = document.createElement('div');
-                text.className = 'm-model-text';
-                text.textContent = model.name;
-                return text;
-            },
-            modelName: name => `${name}`.split('/').pop(),
-            modelLines: model => ({ primary: model.name }),
-            note: () => { },
-            warn: message => { window.__realWarnings.push(message); },
-            openSheet: () => () => { }
-        };
-        window.__realWarnings = [];
-        window.mState = {
-            params: {},
-            loras: [],
-            starredFirst: files => [...files],
-            getLoras: () => [...window.mState.loras],
-            setLoras: values => { window.mState.loras = values; },
-            changed: () => { }
-        };
-        window.MState = { sameModel: (a, b) => a == b };
-        window.MCreate = { ListCap: 120, filterModels: (list, query) => list.filter(model => model.name.includes(query)) };
-        window.mCreate = {
-            insertTriggerTag: () => { }, loraList: null, modelList: null, indexLoras: () => { },
-            enrichLoraMetadata: done => done(), buildCountRow: () => document.createElement('div')
-        };
-        window.permissions = { hasPermission: () => false };
-        window.genericRequest = (route, args, success) => {
-            if (route == 'ListModels') {
-                success({ files: rows, folders: ['folder'] });
-            }
-        };
-    }, models);
-    await realPage.addScriptTag({ content: SOURCE });
-    await realPage.evaluate(() => {
-        let panel = document.querySelector('.m-panel');
-        mModels.build(panel);
-        mModels.refresh();
-    });
-}
-
-const realPage = await browser.newPage({ viewport: { width: 360, height: 720 } });
-const realModels = Array.from({ length: 1000 }, (_, i) => ({ name: `folder/NoPreview-${String(i).padStart(4, '0')}`, local: false }));
-mkdirSync(`${REPO}/.local/pwa-desktop-review`, { recursive: true });
-for (const width of [360, 768, 1024, 1440]) {
-    await realPage.setViewportSize({ width, height: 720 });
-    await prepareRealPage(realPage, realModels);
-    let before = await realPage.evaluate(() => {
-        let panel = document.querySelector('.m-panel');
-        return {
-            cards: panel.querySelectorAll('.m-model-card').length,
-            header: document.querySelector('.m-header').getBoundingClientRect().toJSON(),
-            toggle: document.querySelector('.m-models-toggle').getBoundingClientRect().toJSON(),
-            search: document.querySelector('.m-models-search').getBoundingClientRect().toJSON(),
-            folders: document.querySelector('.m-folder-chips').getBoundingClientRect().toJSON()
-        };
-    });
-    // Let an actual browser observer process the initial, still-visible sentinel. This must advance in
-    // bounded chunks rather than synchronously creating all 1,000 cards in refresh().
-    await realPage.waitForTimeout(120);
-    let loaded = await realPage.evaluate(() => document.querySelectorAll('.m-model-card').length);
-    await realPage.evaluate(() => {
-        let panel = document.querySelector('.m-panel');
-        panel.scrollTop = panel.scrollHeight;
-        panel.dispatchEvent(new Event('scroll'));
-    });
-    await realPage.waitForTimeout(120);
-    let after = await realPage.evaluate(() => {
-        let panel = document.querySelector('.m-panel');
-        // Compare chrome at the same scroll position. A card's viewport y changing after the test scrolls to
-        // the bottom is expected movement, not a layout shift.
-        panel.scrollTop = 0;
-        let first = panel.querySelector('.m-model-card');
-        first.click();
-        return {
-            cards: panel.querySelectorAll('.m-model-card').length,
-            selected: mState.params.model,
-            overflow: panel.scrollWidth - panel.clientWidth,
-            header: document.querySelector('.m-header').getBoundingClientRect().toJSON(),
-            toggle: document.querySelector('.m-models-toggle').getBoundingClientRect().toJSON(),
-            search: document.querySelector('.m-models-search').getBoundingClientRect().toJSON(),
-            folders: document.querySelector('.m-folder-chips').getBoundingClientRect().toJSON()
-        };
-    });
-    let shifts = ['header', 'toggle', 'search', 'folders'].map(key => Math.abs(before[key].y - after[key].y));
-    check(`real observer loads bounded chunks at ${width}px`, before.cards == 40 && loaded > 40 && loaded < realModels.length && after.cards > loaded,
-        `before=${before.cards}, visible=${loaded}, afterScroll=${after.cards}`);
-    check(`real Models layout remains stable at ${width}px`, Math.max(...shifts) <= 1 && after.overflow <= 1 && !!after.selected,
-        `shifts=${shifts.join(',')}, overflow=${after.overflow}`);
-    await realPage.screenshot({ path: `${REPO}/.local/pwa-desktop-review/models-${width}${engine == webkit ? '-webkit' : ''}.png`, fullPage: false });
-}
-await realPage.close();
-
+check('breadcrumb is separate and folder chips fill the final row', report.breadcrumbAbove && report.chipGap <= 1 && report.overflow <= 1, JSON.stringify(report));
+check('missing previews reserve a square and full text remains accessible', report.placeholderSquare <= 1 && report.title.includes('A very long'), JSON.stringify(report));
+report = await page.evaluate(() => {
+    permissions.hasPermission = () => true;
+    mModels.grid.innerHTML = '';
+    for (let i = 0; i < 8; i++) {
+        mModels.grid.appendChild(mModels.buildCard({ name: `card-${i}`, local: i % 2 == 0, preview: i % 3 == 0 ? 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==' : null }));
+    }
+    let heights = [...document.querySelectorAll('.m-model-card')].map(card => card.getBoundingClientRect().height);
+    return { min: Math.min(...heights), max: Math.max(...heights) };
+});
+check('local, remote, preview, and no-preview cards keep one height across rows', Math.abs(report.max - report.min) <= 1, JSON.stringify(report));
+report = await page.evaluate(() => {
+    mModels.renderPage([{ name: 'only', local: false }]);
+    return { hidden: mModels.pager.hidden, display: getComputedStyle(mModels.pager).display };
+});
+check('single-page results hide the pager from layout', report.hidden && report.display == 'none', JSON.stringify(report));
+mkdirSync(`${REPO}/.local/simple-model-browser`, { recursive: true });
+await page.screenshot({ path: `${REPO}/.local/simple-model-browser/models-${engine == webkit ? 'webkit' : 'chromium'}.png`, fullPage: true });
 await browser.close();
-if (results.some(result => !result.pass)) {
-    process.exitCode = 1;
-}
+process.exit(failed ? 1 : 0);

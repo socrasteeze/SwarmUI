@@ -214,7 +214,13 @@ async function shots() {
 await openBrowser();
 let source = await page.evaluate(() => ({ output: !!document.querySelector('.m-imgbrowser-source.m-selected'), drives: !![...document.querySelectorAll('.m-imgbrowser-source')].find(b => b.textContent == 'Drives'), phone: !![...document.querySelectorAll('.m-imgbrowser-tool')].find(b => b.textContent == 'From Phone') }));
 check('picker shows Output and permission-gated Drives, with phone fallback', source.output && source.drives && source.phone, JSON.stringify(source));
+await picker().locator('.m-imgbrowser-sort').selectOption('Newest First');
+let sortCall = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListImages'));
+check('Output sort sends corrected Newest parameters and resets page', sortCall.args.sortBy == 'Date' && sortCall.args.sortReverse == false && sortCall.args.offset == 0, JSON.stringify(sortCall.args));
 await drives();
+sortCall = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder'));
+check('Drives uses the same persisted sort parameters', sortCall.args.sortBy == 'Date' && sortCall.args.sortReverse == false, JSON.stringify(sortCall.args));
+await picker().locator('.m-imgbrowser-sort').selectOption('Name A-Z');
 check('Drives starts at the drive root', await page.locator('.m-imgbrowser-path').textContent() == 'Drives');
 await page.evaluate(() => { window.__delayRoot = true; });
 await picker().getByRole('button', { name: 'Output', exact: true }).click();
@@ -419,7 +425,7 @@ await page.waitForFunction(scroll => document.querySelector('.m-imgbrowser-page'
 let kept = await page.evaluate(() => ({
     page: document.querySelector('.m-imgbrowser-page')?.textContent,
     scroll: document.querySelector('.m-imgbrowser-grid')?.scrollTop,
-    place: mImageBrowser.sessionPlaces['output\npaged-output'],
+    place: mImageBrowser.sessionPlaces['output\npaged-output\nName A-Z'],
     stored: localStorage.getItem('m_client_img_browser_place')
 }));
 check('reopening the image browser keeps the page and scroll for this page load', kept.page == '2 / 3' && kept.scroll == keptScroll && kept.place?.offset == 48 && !kept.stored, JSON.stringify(kept));
@@ -458,7 +464,8 @@ for (let width of [360, 768, 1024, 1440]) {
             pagerShift: Math.abs(before.y - after.y) };
     });
     check(`responsive ${width}px has no horizontal overflow and a usable grid`, geometry.overflow && geometry.grid >= 96, JSON.stringify(geometry));
-    check(`responsive ${width}px has four touch-sized columns and fixed paging`, geometry.columns == 4 && geometry.tileWidth >= 44
+    let expectedColumns = width < 768 ? 3 : 4;
+    check(`responsive ${width}px has ${expectedColumns} touch-sized columns and fixed paging`, geometry.columns == expectedColumns && geometry.tileWidth >= 44
         && geometry.pagerVisible && geometry.pagerShift <= 1, JSON.stringify(geometry));
     if (process.env.SWARM_SCREENSHOT == '1') {
         await page.waitForFunction(() => {
@@ -470,8 +477,8 @@ for (let width of [360, 768, 1024, 1440]) {
             });
             return visible.length > 0 && visible.every(img => img.complete && img.naturalWidth > 0);
         });
-        mkdirSync(`${REPO}/.local/simple-image-browser`, { recursive: true });
-        await page.screenshot({ path: `${REPO}/.local/simple-image-browser/browser-${width}.png` });
+        mkdirSync(`${REPO}/.local/simple-upload-browser`, { recursive: true });
+        await page.screenshot({ path: `${REPO}/.local/simple-upload-browser/browser-${width}.png` });
     }
     await page.locator('.m-imgbrowser-close').click();
     await page.waitForTimeout(300);
@@ -666,8 +673,8 @@ check('drive favorites are hidden without browse permission', !noPermissionLabel
 await page.evaluate(() => { window.__permission = true; localStorage.removeItem('m_client_img_browser_roots'); });
 
 if (process.env.SWARM_SCREENSHOT == '1') {
-    mkdirSync(`${REPO}/.local/simple-image-browser`, { recursive: true });
-    await page.screenshot({ path: `${REPO}/.local/simple-image-browser/primary.png`, fullPage: false });
+    mkdirSync(`${REPO}/.local/simple-upload-browser`, { recursive: true });
+    await page.screenshot({ path: `${REPO}/.local/simple-upload-browser/primary.png`, fullPage: false });
 }
 await browser.close();
 let failed = results.filter(result => !result.pass);
@@ -680,7 +687,7 @@ if (process.env.SWARM_SCREENSHOT == '1') {
         let result = results[i];
         report += `| ${i + 1} | ${result.name} | ${result.pass ? 'PASS' : 'FAIL'} | ${result.pass ? 'N/A' : 'SHIFT'} | Browser harness; browser-360.png | ${result.pass ? 'None' : 'Resolve failed check'} |\n`;
     }
-    writeFileSync(`${REPO}/.local/simple-image-browser/ui-stability.md`, report);
+    writeFileSync(`${REPO}/.local/simple-upload-browser/ui-stability.md`, report);
 }
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 process.exit(failed.length ? 1 : 0);

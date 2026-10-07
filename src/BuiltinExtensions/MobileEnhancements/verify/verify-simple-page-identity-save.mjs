@@ -79,22 +79,14 @@ async function runChecks() {
     let first = requests[requests.length - 1].data;
     check(historyLog, 'first ListImages uses a positive limit', first.limit >= 1 && first.limit <= 250 && first.offset == 0);
     check(historyLog, 'first response is only that page', mImages.entries.length == first.limit && mImages.entries.length < total);
-    check(historyLog, 'first page is not fully painted yet', mImages.rendered < mImages.entries.length);
+    check(historyLog, 'first API page is fully painted', imagesPanel.querySelectorAll('.m-image-tile-cell').length == first.limit);
     check(historyLog, 'folder names arrive with the page', [...imagesPanel.querySelectorAll('.m-folder-chip')].some(chip => chip.textContent == 'Starred'));
-    let firstSrc = mImages.entries[0].src;
-    mImages.renderMore();
+    let firstNames = mImages.entries.map(entry => entry.src);
+    fire(mImages.nextPage, 'click');
     let second = requests[requests.length - 1].data;
-    check(historyLog, 'later load requests the next offset', requests.length == 2 && second.offset == first.limit && second.offset != 0);
-    check(historyLog, 'later files follow the first page', mImages.entries.length == total && mImages.entries[0].src == firstSrc && mImages.entries[first.limit].src == 'img-' + first.limit + '.png');
-    let seen = {};
-    let repeated = false;
-    for (let entry of mImages.entries) {
-        if (seen[entry.src]) {
-            repeated = true;
-        }
-        seen[entry.src] = true;
-    }
-    check(historyLog, 'the second page does not repeat the first', !repeated);
+    check(historyLog, 'Next requests the next explicit offset', requests.length == 2 && second.offset == first.limit && second.offset != 0);
+    check(historyLog, 'the second page replaces the first page', mImages.entries.length == total - first.limit && mImages.entries[0].src == 'img-' + first.limit + '.png');
+    check(historyLog, 'the second page does not repeat the first', mImages.entries.every(entry => !firstNames.includes(entry.src)));
     let last = mImages.entries[mImages.entries.length - 1];
     let lastTile = null;
     for (let tile of imagesPanel.querySelectorAll('.m-image-tile-cell')) {

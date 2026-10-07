@@ -206,7 +206,7 @@ async function verifyCards(browser, name) {
             isStarred: () => false, starredFirst: rows => rows };
         window.MState = { sameModel: (a, b) => a == b };
         window.MCreate = { ListCap: 120, filterModels: rows => rows };
-        window.mCreate = { insertTriggerTag: () => counts.triggers++, buildCountRow: () => document.createElement('div') };
+        window.mCreate = { insertTriggerPhrase: trigger => { counts.triggers++; counts.triggerText = trigger; }, buildCountRow: () => document.createElement('div') };
         mUI.note = () => counts.notes++;
     });
     await page.addScriptTag({ content: MODELS });
@@ -237,7 +237,7 @@ async function verifyCards(browser, name) {
     await page.locator('.m-model-civitai-btn').focus();
     await page.keyboard.press('Enter');
     let nested = await page.evaluate(() => ({ ...counts }));
-    check(`${name}: nested model controls retain native action without card selection`, nested.changed == 2 && nested.triggers == 1 && nested.civitai == 1,
+    check(`${name}: nested model controls retain native action without card selection`, nested.changed == 2 && nested.triggers == 1 && nested.triggerText == 'subject' && nested.civitai == 1,
         JSON.stringify(nested));
     await page.locator('.m-image-tile-cell').first().focus();
     let label = await page.locator('.m-image-tile-cell').first().getAttribute('aria-label');

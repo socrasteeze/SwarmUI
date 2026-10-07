@@ -920,7 +920,7 @@ class MCreate {
     static ListCap = 120;
 
     /** Classic model-browser sort. The stored value is ListModels' sortBy: Name, Title, DateCreated, DateModified. */
-    static LoraSortModes = [['Name', 'Name'], ['Title', 'Title'], ['DateCreated', 'Date created'], ['DateModified', 'Date modified']];
+    static LoraSortModes = [['Name', 'Name'], ['Title', 'Title'], ['DateCreated', 'Date Created'], ['DateModified', 'Date Modified']];
 
     /** The LoRA sort Classic last saved, or Name. Shared keys, so the two layouts stay on the same choice. */
     static loraSortSetting() {
@@ -944,7 +944,11 @@ class MCreate {
      * A missing timestamp sorts as newest, matching ListModels' unset-metadata fallback.
      * Reverse flips that whole order. Returns a copy. */
     static sortLoras(list) {
-        let setting = MCreate.loraSortSetting();
+        return MCreate.sortModels(list, MCreate.loraSortSetting());
+    }
+
+    /** Orders model rows using the same four modes as Classic. Returns a copy. */
+    static sortModels(list, setting) {
         let mode = setting.mode;
         let reverse = setting.reverse;
         let nameOf = (model) => `${model.name || ''}`;
@@ -976,6 +980,26 @@ class MCreate {
             }
             return primary;
         });
+    }
+
+    /** Number of rows on one picker page. */
+    static PickerPageSize = 48;
+
+    /** Adds explicit Previous/Next controls for a picker result set. */
+    buildPager(page, total, onPage) {
+        let pages = Math.max(1, Math.ceil(total / MCreate.PickerPageSize));
+        let pager = mUI.el('div', 'm-pagination');
+        let previous = mUI.el('button', 'm-pagination-button', 'Previous');
+        previous.disabled = page == 0;
+        previous.addEventListener('click', () => onPage(page - 1));
+        pager.appendChild(previous);
+        pager.appendChild(mUI.el('span', 'm-pagination-status', `Page ${page + 1} of ${pages}`));
+        let next = mUI.el('button', 'm-pagination-button', 'Next');
+        next.disabled = page >= pages - 1;
+        next.addEventListener('click', () => onPage(page + 1));
+        pager.appendChild(next);
+        pager.hidden = total <= MCreate.PickerPageSize;
+        return pager;
     }
 
     /** Footer telling you how much of the list you are actually looking at. A cap that says nothing is
@@ -1090,6 +1114,7 @@ class MCreate {
         content.appendChild(results);
         let close = null;
         let archState = { 'showAll': false };
+        let page = 0;
         let renderResults = () => {
             results.innerHTML = '';
             let clear = mUI.el('button', 'm-model-plain-row', 'Use server default');
@@ -1110,8 +1135,12 @@ class MCreate {
                 results.appendChild(arch.row);
             }
             let matches = mState.starredFirst(MCreate.filterModels(arch.list, search.value), 'Stable-Diffusion');
-            let shown = 0;
-            for (let model of matches) {
+            let pages = Math.max(1, Math.ceil(matches.length / MCreate.PickerPageSize));
+            page = Math.min(page, pages - 1);
+            let start = page * MCreate.PickerPageSize;
+            let end = Math.min(start + MCreate.PickerPageSize, matches.length);
+            for (let i = start; i < end; i++) {
+                let model = matches[i];
                 let item = mUI.el('div', 'm-model-result');
                 let thumb = mUI.modelThumb(model, 'm-model-thumb');
                 if (thumb) {
@@ -1131,13 +1160,17 @@ class MCreate {
                     close();
                 });
                 results.appendChild(item);
-                if (++shown >= MCreate.ListCap) {
-                    break;
-                }
             }
-            results.appendChild(this.buildCountRow(shown, matches.length, 'checkpoints'));
+            results.appendChild(this.buildCountRow(matches.length, matches.length, 'checkpoints'));
+            results.appendChild(this.buildPager(page, matches.length, next => {
+                page = next;
+                renderResults();
+            }));
         };
-        search.addEventListener('input', renderResults);
+        search.addEventListener('input', () => {
+            page = 0;
+            renderResults();
+        });
         let loadModelList = () => {
             this.modelListError = false;
             renderResults();
@@ -2484,17 +2517,14 @@ class MCreate {
         mState.changed();
     }
 
-    /** Inserts the `<trigger>` prompt tag, which the server expands to the trigger phrases of the current
-     * model AND every active LoRA. That is the whole set in one tag, so a second copy would repeat all of
-     * them - hence the guard. Inserting the tag rather than the literal phrase also means the prompt stays
-     * correct when LoRAs are swapped afterwards. */
-    insertTriggerTag() {
-        if (`${mState.params['prompt'] || ''}`.includes('<trigger>')) {
-            mUI.note('<trigger> is already in your prompt - it covers every active LoRA.');
+    /** Inserts the selected card's full trigger phrase at the remembered prompt caret. */
+    insertTriggerPhrase(trigger) {
+        let phrase = `${trigger || ''}`.trim();
+        if (!phrase) {
             return;
         }
-        this.insertIntoPrompt('<trigger>');
-        mUI.note('Added <trigger> to the prompt.');
+        this.insertIntoPrompt(phrase);
+        mUI.note('Added trigger words to the prompt.');
     }
 
     /** Builds the LoRA picker's corpus, indexed by both the full name and the extension-stripped form.
@@ -2668,7 +2698,7 @@ class MCreate {
                 if (thumb) {
                     top.appendChild(thumb);
                 }
-                top.appendChild(mUI.modelText(model, () => mCreate.insertTriggerTag(), true));
+                top.appendChild(mUI.modelText(model, trigger => mCreate.insertTriggerPhrase(trigger), true));
                 let remove = mUI.el('button', 'm-lora-remove', '\u00d7');
                 remove.setAttribute('aria-label', `Remove ${mUI.modelName(loras[i].name)}`);
                 remove.addEventListener('click', () => {
@@ -2760,6 +2790,7 @@ class MCreate {
                 localStorage.setItem('models_LoRA_sort_by', sortSelect.value);
             }
             catch (e) { /* ignore */ }
+            page = 0;
             renderResults();
         });
         let reverseBtn = mUI.el('button', 'm-lora-sort-reverse', 'Reverse');
@@ -2774,6 +2805,7 @@ class MCreate {
                 localStorage.setItem('models_LoRA_sort_reverse', on ? 'true' : 'false');
             }
             catch (e) { /* ignore */ }
+            page = 0;
             renderResults();
         });
         sortRow.appendChild(sortSelect);
@@ -2783,6 +2815,7 @@ class MCreate {
         addWrap.appendChild(results);
         let archState = { 'showAll': false };
         let compatState = { 'showAll': false };
+        let page = 0;
         let renderResults = () => {
             results.innerHTML = '';
             if (!this.loraList) {
@@ -2809,8 +2842,12 @@ class MCreate {
                 active.add(MState.stripModelExt(curLoras[i].name));
             }
             let matches = mState.starredFirst(MCreate.sortLoras(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name)))), 'LoRA');
-            let shown = 0;
-            for (let model of matches) {
+            let pages = Math.max(1, Math.ceil(matches.length / MCreate.PickerPageSize));
+            page = Math.min(page, pages - 1);
+            let start = page * MCreate.PickerPageSize;
+            let end = Math.min(start + MCreate.PickerPageSize, matches.length);
+            for (let i = start; i < end; i++) {
+                let model = matches[i];
                 let item = mUI.el('div', 'm-model-result');
                 let thumb = mUI.modelThumb(model, 'm-model-thumb');
                 if (thumb) {
@@ -2831,11 +2868,12 @@ class MCreate {
                     renderResults();
                 });
                 results.appendChild(item);
-                if (++shown >= MCreate.ListCap) {
-                    break;
-                }
             }
-            results.appendChild(this.buildCountRow(shown, matches.length, 'LoRAs'));
+            results.appendChild(this.buildCountRow(matches.length, matches.length, 'LoRAs'));
+            results.appendChild(this.buildPager(page, matches.length, next => {
+                page = next;
+                renderResults();
+            }));
             // A search that only misses because of the arch/compat filters says so, instead of "no match".
             if (search.value.trim() && compat.list.length != this.loraList.length) {
                 let hidden = MCreate.filterModels(this.loraList, search.value).filter(m => !active.has(MState.stripModelExt(m.name))).length - matches.length;
@@ -2850,7 +2888,10 @@ class MCreate {
                 }
             }
         };
-        search.addEventListener('input', renderResults);
+        search.addEventListener('input', () => {
+            page = 0;
+            renderResults();
+        });
         content.appendChild(addWrap);
         let loadLoraList = () => {
             this.loraListError = false;
