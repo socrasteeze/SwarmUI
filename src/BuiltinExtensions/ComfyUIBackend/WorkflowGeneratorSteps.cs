@@ -1209,6 +1209,15 @@ public class WorkflowGeneratorSteps
                     }
                     else if (controlModel.ModelClass?.CompatClass?.ID == T2IModelClassSorter.CompatAnima.ID)
                     {
+                        // kohya's Anima lineart LLLite was trained on black lines over white, but Comfy lineart preprocessors output white lines over black.
+                        if (preprocessor.ToLowerFast().Contains("lineart") && controlModel.Name.ToLowerFast().Contains("lineart"))
+                        {
+                            string invertNode = g.CreateNode("ImageInvert", new JObject()
+                            {
+                                ["image"] = imageNodeActual.Path
+                            });
+                            imageNodeActual = imageNodeActual.WithPath([invertNode, 0]);
+                        }
                         string modelPatchLoader = g.CreateNode("ModelPatchLoader", new JObject()
                         {
                             ["name"] = controlModel.ToString(g.ModelFolderFormat)
