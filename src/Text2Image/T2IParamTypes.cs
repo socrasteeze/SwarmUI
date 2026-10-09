@@ -617,7 +617,7 @@ public class T2IParamTypes
                     "(None)", FeatureFlag: "controlnet", Permission: Permissions.ParamControlNet, Group: group, Subtype: "ControlNet", OrderPriority: 5, ChangeWeight: 5
                     )),
                 Strength = Register<double>(new($"ControlNet{suffix} Strength", "Higher values make the ControlNet apply more strongly. Weaker values let the prompt overrule the ControlNet.",
-                    "1", FeatureFlag: "controlnet", Permission: Permissions.ParamControlNet, Min: 0, Max: 2, Step: 0.05, OrderPriority: 8, ViewType: ParamViewType.SLIDER, Group: group, Examples: ["0", "0.5", "1", "2"]
+                    "1", FeatureFlag: "controlnet", Permission: Permissions.ParamControlNet, Min: 0, Max: 5, ViewMax: 2, Step: 0.05, OrderPriority: 8, ViewType: ParamViewType.SLIDER, Group: group, Examples: ["0", "0.5", "1", "2", "3"]
                     )),
                 Start = Register<double>(new($"ControlNet{suffix} Start", "When to start applying controlnet, as a fraction of steps.\nFor example, 0.5 starts applying halfway through. Must be less than End.\nExcluding early steps reduces the controlnet's impact on overall image structure.",
                     "0", IgnoreIf: "0", FeatureFlag: "controlnet", Permission: Permissions.ParamControlNet, Min: 0, Max: 1, Step: 0.05, OrderPriority: 10, IsAdvanced: true, ViewType: ParamViewType.SLIDER, Group: group, Examples: ["0", "0.2", "0.5"]
