@@ -543,6 +543,7 @@ class GenPageBrowserClass {
                 if (this.format.startsWith('Small')) { div.classList.add('model-block-small'); }
                 else if (this.format.startsWith('Big')) { div.classList.add('model-block-big'); }
                 let textBlock = createDiv(null, 'model-descblock');
+                textBlock.tabIndex = 0;
                 textBlock.innerHTML = desc.description;
                 div.appendChild(textBlock);
             }
