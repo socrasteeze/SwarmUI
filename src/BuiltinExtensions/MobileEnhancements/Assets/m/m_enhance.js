@@ -12,8 +12,20 @@ class MEnhance {
         this.buttonEnabled = false;
         /** Title / reason text mirrored onto the pill. */
         this.buttonReason = 'Loading Prompt Enhance status...';
-        /** Manual profile override id, or '' for automatic. Persisted like desktop. */
-        this.profileOverride = this.pref('profile_override', '');
+        /** Manual profile override id, or '' for automatic. Session-only, same rule as desktop: a model
+         * change clears it, and a saved localStorage value is not read (that was sticking MiniMax H3 onto
+         * a later Krea preset). */
+        this.profileOverride = '';
+        /** Effective model the current override was chosen against, or null before the first status check. */
+        this.trackedModel = null;
+        /** Display name of the profile automatic resolution last chose. */
+        this.resolvedDisplay = '';
+        try {
+            localStorage.removeItem('promptenhance_profile_override');
+        }
+        catch (e) {
+            // Storage can be unavailable. The override is memory-only either way.
+        }
         /** Enhance Strength: faithful / expand / full. */
         this.strength = this.pref('strength', 'full');
         /** Profiles list from the last successful status reply (for the sheet select). */
@@ -88,9 +100,30 @@ class MEnhance {
         if (!this.pillEl) {
             return;
         }
+        if (this.running) {
+            this.pillEl.textContent = 'Enhancing...';
+            this.pillEl.disabled = true;
+            this.pillEl.classList.add('m-enhance-pill-busy');
+            this.pillEl.setAttribute('aria-busy', 'true');
+            return;
+        }
+        this.pillEl.disabled = false;
+        this.pillEl.classList.remove('m-enhance-pill-busy');
+        this.pillEl.removeAttribute('aria-busy');
         this.pillEl.textContent = this.buttonEnabled ? 'Enhance \u203A' : 'Enhance \u00B7 No profile \u203A';
         this.pillEl.title = this.buttonReason;
         this.pillEl.classList.toggle('m-enhance-pill-disabled', !this.buttonEnabled);
+    }
+
+    /** Drops a manual profile override when the effective checkpoint changes. */
+    syncProfileOverride(model) {
+        if (this.trackedModel != null && this.trackedModel != model) {
+            this.profileOverride = '';
+            if (this.sheet && this.sheet.profileSelect) {
+                this.sheet.profileSelect.value = '';
+            }
+        }
+        this.trackedModel = model;
     }
 
     setButtonEnabled(enabled, reason) {
@@ -114,6 +147,7 @@ class MEnhance {
 
     refreshStatus() {
         let model = this.effectiveModel();
+        this.syncProfileOverride(model);
         this.statusRequestSeq += 1;
         let requestSeq = this.statusRequestSeq;
         genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride }, data => {
@@ -137,13 +171,42 @@ class MEnhance {
     }
 
     applyStatusToButton(data) {
+        let display = '';
+        let profiles = (data && data.profiles) || this.profiles || [];
+        if (data && data.resolved && data.resolved.profile) {
+            for (let i = 0; i < profiles.length; i++) {
+                if (profiles[i].id == data.resolved.profile) {
+                    display = profiles[i].display || profiles[i].id;
+                    break;
+                }
+            }
+            if (!display) {
+                display = data.resolved.profile;
+            }
+        }
+        this.resolvedDisplay = display;
         if (!data.resolved || !data.resolved.profile) {
             this.setButtonEnabled(false, (data.resolved && data.resolved.reason) || 'No writer profile available for the current model.');
             return;
         }
-        let anyHealthy = (data.endpoints || []).some(endpoint => endpoint.healthy);
-        let reason = anyHealthy ? 'Rewrite this prompt with a local writer LLM for the currently loaded model.'
-            : 'No Prompt Enhance writer endpoint is currently reachable - the prompt will pass through unchanged.';
+        let endpoints = data.endpoints || [];
+        let knownDown = true;
+        let sawEnabled = false;
+        for (let i = 0; i < endpoints.length; i++) {
+            if (endpoints[i].enabled === false) {
+                continue;
+            }
+            sawEnabled = true;
+            if (endpoints[i].healthy !== false) {
+                knownDown = false;
+                break;
+            }
+        }
+        if (endpoints.length > 0 && !sawEnabled) {
+            knownDown = true;
+        }
+        let reason = knownDown ? 'No Prompt Enhance writer endpoint is currently reachable - the prompt will pass through unchanged.'
+            : `Profile: ${display}. Rewrite this prompt with a local writer LLM for the currently loaded model.`;
         this.setButtonEnabled(true, reason);
     }
 
@@ -155,7 +218,7 @@ class MEnhance {
         select.innerHTML = '';
         let auto = document.createElement('option');
         auto.value = '';
-        auto.textContent = 'Automatic';
+        auto.textContent = (this.profileOverride == '' && this.resolvedDisplay) ? `Automatic (${this.resolvedDisplay})` : 'Automatic';
         select.appendChild(auto);
         for (let i = 0; i < this.profiles.length; i++) {
             let option = document.createElement('option');
@@ -196,7 +259,7 @@ class MEnhance {
         }
         let content = mUI.el('div', 'm-enhance-sheet');
         content.appendChild(mUI.el('div', 'm-enhance-title', 'Prompt Enhance'));
-        let status = mUI.el('div', 'm-enhance-status', 'Starting...');
+        let status = mUI.el('div', 'm-enhance-status', 'Enhancing...');
         content.appendChild(status);
 
         let profileRow = mUI.el('div', 'm-enhance-row');
@@ -267,6 +330,7 @@ class MEnhance {
                 try { this.socket.close(); } catch (e) { /* ignore */ }
             }
             this.running = false;
+            this.renderPill();
         };
         keepBtn.addEventListener('click', () => {
             this.clearProvenance();
@@ -288,7 +352,7 @@ class MEnhance {
         });
         profileSelect.addEventListener('change', () => {
             this.profileOverride = profileSelect.value;
-            this.setPref('profile_override', this.profileOverride);
+            this.trackedModel = this.effectiveModel();
             this.refreshStatus();
             if (this.running && this.socket) {
                 this.settled = true;
@@ -313,6 +377,8 @@ class MEnhance {
         });
 
         let model = this.effectiveModel();
+        this.syncProfileOverride(model);
+        this.renderPill();
         let prompt = this.currentPrompt();
         this.socket = makeWSRequest('EnhancePrompt', {
             'prompt': prompt,
@@ -330,11 +396,18 @@ class MEnhance {
                 this.settled = true;
             }
             this.handleFrame(data);
+            if (!this.running) {
+                this.renderPill();
+            }
         }, 0, error => {
             this.settled = true;
             this.running = false;
+            this.renderPill();
+            let text = `${error || ''}`;
             if (this.sheet && this.sheet.content.isConnected) {
-                this.sheet.status.textContent = '';
+                this.sheet.status.textContent = text;
+                this.sheet.passthrough.style.display = '';
+                this.sheet.passthrough.textContent = text.indexOf('Prompt enhance:') == 0 ? text : `Not enhanced: ${text}`;
             }
             showError(error);
         });
@@ -343,6 +416,7 @@ class MEnhance {
                 if (!this.settled) {
                     this.settled = true;
                     this.running = false;
+                    this.renderPill();
                     showError('The Prompt Enhance connection closed with no result. Check the server logs.');
                 }
             });
@@ -352,6 +426,7 @@ class MEnhance {
             // user can still change profile/strength, but clear running so a later tap can retry.
             this.running = false;
             this.settled = true;
+            this.renderPill();
             if (this.sheet && this.sheet.content.isConnected) {
                 this.sheet.status.textContent = 'Could not start Prompt Enhance - try again.';
             }

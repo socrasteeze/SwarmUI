@@ -55,12 +55,13 @@ owned here.
    request. A reply is capped at 32,000 characters (a runaway stream aborts rather than buffering forever);
    a submitted prompt over 20,000 characters is rejected outright, before any shielding or caching work.
 4. **Cache.** Every prompt is looked up before it is ever dispatched, keyed on
-   `(shielded prompt, profile ID, profile-pack version, endpoint's configured model)`. The endpoint used for
-   that key is the first healthy one, or - if none answer their health probe - simply the first *enabled*
-   endpoint in config, since its model name is known either way. This is deliberate: cache lookup happens
-   **before** health is checked, which is what lets a repeat prompt still return instantly while the writer
-   host is asleep. A miss with nothing healthy passes through unchanged. An empty (or notes-only) reply is
-   never cached - it isn't a success, so it's treated as a passthrough instead of poisoning future lookups.
+   `(shielded prompt, profile ID, profile-pack version, endpoint's configured model, strength)`. When exactly
+   one endpoint is enabled, or an override names one enabled endpoint, that endpoint is used with no health
+   probe first, so a cache hit does not wait on the writer host. Several enabled endpoints still probe, and
+   that result is cached for 5 seconds. A connection failure records the endpoint unhealthy, probes any
+   *other* enabled endpoint, and retries that one once. If none answer, the request returns an error the UI
+   shows verbatim, for example `Prompt enhance: local Ollama at 127.0.0.1:11434 not reachable`. An empty
+   (or notes-only) reply is never cached.
 5. **Provenance.** Applying a result writes one hidden T2I param, `Prompt Enhance Provenance`
    (id `promptenhanceprovenance`) as JSON: `original`, `profile`, `pack_version`, `writer_model`, `endpoint`,
    `cached`, `strength` (the effective strength actually used - see "Strength" below). It is registered
@@ -76,7 +77,7 @@ owned here.
 
 | Condition | Behavior |
 |---|---|
-| Endpoint unreachable, connection failure, or timed out | **Fail open.** Passthrough, with a visible "Not enhanced: `<reason>`" marker. Generation is never blocked on an un-enhanced prompt the user believes was enhanced. |
+| Endpoint unreachable or connection failure | **Error.** The UI shows `Prompt enhance: local Ollama at <host> not reachable` (or `writer` for an OpenAI-compatible host). Auto mode still generates the original prompt. |
 | No profile resolves for the loaded model | Enhance button disabled, reason in its tooltip. Nothing is sent. |
 | No endpoint configured, or nothing healthy and no cache hit | Passthrough, reason shown. |
 | Reply begins `CONFLICT:` | Hard stop. Red block, the line shown verbatim, no Apply. |
@@ -174,12 +175,12 @@ once manually before starting Generate Forever) if you want a forever run to use
 ## Endpoints
 
 Configured writer hosts live in `Data/PromptEnhance/endpoints.json` (gitignored - a writer-host address is
-never committed). It is an **ordered list**; the first *enabled* entry that answers its health probe is
-used. A default file is written on first run:
+never committed). It is an **ordered list**. One enabled entry is used directly. A health probe runs only
+after that call fails, or up front when several entries are enabled. A default file is written on first run:
 
 ```json
 {
-  "_comment": "Ordered list; the first enabled endpoint that answers its health probe is used. kind is 'ollama' or 'openai'.",
+  "_comment": "Ordered list. A single enabled endpoint is used directly; health is probed only after a failure, or when several endpoints are enabled. kind is 'ollama' or 'openai'.",
   "endpoints": [
     {
       "id": "writer",
@@ -201,8 +202,9 @@ entry with any other kind is skipped with a logged error rather than crashing ex
 to `endpoint<index>` when absent and is deduplicated (a repeated ID is renamed and a warning logged) so it
 always has a stable value to key health results and API overrides on. The health probe is `GET /api/tags`
 (ollama) or `GET /v1/models` (openai), status code only, 5 second timeout, and the result is cached 5 seconds
-per endpoint so a resolve-then-dispatch pair of calls doesn't double the probe cost. `ListPromptEnhanceStatus`
-never exposes endpoint URLs to the client - only `id`, `kind`, `model`, `enabled`, `healthy`.
+per endpoint. With a single enabled endpoint, `ListPromptEnhanceStatus` does not probe; `healthy` is null
+until a writer call records a result. `ListPromptEnhanceStatus` never exposes endpoint URLs to the client -
+only `id`, `kind`, `model`, `enabled`, `healthy`.
 
 ## Folder/filename override config
 
@@ -235,9 +237,13 @@ all - add a line per folder for any other convention your library uses.
 ## Manual profile override
 
 The panel includes a profile dropdown (**Profile**, above the preview) listing every registered profile plus
-an **Automatic** default. Selecting one persists the choice per user (same `localStorage` mechanism as the
-mode control) and is sent as `profile_override` on every subsequent status check and `EnhancePrompt`
-request - both from the panel and from the auto-enhance path in `auto` mode.
+an **Automatic** default. Automatic follows the effective checkpoint: the model dropdown, or a selected
+preset's `model` when that preset sets one. Resolution uses the model's class id, then its compat class
+(`krea-2`, `flux-2-klein-4b` / `flux-2-klein-9b`, `anima`, `stable-diffusion-xl-v1` only when the name or
+folder says Illustrious/Noob, `qwen-image` / `qwen-image-2.1`, `minimax-h3` for that video model). A manual
+pick overrides that for the current page session only. It is not stored in `localStorage`. Changing the
+effective model clears it. The choice is sent as `profile_override` while it is set, from the panel and from
+auto-enhance. The Enhance entry shows **Enhancing...** and ignores another click until the request finishes.
 
 This is the escape hatch for a model with no automatic resolution at all (eg a plain SDXL checkpoint,
 deliberately left unmapped): the Enhance button always opens the panel
