@@ -62,6 +62,36 @@
     opacity: 0.75;
 }
 
+/* Shown on the Enhance entry while a review or auto request is in flight. The label is set to
+   "Enhancing..." in script; the spinner sits in front of that label. */
+.prompt-enhance-busy {
+    cursor: wait;
+    opacity: 0.85;
+}
+
+.prompt-enhance-busy::before {
+    content: '';
+    display: inline-block;
+    width: 0.8em;
+    height: 0.8em;
+    margin-right: 0.4em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    vertical-align: -0.1em;
+    animation: prompt-enhance-spin 0.7s linear infinite;
+}
+
+@keyframes prompt-enhance-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .prompt-enhance-busy::before {
+        animation: none;
+    }
+}
+
 .prompt-enhance-disabled {
     /* No 'pointer-events: none' here - that would stop the element receiving hover at all, which kills the
        'title' tooltip that carries the disabled reason. The click handlers already gate on the enabled flag
