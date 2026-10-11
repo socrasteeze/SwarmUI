@@ -34,7 +34,9 @@ public static class PromptEnhanceEndpoints
     /// <summary>Full path to the endpoint config file.</summary>
     public static string ConfigPath => $"{Program.DataDir}/PromptEnhance/endpoints.json";
 
-    /// <summary>How long a health probe result is trusted before it is re-checked, in milliseconds.</summary>
+    /// <summary>How long a health probe result is trusted before it is re-checked, in milliseconds.
+    /// A failed or successful writer call records into the same cache, so a retry does not probe a host
+    /// that just answered or just refused.</summary>
     private const long HealthCacheMs = 5000;
 
     /// <summary>Per-endpoint-ID cached health result, with the <see cref="Environment.TickCount64"/> it was taken at.</summary>
@@ -110,7 +112,7 @@ public static class PromptEnhanceEndpoints
     {
         return new JObject()
         {
-            ["_comment"] = "Ordered list; the first enabled endpoint that answers its health probe is used. kind is 'ollama' or 'openai'.",
+            ["_comment"] = "Ordered list. A single enabled endpoint is used directly; health is probed only after a failure, or when several endpoints are enabled. kind is 'ollama' or 'openai'.",
             ["endpoints"] = new JArray()
             {
                 new JObject()
@@ -127,14 +129,72 @@ public static class PromptEnhanceEndpoints
         };
     }
 
-    /// <summary>Whether an endpoint answers its health probe (<c>GET /api/tags</c> for <c>ollama</c>,
-    /// <c>GET /v1/models</c> for <c>openai</c>) within 5 seconds. Cached per endpoint ID for 5 seconds so a
-    /// resolve-then-dispatch pair of calls does not double the probe cost.</summary>
-    public static async Task<bool> IsHealthy(PromptEnhanceEndpoint endpoint)
+    /// <summary>The endpoint a request can use without a health probe.
+    /// <para>An override that names one enabled endpoint is that endpoint. With no override, exactly one
+    /// enabled endpoint is that endpoint. Several enabled endpoints, or an override that names nothing
+    /// enabled, return null so the caller probes (or reports that nothing is configured).</para></summary>
+    public static PromptEnhanceEndpoint EndpointForDirectUse(string overrideId)
+    {
+        List<PromptEnhanceEndpoint> enabled = [];
+        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
+        {
+            if (endpoint.Enabled)
+            {
+                enabled.Add(endpoint);
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(overrideId))
+        {
+            foreach (PromptEnhanceEndpoint endpoint in enabled)
+            {
+                if (endpoint.ID == overrideId)
+                {
+                    return endpoint;
+                }
+            }
+            return null;
+        }
+        if (enabled.Count == 1)
+        {
+            return enabled[0];
+        }
+        return null;
+    }
+
+    /// <summary>The first enabled endpoint, or null when none are enabled.</summary>
+    public static PromptEnhanceEndpoint FirstEnabled()
+    {
+        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
+        {
+            if (endpoint.Enabled)
+            {
+                return endpoint;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Records a health result for <paramref name="endpoint"/> so the next few seconds reuse it
+    /// instead of probing again. A writer call that connected, or that failed to connect, is the probe.</summary>
+    public static void RememberHealth(PromptEnhanceEndpoint endpoint, bool healthy)
     {
         if (endpoint is null)
         {
-            return false;
+            return;
+        }
+        lock (HealthLock)
+        {
+            HealthCache[endpoint.ID] = (healthy, Environment.TickCount64);
+        }
+    }
+
+    /// <summary>The cached health of <paramref name="endpoint"/> when it is still inside <see cref="HealthCacheMs"/>,
+    /// otherwise null.</summary>
+    public static bool? CachedHealth(PromptEnhanceEndpoint endpoint)
+    {
+        if (endpoint is null)
+        {
+            return null;
         }
         long now = Environment.TickCount64;
         lock (HealthLock)
@@ -144,11 +204,57 @@ public static class PromptEnhanceEndpoints
                 return cached.Healthy;
             }
         }
-        bool healthy = await ProbeHealth(endpoint);
-        lock (HealthLock)
+        return null;
+    }
+
+    /// <summary>Host:port (or host) from an endpoint URL, for an error the user can act on.</summary>
+    public static string HostLabel(PromptEnhanceEndpoint endpoint)
+    {
+        string host = endpoint?.Url ?? "";
+        if (host.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
         {
-            HealthCache[endpoint.ID] = (healthy, Environment.TickCount64);
+            host = host["http://".Length..];
         }
+        else if (host.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            host = host["https://".Length..];
+        }
+        return host;
+    }
+
+    /// <summary>Error text when a writer host refuses the connection. Ollama is named as local Ollama.</summary>
+    public static string UnreachableMessage(PromptEnhanceEndpoint endpoint)
+    {
+        string who = endpoint is not null && endpoint.Kind == "ollama" ? "local Ollama" : "writer";
+        return $"Prompt enhance: {who} at {HostLabel(endpoint)} not reachable";
+    }
+
+    /// <summary>Whether <paramref name="ex"/> is a connection failure rather than a timeout or a bad reply.
+    /// Those two transport messages are the ones <see cref="PromptEnhanceClient.ChatStream"/> uses when the
+    /// host cannot be contacted at all.</summary>
+    public static bool IsUnreachable(Exception ex)
+    {
+        string message = ex?.Message ?? "";
+        return message.Contains("could not be reached", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("connection failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Whether an endpoint answers its health probe (<c>GET /api/tags</c> for <c>ollama</c>,
+    /// <c>GET /v1/models</c> for <c>openai</c>) within 5 seconds. Cached per endpoint ID for 5 seconds so a
+    /// resolve-then-dispatch pair of calls does not double the probe cost.</summary>
+    public static async Task<bool> IsHealthy(PromptEnhanceEndpoint endpoint)
+    {
+        if (endpoint is null)
+        {
+            return false;
+        }
+        bool? cached = CachedHealth(endpoint);
+        if (cached.HasValue)
+        {
+            return cached.Value;
+        }
+        bool healthy = await ProbeHealth(endpoint);
+        RememberHealth(endpoint, healthy);
         return healthy;
     }
 
@@ -198,13 +304,53 @@ public static class PromptEnhanceEndpoints
         return null;
     }
 
-    /// <summary>Probes every configured endpoint and reports each one's health, for the status API to
-    /// show the whole list rather than just the one that would be picked.</summary>
-    public static async Task<List<(PromptEnhanceEndpoint Endpoint, bool Healthy)>> HealthAll()
+    /// <summary>The first enabled endpoint other than <paramref name="failed"/> that answers a health probe.
+    /// Disabled entries are skipped without a probe. Null when nothing else is enabled and healthy, which
+    /// is the single-endpoint case: the failed call already was the probe.</summary>
+    public static async Task<PromptEnhanceEndpoint> FirstOtherHealthy(PromptEnhanceEndpoint failed)
     {
-        List<(PromptEnhanceEndpoint Endpoint, bool Healthy)> results = [];
         foreach (PromptEnhanceEndpoint endpoint in Endpoints)
         {
+            if (!endpoint.Enabled || (failed is not null && endpoint.ID == failed.ID))
+            {
+                continue;
+            }
+            if (await IsHealthy(endpoint))
+            {
+                return endpoint;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Health for the status API. A fresh cache entry is reused. When at most one endpoint is
+    /// enabled, an uncached entry is reported as unknown (null) instead of blocking the status call on a
+    /// probe — EnhancePrompt uses that endpoint directly and records health from the writer call.
+    /// Several enabled endpoints are still probed, through the same short cache.</summary>
+    public static async Task<List<(PromptEnhanceEndpoint Endpoint, bool? Healthy)>> HealthAll()
+    {
+        int enabledCount = 0;
+        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
+        {
+            if (endpoint.Enabled)
+            {
+                enabledCount++;
+            }
+        }
+        List<(PromptEnhanceEndpoint Endpoint, bool? Healthy)> results = [];
+        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
+        {
+            bool? cached = CachedHealth(endpoint);
+            if (cached.HasValue)
+            {
+                results.Add((endpoint, cached.Value));
+                continue;
+            }
+            if (enabledCount <= 1)
+            {
+                results.Add((endpoint, null));
+                continue;
+            }
             results.Add((endpoint, await IsHealthy(endpoint)));
         }
         return results;

@@ -874,4 +874,54 @@ public class PromptEnhanceTests : SwarmUITest
     }
 
     #endregion
+
+    #region PromptEnhanceEndpoints direct use
+
+    /// <summary>One enabled endpoint is used with no probe, even when a disabled laptop entry is also listed.
+    /// The unreachable message names local Ollama and the host, without the scheme.</summary>
+    [Test]
+    public void EndpointForDirectUse_SingleEnabled_SkipsProbeChoice()
+    {
+        List<PromptEnhanceEndpoint> prior = PromptEnhanceEndpoints.Endpoints;
+        try
+        {
+            PromptEnhanceEndpoints.Endpoints =
+            [
+                new PromptEnhanceEndpoint("laptop", "http://192.168.0.193:11434", "ollama", "other", "30m", 120, false),
+                new PromptEnhanceEndpoint("hub-local", "http://127.0.0.1:11434", "ollama", "writer", "30m", 120, true)
+            ];
+            PromptEnhanceEndpoint chosen = PromptEnhanceEndpoints.EndpointForDirectUse("");
+            Assert.That(chosen?.ID, Is.EqualTo("hub-local"));
+            Assert.That(PromptEnhanceEndpoints.UnreachableMessage(chosen), Is.EqualTo("Prompt enhance: local Ollama at 127.0.0.1:11434 not reachable"));
+            Assert.That(PromptEnhanceEndpoints.IsUnreachable(new System.Net.Http.HttpRequestException("Prompt Enhance endpoint 'http://127.0.0.1:11434' could not be reached: connection refused")), Is.True);
+            Assert.That(PromptEnhanceEndpoints.IsUnreachable(new InvalidOperationException("Prompt Enhance endpoint 'http://127.0.0.1:11434' timed out after 120 seconds.")), Is.False);
+        }
+        finally
+        {
+            PromptEnhanceEndpoints.Endpoints = prior;
+        }
+    }
+
+    /// <summary>Several enabled endpoints are not a direct-use choice. The caller probes those.</summary>
+    [Test]
+    public void EndpointForDirectUse_SeveralEnabled_ReturnsNull()
+    {
+        List<PromptEnhanceEndpoint> prior = PromptEnhanceEndpoints.Endpoints;
+        try
+        {
+            PromptEnhanceEndpoints.Endpoints =
+            [
+                new PromptEnhanceEndpoint("a", "http://127.0.0.1:11434", "ollama", "writer", "30m", 120, true),
+                new PromptEnhanceEndpoint("b", "http://127.0.0.1:11435", "ollama", "writer", "30m", 120, true)
+            ];
+            Assert.That(PromptEnhanceEndpoints.EndpointForDirectUse(null), Is.Null);
+            Assert.That(PromptEnhanceEndpoints.EndpointForDirectUse("b")?.ID, Is.EqualTo("b"));
+        }
+        finally
+        {
+            PromptEnhanceEndpoints.Endpoints = prior;
+        }
+    }
+
+    #endregion
 }

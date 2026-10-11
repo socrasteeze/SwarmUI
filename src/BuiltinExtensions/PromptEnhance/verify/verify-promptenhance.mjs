@@ -64,8 +64,11 @@ let MouseEvent = function(type, init) {
 let localStorage = {
     store: {},
     getItem(key) { return Object.prototype.hasOwnProperty.call(this.store, key) ? this.store[key] : null; },
-    setItem(key, value) { this.store[key] = String(value); }
+    setItem(key, value) { this.store[key] = String(value); },
+    removeItem(key) { delete this.store[key]; }
 };
+// Preset list the desktop effective-model lookup reads. Null unless a test sets it.
+let currentPresets = null;
 // Read by open()'s makeWSRequest error callback. Reassigned per test the same way the others above.
 let showError = () => {};
 
@@ -114,6 +117,17 @@ function buildHost(methodNames, extraProps) {
     }
     if (methodNames.some(name => name == 'open' || name == 'runAutoEnhance') && !methodNames.includes('videoRequestFields')) {
         methodNames.push('videoRequestFields');
+    }
+    if (methodNames.some(name => name == 'open' || name == 'refreshStatus' || name == 'runAutoEnhance')) {
+        if (!methodNames.includes('effectiveModel')) {
+            methodNames.push('effectiveModel');
+        }
+        if (!methodNames.includes('syncProfileOverride')) {
+            methodNames.push('syncProfileOverride');
+        }
+    }
+    if (methodNames.some(name => name == 'open' || name == 'handleFrame' || name == 'close' || name == 'runAutoEnhance') && !methodNames.includes('setEnhanceBusy')) {
+        methodNames.push('setEnhanceBusy');
     }
     let pieces = [];
     for (let i = 0; i < methodNames.length; i++) {
@@ -782,6 +796,37 @@ function check(name, pass, detail) {
     host.open();
     check('open() sends the current strength preference in its EnhancePrompt request', capturedInData != null && capturedInData.strength == 'expand', `inData=${JSON.stringify(capturedInData)}`);
     check('...alongside the current prompt and profile override', capturedInData != null && capturedInData.prompt == 'a dragon' && capturedInData.profile_override == '', `inData=${JSON.stringify(capturedInData)}`);
+}
+
+// ====================================================================================================
+// Part 19: a manual profile override lasts only until the effective model changes, and a preset's model
+// wins over the dropdown. This is the MiniMax H3 stickiness bug: a saved H3 override plus a Krea preset.
+// ====================================================================================================
+{
+    getRequiredElementById = () => ({ value: 'h3/minimax.safetensors' });
+    currentPresets = [{ param_map: { model: 'krea/krea2_raw.safetensors' } }];
+    let host = buildHost(['effectiveModel'], {});
+    check('a preset model replaces the dropdown model for profile resolution', host.effectiveModel() == 'krea/krea2_raw.safetensors', `model="${host.effectiveModel()}"`);
+    currentPresets = [{ param_map: { model: 'prefix {value}' } }];
+    check('a {value} preset template is not treated as a checkpoint name', host.effectiveModel() == 'h3/minimax.safetensors', `model="${host.effectiveModel()}"`);
+    currentPresets = null;
+
+    let select = { value: 'minimax-h3', options: [{ value: '', innerText: 'Automatic' }] };
+    let calls = [];
+    genericRequest = (route, data) => { calls.push(data); };
+    getRequiredElementById = () => ({ value: 'krea/krea2_raw.safetensors' });
+    let host2 = buildHost(['refreshStatus', 'syncProfileOverride', 'effectiveModel', 'applyStatusToButton', 'setButtonEnabled', 'populateProfileOptions', 'applyStrengthOptions'], {
+        button: makeFakeElement(),
+        buttonEnabled: false,
+        profileOverride: 'minimax-h3',
+        trackedModel: 'h3/minimax.safetensors',
+        profileSelect: select,
+        statusRequestSeq: 0,
+        strengthSelect: { options: [] }
+    });
+    host2.refreshStatus();
+    check('changing the model clears a session H3 override back to automatic', host2.profileOverride == '' && select.value == '', `override="${host2.profileOverride}" select="${select.value}"`);
+    check('the status request after that change does not send the old override', calls.length == 1 && calls[0].profile_override == '' && calls[0].model == 'krea/krea2_raw.safetensors', JSON.stringify(calls[0]));
 }
 
 const failed = results.filter(r => !r.pass);

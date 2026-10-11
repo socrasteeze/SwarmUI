@@ -55,16 +55,17 @@ public static class PromptEnhanceAPI
             });
         }
         JArray endpoints = [];
-        foreach ((PromptEnhanceEndpoint endpoint, bool healthy) in await PromptEnhanceEndpoints.HealthAll())
+        foreach ((PromptEnhanceEndpoint endpoint, bool? healthy) in await PromptEnhanceEndpoints.HealthAll())
         {
-            endpoints.Add(new JObject()
+            JObject row = new()
             {
                 ["id"] = endpoint.ID,
                 ["kind"] = endpoint.Kind,
                 ["model"] = endpoint.Model,
                 ["enabled"] = endpoint.Enabled,
-                ["healthy"] = healthy
-            });
+                ["healthy"] = healthy.HasValue ? new JValue(healthy.Value) : JValue.CreateNull()
+            };
+            endpoints.Add(row);
         }
         // No resolved profile means the strength select cannot yet know which profile it will land on, so it
         // offers every strength rather than guessing - the server still enforces the edit-profile cap once a
@@ -120,18 +121,22 @@ public static class PromptEnhanceAPI
                 output(new JObject() { ["passthrough"] = true, ["reason"] = reason });
                 return;
             }
-            // The endpoint whose *config* (in particular its writer model name) drives the cache key is chosen
-            // regardless of health: FirstHealthy(override) when one answers its probe, else simply the first
-            // enabled endpoint in the config, which is known either way. This is what lets a repeat prompt
-            // still hit the cache while the writer host is asleep.
-            PromptEnhanceEndpoint healthyEndpoint = await PromptEnhanceEndpoints.FirstHealthy(endpointOverride);
-            PromptEnhanceEndpoint endpoint = healthyEndpoint ?? PromptEnhanceEndpoints.Endpoints.FirstOrDefault(candidate => candidate.Enabled);
+            // One enabled endpoint (the hub-local Ollama) is used directly. Its name is known from config,
+            // so the result cache can be checked with no health probe. Several enabled endpoints still probe,
+            // using the short health cache. A named override that is not enabled is "not configured".
+            PromptEnhanceEndpoint endpoint = PromptEnhanceEndpoints.EndpointForDirectUse(endpointOverride);
+            bool reachable = endpoint is not null;
+            if (endpoint is null && string.IsNullOrWhiteSpace(endpointOverride))
+            {
+                PromptEnhanceEndpoint healthyEndpoint = await PromptEnhanceEndpoints.FirstHealthy(null);
+                endpoint = healthyEndpoint ?? PromptEnhanceEndpoints.FirstEnabled();
+                reachable = healthyEndpoint is not null;
+            }
             if (endpoint is null)
             {
                 output(new JObject() { ["passthrough"] = true, ["reason"] = "No Prompt Enhance writer endpoint is configured" });
                 return;
             }
-            bool healthy = healthyEndpoint is not null;
             string shielded = PromptEnhanceClient.Shield(prompt, out List<string> extracted);
             if (PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID))
             {
@@ -158,27 +163,74 @@ public static class PromptEnhanceAPI
                 output(BuildResult(PromptEnhanceClient.Unshield(cachedUnwrapped, extracted), "", prompt, profile, endpoint, true, effectiveStrength, strengthNote));
                 return;
             }
-            if (!healthy)
+            if (!reachable)
             {
-                output(new JObject() { ["passthrough"] = true, ["reason"] = "No writer endpoint is reachable" });
+                output(new JObject() { ["error"] = PromptEnhanceEndpoints.UnreachableMessage(endpoint) });
                 return;
             }
-            output(new JObject() { ["status"] = "running", ["profile"] = profile.ID, ["writer_model"] = endpoint.Model, ["endpoint"] = endpoint.ID, ["strength"] = effectiveStrength });
-            PromptEnhanceRequest request = new(endpoint.Url, endpoint.Kind, endpoint.Model, endpoint.KeepAlive, endpoint.TimeoutSeconds, profile.Text, directed);
-            string reply;
+            bool emittedChunk = false;
+            async Task<string> RunChat(PromptEnhanceEndpoint target)
+            {
+                output(new JObject() { ["status"] = "running", ["profile"] = profile.ID, ["writer_model"] = target.Model, ["endpoint"] = target.ID, ["strength"] = effectiveStrength });
+                PromptEnhanceRequest request = new(target.Url, target.Kind, target.Model, target.KeepAlive, target.TimeoutSeconds, profile.Text, directed);
+                using CancellationTokenSource requestCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, session.SessInterrupt.Token);
+                return await PromptEnhanceClient.ChatStream(request, chunk =>
+                {
+                    emittedChunk = true;
+                    output(new JObject() { ["chunk"] = chunk });
+                }, requestCancel.Token);
+            }
+            string reply = null;
             try
             {
-                // Linked so either a global shutdown or the user interrupting their own session stops the writer request.
-                using CancellationTokenSource requestCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, session.SessInterrupt.Token);
-                reply = await PromptEnhanceClient.ChatStream(request, chunk => output(new JObject() { ["chunk"] = chunk }), requestCancel.Token);
+                reply = await RunChat(endpoint);
+                PromptEnhanceEndpoints.RememberHealth(endpoint, true);
             }
             catch (SwarmReadableErrorException ex)
             {
-                // Fail open: an unreachable/timed-out writer must never block generation on an un-enhanced prompt
-                // that looks enhanced, so this is a passthrough, never an {error}.
-                output(new JObject() { ["passthrough"] = true, ["reason"] = ex.Message });
+                PromptEnhanceEndpoints.RememberHealth(endpoint, false);
+                // The failed call is the probe. Retry once, and only against a different enabled endpoint
+                // that actually answers. A lone local endpoint does not get a second connection attempt.
+                if (!emittedChunk)
+                {
+                    PromptEnhanceEndpoint other = await PromptEnhanceEndpoints.FirstOtherHealthy(endpoint);
+                    if (other is not null)
+                    {
+                        endpoint = other;
+                        try
+                        {
+                            reply = await RunChat(endpoint);
+                            PromptEnhanceEndpoints.RememberHealth(endpoint, true);
+                            ex = null;
+                        }
+                        catch (SwarmReadableErrorException retryEx)
+                        {
+                            PromptEnhanceEndpoints.RememberHealth(endpoint, false);
+                            ex = retryEx;
+                        }
+                    }
+                }
+                if (ex is not null)
+                {
+                    // Unreachable is an error the UI shows verbatim. A timeout or other transport failure
+                    // stays a passthrough so auto-enhance can still generate the original prompt.
+                    if (PromptEnhanceEndpoints.IsUnreachable(ex))
+                    {
+                        output(new JObject() { ["error"] = PromptEnhanceEndpoints.UnreachableMessage(endpoint) });
+                    }
+                    else
+                    {
+                        output(new JObject() { ["passthrough"] = true, ["reason"] = ex.Message });
+                    }
+                    return;
+                }
+            }
+            if (reply is null)
+            {
                 return;
             }
+            // A retry may have moved to a different writer. Cache under the endpoint that actually answered.
+            key = PromptEnhanceCache.Key(directed, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength);
             if (PromptEnhanceClient.IsHardStop(reply, out string kind, out string line))
             {
                 if (kind == "needs_input")

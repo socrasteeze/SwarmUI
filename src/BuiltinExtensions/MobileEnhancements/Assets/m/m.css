@@ -1400,6 +1400,30 @@ html:has(.m-body) {
 .m-enhance-pill-disabled {
     opacity: 0.75;
 }
+.m-enhance-pill-busy {
+    cursor: wait;
+    opacity: 0.85;
+}
+.m-enhance-pill-busy::before {
+    content: '';
+    display: inline-block;
+    width: 0.75em;
+    height: 0.75em;
+    margin-right: 0.35em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    vertical-align: -0.1em;
+    animation: m-enhance-spin 0.7s linear infinite;
+}
+@keyframes m-enhance-spin {
+    to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .m-enhance-pill-busy::before {
+        animation: none;
+    }
+}
 .m-enhance-sheet {
     display: flex;
     flex-direction: column;
