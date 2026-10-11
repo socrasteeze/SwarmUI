@@ -2327,14 +2327,29 @@ html:has(.m-body) {
     max-height: 100%;
     object-fit: contain;
 }
+.m-viewer-prompt {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: 0.35rem calc(0.6rem + var(--m-safe-right)) 0.2rem calc(0.6rem + var(--m-safe-left));
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
+    max-height: calc(6.5em + 0.55rem);
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
 .m-viewer-actions {
-    display: flex;
-    flex-wrap: nowrap;
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.35rem;
-    padding: 0.6rem 0.6rem calc(0.6rem + var(--m-safe-bottom)) 0.6rem;
-    justify-content: flex-start;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    padding: 0.6rem var(--m-safe-right) calc(0.6rem + var(--m-safe-bottom)) var(--m-safe-left);
 }
 .m-viewer-action {
     background: var(--background-panel);
@@ -2342,9 +2357,11 @@ html:has(.m-body) {
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     min-height: 44px;
-    padding: 0 0.65rem;
-    flex: 0 0 auto;
-    white-space: nowrap;
+    padding: 0.3rem 0.2rem;
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
 }
 
 /* --- Models tab --- */
