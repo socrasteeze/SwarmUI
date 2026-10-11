@@ -74,9 +74,16 @@ class PromptEnhanceHelperClass {
         this.mode = this.pref('mode', 'review');
         /** The mode <select> beside the Enhance button. */
         this.modeSelect = null;
-        /** Manual profile override id, or '' for automatic resolution. Persisted per user. Sent as
-         * 'profile_override' on every status check and every EnhancePrompt request. */
-        this.profileOverride = this.pref('profile_override', '');
+        /** Manual profile override id, or '' for automatic resolution. Session-only: a model change clears
+         * it, and it is never read back from localStorage (an old saved MiniMax H3 choice was sticking onto
+         * later checkpoints). Sent as 'profile_override' while it is set. */
+        this.profileOverride = '';
+        /** Effective model name the current manual override was chosen against, or null before the first status check. */
+        this.trackedModel = null;
+        /** Display name of the profile automatic resolution last chose, or ''. */
+        this.resolvedDisplay = '';
+        /** Idle label of the Enhance button, captured the first time a request marks it busy. */
+        this.buttonIdleText = null;
         /** The profile-override <select> inside the panel. */
         this.profileSelect = null;
         /** Enhance Strength: 'faithful' (send unchanged), 'expand' (permit restrained additions), or 'full'
@@ -121,9 +128,87 @@ class PromptEnhanceHelperClass {
         this.buildButton();
         this.buildPanel();
         this.generateButton.addEventListener('click', e => this.onGenerateClick(e), true);
+        try {
+            localStorage.removeItem('promptenhance_profile_override');
+        }
+        catch (e) {
+            // Private mode can refuse storage. The override is memory-only either way.
+        }
+        this.profileOverride = '';
         getRequiredElementById('current_model').addEventListener('change', () => this.scheduleStatusRefresh());
         featureSetChangedCallbacks.push(() => this.scheduleStatusRefresh());
+        // Preset clicks update currentPresets inside updatePresetList and do not always change the model
+        // dropdown. Wrap that function so a preset that sets model re-resolves the profile.
+        if (typeof updatePresetList == 'function' && !updatePresetList._promptEnhanceWrapped) {
+            let originalUpdatePresetList = updatePresetList;
+            let wrappedUpdatePresetList = function() {
+                let result = originalUpdatePresetList.apply(this, arguments);
+                promptEnhanceHelper.scheduleStatusRefresh();
+                return result;
+            };
+            wrappedUpdatePresetList._promptEnhanceWrapped = true;
+            updatePresetList = wrappedUpdatePresetList;
+        }
         this.scheduleStatusRefresh();
+    }
+
+    /** The checkpoint profile resolution should follow. A selected preset's model replaces the dropdown
+     * when that preset sets model to a concrete name. A {value} template is not a checkpoint name. */
+    effectiveModel() {
+        let model = '';
+        try {
+            let selector = getRequiredElementById('current_model');
+            if (selector && selector.value) {
+                model = selector.value;
+            }
+        }
+        catch (e) {
+            model = '';
+        }
+        let presets = typeof currentPresets == 'undefined' ? null : currentPresets;
+        if (presets) {
+            for (let i = 0; i < presets.length; i++) {
+                let map = presets[i] && presets[i].param_map;
+                let picked = map ? map['model'] : '';
+                if (typeof picked == 'string' && picked.indexOf('{value}') < 0 && picked.trim() != '') {
+                    model = picked.trim();
+                }
+            }
+        }
+        return model;
+    }
+
+    /** Drops a manual profile override when the effective model changes. The override then lasts only until
+     * the next model or model-setting preset, and only in this page session. */
+    syncProfileOverride(model) {
+        if (this.trackedModel != null && this.trackedModel != model) {
+            this.profileOverride = '';
+            if (this.profileSelect) {
+                this.profileSelect.value = '';
+            }
+        }
+        this.trackedModel = model;
+    }
+
+    /** Shows or clears Enhancing... on the Enhance button and ignores the idea of a second click visually.
+     * open() and runAutoEnhance() also return while a request is in flight. */
+    setEnhanceBusy(busy) {
+        if (!this.button) {
+            return;
+        }
+        if (this.buttonIdleText == null) {
+            this.buttonIdleText = this.button.innerText || 'Enhance Prompt';
+        }
+        if (busy) {
+            this.button.innerText = 'Enhancing...';
+            this.button.classList.add('prompt-enhance-busy');
+            this.button.setAttribute('aria-busy', 'true');
+        }
+        else {
+            this.button.innerText = this.buttonIdleText;
+            this.button.classList.remove('prompt-enhance-busy');
+            this.button.removeAttribute('aria-busy');
+        }
     }
 
     /** Builds the mode control and the Enhance entry, and puts them in the Generate caret menu
@@ -230,7 +315,7 @@ class PromptEnhanceHelperClass {
         this.passthroughBlock.addEventListener('click', () => this.close());
         this.profileSelect.addEventListener('change', () => {
             this.profileOverride = this.profileSelect.value;
-            this.setPref('profile_override', this.profileOverride);
+            this.trackedModel = this.effectiveModel();
             this.refreshStatus();
             if (this.panel.classList.contains('prompt-enhance-panel-open')) {
                 // Re-send with the newly forced override rather than leaving a stale rewrite (or a stale
@@ -354,6 +439,7 @@ class PromptEnhanceHelperClass {
             this.socket.close();
         }
         this.running = false;
+        this.setEnhanceBusy(false);
     }
 
     /** Renders the red hard-stop block for a 'conflict' or 'needs_input' terminal frame. No Apply. */
@@ -367,7 +453,11 @@ class PromptEnhanceHelperClass {
     /** Renders the fail-open marker for a 'passthrough' terminal frame. No Apply; closes on acknowledgement. */
     showPassthrough(reason) {
         this.passthroughBlock.style.display = '';
-        this.passthroughBlock.innerText = `Not enhanced: ${reason}`;
+        let text = `${reason || ''}`;
+        if (text.indexOf('Prompt enhance:') != 0) {
+            text = `Not enhanced: ${text}`;
+        }
+        this.passthroughBlock.innerText = text;
         this.setApplyEnabled(false);
     }
 
@@ -433,6 +523,7 @@ class PromptEnhanceHelperClass {
         }
         if (data.result != null) {
             this.running = false;
+            this.setEnhanceBusy(false);
             data.result = this.unwrapEnhanceResult(data.result);
             if (data.result.trim() == '') {
                 // An empty result is not a success - never enable Apply on it, treat it like passthrough.
@@ -457,16 +548,19 @@ class PromptEnhanceHelperClass {
         }
         if (data.conflict != null) {
             this.running = false;
+            this.setEnhanceBusy(false);
             this.showConflict(data.conflict, false);
             return;
         }
         if (data.needs_input != null) {
             this.running = false;
+            this.setEnhanceBusy(false);
             this.showConflict(data.needs_input, true);
             return;
         }
         if (data.passthrough != null) {
             this.running = false;
+            this.setEnhanceBusy(false);
             this.showPassthrough(data.reason);
             return;
         }
@@ -477,12 +571,14 @@ class PromptEnhanceHelperClass {
         if (this.running || this.autoRunning) {
             return;
         }
-        let model = getRequiredElementById('current_model').value;
+        let model = this.effectiveModel();
+        this.syncProfileOverride(model);
         let prompt = this.promptBox.value;
         this.resetPanel();
         this.showPanel();
         this.running = true;
-        this.setStatus('Starting...');
+        this.setEnhanceBusy(true);
+        this.setStatus('Enhancing...');
         this.settled = false;
         this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields() }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
@@ -492,7 +588,8 @@ class PromptEnhanceHelperClass {
         }, 0, error => {
             this.settled = true;
             this.running = false;
-            this.setStatus('');
+            this.setEnhanceBusy(false);
+            this.showPassthrough(error);
             showError(error);
         });
         if (this.socket) {
@@ -500,6 +597,7 @@ class PromptEnhanceHelperClass {
                 if (!this.settled) {
                     this.settled = true;
                     this.running = false;
+                    this.setEnhanceBusy(false);
                     showError('The Prompt Enhance connection closed with no result. Check the server logs.');
                 }
             });
@@ -632,7 +730,8 @@ class PromptEnhanceHelperClass {
      * necessarily whichever was dispatched last.</p>
      */
     refreshStatus() {
-        let model = getRequiredElementById('current_model').value;
+        let model = this.effectiveModel();
+        this.syncProfileOverride(model);
         this.statusRequestSeq += 1;
         let requestSeq = this.statusRequestSeq;
         genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride }, data => {
@@ -658,13 +757,48 @@ class PromptEnhanceHelperClass {
      * button's own title text.</p>
      */
     applyStatusToButton(data) {
+        let display = '';
+        let profiles = (data && data.profiles) || [];
+        if (data && data.resolved && data.resolved.profile) {
+            for (let i = 0; i < profiles.length; i++) {
+                if (profiles[i].id == data.resolved.profile) {
+                    display = profiles[i].display || profiles[i].id;
+                    break;
+                }
+            }
+            if (!display) {
+                display = data.resolved.profile;
+            }
+        }
+        this.resolvedDisplay = display;
+        if (this.profileSelect && this.profileOverride == '' && this.profileSelect.options && this.profileSelect.options.length > 0) {
+            let auto = this.profileSelect.options[0];
+            if (auto && auto.value == '') {
+                auto.innerText = display ? `Automatic (${display})` : 'Automatic';
+            }
+        }
         if (!data.resolved || !data.resolved.profile) {
             this.setButtonEnabled(false, (data.resolved && data.resolved.reason) || 'No writer profile available for the current model.');
             return;
         }
-        let anyHealthy = (data.endpoints || []).some(endpoint => endpoint.healthy);
-        let reason = anyHealthy ? 'Rewrite this prompt with a local writer LLM for the currently loaded model.'
-            : 'No Prompt Enhance writer endpoint is currently reachable - the prompt will pass through unchanged.';
+        let endpoints = data.endpoints || [];
+        let knownDown = true;
+        let sawEnabled = false;
+        for (let i = 0; i < endpoints.length; i++) {
+            if (endpoints[i].enabled === false) {
+                continue;
+            }
+            sawEnabled = true;
+            if (endpoints[i].healthy !== false) {
+                knownDown = false;
+                break;
+            }
+        }
+        if (endpoints.length > 0 && !sawEnabled) {
+            knownDown = true;
+        }
+        let reason = knownDown ? 'No Prompt Enhance writer endpoint is currently reachable - the prompt will pass through unchanged.'
+            : `Profile: ${display}. Rewrite this prompt with a local writer LLM for the currently loaded model.`;
         this.setButtonEnabled(true, reason);
     }
 
@@ -704,11 +838,14 @@ class PromptEnhanceHelperClass {
      * anyway with the original, un-enhanced prompt (fail open).</p>
      */
     runAutoEnhance(prompt, altKey) {
-        let model = getRequiredElementById('current_model').value;
+        let model = this.effectiveModel();
+        this.syncProfileOverride(model);
         this.autoRunning = true;
+        this.setEnhanceBusy(true);
         this.setGenerateButtonBusy(true);
         let failOpen = reason => {
             this.autoRunning = false;
+            this.setEnhanceBusy(false);
             this.setGenerateButtonBusy(false);
             this.resetPanel();
             this.showPanel();
@@ -727,6 +864,7 @@ class PromptEnhanceHelperClass {
                     return;
                 }
                 this.autoRunning = false;
+                this.setEnhanceBusy(false);
                 this.setGenerateButtonBusy(false);
                 this.applyResult(data);
                 this.dispatchGenerateClick(altKey);
@@ -734,6 +872,7 @@ class PromptEnhanceHelperClass {
             }
             if (data.conflict != null || data.needs_input != null) {
                 this.autoRunning = false;
+                this.setEnhanceBusy(false);
                 this.setGenerateButtonBusy(false);
                 this.resetPanel();
                 this.showPanel();
