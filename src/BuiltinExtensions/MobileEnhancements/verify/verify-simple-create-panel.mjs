@@ -162,13 +162,7 @@ await page.addInitScript(() => {
         else if (route == 'ListImages') {
             let path = args.path || '';
             if (path == '') {
-                callback({ folders: ['inputs', 'Starred', 'MixStudio', 'raw'], files: [{ src: 'root.png', metadata: '' }] });
-            }
-            else if (path == 'MixStudio') {
-                callback({ folders: ['shots'], files: [{ src: 'mix-a.png', metadata: '' }, { src: 'clip.mp4', metadata: '' }] });
-            }
-            else if (path == 'MixStudio/shots') {
-                callback({ folders: [], files: [{ src: 'shot1.png', metadata: '' }] });
+                callback({ folders: ['inputs', 'Starred', 'raw'], files: [{ src: 'root.png', metadata: '' }] });
             }
             else if (path == 'inputs') {
                 callback({ folders: [], files: [{ src: 'ref.png', metadata: '' }] });
@@ -1808,21 +1802,22 @@ const browserOpen = await page.evaluate(async () => {
     };
 });
 check('frame + opens server image browser sheet', browserOpen.sheet, JSON.stringify(browserOpen));
-check('browser shows Output favorites in its select and disables Up at the root', ['Output','Inputs','Starred','MixStudio'].every(l => browserOpen.roots.includes(l))
+check('browser shows Output favorites in its select and disables Up at the root', ['Output','Inputs','Starred'].every(l => browserOpen.roots.includes(l))
     && browserOpen.upDisabled, JSON.stringify(browserOpen));
 check('browser offers From phone fallback', browserOpen.phone);
 
-const pickFromMix = await page.evaluate(async () => {
+const pickFromInputs = await page.evaluate(async () => {
     let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    // Select MixStudio favorite then choose its mix-a.png tile.
+    // Select the Inputs favorite by its rendered option, then choose ref.png.
     let favorites = document.querySelector('.m-imgbrowser-favorites-select');
-    favorites.value = 'MixStudio';
+    let inputs = [...favorites.options].find(option => option.textContent == 'Inputs');
+    favorites.value = inputs.value;
     favorites.dispatchEvent(new Event('change'));
     await settle();
     // Wait a tick for ListImages callback.
     await new Promise(r => setTimeout(r, 100));
     await settle();
-    let tile = [...document.querySelectorAll('.m-imgbrowser-tile')].find(t => (t.querySelector('.m-imgbrowser-tile-name') || {}).textContent == 'mix-a.png');
+    let tile = [...document.querySelectorAll('.m-imgbrowser-tile')].find(t => (t.querySelector('.m-imgbrowser-tile-name') || {}).textContent == 'ref.png');
     if (tile) { tile.click(); }
     await settle();
     // openSheet removes the DOM 250ms after close(); wait past that animation.
@@ -1834,9 +1829,9 @@ const pickFromMix = await page.evaluate(async () => {
         sheetGone: !document.querySelector('.m-imgbrowser')
     };
 });
-check('picking MixStudio image sets initImage path entry', pickFromMix.initImage && pickFromMix.initImage.kind == 'path' && pickFromMix.initImage.value == 'MixStudio/mix-a.png', JSON.stringify(pickFromMix));
-check('buildGenInput sends the MixStudio path as initimage', pickFromMix.initParam == 'MixStudio/mix-a.png', JSON.stringify(pickFromMix));
-check('browser sheet closes after pick', pickFromMix.sheetGone);
+check('picking an Inputs image sets initImage path entry', pickFromInputs.initImage && pickFromInputs.initImage.kind == 'path' && pickFromInputs.initImage.value == 'inputs/ref.png', JSON.stringify(pickFromInputs));
+check('buildGenInput sends the Inputs path as initimage', pickFromInputs.initParam == 'inputs/ref.png', JSON.stringify(pickFromInputs));
+check('browser sheet closes after pick', pickFromInputs.sheetGone);
 
 const promptChooser = await page.evaluate(async () => {
     let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));

@@ -25,8 +25,7 @@ class MImageBrowser {
     static DefaultRoots = [
         { 'label': 'Output', 'path': '' },
         { 'label': 'Inputs', 'path': 'inputs' },
-        { 'label': 'Starred', 'path': 'Starred' },
-        { 'label': 'MixStudio', 'path': 'MixStudio' }
+        { 'label': 'Starred', 'path': 'Starred' }
     ];
 
     /** Folder name prefixes hidden from this browser (Comfy paste dumps, test scratch).
