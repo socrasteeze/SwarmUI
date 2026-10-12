@@ -38,13 +38,45 @@ public static class PromptEnhanceCache
 
     /// <summary>Builds the cache key for one enhance request: a lowercase SHA256 hex digest of every input
     /// that can change the result. Stable for identical inputs, and changes whenever the prompt, the
-    /// resolved profile, the profile-pack version, the writer model, or the effective Enhance Strength
-    /// differs - two different strengths prepend two different directives (see
-    /// <c>PromptEnhanceClient.ApplyStrength</c>), so they must never collide on the same key.</summary>
-    public static string Key(string prompt, string profileId, string packVersion, string writerModel, string strength)
+    /// resolved profile, the profile-pack version, the writer model, the effective Enhance Strength, the
+    /// resolved writer mode (<c>t2i</c> or <c>edit</c>), or the reference-image digest differs. Two
+    /// different strengths prepend two different directives (see <c>PromptEnhanceClient.ApplyStrength</c>),
+    /// so they must never collide on the same key. <paramref name="imageDigest"/> is a hash of the
+    /// downscaled image bytes, empty when no reference image was attached.</summary>
+    public static string Key(string prompt, string profileId, string packVersion, string writerModel, string strength, string resolvedMode = "", string imageDigest = "")
     {
-        string raw = $"{prompt}|{profileId}|{packVersion}|{writerModel}|{strength}";
+        string raw = $"{prompt}|{profileId}|{packVersion}|{writerModel}|{strength}|{resolvedMode}|{imageDigest}";
         return Utilities.BytesToHex(SHA256.HashData(raw.EncodeUTF8())).ToLowerFast();
+    }
+
+    /// <summary>Lowercase SHA256 hex of the reference-image bytes, in order, with a separator between
+    /// images so two different splits of the same bytes do not collide. Empty when there are no images.</summary>
+    public static string ImageDigest(IReadOnlyList<byte[]> images)
+    {
+        if (images is null || images.Count == 0)
+        {
+            return "";
+        }
+        IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        try
+        {
+            byte[] separator = [0];
+            for (int i = 0; i < images.Count; i++)
+            {
+                byte[] image = images[i];
+                if (image is null)
+                {
+                    continue;
+                }
+                hash.AppendData(image);
+                hash.AppendData(separator);
+            }
+            return Utilities.BytesToHex(hash.GetHashAndReset()).ToLowerFast();
+        }
+        finally
+        {
+            hash.Dispose();
+        }
     }
 
     /// <summary>Loads <see cref="CachePath"/> into memory on first use. Never throws: a missing or

@@ -31,7 +31,7 @@
  * Run with: node src/BuiltinExtensions/PromptEnhance/verify/verify-promptenhance.mjs
  * Exits non-zero if any check fails.
  */
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
@@ -50,6 +50,8 @@ let triggerChangeFor = () => {};
 // (makeWSRequest, MouseEvent) - reassigned per test the same way document/triggerChangeFor are above.
 let getRequiredElementById = () => ({ value: '' });
 let getParamById = () => null;
+// Generation input the writer-mode image check reads. Null unless a test sets a function.
+let getGenInput = null;
 let makeWSRequest = () => null;
 // Read by refreshStatus() (genericRequest('ListPromptEnhanceStatus', ...)). Reassigned per test the same way
 // makeWSRequest is above, so a test can capture the dispatched callbacks and invoke them in whatever order it
@@ -117,6 +119,13 @@ function buildHost(methodNames, extraProps) {
     }
     if (methodNames.some(name => name == 'open' || name == 'runAutoEnhance') && !methodNames.includes('videoRequestFields')) {
         methodNames.push('videoRequestFields');
+    }
+    if (methodNames.some(name => name == 'open' || name == 'refreshStatus' || name == 'runAutoEnhance' || name == 'enhanceRequestFields' || name == 'syncWriteModeLabel')) {
+        for (let extra of ['enhanceRequestFields', 'referenceImageValues', 'resolvedWriteMode', 'normalizeWriteMode', 'syncWriteModeLabel']) {
+            if (!methodNames.includes(extra)) {
+                methodNames.push(extra);
+            }
+        }
     }
     if (methodNames.some(name => name == 'open' || name == 'refreshStatus' || name == 'runAutoEnhance')) {
         if (!methodNames.includes('effectiveModel')) {
@@ -827,6 +836,67 @@ function check(name, pass, detail) {
     host2.refreshStatus();
     check('changing the model clears a session H3 override back to automatic', host2.profileOverride == '' && select.value == '', `override="${host2.profileOverride}" select="${select.value}"`);
     check('the status request after that change does not send the old override', calls.length == 1 && calls[0].profile_override == '' && calls[0].model == 'krea/krea2_raw.safetensors', JSON.stringify(calls[0]));
+    check('the status request also sends the writer mode', calls[0].mode == 'auto' && calls[0].resolved_mode == 't2i', JSON.stringify(calls[0]));
+}
+
+// ====================================================================================================
+// Part 20: writer mode. Auto is edit when the generation has an init image or prompt images.
+// ====================================================================================================
+{
+    getGenInput = () => ({ initimage: 'init-bytes', promptimages: ['p1', 'p2', 'p3', 'p4'] });
+    let host = buildHost(['enhanceRequestFields'], { writeMode: 'auto' });
+    let fields = host.enhanceRequestFields();
+    check('auto with an init image resolves to edit', fields.mode == 'auto' && fields.resolved_mode == 'edit', JSON.stringify(fields));
+    check('init image is first and the list is capped at 4', fields.images && fields.images.length == 4 && fields.images[0] == 'init-bytes' && fields.images[3] == 'p3', JSON.stringify(fields.images));
+    host.writeMode = 't2i';
+    let forced = host.enhanceRequestFields();
+    check('explicit t2i stays t2i and does not attach images', forced.mode == 't2i' && forced.resolved_mode == 't2i' && forced.images == null, JSON.stringify(forced));
+    host.writeMode = 'edit';
+    getGenInput = () => ({});
+    let editOnly = host.enhanceRequestFields();
+    check('explicit edit stays edit with no images to attach', editOnly.resolved_mode == 'edit' && editOnly.images == null, JSON.stringify(editOnly));
+    host.writeMode = 'auto';
+    let plain = host.enhanceRequestFields();
+    check('auto with no images resolves to t2i', plain.mode == 'auto' && plain.resolved_mode == 't2i' && plain.images == null, JSON.stringify(plain));
+    getGenInput = null;
+
+    let autoOption = { value: 'auto', innerText: 'Auto' };
+    let select = { options: [autoOption, { value: 't2i', innerText: 'T2I' }, { value: 'edit', innerText: 'Edit' }], value: 'auto' };
+    getGenInput = () => ({ promptimages: ['only-prompt'] });
+    let labelHost = buildHost(['syncWriteModeLabel'], { writeMode: 'auto', writeModeSelect: select, panelWriteModeSelect: null });
+    labelHost.syncWriteModeLabel();
+    check('the Auto option shows the resolved mode', autoOption.innerText == 'Auto (Edit)', `innerText="${autoOption.innerText}"`);
+    getGenInput = null;
+}
+
+// ====================================================================================================
+// Part 21: edit profile files and the server mapping, read from source. No live server.
+// ====================================================================================================
+{
+    let root = `${REPO}/src/BuiltinExtensions/PromptEnhance`;
+    let profiles = readFileSync(`${root}/PromptEnhanceProfiles.cs`, 'utf8');
+    let client = readFileSync(`${root}/PromptEnhanceClient.cs`, 'utf8');
+    let unload = readFileSync(`${root}/PromptEnhanceUnload.cs`, 'utf8');
+    let extension = readFileSync(`${root}/PromptEnhanceExtension.cs`, 'utf8');
+    let version = readFileSync(`${root}/Assets/profiles/VERSION`, 'utf8').trim();
+    check('pack version is 1.5.0+edit-mode', version == '1.5.0+edit-mode', version);
+    check('klein 9b maps to its edit profile', profiles.includes('["flux2-klein-9b"] = "flux2-klein-9b.edit"'), '');
+    check('qwen image 2.1 maps to its edit profile', profiles.includes('["qwen-image-2.1"] = "qwen-image-2.1.edit"'), '');
+    check('krea 2 maps to its reference profile', profiles.includes('["krea-2"] = "krea-2.reference"'), '');
+    check('the three edit profiles are registered as edit profiles', profiles.includes('"flux2-klein-9b.edit"') && profiles.includes('"qwen-image-2.1.edit"') && profiles.includes('"krea-2.reference"'), '');
+    check('a base profile without an edit file gets the generic edit appendix', profiles.includes('GenericEditAppendix'), '');
+    check('enhance requests keep keep_alive at 5m', client.includes('EnhanceKeepAlive = "5m"'), '');
+    check('reference images are capped at 4 and 768px', client.includes('MaxReferenceImages = 4') && client.includes('MaxReferenceSide = 768'), '');
+    check('ollama messages carry an images field', client.includes('user["images"] = images'), '');
+    check('generation hooks the unload on PreGenerateEvent', extension.includes('PreGenerateEvent += PromptEnhanceUnload.OnPreGenerate'), '');
+    check('unload reads /api/ps and posts keep_alive 0', unload.includes('/api/ps') && unload.includes('["keep_alive"] = 0') && unload.includes('/api/generate'), '');
+    check('unload is not awaited on the generation path', unload.includes('Task.Run(UnloadAsync)') && unload.includes('DebounceMs = 5000'), '');
+    let klein = readFileSync(`${root}/Assets/profiles/flux2-klein-9b.edit.system.md`, 'utf8');
+    let qwen = readFileSync(`${root}/Assets/profiles/qwen-image-2.1.edit.system.md`, 'utf8');
+    let krea = readFileSync(`${root}/Assets/profiles/krea-2.reference.system.md`, 'utf8');
+    check('klein edit profile exists and speaks in natural sentences about image 1', existsSync(`${root}/Assets/profiles/flux2-klein-9b.edit.system.md`) && klein.includes('natural sentences') && klein.includes('image 1'), '');
+    check('qwen edit profile names add, remove, replace and keeps quoted original-language text', qwen.includes('add, remove, replace') && qwen.includes('original language'), '');
+    check('krea reference profile describes the first reference image because krea is not a true edit model', krea.includes('not a true edit model') && krea.includes('first reference image'), '');
 }
 
 const failed = results.filter(r => !r.pass);
