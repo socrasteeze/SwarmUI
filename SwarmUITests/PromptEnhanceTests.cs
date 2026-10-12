@@ -987,7 +987,7 @@ public class PromptEnhanceTests : SwarmUITest
         {
             PromptEnhanceEndpoints.Endpoints =
             [
-                new PromptEnhanceEndpoint("laptop", "http://192.168.0.193:11434", "ollama", "other", "30m", 120, false),
+                new PromptEnhanceEndpoint("laptop", "http://192.0.2.10:11434", "ollama", "other", "30m", 120, false),
                 new PromptEnhanceEndpoint("hub-local", "http://127.0.0.1:11434", "ollama", "writer", "30m", 120, true)
             ];
             PromptEnhanceEndpoint chosen = PromptEnhanceEndpoints.EndpointForDirectUse("");

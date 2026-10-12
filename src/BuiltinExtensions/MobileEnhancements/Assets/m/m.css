@@ -1103,8 +1103,8 @@ button.m-header-link {
     color: var(--emphasis);
 }
 /* Marks a starred ("favourite") model. The pickers sort starred entries to the top (mState.starredFirst), and
-   a list that reorders itself with nothing on screen to explain why just looks unsorted. Decoration only - the
-   star is set in the full UI's model browser; this client has no star button of its own. */
+   a list that reorders itself with nothing on screen to explain why just looks unsorted. Picker decoration;
+   the Models tab has separate buttons that update SwarmUI's shared favorites. */
 .m-model-star {
     flex: 0 0 auto;
     color: var(--emphasis);
@@ -1113,11 +1113,28 @@ button.m-header-link {
 }
 /* On a Models-tab card the star rides the top corner of the thumbnail instead of sitting in the row
    (.m-model-card carries the position: relative this anchors to). */
-.m-model-star-badge {
+.m-model-favorite {
     position: absolute;
     top: 0.25rem;
     right: 0.35rem;
-    text-shadow: 0 0 0.3rem var(--background);
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    font-size: 22px;
+}
+.m-model-favorite[aria-pressed="true"] {
+    color: var(--emphasis);
+}
+.m-model-favorite:focus-visible {
+    outline: 2px solid var(--emphasis);
+    outline-offset: -3px;
+}
+.m-model-favorite:disabled {
+    opacity: 0.6;
 }
 .m-model-text {
     flex: 1 1 auto;
@@ -2527,7 +2544,7 @@ button.m-header-link {
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     overflow: hidden;
-    /* Anchor for .m-model-star-badge. */
+    /* Anchor for .m-model-favorite. */
     position: relative;
     display: flex;
     flex-direction: column;

@@ -31,7 +31,7 @@ await page.evaluate(() => {
         modelText: model => { let wrap = document.createElement('div'); wrap.className = 'm-model-text'; let name = document.createElement('div'); name.className = 'm-model-name'; name.textContent = model.name; wrap.appendChild(name); return wrap; },
         modelName: name => name, modelLines: model => ({ primary: model.name }), note: () => {}, warn: message => window.__warnings.push(message), openSheet: () => () => {}
     };
-    window.mState = { params: {}, starredFirst: files => [...files].sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)), getLoras: () => [], setLoras: () => {}, changed: () => {} };
+    window.mState = { params: {}, models: {}, modelClasses: {}, refreshUserData: () => {}, isStarred: () => false, onChange: callback => window.__stateChanged = callback, starredFirst: files => [...files].sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)), getLoras: () => [], setLoras: () => {}, changed: () => {} };
     window.MState = { sameModel: (a, b) => a == b, stripModelExt: name => name };
     window.mCreate = { loraList: null, modelList: null, insertTriggerPhrase: () => {}, indexLoras: () => {}, enrichLoraMetadata: done => done(), buildCountRow: (shown, total) => mUI.el('div', 'm-list-count', `${shown}/${total}`) };
     window.permissions = { hasPermission: () => false };
@@ -123,6 +123,69 @@ report = await page.evaluate(() => {
     return { hidden: mModels.pager.hidden, display: getComputedStyle(mModels.pager).display };
 });
 check('single-page results hide the pager from layout', report.hidden && report.display == 'none', JSON.stringify(report));
+report = await page.evaluate(() => {
+    mState.models = {
+        'Stable-Diffusion': [['nested/anima.safetensors', 'anima'], ['flux.safetensors', 'flux']],
+        'LoRA': [['nested/needle.safetensors', 'anima/lora'], ['other/needle.safetensors', 'flux/lora'], ['unclassified.safetensors', null]]
+    };
+    mState.modelClasses = { 'anima': { name: 'Anima' }, 'flux': { name: 'Flux' }, 'anima/lora': { name: 'Anima LoRA' }, 'flux/lora': { name: 'Flux LoRA' } };
+    window.__stateChanged();
+    return [...mModels.architectureSelect.options].map(option => option.textContent);
+});
+check('architecture options populate when the boot inventory arrives late', report.includes('Anima LoRA') && report.includes('Flux LoRA') && report.includes('Unknown'), JSON.stringify(report));
+report = await page.evaluate(() => {
+    mCreate.loraList = [{ name: 'nested/needle.safetensors', local: false }, { name: 'other/needle.safetensors', local: false, starred: true }, { name: 'unclassified.safetensors', local: false }];
+    mModels.search.value = '';
+    mModels.page = 5;
+    mModels.architectureSelect.value = 'anima/lora';
+    mModels.architectureSelect.dispatchEvent(new Event('change'));
+    return { names: [...document.querySelectorAll('.m-model-name')].map(el => el.textContent), page: mModels.page, folders: mModels.folderChips.style.display, selected: mModels.architectureSelect.value };
+});
+check('architecture alone finds nested LoRAs using the uncapped index and resets pagination', report.names.join(',') == 'nested/needle.safetensors' && report.page == 0 && report.folders == 'none' && report.selected == 'anima/lora', JSON.stringify(report));
+report = await page.evaluate(() => {
+    mModels.search.value = 'other';
+    mModels.refresh();
+    return { cards: document.querySelectorAll('.m-model-card').length, pager: mModels.pager.hidden, count: document.querySelector('.m-models-search-count').textContent };
+});
+check('text search intersects architecture and excludes starred models of other architectures', report.cards == 0 && report.pager && report.count == '0/0', JSON.stringify(report));
+report = await page.evaluate(() => {
+    mModels.search.value = '';
+    mModels.architectureSelect.value = '__unknown__';
+    mModels.architectureSelect.dispatchEvent(new Event('change'));
+    return [...document.querySelectorAll('.m-model-name')].map(el => el.textContent);
+});
+check('Unknown keeps unclassified models reachable', report.join(',') == 'unclassified.safetensors', JSON.stringify(report));
+report = await page.evaluate(() => {
+    mCreate.modelList = Array.from({ length: 65 }, (_, i) => ({ name: `nested/checkpoint-${String(i).padStart(3, '0')}`, local: false, architecture: 'anima' }));
+    mCreate.modelList.push({ name: 'flux', architecture: 'flux', local: false });
+    mModels.toggle.querySelector('[data-subtype="Stable-Diffusion"]').click();
+    let initial = mModels.architectureSelect.value;
+    mModels.architectureSelect.value = 'anima';
+    mModels.architectureSelect.dispatchEvent(new Event('change'));
+    let first = { cards: document.querySelectorAll('.m-model-card').length, status: mModels.pageStatus.textContent };
+    mModels.nextPage.click();
+    return { initial, first, last: document.querySelectorAll('.m-model-card').length, status: mModels.pageStatus.textContent };
+});
+check('checkpoint architecture is independent and filtered results retain every page', report.initial == '' && report.first.cards == 48 && report.first.status == 'Page 1 of 2 · 65' && report.last == 17 && report.status == 'Page 2 of 2 · 65', JSON.stringify(report));
+report = await page.evaluate(() => {
+    mModels.toggle.querySelector('[data-subtype="LoRA"]').click();
+    let restored = mModels.architectureSelect.value;
+    window.__requests = [];
+    mModels.architectureSelect.value = '';
+    mModels.architectureSelect.dispatchEvent(new Event('change'));
+    let request = window.__requests.pop();
+    request.success({ files: [{ name: 'folder-row', local: false }], folders: ['child'] });
+    return { restored, path: request.args.path, folder: mModels.folder, names: [...document.querySelectorAll('.m-model-name')].map(el => el.textContent), folders: mModels.folderChips.style.display };
+});
+check('switching subtypes restores the filter and All Architectures restores folder browsing', report.restored == '__unknown__' && report.path == report.folder && report.names.join(',') == 'folder-row' && report.folders == '', JSON.stringify(report));
+for (let width of [360, 390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    report = await page.evaluate(() => {
+        let select = mModels.architectureSelect.getBoundingClientRect();
+        return { overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, height: select.height, label: mModels.architectureSelect.getAttribute('aria-label') };
+    });
+    check(`architecture dropdown fits ${width}px and has an accessible label and touch target`, report.overflow <= 1 && report.height >= 44 && report.label == 'Architecture', JSON.stringify(report));
+}
 mkdirSync(`${REPO}/.local/simple-model-browser`, { recursive: true });
 await page.screenshot({ path: `${REPO}/.local/simple-model-browser/models-${engine == webkit ? 'webkit' : 'chromium'}.png`, fullPage: true });
 await browser.close();

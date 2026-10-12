@@ -20,6 +20,12 @@ class MModels {
         this.page = 0;
         /** Monotonic token that invalidates stale folder listing callbacks. */
         this.folderRequestVersion = 0;
+        /** Architecture selections are independent for checkpoints and LoRAs. */
+        this.architectureFilters = {};
+        /** Uncapped name-to-architecture index for the current subtype. */
+        this.architectureMap = new Map();
+        /** Prevents overlapping writes to SwarmUI's complete favorites dictionary. */
+        this.favoriteBusy = false;
     }
 
     /** Builds the Models panel once. */
@@ -53,6 +59,17 @@ class MModels {
             this.searchTimer = setTimeout(() => this.refresh(), 150);
         });
         panel.appendChild(this.search);
+        let architectureRow = mUI.el('div', 'm-models-sort');
+        this.architectureSelect = document.createElement('select');
+        this.architectureSelect.className = 'm-sort-select m-models-architecture';
+        this.architectureSelect.setAttribute('aria-label', 'Architecture');
+        this.architectureSelect.addEventListener('change', () => {
+            this.architectureFilters[this.subtype] = this.architectureSelect.value;
+            this.page = 0;
+            this.refresh();
+        });
+        architectureRow.appendChild(this.architectureSelect);
+        panel.appendChild(architectureRow);
         this.sortRow = mUI.el('div', 'm-models-sort');
         this.sortSelect = document.createElement('select');
         this.sortSelect.className = 'm-sort-select';
@@ -98,11 +115,65 @@ class MModels {
         this.pager.appendChild(this.nextPage);
         panel.appendChild(this.pager);
         this.panel = panel;
+        mState.onChange(() => {
+            if (this.architectureInventory != mState.models || this.architectureClasses != mState.modelClasses) {
+                this.updateArchitectures();
+            }
+            this.updateFavoriteButtons();
+        });
     }
 
     /** Every activation: fetch fresh (models change rarely; the call is cheap at depth 1). */
     onShow() {
+        mState.refreshUserData();
         this.refresh();
+    }
+
+    /** Reflects confirmed SwarmUI favorites on the visible card buttons. */
+    updateFavoriteButtons() {
+        for (let button of this.grid.querySelectorAll('.m-model-favorite')) {
+            let favorite = mState.isStarred(button.dataset.subtype, button.dataset.model);
+            button.textContent = favorite ? '\u2605' : '\u2606';
+            button.setAttribute('aria-pressed', favorite ? 'true' : 'false');
+            button.setAttribute('aria-label', favorite ? 'Remove Favorite' : 'Add Favorite');
+            button.title = favorite ? 'Remove favorite' : 'Add favorite';
+            button.disabled = this.favoriteBusy;
+        }
+    }
+
+    /** Reads the latest complete dictionary before saving through Classic's favorites API. */
+    toggleFavorite(subtype, name) {
+        if (this.favoriteBusy) {
+            return;
+        }
+        let favorite = !mState.isStarred(subtype, name);
+        this.favoriteBusy = true;
+        this.updateFavoriteButtons();
+        let fail = err => {
+            this.favoriteBusy = false;
+            this.updateFavoriteButtons();
+            mUI.warn(`Could not save favorite: ${err || 'request failed'}`);
+        };
+        genericRequest('GetMyUserData', { 'includeAutocompletions': false }, data => {
+            let favorites = data.starred_models || {};
+            let names = (favorites[subtype] || []).filter(entry => MState.starKey(entry) != MState.starKey(name));
+            if (favorite) {
+                names.push(name);
+            }
+            if (names.length > 0) {
+                favorites[subtype] = names;
+            }
+            else {
+                delete favorites[subtype];
+            }
+            genericRequest('SetStarredModels', favorites, () => {
+                this.favoriteBusy = false;
+                mState.starredModels = favorites;
+                mState.changed();
+                this.updateFavoriteButtons();
+                this.refresh();
+            }, 0, fail);
+        }, 0, fail);
     }
 
     /** Fetches and renders the current folder. */
@@ -117,7 +188,8 @@ class MModels {
         this.sortReverse.classList.toggle('m-selected', sort.reverse);
         this.sortReverse.setAttribute('aria-pressed', sort.reverse ? 'true' : 'false');
         this.search.placeholder = isLora ? 'Search all LoRAs' : 'Search all checkpoints';
-        if (this.search.value.trim()) {
+        this.updateArchitectures();
+        if (this.search.value.trim() || this.architectureFilters[this.subtype]) {
             this.breadcrumb.style.display = 'none';
             this.renderSearch();
             return;
@@ -137,6 +209,7 @@ class MModels {
             // remains complete, then renders in pages: a favourite belongs in the first visible page even
             // when the folder has hundreds of rows.
             this.folderModels = mState.starredFirst(data.files || [], this.subtype);
+            this.updateArchitectures();
             if (this.folderModels.length == 0) {
                 this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
                 return;
@@ -157,6 +230,45 @@ class MModels {
         this.folderModels = [];
         this.folderIncomplete = false;
         this.pager.hidden = true;
+    }
+
+    /** Builds architecture choices from the uncapped inventory and available rich metadata. */
+    updateArchitectures() {
+        this.architectureInventory = mState.models;
+        this.architectureClasses = mState.modelClasses;
+        let architectures = new Set();
+        this.architectureMap = new Map();
+        for (let entry of (mState.models[this.subtype] || [])) {
+            let architecture = entry[1] || '__unknown__';
+            this.architectureMap.set(MState.stripModelExt(entry[0]), architecture);
+            architectures.add(architecture);
+        }
+        let cached = this.subtype == 'LoRA' ? mCreate.loraList : mCreate.modelList;
+        for (let model of [...(cached || []), ...this.folderModels]) {
+            architectures.add(this.architectureOf(model));
+        }
+        let selected = this.architectureFilters[this.subtype] || '';
+        if (selected) {
+            architectures.add(selected);
+        }
+        let label = architecture => architecture == '__unknown__' ? 'Unknown' : (mState.modelClasses[architecture] || {}).name || architecture;
+        this.architectureSelect.innerHTML = '';
+        let all = document.createElement('option');
+        all.value = '';
+        all.textContent = 'All Architectures';
+        this.architectureSelect.appendChild(all);
+        for (let architecture of [...architectures].sort((a, b) => label(a).localeCompare(label(b)))) {
+            let option = document.createElement('option');
+            option.value = architecture;
+            option.textContent = label(architecture);
+            this.architectureSelect.appendChild(option);
+        }
+        this.architectureSelect.value = selected;
+    }
+
+    /** Uses rich metadata first, then the boot inventory for LoRA rows awaiting enrichment. */
+    architectureOf(model) {
+        return model.architecture || this.architectureMap.get(MState.stripModelExt(model.name)) || '__unknown__';
     }
 
     /** Number of cards on one explicit page. */
@@ -228,7 +340,12 @@ class MModels {
             this.loadSearchList();
             return;
         }
-        let matches = mState.starredFirst(MCreate.sortModels(MCreate.filterModels(list, this.search.value), this.sortSetting()), this.subtype);
+        let architecture = this.architectureFilters[this.subtype];
+        let matches = MCreate.filterModels(list, this.search.value);
+        if (architecture) {
+            matches = matches.filter(model => this.architectureOf(model) == architecture);
+        }
+        matches = mState.starredFirst(MCreate.sortModels(matches, this.sortSetting()), this.subtype);
         this.renderPage(matches);
         let count = mCreate.buildCountRow(matches.length, matches.length, isLora ? 'LoRAs' : 'checkpoints');
         count.classList.add('m-models-search-count');
@@ -238,7 +355,7 @@ class MModels {
     /** Loads the list the current search needs, once, then redraws if the search is still showing. */
     loadSearchList() {
         let redraw = () => {
-            if (this.search.value.trim()) {
+            if (this.search.value.trim() || this.architectureFilters[this.subtype]) {
                 this.refresh();
             }
         };
@@ -318,13 +435,21 @@ class MModels {
         }
         card.title = [model.title, model.name, model.author, model.trigger_phrase].filter(Boolean).join('\n');
         card.setAttribute('aria-label', card.title.replace(/\n/g, '. '));
-        let star = mUI.starBadge(this.subtype, model.name);
-        if (star) {
-            // On the card the star is a corner badge over the thumbnail rather than a row item - a card with
-            // no preview image has nothing to overlay, so it sits in the corner of the card itself.
-            star.classList.add('m-model-star-badge');
-            card.appendChild(star);
-        }
+        let subtype = this.subtype;
+        let favorite = mState.isStarred(subtype, model.name);
+        let star = mUI.el('button', 'm-model-favorite', favorite ? '\u2605' : '\u2606');
+        star.type = 'button';
+        star.dataset.subtype = subtype;
+        star.dataset.model = model.name;
+        star.setAttribute('aria-pressed', favorite ? 'true' : 'false');
+        star.setAttribute('aria-label', favorite ? 'Remove Favorite' : 'Add Favorite');
+        star.title = favorite ? 'Remove favorite' : 'Add favorite';
+        star.disabled = this.favoriteBusy;
+        star.addEventListener('click', e => {
+            e.stopPropagation();
+            this.toggleFavorite(subtype, model.name);
+        });
+        card.appendChild(star);
         card.appendChild(mUI.modelText(model, trigger => mCreate.insertTriggerPhrase(trigger), this.subtype == 'LoRA'));
         if (model.local !== false && this.canEditMetadata()) {
             let civitBtn = mUI.el('button', 'm-model-civitai-btn', 'Load CivitAI');
