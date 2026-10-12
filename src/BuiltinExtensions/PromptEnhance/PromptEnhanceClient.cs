@@ -28,7 +28,8 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="UserPrompt">The user's raw idea (already shielded by the caller).</param>
 /// <param name="Images">Base64 JPEG reference images for an edit request, longest side at most
 /// <see cref="PromptEnhanceClient.MaxReferenceSide"/>. Null or empty for a text-to-image rewrite.</param>
-public record class PromptEnhanceRequest(string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, string SystemPrompt, string UserPrompt, IReadOnlyList<string> Images = null);
+/// <param name="NumCtx">Optional Ollama <c>num_ctx</c>. Null omits the option. The OpenAI transport ignores it.</param>
+public record class PromptEnhanceRequest(string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, string SystemPrompt, string UserPrompt, IReadOnlyList<string> Images = null, int? NumCtx = null);
 
 /// <summary>Transport client for talking to a writer endpoint (Ollama or an OpenAI-compatible server), plus the
 /// pure text-shaping helpers (Swarm-syntax shielding and hard-stop detection) the caller needs around it.</summary>
@@ -178,8 +179,9 @@ public static class PromptEnhanceClient
     }
 
     /// <summary>Builds the Ollama <c>/api/chat</c> request body. Reference images ride on the user message
-    /// as the <c>images</c> array of raw base64 JPEGs.</summary>
-    private static JObject BuildOllamaBody(PromptEnhanceRequest request)
+    /// as the <c>images</c> array of raw base64 JPEGs. <c>options.num_ctx</c> is included only when
+    /// <see cref="PromptEnhanceRequest.NumCtx"/> has a value.</summary>
+    public static JObject BuildOllamaBody(PromptEnhanceRequest request)
     {
         JObject user = new()
         {
@@ -195,6 +197,16 @@ public static class PromptEnhanceClient
             }
             user["images"] = images;
         }
+        JObject options = new()
+        {
+            ["temperature"] = 0.7,
+            ["seed"] = 7,
+            ["num_predict"] = 2048
+        };
+        if (request.NumCtx.HasValue)
+        {
+            options["num_ctx"] = request.NumCtx.Value;
+        }
         return new JObject()
         {
             ["model"] = request.Model,
@@ -206,12 +218,7 @@ public static class PromptEnhanceClient
                 new JObject() { ["role"] = "system", ["content"] = request.SystemPrompt },
                 user
             },
-            ["options"] = new JObject()
-            {
-                ["temperature"] = 0.7,
-                ["seed"] = 7,
-                ["num_predict"] = 2048
-            }
+            ["options"] = options
         };
     }
 

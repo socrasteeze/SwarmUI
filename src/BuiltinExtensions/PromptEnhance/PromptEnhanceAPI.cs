@@ -206,7 +206,7 @@ public static class PromptEnhanceAPI
             async Task<string> RunChat(PromptEnhanceEndpoint target)
             {
                 output(new JObject() { ["status"] = "running", ["profile"] = profile.ID, ["writer_model"] = target.Model, ["endpoint"] = target.ID, ["strength"] = effectiveStrength });
-                PromptEnhanceRequest request = new(target.Url, target.Kind, target.Model, PromptEnhanceClient.EnhanceKeepAlive, target.TimeoutSeconds, profile.Text, directed, preparedImages);
+                PromptEnhanceRequest request = new(target.Url, target.Kind, target.Model, PromptEnhanceClient.EnhanceKeepAlive, target.TimeoutSeconds, profile.Text, directed, preparedImages, target.NumCtx);
                 using CancellationTokenSource requestCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, session.SessInterrupt.Token);
                 return await PromptEnhanceClient.ChatStream(request, chunk =>
                 {
