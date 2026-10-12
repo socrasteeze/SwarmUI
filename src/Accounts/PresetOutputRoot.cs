@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using FreneticUtilities.FreneticExtensions;
 using LiteDB;
+using SwarmUI.Core;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
 
@@ -390,7 +391,7 @@ public static class PresetOutputRoot
     public static string ClaimKey(string folderName, string normalizedPath)
     {
         string plain = folderName + "/";
-        if (!UserImageHistoryHelper.SharedSpecialFolders.ContainsKey(plain))
+        if (!UserImageHistoryHelper.SharedSpecialFolders.ContainsKey(plain) && !RealOutputFolderExists(folderName))
         {
             return plain;
         }
@@ -405,6 +406,39 @@ public static class PresetOutputRoot
             }
         }
         throw new SwarmUserErrorException("Output Root could not be registered.");
+    }
+
+    /// <summary>True when the server output directory already has a real folder with this name. Mapping that name would hide the real folder in history.</summary>
+    public static bool RealOutputFolderExists(string folderName)
+    {
+        string outputPath = Program.ServerSettings?.Paths?.OutputPath;
+        if (string.IsNullOrWhiteSpace(outputPath) || string.IsNullOrWhiteSpace(folderName))
+        {
+            return false;
+        }
+        try
+        {
+            if (!Program.ServerSettings.Paths.AppendUserNameToOutputPath)
+            {
+                return Directory.Exists(Path.Combine(outputPath, folderName));
+            }
+            if (!Directory.Exists(outputPath))
+            {
+                return false;
+            }
+            foreach (string userDir in Directory.EnumerateDirectories(outputPath))
+            {
+                if (Directory.Exists(Path.Combine(userDir, folderName)))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logs.Debug($"Output Root could not check the output folder for '{folderName}': {ex.Message}");
+        }
+        return false;
     }
 
     /// <summary>Gives a later path a hash suffix when two paths want the same history folder name.</summary>

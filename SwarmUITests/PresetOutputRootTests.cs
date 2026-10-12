@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using SwarmUI.Accounts;
+using SwarmUI.Core;
 using SwarmUI.Utils;
 
 namespace SwarmUITests;
@@ -193,6 +194,33 @@ public class PresetOutputRootTests : SwarmUITest
         finally
         {
             UserImageHistoryHelper.SharedSpecialFolders.TryRemove(foreign, out _);
+        }
+    }
+
+    /// <summary>A name that is a real folder in the output directory is not taken, so that folder stays visible in history.</summary>
+    [Test]
+    public static void TestRefresh_DoesNotHideRealOutputFolder()
+    {
+        string savedOutput = Program.ServerSettings.Paths.OutputPath;
+        bool savedAppend = Program.ServerSettings.Paths.AppendUserNameToOutputPath;
+        string outputDir = Path.Combine(Path.GetTempPath(), "presetroot-output-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(outputDir, "presetrootmisc"));
+        Program.ServerSettings.Paths.OutputPath = outputDir;
+        Program.ServerSettings.Paths.AppendUserNameToOutputPath = false;
+        try
+        {
+            string path = "D:\\00\\presetrootmisc";
+            string hash = PresetOutputRoot.ShortHash(path);
+            Dictionary<string, string> map = PresetOutputRoot.Refresh([path], Drives);
+            Assert.That(UserImageHistoryHelper.SharedSpecialFolders.ContainsKey("presetrootmisc/"), Is.False);
+            Assert.That(map[path], Is.EqualTo("presetrootmisc_" + hash));
+            Assert.That(UserImageHistoryHelper.SharedSpecialFolders["presetrootmisc_" + hash + "/"], Is.EqualTo(path));
+        }
+        finally
+        {
+            Program.ServerSettings.Paths.OutputPath = savedOutput;
+            Program.ServerSettings.Paths.AppendUserNameToOutputPath = savedAppend;
+            Directory.Delete(outputDir, true);
         }
     }
 
