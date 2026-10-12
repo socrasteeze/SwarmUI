@@ -34,7 +34,35 @@ class MCreate {
         // that assumed its container existed is exactly the crash this ordering avoids.
         this.buildPreview();
         this.buildResolvedPrompt();
+        this.mountHeaderReset();
         mGen.onFrame((kind, data) => this.onFrame(kind, data));
+    }
+
+    /** Mounts Reset Params in the top header, immediately left of More.
+     * Done here rather than in build() so a deep link that has not opened Create yet still shows it.
+     * The header exists: this script is deferred and runs after the document is parsed. */
+    mountHeaderReset() {
+        this.resetButton = mUI.el('button', 'm-header-link', 'Reset Params');
+        this.resetButton.type = 'button';
+        this.resetButton.title = 'Reset params';
+        this.resetButton.setAttribute('aria-label', 'Reset Params');
+        this.resetButton.addEventListener('click', () => {
+            mUI.confirm('Reset prompt, images, model, LoRAs, and all other params to blank?', () => {
+                // Clears any suggestions left over from the prompt text this is about to erase - onInput()
+                // only recomputes on the box's own 'input' event, and this reset never fires one.
+                mAutoComplete.hide();
+                mState.resetParams();
+                mUI.note('Params reset.');
+            });
+        });
+        let header = document.querySelector('.m-header');
+        let moreLink = header ? header.querySelector('a.m-header-link') : null;
+        if (moreLink) {
+            header.insertBefore(this.resetButton, moreLink);
+        }
+        else if (header) {
+            header.appendChild(this.resetButton);
+        }
     }
 
     /** Builds the (initially detached) live preview block. */
@@ -353,20 +381,6 @@ class MCreate {
         this.loraButton.addEventListener('click', () => this.openLoraSheet());
         this.pickerRow.appendChild(this.loraButton);
         panel.appendChild(this.pickerRow);
-        // Keep the full reset outside the primary picker row. It remains in normal panel flow so it
-        // is present even when More was built before Create.
-        this.resetButton = mUI.el('button', 'm-reset-button', 'Reset Params');
-        this.resetButton.title = 'Reset params';
-        this.resetButton.setAttribute('aria-label', 'Reset Params');
-        this.resetButton.addEventListener('click', () => {
-            mUI.confirm('Reset prompt, images, model, LoRAs, and all other params to blank?', () => {
-                // Clears any suggestions left over from the prompt text this is about to erase - onInput()
-                // only recomputes on the box's own 'input' event, and this reset never fires one.
-                mAutoComplete.hide();
-                mState.resetParams();
-                mUI.note('Params reset.');
-            });
-        });
         // Generate/Interrupt sit directly ABOVE the prompt box rather than at the foot of the panel. At the
         // foot they were sticky to the bottom of the layout viewport, which is exactly where the on-screen
         // keyboard is - so the one moment you most want to tap Generate (having just finished typing) was
@@ -474,12 +488,9 @@ class MCreate {
         negWrap.appendChild(this.negBox);
         this.negWrap = negWrap;
         panel.appendChild(negWrap);
-        this.secondaryActions = mUI.el('div', 'm-create-secondary');
-        this.secondaryActions.appendChild(this.resetButton);
         panel.appendChild(this.buildFramesSection());
         this.advChips = mUI.el('div', 'm-adv-chips');
         panel.appendChild(this.advChips);
-        panel.appendChild(this.secondaryActions);
         let fileInput = document.createElement('input');
         fileInput.type = 'file';
         fileInput.accept = 'image/*';
