@@ -20,6 +20,7 @@ Directory.Build.props
 /Models
 tmp/
 /src/Extensions
+/src/Extensions_disabled
 /dlbackend
 *.debug
 custom-launch-docker.sh
