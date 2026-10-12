@@ -74,6 +74,13 @@ class PromptEnhanceHelperClass {
         this.mode = this.pref('mode', 'review');
         /** The mode <select> beside the Enhance button. */
         this.modeSelect = null;
+        /** Writer mode: 'auto' (edit when this generation has an init image or prompt images, otherwise
+         * text-to-image), 't2i', or 'edit'. Separate from the Off/Review/Auto control above. */
+        this.writeMode = this.normalizeWriteMode(this.pref('write_mode', 'auto'));
+        /** Writer-mode <select> in the Generate menu. */
+        this.writeModeSelect = null;
+        /** Writer-mode <select> in the result panel. */
+        this.panelWriteModeSelect = null;
         /** Manual profile override id, or '' for automatic resolution. Session-only: a model change clears
          * it, and it is never read back from localStorage (an old saved MiniMax H3 choice was sticking onto
          * later checkpoints). Sent as 'profile_override' while it is set. */
@@ -149,7 +156,29 @@ class PromptEnhanceHelperClass {
             wrappedUpdatePresetList._promptEnhanceWrapped = true;
             updatePresetList = wrappedUpdatePresetList;
         }
+        this.watchReferenceImages();
         this.scheduleStatusRefresh();
+    }
+
+    /** Refreshes the Auto (Edit) / Auto (T2I) label when prompt images or the init image change. */
+    watchReferenceImages() {
+        let refresh = () => {
+            this.syncWriteModeLabel();
+            this.scheduleStatusRefresh();
+        };
+        let area = document.getElementById('alt_prompt_image_area');
+        if (area && typeof MutationObserver != 'undefined') {
+            let observer = new MutationObserver(refresh);
+            observer.observe(area, { childList: true });
+        }
+        let initToggle = document.getElementById('input_initimage_toggle');
+        if (initToggle) {
+            initToggle.addEventListener('change', refresh);
+        }
+        let initInput = document.getElementById('input_initimage');
+        if (initInput) {
+            initInput.addEventListener('change', refresh);
+        }
     }
 
     /** The checkpoint profile resolution should follow. A selected preset's model replaces the dropdown
@@ -231,6 +260,7 @@ class PromptEnhanceHelperClass {
         this.modeSelect.addEventListener('change', () => this.setMode(this.modeSelect.value));
         modeRow.appendChild(modeLabel);
         modeRow.appendChild(this.modeSelect);
+        let writeRow = this.buildWriteModeRow();
         let popover = document.getElementById('popover_generate_center');
         if (popover) {
             // 'sui_popover_model_button' both styles the entry like the menu's other rows and marks it as a
@@ -239,12 +269,14 @@ class PromptEnhanceHelperClass {
             this.button = createDiv(null, 'sui_popover_model_button prompt-enhance-popover-button prompt-enhance-disabled translate', 'Enhance Prompt');
             popover.appendChild(this.button);
             popover.appendChild(modeRow);
+            popover.appendChild(writeRow);
         }
         else {
             let addWrapper = getRequiredElementById('alt_text_add_button').parentElement;
             let wrapper = createSpan(null, 'prompt-enhance-button-wrapper');
             this.button = createSpan(null, 'basic-button prompt-enhance-button prompt-enhance-disabled translate', 'Enhance');
             wrapper.appendChild(modeRow);
+            wrapper.appendChild(writeRow);
             wrapper.appendChild(this.button);
             addWrapper.insertAdjacentElement('afterend', wrapper);
         }
@@ -276,6 +308,10 @@ class PromptEnhanceHelperClass {
             <div class="prompt-enhance-panel-inner">
                 <div class="prompt-enhance-status"></div>
                 <div class="prompt-enhance-profile-row">
+                    <label class="prompt-enhance-profile-label translate">Mode</label>
+                    <select class="auto-dropdown prompt-enhance-write-select"></select>
+                </div>
+                <div class="prompt-enhance-profile-row">
                     <label class="prompt-enhance-profile-label translate">Profile</label>
                     <select id="prompt_enhance_profile_select" class="auto-dropdown prompt-enhance-profile-select"></select>
                 </div>
@@ -296,6 +332,12 @@ class PromptEnhanceHelperClass {
         document.body.appendChild(panel);
         this.panel = panel;
         this.statusLine = panel.querySelector('.prompt-enhance-status');
+        this.panelWriteModeSelect = panel.querySelector('.prompt-enhance-write-select');
+        if (this.panelWriteModeSelect) {
+            this.fillWriteModeSelect(this.panelWriteModeSelect);
+            this.panelWriteModeSelect.addEventListener('change', () => this.setWriteMode(this.panelWriteModeSelect.value));
+            this.panelWriteModeSelect.addEventListener('pointerdown', () => this.syncWriteModeLabel());
+        }
         this.profileSelect = panel.querySelector('.prompt-enhance-profile-select');
         this.strengthSelect = panel.querySelector('.prompt-enhance-strength-select');
         this.previewArea = panel.querySelector('.prompt-enhance-preview');
@@ -580,7 +622,7 @@ class PromptEnhanceHelperClass {
         this.setEnhanceBusy(true);
         this.setStatus('Enhancing...');
         this.settled = false;
-        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields() }, data => {
+        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
                 this.settled = true;
             }
@@ -694,6 +736,140 @@ class PromptEnhanceHelperClass {
         }, wait);
     }
 
+    /** Builds the writer-mode row for the Generate menu. The row is not a menu-dismiss button. */
+    buildWriteModeRow() {
+        let writeRow = createDiv(null, 'prompt-enhance-mode-row');
+        let writeLabel = createSpan(null, 'prompt-enhance-mode-label translate', 'Mode:');
+        this.writeModeSelect = document.createElement('select');
+        this.writeModeSelect.className = 'auto-dropdown prompt-enhance-mode-select';
+        this.fillWriteModeSelect(this.writeModeSelect);
+        this.writeModeSelect.addEventListener('change', () => this.setWriteMode(this.writeModeSelect.value));
+        this.writeModeSelect.addEventListener('pointerdown', () => this.syncWriteModeLabel());
+        writeRow.appendChild(writeLabel);
+        writeRow.appendChild(this.writeModeSelect);
+        return writeRow;
+    }
+
+    /** Fills a writer-mode select once. The Auto option's text is updated by syncWriteModeLabel. */
+    fillWriteModeSelect(select) {
+        if (!select || select.dataset.filled == 'true') {
+            this.syncWriteModeLabel();
+            return;
+        }
+        for (let entry of [['auto', 'Auto'], ['t2i', 'T2I'], ['edit', 'Edit']]) {
+            let option = document.createElement('option');
+            option.value = entry[0];
+            option.innerText = entry[1];
+            select.appendChild(option);
+        }
+        select.value = this.normalizeWriteMode(this.writeMode);
+        select.dataset.filled = 'true';
+        this.syncWriteModeLabel();
+    }
+
+    /** Stores the writer mode and re-sends an open review so the new profile is what the user sees. */
+    setWriteMode(mode) {
+        this.writeMode = this.normalizeWriteMode(mode);
+        this.setPref('write_mode', this.writeMode);
+        if (this.writeModeSelect) {
+            this.writeModeSelect.value = this.writeMode;
+        }
+        if (this.panelWriteModeSelect) {
+            this.panelWriteModeSelect.value = this.writeMode;
+        }
+        this.syncWriteModeLabel();
+        this.refreshStatus();
+        if (this.panel && this.panel.classList.contains('prompt-enhance-panel-open')) {
+            this.close();
+            this.open();
+        }
+    }
+
+    /** 'auto', 't2i', or 'edit'. Anything else is auto. */
+    normalizeWriteMode(mode) {
+        let value = `${mode == null ? '' : mode}`.trim().toLowerCase();
+        if (value == 't2i' || value == 'edit' || value == 'auto') {
+            return value;
+        }
+        return 'auto';
+    }
+
+    /** Auto is edit when the generation already has a reference image, otherwise text-to-image. */
+    resolvedWriteMode(hasImages) {
+        let mode = this.normalizeWriteMode(this.writeMode);
+        if (mode == 'edit' || mode == 't2i') {
+            return mode;
+        }
+        return hasImages ? 'edit' : 't2i';
+    }
+
+    /** Init image, then prompt images, capped at 4. Values are whatever the generation request would send. */
+    referenceImageValues() {
+        let images = [];
+        let add = value => {
+            if (images.length >= 4) {
+                return;
+            }
+            if (value == null || `${value}` == '') {
+                return;
+            }
+            images.push(`${value}`);
+        };
+        try {
+            if (typeof getGenInput != 'function') {
+                return images;
+            }
+            let input = getGenInput();
+            if (!input) {
+                return images;
+            }
+            add(input['initimage']);
+            let prompts = input['promptimages'];
+            if (Array.isArray(prompts)) {
+                for (let i = 0; i < prompts.length; i++) {
+                    add(prompts[i]);
+                }
+            }
+            else {
+                add(prompts);
+            }
+        }
+        catch (e) {
+            // The parameter form is not built yet. Treat that as no reference images.
+        }
+        return images;
+    }
+
+    /** Mode fields for EnhancePrompt. Images are attached only when the resolved mode is edit. */
+    enhanceRequestFields() {
+        let images = this.referenceImageValues();
+        let mode = this.normalizeWriteMode(this.writeMode);
+        let resolved = this.resolvedWriteMode(images.length > 0);
+        let fields = { 'mode': mode, 'resolved_mode': resolved };
+        if (resolved == 'edit' && images.length > 0) {
+            fields['images'] = images;
+        }
+        return fields;
+    }
+
+    /** Sets the Auto option text to "Auto (Edit)" or "Auto (T2I)" from the images attached right now. */
+    syncWriteModeLabel() {
+        let resolved = this.resolvedWriteMode(this.referenceImageValues().length > 0);
+        let text = resolved == 'edit' ? 'Auto (Edit)' : 'Auto (T2I)';
+        let selects = [this.writeModeSelect, this.panelWriteModeSelect];
+        for (let i = 0; i < selects.length; i++) {
+            let select = selects[i];
+            if (!select || !select.options) {
+                continue;
+            }
+            for (let j = 0; j < select.options.length; j++) {
+                if (select.options[j].value == 'auto') {
+                    select.options[j].innerText = text;
+                }
+            }
+        }
+    }
+
     /** Reads the current video settings into the EnhancePrompt 'video_task' / 'video_duration' fields. The server
      * only forwards them to video profiles (eg MiniMax H3), so this is harmless for image models.
      * <p>A start frame is an enabled Init Image with data, or an enabled Image To Video model (its source frame is
@@ -732,9 +908,11 @@ class PromptEnhanceHelperClass {
     refreshStatus() {
         let model = this.effectiveModel();
         this.syncProfileOverride(model);
+        this.syncWriteModeLabel();
         this.statusRequestSeq += 1;
         let requestSeq = this.statusRequestSeq;
-        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride }, data => {
+        let writeFields = this.enhanceRequestFields();
+        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': writeFields.mode, 'resolved_mode': writeFields.resolved_mode }, data => {
             if (requestSeq != this.statusRequestSeq) {
                 return;
             }
@@ -852,7 +1030,7 @@ class PromptEnhanceHelperClass {
             this.showPassthrough(reason);
             this.dispatchGenerateClick(altKey);
         };
-        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields() }, data => {
+        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
             if (data.status != null || data.chunk != null) {
                 return;
             }

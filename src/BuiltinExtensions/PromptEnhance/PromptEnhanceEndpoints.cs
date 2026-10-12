@@ -17,7 +17,9 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="Kind">Either <c>ollama</c> (<c>POST /api/chat</c>) or <c>openai</c> (an OpenAI-compatible
 /// server such as LM Studio, <c>POST /v1/chat/completions</c>).</param>
 /// <param name="Model">Writer model name to request.</param>
-/// <param name="KeepAlive">Ollama <c>keep_alive</c> value, eg <c>30m</c>. Ignored for the <c>openai</c> kind.</param>
+/// <param name="KeepAlive">Ollama <c>keep_alive</c> value stored in the endpoint file. Enhance chat requests
+/// send <c>5m</c> regardless (see <see cref="PromptEnhanceClient.EnhanceKeepAlive"/>). Ignored for the
+/// <c>openai</c> kind.</param>
 /// <param name="TimeoutSeconds">Request timeout in seconds.</param>
 /// <param name="Enabled">Whether this endpoint should be considered at all.</param>
 public record class PromptEnhanceEndpoint(string ID, string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, bool Enabled);
@@ -92,7 +94,7 @@ public static class PromptEnhanceEndpoints
                         url,
                         kind,
                         entry.Value<string>("model") ?? "",
-                        entry.Value<string>("keep_alive") ?? "30m",
+                        entry.Value<string>("keep_alive") ?? "5m",
                         entry.Value<int?>("timeout_seconds") ?? 120,
                         entry.Value<bool?>("enabled") ?? true));
                 }
@@ -121,7 +123,7 @@ public static class PromptEnhanceEndpoints
                     ["url"] = "http://127.0.0.1:11434",
                     ["kind"] = "ollama",
                     ["model"] = "huihui_ai/qwen3-vl-abliterated:8b-instruct",
-                    ["keep_alive"] = "30m",
+                    ["keep_alive"] = "5m",
                     ["timeout_seconds"] = 120,
                     ["enabled"] = true
                 }

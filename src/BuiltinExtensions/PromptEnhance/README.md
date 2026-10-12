@@ -51,11 +51,12 @@ owned here.
    (OpenAI-compatible), streamed, and reads it back with `StreamReader.ReadLineAsync` against a linked
    cancellation token that carries both the per-request timeout and the session's own interrupt/shutdown
    token. Sampling matches the profile pack's own grading harness: `temperature 0.7`, `seed 7`,
-   `num_predict`/`max_tokens 2048`, `think false`. `keep_alive` is sent from the endpoint's config on every
-   request. A reply is capped at 32,000 characters (a runaway stream aborts rather than buffering forever);
+   `num_predict`/`max_tokens 2048`, `think false`. A normal enhance request sends Ollama `keep_alive` `5m`.
+   A generation unloads that model separately (see "Unload on generate" below) and does not change this
+   value. A reply is capped at 32,000 characters (a runaway stream aborts rather than buffering forever);
    a submitted prompt over 20,000 characters is rejected outright, before any shielding or caching work.
 4. **Cache.** Every prompt is looked up before it is ever dispatched, keyed on
-   `(shielded prompt, profile ID, profile-pack version, endpoint's configured model, strength)`. When exactly
+   `(directed prompt, profile ID, profile-pack version, endpoint's configured model, strength, resolved writer mode, reference-image digest)`. When exactly
    one endpoint is enabled, or an override names one enabled endpoint, that endpoint is used with no health
    probe first, so a cache hit does not wait on the writer host. Several enabled endpoints still probe, and
    that result is cached for 5 seconds. A connection failure records the endpoint unhealthy, probes any
@@ -119,9 +120,11 @@ Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
    The shortcut check in rule 1 looks at the user's raw, unshielded prompt.
 
 The cache key (`PromptEnhanceCache.Key`) hashes the exact text the writer receives - directive included - plus
-the effective strength, so a `full` rewrite and a `faithful` pass-through of the same idea never collide, a
-repeat request at the same strength still hits the cache, and revising a directive's wording invalidates the
-replies written against the old wording instead of serving them. Both the `running` status frame and the terminal result
+the effective strength, the resolved writer mode (`t2i` or `edit`), and a digest of the downscaled reference
+images, so a `full` rewrite and a `faithful` pass-through of the same idea never collide, an edit and a
+text-to-image rewrite of the same words never collide, a repeat request at the same strength still hits the
+cache, and revising a directive's wording invalidates the replies written against the old wording instead of
+serving them. Both the `running` status frame and the terminal result
 frame report `strength` (the effective value actually used); a capped request also carries `strength_note`.
 Applying a result includes `strength` alongside the other six fields in the provenance JSON recorded into the
 hidden `promptenhanceprovenance` param.
@@ -172,6 +175,50 @@ un-enhanced; enhancing on every tick of a forever-loop would mean a writer-host 
 single image, which is a different feature than this one. Switch to `review` mode (or apply an enhancement
 once manually before starting Generate Forever) if you want a forever run to use an enhanced prompt.
 
+## Writer mode (Auto / T2I / Edit)
+
+A second control, separate from Off / Review / Auto, chooses how the rewrite is shaped. It sits in the
+Generate menu and in the result panel on the desktop, and in the `/simple` sheet. The choice is stored in
+`localStorage` under `promptenhance_write_mode` and is shared by both clients.
+
+| Choice | What is sent |
+|---|---|
+| **Auto** | Edit when the current generation has an init image or any prompt image. Otherwise text-to-image. The closed control reads `Auto (Edit)` or `Auto (T2I)`. |
+| **T2I** | The base profile for the loaded model. Reference images are not sent. |
+| **Edit** | The edit profile for that base, when one exists. |
+
+The request sends both `mode` (`auto`, `t2i`, or `edit`) and `resolved_mode` (`t2i` or `edit`). The server
+resolves `auto` again: images on the request force edit, and a client `resolved_mode` of `edit` is kept when
+the status call has no image bytes. An explicit `t2i` or `edit` is left as chosen.
+
+Edit mode looks up a dedicated profile file for the base profile:
+
+| Base profile | Edit profile |
+|---|---|
+| `flux2-klein-9b` | `flux2-klein-9b.edit` — a short imperative FLUX edit instruction. Natural sentences, the change, what stays, and each image by number. |
+| `qwen-image-2.1` | `qwen-image-2.1.edit` — one concise instruction. The edit is add, remove, replace, text, style, or pose. Unmentioned elements stay. Text to render stays in its original language, in quotes. |
+| `krea-2` | `krea-2.reference` — Krea 2 is not a true edit model, so this is a full descriptive scene that names each reference image's role. |
+
+`qwen-image-edit-2511` is already an edit profile and is used as-is. Any other base profile is sent with a
+short generic edit appendix appended, and is treated as an edit profile for the strength cap. The registered
+base text is not modified.
+
+In edit mode the init image, then the prompt images, are attached to the writer request. At most 4 are used.
+Each is downscaled on the server to a JPEG whose longest side is 768 pixels. Ollama receives them on the user
+message's `images` field. The digest of those JPEG bytes is part of the cache key. Swarm's receive limit
+(`Network.MaxReceiveBytes`, default 200 MB) already covers the payloads the browser sends before that
+downscale.
+
+## Unload on generate
+
+`T2IEngine.PreGenerateEvent` starts an unload check and returns immediately. The check runs on `Task.Run`.
+It never blocks, delays, or fails the generation, and every exception is logged at debug.
+
+For the active endpoint, and only when that endpoint is Ollama, it GETs `<base>/api/ps` with a 2 second
+timeout. If the endpoint's model is in that list, it POSTs `<base>/api/generate` with
+`{"model": "<endpoint model>", "keep_alive": 0}`. A batch claims the check at most once every 5 seconds.
+Normal enhance requests still send `keep_alive` `5m`.
+
 ## Endpoints
 
 Configured writer hosts live in `Data/PromptEnhance/endpoints.json` (gitignored - a writer-host address is
@@ -187,7 +234,7 @@ after that call fails, or up front when several entries are enabled. A default f
       "url": "http://127.0.0.1:11434",
       "kind": "ollama",
       "model": "huihui_ai/qwen3-vl-abliterated:8b-instruct",
-      "keep_alive": "30m",
+      "keep_alive": "5m",
       "timeout_seconds": 120,
       "enabled": true
     }
@@ -196,7 +243,8 @@ after that call fails, or up front when several entries are enabled. A default f
 ```
 
 To point this at a real writer host, edit `url` to the writer host's LAN or tailnet address (never a
-private IP or hostname baked into this repo). `kind` is `ollama` (`POST /api/chat`) or `openai` (an
+private IP or hostname baked into this repo). Enhance chat requests always send `keep_alive` `5m`; the
+value stored here is not what those requests send. `kind` is `ollama` (`POST /api/chat`) or `openai` (an
 OpenAI-compatible server such as LM Studio, `POST /v1/chat/completions`); it is lowercased on load, and an
 entry with any other kind is skipped with a logged error rather than crashing extension init. `id` defaults
 to `endpoint<index>` when absent and is deduplicated (a repeated ID is renamed and a warning logged) so it
@@ -270,7 +318,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.4.0+qwen-t2i`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.5.0+edit-mode`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 
@@ -305,9 +353,9 @@ weakness, not a defect in the Krea-2 profile.
 
 Deliberately out of scope:
 
-- A Prompt Enhance entry on the `/simple` mobile client.
 - A spoke-side route (rejected for the same reasons recorded in `docs/PromptEnhance-Design.md`: it would
-  mint a phantom image backend and impose `VaryID` lockstep deploys for no benefit here).
+  mint a phantom image backend and impose `VaryID` lockstep deploys for no benefit here). `/simple` has
+  its own Prompt Enhance sheet, including the Auto / T2I / Edit control.
 
 ## Fork notes
 
