@@ -198,11 +198,27 @@ check('a known parameter shows its display name, an unknown one its raw id',
     loaded.labels.join(',') == 'CFG Scale,Model,Steps,video_frames', loaded.labels.join(','));
 check('values load from the param map', loaded.values.join(',') == '1,flux/base,20,81', loaded.values.join(','));
 
+const composition = await page.evaluate(() => {
+    let input = __sheet().querySelector('.m-preset-sheet > .m-preset-field');
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    input.value = 'flux/日本 語';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertCompositionText' }));
+    let during = input.value;
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    let after = input.value;
+    input.value = 'flux/Portrait';
+    return { during, after };
+});
+check('IME text is left intact during composition and normalized when composition ends',
+    composition.during == 'flux/日本 語' && composition.after == 'flux/日本_語', JSON.stringify(composition));
+
 // Rename it, change a value, star it, and mark it active first so the rename has something to carry.
 await page.evaluate(() => {
     mState.activePresets = ['flux/Portrait'];
     let fields = __sheet().querySelectorAll('.m-preset-sheet > .m-preset-field');
-    fields[0].value = 'flux/Portrait Tight';
+    fields[0].value = 'flux/Portrait   Tight';
+    fields[0].setSelectionRange('flux/Portrait   '.length, 'flux/Portrait   '.length);
+    fields[0].dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', bubbles: true }));
     fields[1].value = 'Tighter crop';
     __sheet().querySelector('.m-preset-star-toggle').click();
     let stepsInput = [...__sheet().querySelectorAll('.m-preset-param-label')]
@@ -210,13 +226,21 @@ await page.evaluate(() => {
     stepsInput.value = '24';
     stepsInput.dispatchEvent(new Event('input'));
 });
+const normalizedEdit = await page.evaluate(() => {
+    let fields = __sheet().querySelectorAll('.m-preset-sheet > .m-preset-field');
+    return { title: fields[0].value, caret: fields[0].selectionStart, description: fields[1].value };
+});
+check('title whitespace normalizes on paste while preserving the folder slash and caret',
+    normalizedEdit.title == 'flux/Portrait_Tight' && normalizedEdit.caret == 'flux/Portrait_'.length,
+    JSON.stringify(normalizedEdit));
+check('title normalization does not change the description', normalizedEdit.description == 'Tighter crop', normalizedEdit.description);
 await page.evaluate(() => __sheet().querySelector('.m-edit-save-button').click());
 await page.waitForFunction(() => window.__calls.some(c => c.route == 'AddNewPreset'));
 const savePayload = await page.evaluate(() => window.__calls.find(c => c.route == 'AddNewPreset').args);
 check('an edit is sent as an edit, naming the ORIGINAL title',
     savePayload.is_edit === true && savePayload.editing == 'flux/Portrait', JSON.stringify({ is_edit: savePayload.is_edit, editing: savePayload.editing }));
 check('the new title, description and star ride along',
-    savePayload.title == 'flux/Portrait Tight' && savePayload.description == 'Tighter crop' && savePayload.is_starred === true,
+    savePayload.title == 'flux/Portrait_Tight' && savePayload.description == 'Tighter crop' && savePayload.is_starred === true,
     JSON.stringify({ t: savePayload.title, d: savePayload.description, s: savePayload.is_starred }));
 check('preview_image is never sent, so the server keeps the existing image',
     !('preview_image' in savePayload), JSON.stringify(Object.keys(savePayload)));
@@ -226,11 +250,11 @@ check('the edited value is saved and every other parameter survives untouched',
     JSON.stringify(savePayload.param_map));
 const afterRename = await page.evaluate(() => ({
     active: mState.activePresets.slice(),
-    image: window.__presets.find(p => p.title == 'flux/Portrait Tight').preview_image,
+    image: window.__presets.find(p => p.title == 'flux/Portrait_Tight').preview_image,
     count: window.__presets.length
 }));
 check('a rename carries the active selection with it',
-    afterRename.active.join(',') == 'flux/Portrait Tight', afterRename.active.join(','));
+    afterRename.active.join(',') == 'flux/Portrait_Tight', afterRename.active.join(','));
 check('the rename edits in place rather than forking a duplicate', afterRename.count == 2, `${afterRename.count} presets`);
 check('the preset keeps its preview image through the rename',
     afterRename.image == '/ViewSpecial/Preset/flux/Portrait?editid=3', afterRename.image);
@@ -284,6 +308,15 @@ const blankTitle = await page.evaluate(() => ({
 }));
 check('saving with no title is refused without a server round trip and keeps the sheet open',
     blankTitle.calls == 0 && blankTitle.open, JSON.stringify(blankTitle));
+const whitespaceTitle = await page.evaluate(() => {
+    let input = __sheet().querySelector('.m-preset-field');
+    input.value = '   ';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    __sheet().querySelector('.m-edit-save-button').click();
+    return { value: input.value, calls: window.__calls.filter(c => c.route == 'AddNewPreset').length };
+});
+check('whitespace-only input stays empty and uses existing blank-title validation',
+    whitespaceTitle.value == '' && whitespaceTitle.calls == 0, JSON.stringify(whitespaceTitle));
 await page.evaluate(() => {
     __sheet().querySelector('.m-preset-field').value = 'My New One';
     __sheet().querySelector('.m-edit-save-button').click();
@@ -292,6 +325,7 @@ await page.waitForFunction(() => window.__calls.some(c => c.route == 'AddNewPres
 const newPayload = await page.evaluate(() => window.__calls.find(c => c.route == 'AddNewPreset').args);
 check('a new preset is NOT sent as an edit',
     newPayload.is_edit === false && !('editing' in newPayload), JSON.stringify({ is_edit: newPayload.is_edit, editing: newPayload.editing }));
+check('Save normalizes a programmatically assigned new title', newPayload.title == 'My_New_One', newPayload.title);
 
 // ---- A server rejection is surfaced, and the sheet stays open to fix ----
 await page.evaluate(() => {
@@ -393,13 +427,13 @@ const valueControls = await page.evaluate(() => {
     __sheet().querySelector('.m-edit-save-button').click();
     return byKey;
 });
-await page.waitForFunction(() => window.__calls.some(c => c.route == 'AddNewPreset' && c.args.title == 'Scale Test'));
+await page.waitForFunction(() => window.__calls.some(c => c.route == 'AddNewPreset' && c.args.title == 'Scale_Test'));
 const scalePayload = await page.evaluate(() => {
     mState.paramMeta = window.__savedMeta;
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
         elem.remove();
     }
-    return window.__calls.find(c => c.route == 'AddNewPreset' && c.args.title == 'Scale Test').args.param_map;
+    return window.__calls.find(c => c.route == 'AddNewPreset' && c.args.title == 'Scale_Test').args.param_map;
 });
 check('params with values render as a select', valueControls.sampler.tag == 'SELECT'
     && valueControls.sampler.options == 'euler|dpmpp_2m', JSON.stringify(valueControls.sampler));

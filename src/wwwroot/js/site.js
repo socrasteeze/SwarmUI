@@ -1217,7 +1217,7 @@ function makeVideoInput(featureid, id, paramid, name, description, toggles = fal
 }
 /** Returns whether a value is a reusable server media path under the user output root.
  * Matches the server's IsOutputRelativeMediaPath: historical inputs/raw/Starred prefixes, or any
- * slash-containing relative path with a known media extension (MixStudio/..., year folders, etc.). */
+ * slash-containing relative path with a known media extension (dated folders, project folders, etc.). */
 function isValidMediaPath(path) {
     if (typeof path != 'string' || !path || path.startsWith('data:') || path.includes('..') || path.includes('\\') || path.startsWith('/')) {
         return false;

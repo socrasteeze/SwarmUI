@@ -25,6 +25,11 @@ class MPresets {
     /** How many rows the parameter picker renders at once. Truncation is reported rather than silent. */
     static PickerLimit = 60;
 
+    /** Replaces each run of title whitespace with one underscore while preserving folder slashes. */
+    static normalizeTitle(title) {
+        return `${title || ''}`.replace(/\s+/g, '_');
+    }
+
     /** Image To Video parameters shown in the preset editor's Video section, with suggested starting values from the
      * H3 docs. This client's Create tab has no video controls, so a preset is the only way to set them here. A null
      * value means "the FL2VA model if one is listed". The frame images (Init Image, Video End Image) are images, not
@@ -157,8 +162,36 @@ class MPresets {
         content.appendChild(mUI.el('div', 'm-preset-label', 'Title'));
         let titleInput = mUI.el('input', 'm-preset-field');
         titleInput.type = 'text';
-        titleInput.placeholder = 'Title - a "/" makes a folder, e.g. flux/Portrait';
+        titleInput.placeholder = 'Title - a "/" makes a folder, e.g. flux/Portrait_Preset';
         titleInput.value = preset ? preset.title : '';
+        let composingTitle = false;
+        /** Normalizes direct edits without moving the current selection. */
+        let normalizeTitleInput = () => {
+            let start = titleInput.selectionStart;
+            let end = titleInput.selectionEnd;
+            let direction = titleInput.selectionDirection;
+            let value = titleInput.value;
+            let normalized = value.trim() ? MPresets.normalizeTitle(value) : '';
+            if (normalized == value) {
+                return;
+            }
+            let normalizedStart = MPresets.normalizeTitle(value.substring(0, start)).length;
+            let normalizedEnd = MPresets.normalizeTitle(value.substring(0, end)).length;
+            titleInput.value = normalized;
+            titleInput.setSelectionRange(normalizedStart, normalizedEnd, direction);
+        };
+        titleInput.addEventListener('compositionstart', () => {
+            composingTitle = true;
+        });
+        titleInput.addEventListener('compositionend', () => {
+            composingTitle = false;
+            normalizeTitleInput();
+        });
+        titleInput.addEventListener('input', () => {
+            if (!composingTitle) {
+                normalizeTitleInput();
+            }
+        });
         content.appendChild(titleInput);
         content.appendChild(mUI.el('div', 'm-preset-label', 'Description'));
         let descInput = mUI.el('input', 'm-preset-field');
@@ -269,7 +302,8 @@ class MPresets {
         actions.appendChild(cancel);
         let save = mUI.el('button', 'm-edit-save-button', 'Save');
         save.addEventListener('click', () => {
-            let title = titleInput.value.trim();
+            let title = MPresets.normalizeTitle(titleInput.value.trim());
+            titleInput.value = title;
             if (!title) {
                 mUI.warn('A preset needs a title.');
                 return;

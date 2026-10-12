@@ -127,7 +127,7 @@ class MImages {
     }
 
     /** Prompt-image entry for a generated or history file. Always kind:'path' with the output-relative
-     * path under the output root (raw/..., inputs/..., Starred/..., MixStudio/..., ...). The server expands
+     * path under the output root (raw/..., inputs/..., Starred/..., dated folders, etc.). The server expands
      * any output-relative media path into file bytes; anything else is treated as base64, and ValidateParam interpolates the entire value into the
      * exception - a View URL or a data URI stuffed here is the "string too long" failure. Returns null
      * when the image was never saved (data URI preview, SaveFiles off). */
@@ -306,6 +306,28 @@ class MImages {
         this.renderPage();
     }
 
+    /** Returns only the resolved prompt stored with this image, or an empty string when unavailable. */
+    resolvedPrompt(metadata) {
+        if (!metadata) {
+            return '';
+        }
+        let full = metadata;
+        if (typeof full == 'string') {
+            let text = full.trim();
+            try {
+                full = JSON.parse(text);
+            }
+            catch (e) {
+                return '';
+            }
+        }
+        if (!full || typeof full != 'object') {
+            return '';
+        }
+        let params = full.sui_image_params || full;
+        return typeof params.prompt == 'string' ? params.prompt : '';
+    }
+
     /** Fullscreen viewer overlay: swipe left/right = prev/next history entry, action row below. */
     openViewer(entry, index, viewerState = null) {
         let state = viewerState || {
@@ -331,6 +353,13 @@ class MImages {
         img.src = entry.url;
         imgWrap.appendChild(img);
         overlay.appendChild(imgWrap);
+        let resolved = this.resolvedPrompt(entry.metadata);
+        if (resolved) {
+            let prompt = mUI.el('div', 'm-viewer-prompt', resolved);
+            prompt.setAttribute('aria-label', 'Resolved Prompt');
+            prompt.setAttribute('role', 'note');
+            overlay.appendChild(prompt);
+        }
         let actions = mUI.el('div', 'm-viewer-actions');
         let closed = false;
         let close = (restore = true) => {
