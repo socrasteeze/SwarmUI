@@ -31,6 +31,7 @@ public class PromptEnhanceExtension : Extension
         PromptEnhanceProfiles.Init(this);
         PromptEnhanceEndpoints.Init();
         PromptEnhanceAPI.Register();
+        T2IEngine.PreGenerateEvent += PromptEnhanceUnload.OnPreGenerate;
         // Hidden provenance param: records what enhancement (if any) produced the prompt this generation used.
         // VisibleNormally: false routes it into the hidden inputs area (still built and readable by JS) rather
         // than the main params list; it is still written to image metadata, since T2IParamInput.GenParameterMetadata

@@ -1,5 +1,9 @@
 using FreneticUtilities.FreneticExtensions;
 using Newtonsoft.Json.Linq;
+using SixLabors.ImageSharp.Processing;
+using SwarmUI.Accounts;
+using SwarmUI.Media;
+using SwarmUI.Text2Image;
 using SwarmUI.Utils;
 using System;
 using System.Collections.Generic;
@@ -9,6 +13,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using ISImage = SixLabors.ImageSharp.Image;
 
 namespace SwarmUI.Builtin_PromptEnhanceExtension;
 
@@ -16,11 +21,14 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="Url">Base URL of the writer endpoint, eg <c>http://127.0.0.1:11434</c>. No trailing slash.</param>
 /// <param name="Kind">Transport kind: <c>ollama</c> or <c>openai</c>.</param>
 /// <param name="Model">Writer model name to request.</param>
-/// <param name="KeepAlive">Ollama <c>keep_alive</c> value, eg <c>30m</c> or <c>0</c>. Ignored for the openai transport.</param>
+/// <param name="KeepAlive">Ollama <c>keep_alive</c> value. Enhance requests use <see cref="PromptEnhanceClient.EnhanceKeepAlive"/>
+/// (<c>5m</c>). Ignored for the openai transport.</param>
 /// <param name="TimeoutSeconds">Overall request timeout, enforced independently of the shared client's connect timeout.</param>
 /// <param name="SystemPrompt">The selected non-interactive profile text, verbatim.</param>
 /// <param name="UserPrompt">The user's raw idea (already shielded by the caller).</param>
-public record class PromptEnhanceRequest(string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, string SystemPrompt, string UserPrompt);
+/// <param name="Images">Base64 JPEG reference images for an edit request, longest side at most
+/// <see cref="PromptEnhanceClient.MaxReferenceSide"/>. Null or empty for a text-to-image rewrite.</param>
+public record class PromptEnhanceRequest(string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, string SystemPrompt, string UserPrompt, IReadOnlyList<string> Images = null);
 
 /// <summary>Transport client for talking to a writer endpoint (Ollama or an OpenAI-compatible server), plus the
 /// pure text-shaping helpers (Swarm-syntax shielding and hard-stop detection) the caller needs around it.</summary>
@@ -30,6 +38,16 @@ public static class PromptEnhanceClient
     /// as a runaway stream and the request is aborted, so the API can fail open instead of buffering an
     /// unbounded reply.</summary>
     public const int MaxReplyLength = 32000;
+
+    /// <summary>Ollama <c>keep_alive</c> sent on a normal enhance request. Short enough that an unused writer
+    /// drops on its own. Generation unload sends <c>0</c> separately and does not change this value.</summary>
+    public const string EnhanceKeepAlive = "5m";
+
+    /// <summary>Most reference images attached to one edit request. Init image first, then prompt images.</summary>
+    public const int MaxReferenceImages = 4;
+
+    /// <summary>Longest side, in pixels, of a reference image sent to the writer.</summary>
+    public const int MaxReferenceSide = 768;
 
     /// <summary>Directive prepended to the shielded user prompt for strength <c>expand</c>: the profile's own
     /// <c>Mode: expand</c> switch, verbatim (see eg <c>anima.system.md</c> rule "<c>Mode: expand</c> permits
@@ -159,9 +177,24 @@ public static class PromptEnhanceClient
         return fullReply.ToString();
     }
 
-    /// <summary>Builds the Ollama <c>/api/chat</c> request body.</summary>
+    /// <summary>Builds the Ollama <c>/api/chat</c> request body. Reference images ride on the user message
+    /// as the <c>images</c> array of raw base64 JPEGs.</summary>
     private static JObject BuildOllamaBody(PromptEnhanceRequest request)
     {
+        JObject user = new()
+        {
+            ["role"] = "user",
+            ["content"] = request.UserPrompt
+        };
+        if (request.Images is not null && request.Images.Count > 0)
+        {
+            JArray images = new();
+            for (int i = 0; i < request.Images.Count; i++)
+            {
+                images.Add(request.Images[i]);
+            }
+            user["images"] = images;
+        }
         return new JObject()
         {
             ["model"] = request.Model,
@@ -171,7 +204,7 @@ public static class PromptEnhanceClient
             ["messages"] = new JArray()
             {
                 new JObject() { ["role"] = "system", ["content"] = request.SystemPrompt },
-                new JObject() { ["role"] = "user", ["content"] = request.UserPrompt }
+                user
             },
             ["options"] = new JObject()
             {
@@ -182,9 +215,27 @@ public static class PromptEnhanceClient
         };
     }
 
-    /// <summary>Builds the OpenAI-compatible <c>/v1/chat/completions</c> request body.</summary>
+    /// <summary>Builds the OpenAI-compatible <c>/v1/chat/completions</c> request body. Reference images are
+    /// <c>image_url</c> parts on the user message so a vision-capable OpenAI server sees the same pixels.</summary>
     private static JObject BuildOpenAIBody(PromptEnhanceRequest request)
     {
+        JToken userContent = request.UserPrompt;
+        if (request.Images is not null && request.Images.Count > 0)
+        {
+            JArray parts = new()
+            {
+                new JObject() { ["type"] = "text", ["text"] = request.UserPrompt }
+            };
+            for (int i = 0; i < request.Images.Count; i++)
+            {
+                parts.Add(new JObject()
+                {
+                    ["type"] = "image_url",
+                    ["image_url"] = new JObject() { ["url"] = $"data:image/jpeg;base64,{request.Images[i]}" }
+                });
+            }
+            userContent = parts;
+        }
         return new JObject()
         {
             ["model"] = request.Model,
@@ -192,12 +243,111 @@ public static class PromptEnhanceClient
             ["messages"] = new JArray()
             {
                 new JObject() { ["role"] = "system", ["content"] = request.SystemPrompt },
-                new JObject() { ["role"] = "user", ["content"] = request.UserPrompt }
+                new JObject() { ["role"] = "user", ["content"] = userContent }
             },
             ["temperature"] = 0.7,
             ["seed"] = 7,
             ["max_tokens"] = 2048
         };
+    }
+
+    /// <summary>Decodes up to <see cref="MaxReferenceImages"/> reference values into JPEG bytes whose longest
+    /// side is at most <see cref="MaxReferenceSide"/>, and returns their raw base64 plus a digest of those
+    /// bytes. A value may be a data URI, a JSON <c>{"data":"data:..."}</c> wrapper, raw base64, or an
+    /// output-relative path. A value that cannot be decoded is skipped. Never throws.</summary>
+    public static List<string> PrepareReferenceImages(Session session, string[] raw, out string digest)
+    {
+        List<string> encoded = [];
+        List<byte[]> bytes = [];
+        digest = "";
+        if (raw is null)
+        {
+            return encoded;
+        }
+        for (int i = 0; i < raw.Length && encoded.Count < MaxReferenceImages; i++)
+        {
+            string item = raw[i];
+            if (string.IsNullOrWhiteSpace(item))
+            {
+                continue;
+            }
+            try
+            {
+                byte[] jpeg = ToReferenceJpeg(session, item.Trim());
+                if (jpeg is null || jpeg.Length == 0)
+                {
+                    continue;
+                }
+                bytes.Add(jpeg);
+                encoded.Add(Convert.ToBase64String(jpeg));
+            }
+            catch (Exception ex)
+            {
+                Logs.Debug($"[PromptEnhance] Skipped a reference image: {ex.Message}");
+            }
+        }
+        digest = PromptEnhanceCache.ImageDigest(bytes);
+        return encoded;
+    }
+
+    /// <summary>Loads one reference value and returns a JPEG no larger than <paramref name="maxSide"/> on
+    /// its longest side. Throws when the bytes are not an image; the caller skips that value.</summary>
+    private static byte[] ToReferenceJpeg(Session session, string item)
+    {
+        string data = item;
+        if (!data.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && !data.StartsWith("{", StringComparison.Ordinal) && session is not null && T2IParamTypes.IsOutputRelativeMediaPath(data))
+        {
+            data = T2IParamTypes.FilePathToDataString(session, data, "for a Prompt Enhance reference image");
+        }
+        ImageFile image;
+        if (data.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            image = ImageFile.FromDataString(data);
+        }
+        else if (data.StartsWith("{", StringComparison.Ordinal))
+        {
+            JObject parsed = JObject.Parse(data);
+            string wrapped = parsed.Value<string>("data") ?? "";
+            image = ImageFile.FromDataString(wrapped);
+        }
+        else
+        {
+            image = ImageFile.FromBase64(data, MediaType.ImagePng);
+        }
+        return DownscaleJpeg(image, MaxReferenceSide);
+    }
+
+    /// <summary>Encodes <paramref name="image"/> as JPEG, shrinking it so the longest side is at most
+    /// <paramref name="maxSide"/>. A smaller image is re-encoded without being enlarged.</summary>
+    private static byte[] DownscaleJpeg(ImageFile image, int maxSide)
+    {
+        ISImage source = image.ToIS;
+        int width = source.Width;
+        int height = source.Height;
+        if (width < 1 || height < 1)
+        {
+            return null;
+        }
+        int longest = Math.Max(width, height);
+        ISImage working = source;
+        if (longest > maxSide)
+        {
+            double scale = maxSide / (double)longest;
+            int newWidth = Math.Max(1, (int)Math.Round(width * scale));
+            int newHeight = Math.Max(1, (int)Math.Round(height * scale));
+            working = source.Clone(operation => operation.Resize(newWidth, newHeight));
+        }
+        try
+        {
+            return ImageFile.ISImgToJpgBytes(working);
+        }
+        finally
+        {
+            if (!ReferenceEquals(working, source))
+            {
+                working.Dispose();
+            }
+        }
     }
 
     /// <summary>Pulls the content delta and done-flag out of one line of an Ollama NDJSON chat stream. Pure and

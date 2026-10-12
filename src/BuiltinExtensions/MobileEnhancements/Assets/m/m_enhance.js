@@ -28,6 +28,8 @@ class MEnhance {
         }
         /** Enhance Strength: faithful / expand / full. */
         this.strength = this.pref('strength', 'full');
+        /** Writer mode: 'auto', 't2i', or 'edit'. Same localStorage key as the desktop control. */
+        this.writeMode = this.normalizeWriteMode(this.pref('write_mode', 'auto'));
         /** Profiles list from the last successful status reply (for the sheet select). */
         this.profiles = [];
         /** Allowed strengths from the last status reply. */
@@ -70,6 +72,114 @@ class MEnhance {
         }
         catch (e) {
             return (mState.params['model'] || '') + '';
+        }
+    }
+
+    /** 'auto', 't2i', or 'edit'. Anything else is auto. */
+    normalizeWriteMode(mode) {
+        let value = `${mode == null ? '' : mode}`.trim().toLowerCase();
+        if (value == 't2i' || value == 'edit' || value == 'auto') {
+            return value;
+        }
+        return 'auto';
+    }
+
+    /** Auto is edit when the generation already has a reference image, otherwise text-to-image. */
+    resolvedWriteMode(hasImages) {
+        let mode = this.normalizeWriteMode(this.writeMode);
+        if (mode == 'edit' || mode == 't2i') {
+            return mode;
+        }
+        return hasImages ? 'edit' : 't2i';
+    }
+
+    /** Init image, then prompt images, capped at 4. Values match what Generate would send. */
+    referenceImageValues() {
+        let images = [];
+        let add = value => {
+            if (images.length >= 4) {
+                return;
+            }
+            if (value == null || `${value}` == '') {
+                return;
+            }
+            images.push(`${value}`);
+        };
+        try {
+            let input = mState.buildGenInput();
+            if (input) {
+                add(input['initimage']);
+                let prompts = input['promptimages'];
+                if (Array.isArray(prompts)) {
+                    for (let i = 0; i < prompts.length; i++) {
+                        add(prompts[i]);
+                    }
+                }
+                else {
+                    add(prompts);
+                }
+                return images;
+            }
+        }
+        catch (e) {
+            // Fall through to the raw client state.
+        }
+        try {
+            if (mState.initImage) {
+                add(mState.initImage.value);
+            }
+            let list = mState.promptImages || [];
+            for (let i = 0; i < list.length; i++) {
+                if (list[i]) {
+                    add(list[i].value);
+                }
+            }
+        }
+        catch (e) {
+            // No generation state yet.
+        }
+        return images;
+    }
+
+    /** Mode fields for EnhancePrompt. Images are attached only when the resolved mode is edit. */
+    enhanceRequestFields() {
+        let images = this.referenceImageValues();
+        let mode = this.normalizeWriteMode(this.writeMode);
+        let resolved = this.resolvedWriteMode(images.length > 0);
+        let fields = { 'mode': mode, 'resolved_mode': resolved };
+        if (resolved == 'edit' && images.length > 0) {
+            fields['images'] = images;
+        }
+        return fields;
+    }
+
+    /** Fills a writer-mode select. The Auto option shows the resolved mode. */
+    fillWriteModeSelect(select) {
+        if (!select) {
+            return;
+        }
+        select.innerHTML = '';
+        for (let entry of [['auto', 'Auto'], ['t2i', 'T2I'], ['edit', 'Edit']]) {
+            let option = document.createElement('option');
+            option.value = entry[0];
+            option.textContent = entry[1];
+            select.appendChild(option);
+        }
+        select.value = this.normalizeWriteMode(this.writeMode);
+        this.syncWriteModeLabel(select);
+    }
+
+    /** Sets the Auto option text to "Auto (Edit)" or "Auto (T2I)". */
+    syncWriteModeLabel(select) {
+        if (!select || !select.options) {
+            return;
+        }
+        let resolved = this.resolvedWriteMode(this.referenceImageValues().length > 0);
+        let text = resolved == 'edit' ? 'Auto (Edit)' : 'Auto (T2I)';
+        for (let i = 0; i < select.options.length; i++) {
+            if (select.options[i].value == 'auto') {
+                select.options[i].textContent = text;
+            }
         }
     }
 
@@ -150,11 +260,15 @@ class MEnhance {
         this.syncProfileOverride(model);
         this.statusRequestSeq += 1;
         let requestSeq = this.statusRequestSeq;
-        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride }, data => {
+        let writeFields = this.enhanceRequestFields();
+        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': writeFields.mode, 'resolved_mode': writeFields.resolved_mode }, data => {
             if (requestSeq != this.statusRequestSeq) {
                 return;
             }
             this.applyStatusToButton(data);
+            if (this.sheet && this.sheet.writeSelect) {
+                this.syncWriteModeLabel(this.sheet.writeSelect);
+            }
             this.profiles = data.profiles || [];
             this.allowedStrengths = (data.resolved && data.resolved.strengths) || ['faithful', 'expand', 'full'];
             if (this.sheet && this.sheet.content && this.sheet.content.isConnected) {
@@ -262,6 +376,14 @@ class MEnhance {
         let status = mUI.el('div', 'm-enhance-status', 'Enhancing...');
         content.appendChild(status);
 
+        let modeRow = mUI.el('div', 'm-enhance-row');
+        modeRow.appendChild(mUI.el('label', 'm-enhance-label', 'Mode'));
+        let writeSelect = document.createElement('select');
+        writeSelect.className = 'm-enhance-select';
+        this.fillWriteModeSelect(writeSelect);
+        modeRow.appendChild(writeSelect);
+        content.appendChild(modeRow);
+
         let profileRow = mUI.el('div', 'm-enhance-row');
         profileRow.appendChild(mUI.el('label', 'm-enhance-label', 'Profile'));
         let profileSelect = document.createElement('select');
@@ -315,7 +437,7 @@ class MEnhance {
 
         this.sheet = {
             content, status, preview, notes, conflict, passthrough, applyBtn,
-            profileSelect, strengthSelect
+            profileSelect, strengthSelect, writeSelect
         };
         this.lastResult = null;
         this.applyEnabled = false;
@@ -363,6 +485,18 @@ class MEnhance {
             closeSheet();
             this.open();
         });
+        writeSelect.addEventListener('change', () => {
+            this.writeMode = this.normalizeWriteMode(writeSelect.value);
+            this.setPref('write_mode', this.writeMode);
+            if (this.running && this.socket) {
+                this.settled = true;
+                try { this.socket.close(); } catch (e) { /* ignore */ }
+                this.running = false;
+            }
+            disconnected();
+            closeSheet();
+            this.open();
+        });
         strengthSelect.addEventListener('change', () => {
             this.strength = strengthSelect.value;
             this.setPref('strength', this.strength);
@@ -380,15 +514,22 @@ class MEnhance {
         this.syncProfileOverride(model);
         this.renderPill();
         let prompt = this.currentPrompt();
-        this.socket = makeWSRequest('EnhancePrompt', {
+        let writeFields = this.enhanceRequestFields();
+        let payload = {
             'prompt': prompt,
             'model': model,
             'profile_override': this.profileOverride,
             'endpoint_override': '',
             'strength': this.strength,
             'video_task': '',
-            'video_duration': 0
-        }, data => {
+            'video_duration': 0,
+            'mode': writeFields.mode,
+            'resolved_mode': writeFields.resolved_mode
+        };
+        if (writeFields.images) {
+            payload['images'] = writeFields.images;
+        }
+        this.socket = makeWSRequest('EnhancePrompt', payload, data => {
             if (!this.sheet || !this.sheet.content.isConnected) {
                 return;
             }
