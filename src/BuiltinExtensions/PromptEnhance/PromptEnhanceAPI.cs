@@ -36,14 +36,21 @@ public static class PromptEnhanceAPI
         "pack_version": "1.1.0+7ff564b9",
         "profiles": [{"id": "anima", "display": "Anima", "target_model": "Anima"}],
         "endpoints": [{"id": "writer", "kind": "ollama", "model": "some-writer-model", "enabled": true, "healthy": true}],
-        "resolved": {"profile": "anima", "reason": null, "strengths": ["faithful", "expand", "full"]}
+        "resolved": {"profile": "anima", "reason": null, "strengths": ["faithful", "expand", "full"], "mode": "auto", "resolved_mode": "t2i"}
         """)]
     public static async Task<JObject> ListPromptEnhanceStatus(Session session,
         [API.APIParameter("Name of the currently loaded model, used to resolve a writer profile.")] string model,
-        [API.APIParameter("Optional profile ID to force, overriding automatic resolution - same semantics as EnhancePrompt's own profile_override.")] string profile_override = "")
+        [API.APIParameter("Optional profile ID to force, overriding automatic resolution - same semantics as EnhancePrompt's own profile_override.")] string profile_override = "",
+        [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto resolves from resolved_mode on this call, because status does not carry image bytes.")] string mode = "auto",
+        [API.APIParameter("Client-resolved writer mode, 't2i' or 'edit', used when mode is auto.")] string resolved_mode = "")
     {
         T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
         PromptEnhanceProfile profile = PromptEnhanceProfiles.Resolve(t2iModel, profile_override, out string reason);
+        string resolvedMode = PromptEnhanceProfiles.ResolveWriteMode(mode, resolved_mode, false);
+        if (profile is not null)
+        {
+            profile = PromptEnhanceProfiles.ApplyWriteMode(profile, resolvedMode);
+        }
         JArray profiles = [];
         foreach (PromptEnhanceProfile entry in PromptEnhanceProfiles.Profiles.Values)
         {
@@ -76,7 +83,14 @@ public static class PromptEnhanceAPI
             ["pack_version"] = PromptEnhanceProfiles.PackVersion,
             ["profiles"] = profiles,
             ["endpoints"] = endpoints,
-            ["resolved"] = new JObject() { ["profile"] = profile?.ID, ["reason"] = reason, ["strengths"] = new JArray(strengths) }
+            ["resolved"] = new JObject()
+            {
+                ["profile"] = profile?.ID,
+                ["reason"] = reason,
+                ["strengths"] = new JArray(strengths),
+                ["mode"] = PromptEnhanceProfiles.NormalizeWriteMode(mode),
+                ["resolved_mode"] = resolvedMode
+            }
         };
     }
 
@@ -91,7 +105,10 @@ public static class PromptEnhanceAPI
         [API.APIParameter("Optional endpoint ID to force, overriding automatic selection.")] string endpoint_override = "",
         [API.APIParameter("Enhance Strength: 'faithful' (send unchanged), 'expand' (permit restrained additions), or 'full' (build a complete scene) - default 'full'. Blank/unrecognized falls back to 'full'; capped to 'expand' on an edit profile.")] string strength = "full",
         [API.APIParameter("Optional video task for video profiles: 'T2VA', 'I2VA', 'FL2VA' or 'L2VA'. Ignored for image profiles.")] string video_task = "",
-        [API.APIParameter("Optional clip length in seconds for video profiles. Ignored for image profiles, or when 0.")] double video_duration = 0)
+        [API.APIParameter("Optional clip length in seconds for video profiles. Ignored for image profiles, or when 0.")] double video_duration = 0,
+        [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto is edit when reference images are present, otherwise t2i. The server resolves auto again from the images on this request.")] string mode = "auto",
+        [API.APIParameter("Client-resolved writer mode, 't2i' or 'edit'. Used when mode is auto and this request carries no image bytes.")] string resolved_mode = "",
+        [API.APIParameter("Reference images for edit mode, init image first, then prompt images. Data URIs, raw base64, or output-relative paths. At most 4 are used, each downscaled to a 768px JPEG before the writer call.")] string[] images = null)
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -103,19 +120,25 @@ public static class PromptEnhanceAPI
             await socket.SendAndReportError($"EnhancePrompt request from {session.User.UserID}", $"The prompt is too long (over {MaxPromptLength} characters).", API.WebsocketTimeout);
             return null;
         }
-        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration), socket);
+        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration, mode, resolved_mode, images), socket);
         return null;
     }
 
     /// <summary>Internal handler: resolves a profile and endpoint, dispatches (or reuses a cached reply from)
     /// the writer LLM, and reports status/chunks/the terminal frame back over the websocket.</summary>
-    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration) input, Action<JObject> output, bool isWS)
+    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration, string Mode, string ResolvedMode, string[] Images) input, Action<JObject> output, bool isWS)
     {
-        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration) = input;
+        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration, string mode, string resolvedModeHint, string[] images) = input;
         try
         {
             T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
             PromptEnhanceProfile profile = PromptEnhanceProfiles.Resolve(t2iModel, profileOverride, out string reason);
+            bool hasImages = HasAnyImage(images);
+            string resolvedMode = PromptEnhanceProfiles.ResolveWriteMode(mode, resolvedModeHint, hasImages);
+            if (profile is not null)
+            {
+                profile = PromptEnhanceProfiles.ApplyWriteMode(profile, resolvedMode);
+            }
             if (profile is null)
             {
                 output(new JObject() { ["passthrough"] = true, ["reason"] = reason });
@@ -150,17 +173,28 @@ public static class PromptEnhanceAPI
             // Strength is applied after Shield, on the already-shielded prompt, so the directive text can never
             // interact with shielding - Unshield below re-appends the extracted tokens exactly as it always did.
             string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, strength, profile.IsEdit, out string effectiveStrength, out string strengthNote);
+            List<string> preparedImages = [];
+            string imageDigest = "";
+            if (resolvedMode == "edit")
+            {
+                preparedImages = PromptEnhanceClient.PrepareReferenceImages(session, images, out imageDigest);
+                if (preparedImages.Count > 0)
+                {
+                    directed = $"{directed}\n\nReference images are attached in order as image 1 through image {preparedImages.Count}.";
+                }
+            }
             // Keyed on 'directed' (the exact text the writer receives), not on 'shielded' - the strength name alone
             // does not change when a directive's wording is revised, so a name-only key kept serving replies
-            // written against the old wording.
-            string key = PromptEnhanceCache.Key(directed, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength);
+            // written against the old wording. The resolved mode and the image digest keep an edit of the same
+            // words, or the same words over different reference pixels, from colliding with a text-to-image rewrite.
+            string key = PromptEnhanceCache.Key(directed, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength, resolvedMode, imageDigest);
             // Cache lookup happens before health gating, so a cache hit still answers even with nothing healthy.
             if (PromptEnhanceCache.TryGet(key, out string cachedPromptPart))
             {
                 // Notes are not cached (only the prompt part is), so a cache hit never carries notes.
                 // Unwrap JSON positive_prompt here too: older cache entries may still hold a raw writer object.
                 string cachedUnwrapped = PromptEnhanceClient.UnwrapJsonPrompt(cachedPromptPart);
-                output(BuildResult(PromptEnhanceClient.Unshield(cachedUnwrapped, extracted), "", prompt, profile, endpoint, true, effectiveStrength, strengthNote));
+                output(BuildResult(PromptEnhanceClient.Unshield(cachedUnwrapped, extracted), "", prompt, profile, endpoint, true, effectiveStrength, strengthNote, resolvedMode));
                 return;
             }
             if (!reachable)
@@ -172,7 +206,7 @@ public static class PromptEnhanceAPI
             async Task<string> RunChat(PromptEnhanceEndpoint target)
             {
                 output(new JObject() { ["status"] = "running", ["profile"] = profile.ID, ["writer_model"] = target.Model, ["endpoint"] = target.ID, ["strength"] = effectiveStrength });
-                PromptEnhanceRequest request = new(target.Url, target.Kind, target.Model, target.KeepAlive, target.TimeoutSeconds, profile.Text, directed);
+                PromptEnhanceRequest request = new(target.Url, target.Kind, target.Model, PromptEnhanceClient.EnhanceKeepAlive, target.TimeoutSeconds, profile.Text, directed, preparedImages);
                 using CancellationTokenSource requestCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, session.SessInterrupt.Token);
                 return await PromptEnhanceClient.ChatStream(request, chunk =>
                 {
@@ -230,7 +264,7 @@ public static class PromptEnhanceAPI
                 return;
             }
             // A retry may have moved to a different writer. Cache under the endpoint that actually answered.
-            key = PromptEnhanceCache.Key(directed, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength);
+            key = PromptEnhanceCache.Key(directed, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength, resolvedMode, imageDigest);
             if (PromptEnhanceClient.IsHardStop(reply, out string kind, out string line))
             {
                 if (kind == "needs_input")
@@ -261,7 +295,7 @@ public static class PromptEnhanceAPI
             // meaningful to replay from a stale cache hit. Store the unwrapped prompt so later hits never
             // re-surface a JSON object into the prompt box.
             PromptEnhanceCache.Put(key, promptPart);
-            output(BuildResult(PromptEnhanceClient.Unshield(promptPart, extracted), notes, prompt, profile, endpoint, false, effectiveStrength, strengthNote));
+            output(BuildResult(PromptEnhanceClient.Unshield(promptPart, extracted), notes, prompt, profile, endpoint, false, effectiveStrength, strengthNote, resolvedMode));
         }
         catch (Exception ex)
         {
@@ -276,7 +310,7 @@ public static class PromptEnhanceAPI
     /// <summary>Builds the terminal result frame shared by the cache-hit and fresh-completion paths. Adds
     /// <c>strength_note</c> only when <paramref name="strengthNote"/> is non-null (eg the edit-profile cap),
     /// rather than always carrying an empty string like <c>notes</c> does.</summary>
-    private static JObject BuildResult(string result, string notes, string original, PromptEnhanceProfile profile, PromptEnhanceEndpoint endpoint, bool cached, string effectiveStrength, string strengthNote)
+    private static JObject BuildResult(string result, string notes, string original, PromptEnhanceProfile profile, PromptEnhanceEndpoint endpoint, bool cached, string effectiveStrength, string strengthNote, string resolvedMode)
     {
         JObject frame = new()
         {
@@ -288,12 +322,30 @@ public static class PromptEnhanceAPI
             ["writer_model"] = endpoint.Model,
             ["endpoint"] = endpoint.ID,
             ["cached"] = cached,
-            ["strength"] = effectiveStrength
+            ["strength"] = effectiveStrength,
+            ["resolved_mode"] = resolvedMode
         };
         if (strengthNote is not null)
         {
             frame["strength_note"] = strengthNote;
         }
         return frame;
+    }
+
+    /// <summary>True when <paramref name="images"/> contains at least one non-blank value.</summary>
+    private static bool HasAnyImage(string[] images)
+    {
+        if (images is null)
+        {
+            return false;
+        }
+        for (int i = 0; i < images.Length; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(images[i]))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

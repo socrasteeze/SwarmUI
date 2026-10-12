@@ -47,8 +47,25 @@ public static class PromptEnhanceProfiles
     /// <c>IsEdit: true</c> directly - both are equivalent.</summary>
     public static readonly HashSet<string> KnownEditProfileIDs = new(StringComparer.OrdinalIgnoreCase)
     {
-        "qwen-image-edit-2511"
+        "qwen-image-edit-2511",
+        "flux2-klein-9b.edit",
+        "qwen-image-2.1.edit",
+        "krea-2.reference"
     };
+
+    /// <summary>Edit-profile file to use when <see cref="ApplyWriteMode"/> is in edit mode and the base
+    /// profile has a dedicated edit asset. The key is the base profile id from <see cref="Resolve"/>.
+    /// Krea 2's file is a reference-scene profile because Krea 2 is not a true edit model.</summary>
+    public static readonly Dictionary<string, string> EditVariantForBase = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["flux2-klein-9b"] = "flux2-klein-9b.edit",
+        ["qwen-image-2.1"] = "qwen-image-2.1.edit",
+        ["krea-2"] = "krea-2.reference"
+    };
+
+    /// <summary>Appended to a base profile's system text when edit mode is on and no dedicated edit asset
+    /// exists. The base profile stays registered unchanged; callers receive a copy.</summary>
+    public const string GenericEditAppendix = "\n\n## Edit mode\n\nThe user is editing existing images, not requesting a new scene from scratch. Output only a short imperative edit instruction, with no preamble. State exactly what changes. Explicitly state what stays the same: identity, face, pose, composition, lighting, and style, unless the user asked to change that thing. When reference images are attached, refer to each by its role, for example \"image 1 is the subject, image 2 provides the outfit\". Never invent new content, objects, or details the user did not ask for. Expand and clarify only. Quote any text that must be rendered, exactly. If the request is unclear, keep the original meaning.\n";
 
     /// <summary>Profile IDs that target a video model and understand the <c>Task:</c> / <c>Duration:</c> header the
     /// frontend builds from the current video parameters (see <c>PromptEnhanceAPI.EnhancePrompt_Internal</c>). Any
@@ -70,7 +87,10 @@ public static class PromptEnhanceProfiles
         ["minimax-h3"] = "MiniMax H3",
         ["qwen-image"] = "Qwen Image",
         ["qwen-image-2.1"] = "Qwen Image 2.1",
-        ["qwen-image-edit-2511"] = "Qwen Image Edit 2511"
+        ["qwen-image-edit-2511"] = "Qwen Image Edit 2511",
+        ["flux2-klein-9b.edit"] = "FLUX.2 klein 9B edit",
+        ["qwen-image-2.1.edit"] = "Qwen Image 2.1 edit",
+        ["krea-2.reference"] = "Krea 2 reference"
     };
 
     /// <summary>Pack name each known profile ID targets, as used in <c>output.schema.json</c>.</summary>
@@ -84,7 +104,10 @@ public static class PromptEnhanceProfiles
         ["minimax-h3"] = "MiniMax-H3",
         ["qwen-image"] = "Qwen-Image",
         ["qwen-image-2.1"] = "Qwen-Image-2.1",
-        ["qwen-image-edit-2511"] = "Qwen-Image-Edit-2511"
+        ["qwen-image-edit-2511"] = "Qwen-Image-Edit-2511",
+        ["flux2-klein-9b.edit"] = "FLUX.2-klein-9B",
+        ["qwen-image-2.1.edit"] = "Qwen-Image-2.1",
+        ["krea-2.reference"] = "Krea-2"
     };
 
     /// <summary>Built-in filename-fragment regex fallback, consulted after <see cref="ConfiguredFilenameOverrides"/>
@@ -308,5 +331,63 @@ public static class PromptEnhanceProfiles
         }
         reason = $"No writer profile for model class '{classId ?? compatId ?? "unknown"}'";
         return null;
+    }
+
+    /// <summary>Normalizes a writer-mode value to <c>auto</c>, <c>t2i</c>, or <c>edit</c>. Anything else,
+    /// including blank, is <c>auto</c>.</summary>
+    public static string NormalizeWriteMode(string mode)
+    {
+        string value = (mode ?? "").Trim().ToLowerFast();
+        if (value == "t2i" || value == "edit" || value == "auto")
+        {
+            return value;
+        }
+        return "auto";
+    }
+
+    /// <summary>Resolves <paramref name="mode"/> to the mode that actually picks a profile.
+    /// <para><c>t2i</c> and <c>edit</c> are returned as themselves. <c>auto</c> is <c>edit</c> when
+    /// <paramref name="hasImages"/> is true or <paramref name="clientResolved"/> is <c>edit</c>, and
+    /// <c>t2i</c> otherwise. The client sends its own resolution because a status call does not carry
+    /// the image bytes.</para></summary>
+    public static string ResolveWriteMode(string mode, string clientResolved, bool hasImages)
+    {
+        string normalized = NormalizeWriteMode(mode);
+        if (normalized == "t2i" || normalized == "edit")
+        {
+            return normalized;
+        }
+        if (hasImages)
+        {
+            return "edit";
+        }
+        string hinted = (clientResolved ?? "").Trim().ToLowerFast();
+        if (hinted == "edit")
+        {
+            return "edit";
+        }
+        return "t2i";
+    }
+
+    /// <summary>Returns the profile to send for <paramref name="resolvedMode"/>.
+    /// <para>Edit mode uses <see cref="EditVariantForBase"/> when that asset is loaded. A profile that is
+    /// already an edit profile is returned as-is. Any other profile is copied with
+    /// <see cref="GenericEditAppendix"/> appended and <see cref="PromptEnhanceProfile.IsEdit"/> set, so the
+    /// strength cap applies. T2I mode returns <paramref name="profile"/> unchanged. Null stays null.</para></summary>
+    public static PromptEnhanceProfile ApplyWriteMode(PromptEnhanceProfile profile, string resolvedMode)
+    {
+        if (profile is null || resolvedMode != "edit")
+        {
+            return profile;
+        }
+        if (EditVariantForBase.TryGetValue(profile.ID, out string variantId) && Profiles.TryGetValue(variantId, out PromptEnhanceProfile variant))
+        {
+            return variant;
+        }
+        if (profile.IsEdit)
+        {
+            return profile;
+        }
+        return profile with { Text = profile.Text + GenericEditAppendix, IsEdit = true };
     }
 }

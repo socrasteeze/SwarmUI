@@ -349,6 +349,68 @@ public class PromptEnhanceTests : SwarmUITest
 
     #endregion
 
+    #region PromptEnhanceProfiles writer mode
+
+    /// <summary>Auto is edit when images are present or the client already resolved edit, and t2i otherwise.
+    /// An explicit t2i or edit choice is not overridden by the images.</summary>
+    [Test]
+    public void ResolveWriteMode_AutoUsesImages_ExplicitModeWins()
+    {
+        Assert.That(PromptEnhanceProfiles.ResolveWriteMode("auto", "", false), Is.EqualTo("t2i"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteMode("auto", "t2i", false), Is.EqualTo("t2i"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteMode("auto", "edit", false), Is.EqualTo("edit"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteMode("auto", "t2i", true), Is.EqualTo("edit"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteMode("edit", "", false), Is.EqualTo("edit"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteMode("t2i", "edit", true), Is.EqualTo("t2i"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteMode("nope", "", false), Is.EqualTo("t2i"));
+    }
+
+    /// <summary>Edit mode uses the dedicated edit asset when one is registered for the base profile, and
+    /// leaves text-to-image mode on the base profile.</summary>
+    [Test]
+    public void ApplyWriteMode_UsesEditVariantWhenRegistered()
+    {
+        PromptEnhanceProfiles.Register(new("flux2-klein-9b", "FLUX.2 klein 9B", "FLUX.2-klein-9B", "klein base"));
+        PromptEnhanceProfiles.Register(new("flux2-klein-9b.edit", "FLUX.2 klein 9B edit", "FLUX.2-klein-9B", "klein edit"));
+        T2IModel model = MakeModel("some_klein_variant.safetensors", "flux-2-klein-9b-variant", "flux-2-klein-9b");
+        PromptEnhanceProfile baseline = PromptEnhanceProfiles.Resolve(model, null, out _);
+        PromptEnhanceProfile t2i = PromptEnhanceProfiles.ApplyWriteMode(baseline, "t2i");
+        PromptEnhanceProfile edit = PromptEnhanceProfiles.ApplyWriteMode(baseline, "edit");
+        Assert.That(t2i.ID, Is.EqualTo("flux2-klein-9b"));
+        Assert.That(t2i.Text, Is.EqualTo("klein base"));
+        Assert.That(edit.ID, Is.EqualTo("flux2-klein-9b.edit"));
+        Assert.That(edit.IsEdit, Is.True);
+    }
+
+    /// <summary>A profile with no edit asset keeps its id and gains the generic edit appendix, marked as an
+    /// edit profile so the strength cap applies. The registered copy is not modified.</summary>
+    [Test]
+    public void ApplyWriteMode_AppendsGenericAppendixWhenNoVariant()
+    {
+        PromptEnhanceProfiles.Register(new("anima", "Anima", "Anima", "anima system text"));
+        T2IModel model = MakeModel("anima/checkpoint.safetensors", "anima", "anima");
+        PromptEnhanceProfile baseline = PromptEnhanceProfiles.Resolve(model, null, out _);
+        PromptEnhanceProfile edit = PromptEnhanceProfiles.ApplyWriteMode(baseline, "edit");
+        Assert.That(edit.ID, Is.EqualTo("anima"));
+        Assert.That(edit.IsEdit, Is.True);
+        Assert.That(edit.Text, Does.Contain("anima system text"));
+        Assert.That(edit.Text, Does.Contain(PromptEnhanceProfiles.GenericEditAppendix.Trim()));
+        Assert.That(baseline.Text, Is.EqualTo("anima system text"));
+        Assert.That(baseline.IsEdit, Is.False);
+    }
+
+    /// <summary>An already-edit profile, such as Qwen Image Edit, is not given a second appendix.</summary>
+    [Test]
+    public void ApplyWriteMode_ExistingEditProfileStaysAsIs()
+    {
+        PromptEnhanceProfiles.Register(new("qwen-image-edit-2511", "Qwen Image Edit 2511", "Qwen-Image-Edit-2511", "edit system text"));
+        PromptEnhanceProfile edit = PromptEnhanceProfiles.ApplyWriteMode(PromptEnhanceProfiles.Profiles["qwen-image-edit-2511"], "edit");
+        Assert.That(edit.Text, Is.EqualTo("edit system text"));
+        Assert.That(edit.IsEdit, Is.True);
+    }
+
+    #endregion
+
     #region PromptEnhanceCache.Key
 
     /// <summary>The cache key is stable for identical inputs, and changes whenever the pack version differs -
@@ -379,6 +441,10 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(faithful1, Is.Not.EqualTo(expand));
         Assert.That(faithful1, Is.Not.EqualTo(full));
         Assert.That(expand, Is.Not.EqualTo(full));
+        string edit = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "faithful", "edit", "");
+        string withImage = PromptEnhanceCache.Key("a prompt", "profile1", "1.0.0", "writer-model", "faithful", "edit", "abc");
+        Assert.That(edit, Is.Not.EqualTo(faithful1));
+        Assert.That(withImage, Is.Not.EqualTo(edit));
     }
 
     /// <summary>Put followed by TryGet round-trips the stored result, isolated to a throwaway data directory
@@ -410,6 +476,39 @@ public class PromptEnhanceTests : SwarmUITest
                 // Best-effort - a stray open handle on a throwaway temp dir is not worth failing the test over.
             }
         }
+    }
+
+    #endregion
+
+    #region PromptEnhance reference images and unload
+
+    /// <summary>A tiny PNG is downscaled to one JPEG, and a fifth image is dropped. The digest changes when
+    /// the pixels change.</summary>
+    [Test]
+    public void PrepareReferenceImages_DownscalesCapsAndHashes()
+    {
+        string png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+        string other = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+        string[] five = [png, png, png, png, png];
+        List<string> encoded = PromptEnhanceClient.PrepareReferenceImages(null, five, out string digest);
+        Assert.That(encoded.Count, Is.EqualTo(4));
+        Assert.That(digest, Is.Not.Empty);
+        List<string> again = PromptEnhanceClient.PrepareReferenceImages(null, [png], out string same);
+        Assert.That(same, Is.Not.EqualTo(digest));
+        List<string> otherEncoded = PromptEnhanceClient.PrepareReferenceImages(null, [other], out string otherDigest);
+        Assert.That(otherEncoded.Count, Is.EqualTo(1));
+        Assert.That(otherDigest, Is.Not.EqualTo(same));
+        Assert.That(again[0], Does.Not.StartWith("data:"));
+    }
+
+    /// <summary>Ollama's process list matches the configured model name and ignores a different one.</summary>
+    [Test]
+    public void ModelIsListed_MatchesNameOrModelField()
+    {
+        string body = "{\"models\":[{\"name\":\"writer:latest\",\"model\":\"writer:latest\"}]}";
+        Assert.That(PromptEnhanceUnload.ModelIsListed(body, "writer:latest"), Is.True);
+        Assert.That(PromptEnhanceUnload.ModelIsListed(body, "other:latest"), Is.False);
+        Assert.That(PromptEnhanceUnload.ModelIsListed("not json", "writer:latest"), Is.False);
     }
 
     #endregion
