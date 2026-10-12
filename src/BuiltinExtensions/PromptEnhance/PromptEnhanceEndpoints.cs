@@ -22,7 +22,9 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <c>openai</c> kind.</param>
 /// <param name="TimeoutSeconds">Request timeout in seconds.</param>
 /// <param name="Enabled">Whether this endpoint should be considered at all.</param>
-public record class PromptEnhanceEndpoint(string ID, string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, bool Enabled);
+/// <param name="NumCtx">Optional Ollama <c>num_ctx</c>. Null omits the option so Ollama keeps its default
+/// context length. Ignored for the <c>openai</c> kind.</param>
+public record class PromptEnhanceEndpoint(string ID, string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, bool Enabled, int? NumCtx = null);
 
 /// <summary>Loads and holds the ordered list of configured writer-host endpoints, and probes them for
 /// reachability.
@@ -96,7 +98,8 @@ public static class PromptEnhanceEndpoints
                         entry.Value<string>("model") ?? "",
                         entry.Value<string>("keep_alive") ?? "5m",
                         entry.Value<int?>("timeout_seconds") ?? 120,
-                        entry.Value<bool?>("enabled") ?? true));
+                        entry.Value<bool?>("enabled") ?? true,
+                        entry.Value<int?>("num_ctx")));
                 }
             }
             Endpoints = loaded;
@@ -114,7 +117,7 @@ public static class PromptEnhanceEndpoints
     {
         return new JObject()
         {
-            ["_comment"] = "Ordered list. A single enabled endpoint is used directly; health is probed only after a failure, or when several endpoints are enabled. kind is 'ollama' or 'openai'.",
+            ["_comment"] = "Ordered list. A single enabled endpoint is used directly; health is probed only after a failure, or when several endpoints are enabled. kind is 'ollama' or 'openai'. Optional num_ctx (Ollama only) caps context length when set.",
             ["endpoints"] = new JArray()
             {
                 new JObject()

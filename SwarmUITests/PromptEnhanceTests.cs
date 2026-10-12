@@ -1,3 +1,4 @@
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using SwarmUI.Builtin_PromptEnhanceExtension;
 using SwarmUI.Core;
@@ -1019,6 +1020,61 @@ public class PromptEnhanceTests : SwarmUITest
         finally
         {
             PromptEnhanceEndpoints.Endpoints = prior;
+        }
+    }
+
+    /// <summary>Ollama <c>options.num_ctx</c> is sent only when the request sets one. A null value leaves the key out
+    /// so Ollama keeps its own default, and the other options stay.</summary>
+    [Test]
+    public void BuildOllamaBody_NumCtx_PresentOnlyWhenSet()
+    {
+        PromptEnhanceRequest withCtx = new("http://127.0.0.1:11434", "ollama", "writer", "5m", 120, "system", "user", null, 8192);
+        JObject withBody = PromptEnhanceClient.BuildOllamaBody(withCtx);
+        Assert.That(withBody["options"]?.Value<int?>("num_ctx"), Is.EqualTo(8192));
+        Assert.That(withBody["options"]?.Value<int?>("num_predict"), Is.EqualTo(2048));
+        PromptEnhanceRequest withoutCtx = new("http://127.0.0.1:11434", "ollama", "writer", "5m", 120, "system", "user");
+        JObject withoutBody = PromptEnhanceClient.BuildOllamaBody(withoutCtx);
+        Assert.That(withoutBody["options"]?["num_ctx"], Is.Null);
+        Assert.That(withoutBody["options"]?.Value<double>("temperature"), Is.EqualTo(0.7));
+    }
+
+    /// <summary>Endpoint config loads an optional integer <c>num_ctx</c>, and a missing key stays null.</summary>
+    [Test]
+    public void Init_LoadsOptionalNumCtx()
+    {
+        List<PromptEnhanceEndpoint> prior = PromptEnhanceEndpoints.Endpoints;
+        string tempDir = Path.Combine(Path.GetTempPath(), $"swarmui-promptenhance-endpoints-{Guid.NewGuid():N}");
+        string previousDataDir = Program.DataDir;
+        try
+        {
+            Directory.CreateDirectory($"{tempDir}/PromptEnhance");
+            File.WriteAllText($"{tempDir}/PromptEnhance/endpoints.json", """
+                {
+                  "endpoints": [
+                    {"id": "capped", "url": "http://127.0.0.1:11434", "kind": "ollama", "model": "writer", "num_ctx": 8192},
+                    {"id": "plain", "url": "http://127.0.0.1:11435", "kind": "ollama", "model": "writer"}
+                  ]
+                }
+                """);
+            Program.DataDir = tempDir;
+            PromptEnhanceEndpoints.Init();
+            Assert.That(PromptEnhanceEndpoints.Endpoints.Count, Is.EqualTo(2));
+            Assert.That(PromptEnhanceEndpoints.Endpoints[0].ID, Is.EqualTo("capped"));
+            Assert.That(PromptEnhanceEndpoints.Endpoints[0].NumCtx, Is.EqualTo(8192));
+            Assert.That(PromptEnhanceEndpoints.Endpoints[1].NumCtx, Is.Null);
+        }
+        finally
+        {
+            Program.DataDir = previousDataDir;
+            PromptEnhanceEndpoints.Endpoints = prior;
+            try
+            {
+                Directory.Delete(tempDir, true);
+            }
+            catch (Exception)
+            {
+                // Best-effort - a stray open handle on a throwaway temp dir is not worth failing the test over.
+            }
         }
     }
 
