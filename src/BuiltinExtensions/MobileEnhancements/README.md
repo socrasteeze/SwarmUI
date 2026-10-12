@@ -14,11 +14,19 @@ Fork-owned assets live in this extension. Small core integration changes are rec
 
 ## Browsing and keyboard access
 
-The `/simple` Models tab builds folder cards in batches of 40. Scrolling loads more; **Load More** remains available as a fallback. Genpage History uses its existing progressive renderer with a 50-card first batch. Search, starred ordering, and image actions retain their existing behavior.
+The `/simple` Models tab displays 48 cards per page with **Previous** and **Next** controls. Genpage History uses its existing progressive renderer with a 50-card first batch. Search, starred ordering, and image actions retain their existing behavior.
 
 **Skip Navigation** moves keyboard focus into the main content. Model and History tiles support Enter and Space. Open sheets and the History viewer contain Tab navigation; Escape closes them and restores focus. The History viewer also supports Left and Right arrow navigation. Sheets, toasts, preview indicators, and viewer travel honor the device's reduced-motion setting.
 
 Genpage applies the saved mobile/desktop layout choice before first paint. The standalone client's fallback status polling pauses while hidden and reconciles the queue when the app returns. These changes require a server restart and client cache refresh before a running Release installation adopts them.
+
+## /simple model favorites
+
+Use the star button on a checkpoint or LoRA card in the Models tab to add or remove a favorite. Simple saves to the same per-user favorites store as normal SwarmUI through SetStarredModels. Refresh normal SwarmUI to see changes made in Simple. Returning to Simple's Models tab refreshes favorites from normal SwarmUI. Favorites for other model types are preserved. A failed save leaves the star unchanged and shows an error.
+
+## /simple model architecture filter
+
+The Models tab has an Architecture dropdown for checkpoints and LoRAs. Select an architecture to browse matching models across all folders. Text search narrows those results. Sorting, favorites-first ordering, and 48-card pages still apply. Unknown shows models without a detected architecture. Each subtype keeps its own selection until the page reloads. All Architectures restores folder browsing when the search field is empty.
 
 ## /simple FL2VA same-frame prep
 
