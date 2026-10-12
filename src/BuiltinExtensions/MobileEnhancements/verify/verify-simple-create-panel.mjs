@@ -233,7 +233,7 @@ check('an empty prompt box still stands at its three-row floor',
 // ---- Priority-control regressions ----
 const initialControls = await page.evaluate(() => ({
     randomLabel: document.querySelector('.m-seed-random').textContent,
-    resetLabel: document.querySelector('.m-reset-button').textContent,
+    resetLabel: (mCreate.resetButton || {}).textContent,
     seedClearLabel: document.querySelector('.m-seed-clear').textContent,
     decreaseLabels: [...document.querySelectorAll('.m-stepper-button:first-of-type')].map(button => button.textContent),
     seedInputHidden: getComputedStyle(document.querySelector('.m-seed-input')).display == 'none',
@@ -241,14 +241,17 @@ const initialControls = await page.evaluate(() => ({
     sizeSteppers: document.querySelectorAll('.m-size-stepper').length,
     oldResolutionPickers: document.querySelectorAll('.m-resolution-select, .m-size-select, .m-res-readout').length,
     tagDexButtons: document.querySelectorAll('.m-tagdex-browse-button').length,
-    resetOutsidePicker: !document.querySelector('.m-picker-row .m-reset-button'),
-    resetSecondary: !!document.querySelector('.m-create-secondary .m-reset-button')
+    resetInHeader: !!mCreate.resetButton && mCreate.resetButton.parentElement == document.querySelector('.m-header')
+        && mCreate.resetButton.classList.contains('m-header-link'),
+    resetBeforeMore: !!mCreate.resetButton && !!mCreate.resetButton.nextElementSibling
+        && mCreate.resetButton.nextElementSibling.getAttribute('href') == '#more',
+    resetOutsideCreate: !!mCreate.resetButton && !mCreate.resetButton.closest('.m-panel')
 }));
 check('seed starts as one Random button', initialControls.randomLabel == 'Random' && initialControls.seedInputHidden, JSON.stringify(initialControls));
 check('aspect and size are steppers', initialControls.aspectSteppers == 1 && initialControls.sizeSteppers == 1 && initialControls.oldResolutionPickers == 0, JSON.stringify(initialControls));
 check('Characters shortcut is absent from the Create picker row', initialControls.tagDexButtons == 0, `${initialControls.tagDexButtons} buttons`);
-check('Reset Params is a secondary action outside the picker row', initialControls.resetLabel == 'Reset Params'
-    && initialControls.resetOutsidePicker && initialControls.resetSecondary, JSON.stringify(initialControls));
+check('Reset Params sits in the header immediately left of More, outside Create', initialControls.resetLabel == 'Reset Params'
+    && initialControls.resetInHeader && initialControls.resetBeforeMore && initialControls.resetOutsideCreate, JSON.stringify(initialControls));
 check('seed-clear control shows its single symbol', initialControls.seedClearLabel == '\u00d7', JSON.stringify(initialControls));
 check('all four quick steppers show a minus sign', initialControls.decreaseLabels.length == 4
     && initialControls.decreaseLabels.every(label => label == '\u2212'), JSON.stringify(initialControls.decreaseLabels));
