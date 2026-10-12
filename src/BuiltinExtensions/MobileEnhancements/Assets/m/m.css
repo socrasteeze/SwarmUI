@@ -139,6 +139,22 @@ html:has(.m-body) {
     align-items: center;
     padding: 0 0.4rem;
 }
+/* Reset Params is a button with the same class as More. Kill the native button chrome so the two match.
+   Only the first header link keeps margin-left: auto; the one after it (More) sits immediately beside it
+   instead of splitting the free space between two auto margins. */
+button.m-header-link {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 0;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-soft);
+    cursor: pointer;
+}
+.m-header-link + .m-header-link {
+    margin-left: 0;
+}
 
 /* --- Header error strip ---
    Replaces site.js's center_toast as the error surface on this client (mUI.error + the showError override in
@@ -411,12 +427,13 @@ html:has(.m-body) {
     font-size: 26px;
     border-style: dashed;
 }
-/* Prompt actions keep their positions as thumbnails are added and removed. */
+/* Prompt actions: + stays left. Clear and Enhance sit together on the right.
+   space-between with three children was parking Clear in the middle of the row. */
 .m-prompt-toolbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
+    justify-content: flex-start;
+    gap: 0.4rem;
     margin-top: 0.4rem;
 }
 /* Suggestion row above the prompt. Empty until a match exists, then a full-width strip.
@@ -428,7 +445,35 @@ html:has(.m-body) {
 .m-prompt-toolbar > .m-prompt-image-add,
 .m-prompt-toolbar > .m-prompt-image-clear,
 .m-prompt-toolbar > .m-enhance-pill {
+    box-sizing: border-box;
     flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    min-height: 44px;
+    margin: 0;
+    padding: 0 0.75rem;
+    font-size: 14px;
+    line-height: 1;
+    border-radius: 0.5rem;
+    white-space: nowrap;
+}
+.m-prompt-toolbar > .m-prompt-image-add {
+    width: auto;
+    min-width: 44px;
+}
+.m-prompt-toolbar > .m-prompt-image-clear {
+    margin-left: auto;
+    min-width: 0;
+    flex: 0 0 auto;
+}
+.m-prompt-toolbar > .m-enhance-pill {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .m-prompt-image-clear:disabled {
     opacity: 0.45;
@@ -1020,21 +1065,6 @@ html:has(.m-body) {
 }
 .m-model-button.m-selected {
     border-color: var(--emphasis);
-}
-.m-create-secondary {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 0.5rem;
-}
-.m-reset-button {
-    min-height: 44px;
-    border: 1px solid var(--border-color);
-    border-radius: 0.5rem;
-    background: var(--background-panel);
-    color: var(--text-soft);
-    text-align: center;
-    font-size: 13px;
-    padding: 0.35rem 0.7rem;
 }
 /* An active preset's param_map also sets 'model' and wins over the manual pick on every generate (presets
    apply after raw params) - this needs to read as distinctly different from a normal selection, not just a
@@ -3195,6 +3225,20 @@ html:has(.m-body) {
     border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     font-size: 14px;
+}
+/* Edit (last control on the favorites row, beside the output-root select) and Up (path row)
+   are short labels, so the shared tool padding left them narrower than the 44px select and search.
+   Same border, fill, type, and radius as the other tools; only the tap size grows. */
+.m-imgbrowser-favorites > .m-imgbrowser-tool:last-child,
+.m-imgbrowser-up {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    min-height: 44px;
+    min-width: 72px;
+    padding: 0 0.8rem;
 }
 .m-imgbrowser-machine-path {
     flex: 1 1 12rem;
