@@ -47,7 +47,7 @@ public class T2IModelHandler
     /// <summary>Internal tracker for model folders that could not be scanned completely.</summary>
     private readonly ConcurrentQueue<string> ScanErrorSet = new();
 
-    public record class ModelDatabase(string Folder, T2IModelHandler Handler, LiteDatabase Database, ILiteCollection<ModelMetadataStore> Metadata)
+    public record class ModelDatabase(string Folder, T2IModelHandler Handler, LiteDatabase Database, ILiteCollection<ModelMetadataStore> Metadata, string FileName = "model_metadata.ldb")
     {
         public volatile int Errors = 0;
 
@@ -68,15 +68,15 @@ public class T2IModelHandler
                 catch (Exception) { }
                 try
                 {
-                    File.Delete($"{Folder}/model_metadata.ldb");
+                    File.Delete($"{Folder}/{FileName}");
                 }
                 catch (Exception) { }
                 try
                 {
-                    File.Delete($"{Folder}/model_metadata-log.ldb");
+                    File.Delete($"{Folder}/{FileName.Replace(".ldb", "-log.ldb")}");
                 }
                 catch (Exception) { }
-                ModelMetadataCachePerFolder.TryRemove(Folder, out _);
+                ModelMetadataCachePerFolder.TryRemove($"{Folder}/{FileName}", out _);
             }
         }
 
@@ -374,9 +374,11 @@ public class T2IModelHandler
         {
             try
             {
-                return ModelMetadataCachePerFolder.GetOrCreate(folder, () =>
+                folder = SpokeModePolicy.IsActive ? Program.DataDir : folder;
+                string fileName = SpokeModePolicy.IsActive ? SpokeModelMetadata.CacheFileName : "model_metadata.ldb";
+                return ModelMetadataCachePerFolder.GetOrCreate($"{folder}/{fileName}", () =>
                 {
-                    string path = $"{folder}/model_metadata.ldb";
+                    string path = $"{folder}/{fileName}";
                     LiteDatabase ldb;
                     try
                     {
@@ -388,7 +390,7 @@ public class T2IModelHandler
                         File.Delete(path);
                         ldb = new(path);
                     }
-                    return new(folder, this, ldb, ldb.GetCollection<ModelMetadataStore>("models"));
+                    return new(folder, this, ldb, ldb.GetCollection<ModelMetadataStore>("models"), fileName);
                 });
             }
             catch (Exception ex)
@@ -410,7 +412,7 @@ public class T2IModelHandler
         ModelDatabase cache = null;
         try
         {
-            bool perFolder = Program.ServerSettings.Metadata.ModelMetadataPerFolder;
+            bool perFolder = !SpokeModePolicy.IsActive && Program.ServerSettings.Metadata.ModelMetadataPerFolder;
             long modified = ((DateTimeOffset)File.GetLastWriteTimeUtc(model.RawFilePath)).ToUnixTimeMilliseconds();
             string folder = model.RawFilePath.Replace('\\', '/').BeforeAndAfterLast('/', out string fileName);
             cache = GetCacheForFolder(perFolder ? folder : Program.DataDir);
@@ -431,6 +433,7 @@ public class T2IModelHandler
                 metadata.StandardHeight = model.StandardHeight;
                 lock (MetadataLock)
                 {
+                    SpokeModelMetadata.TrimForSpoke(metadata);
                     cache.Metadata.Upsert(metadata);
                 }
             }
@@ -457,6 +460,10 @@ public class T2IModelHandler
 
     public string GetAutoFormatImage(T2IModel model)
     {
+        if (SpokeModePolicy.IsActive)
+        {
+            return null;
+        }
         string prefix = $"{model.OriginatingFolderPath}/{model.Name.BeforeLast('.')}";
         foreach (string suffix in AutoImageFormatSuffixes)
         {
@@ -495,7 +502,7 @@ public class T2IModelHandler
         }
         string folder = model.RawFilePath.Replace('\\', '/').BeforeAndAfterLast('/', out string fileName);
         long modified = new DateTimeOffset(File.GetLastWriteTimeUtc(model.RawFilePath)).ToUnixTimeMilliseconds();
-        bool perFolder = Program.ServerSettings.Metadata.ModelMetadataPerFolder;
+        bool perFolder = !SpokeModePolicy.IsActive && Program.ServerSettings.Metadata.ModelMetadataPerFolder;
         ModelDatabase cache = GetCacheForFolder(perFolder ? folder : Program.DataDir);
         if (cache is null)
         {
@@ -531,7 +538,7 @@ public class T2IModelHandler
             string textEncs = null;
             if (model.Name.EndsWith(".safetensors") || model.Name.EndsWith(".sft") || model.Name.EndsWith(".gguf"))
             {
-                headerData = T2IModel.GetMetadataHeaderFrom(model.RawFilePath);
+                headerData = SpokeModePolicy.IsActive ? SpokeModelMetadata.ReadHeader(model.RawFilePath) : T2IModel.GetMetadataHeaderFrom(model.RawFilePath);
                 if (headerData is not null)
                 {
                     metaHeader = headerData["__metadata__"] as JObject ?? [];
@@ -548,7 +555,7 @@ public class T2IModelHandler
             {
                 if (File.Exists(altModelPrefix + altSuffix))
                 {
-                    JObject altMetadata = File.ReadAllText(altModelPrefix + altSuffix).ParseToJson();
+                    JObject altMetadata = SpokeModePolicy.IsActive ? SpokeModelMetadata.ReadSidecar(altModelPrefix + altSuffix) : File.ReadAllText(altModelPrefix + altSuffix).ParseToJson();
                     foreach (JProperty prop in altMetadata.Properties())
                     {
                         metaHeader[prop.Name] = prop.Value;
@@ -632,7 +639,7 @@ public class T2IModelHandler
             {
                 if (File.Exists(altModelPrefix + altSuffix))
                 {
-                    JObject altMetadata = File.ReadAllText(altModelPrefix + altSuffix).ParseToJson();
+                    JObject altMetadata = SpokeModePolicy.IsActive ? SpokeModelMetadata.ReadSidecar(altModelPrefix + altSuffix) : File.ReadAllText(altModelPrefix + altSuffix).ParseToJson();
                     procAltHeader(altMetadata);
                 }
             }
@@ -798,6 +805,7 @@ public class T2IModelHandler
             {
                 try
                 {
+                    SpokeModelMetadata.TrimForSpoke(metadata);
                     cache.Metadata.Upsert(metadata);
                 }
                 catch (Exception ex)
@@ -807,6 +815,7 @@ public class T2IModelHandler
                 }
             }
         }
+        SpokeModelMetadata.TrimForSpoke(metadata);
         if (!string.IsNullOrWhiteSpace(metadata.ModelClassType))
         {
             metadata.ModelClassType = T2IModelClassSorter.Remaps.GetValueOrDefault(metadata.ModelClassType, metadata.ModelClassType);
@@ -843,7 +852,9 @@ public class T2IModelHandler
             Logs.Verbose($"[Model Scan] Skipping folder {actualFolder}");
             return;
         }
-        Parallel.ForEach(Directory.EnumerateDirectories(actualFolder), subfolder =>
+        // Allow bounded parallel directory traversal; expensive spoke header reads have a separate shared bound.
+        ParallelOptions directoryScanOptions = new() { MaxDegreeOfParallelism = SpokeModePolicy.IsActive ? 4 : -1 };
+        Parallel.ForEach(Directory.EnumerateDirectories(actualFolder), directoryScanOptions, subfolder =>
         {
             string simpleName = subfolder.Replace('\\', '/').AfterLast('/');
             string path = $"{prefix}{simpleName}";
@@ -871,7 +882,8 @@ public class T2IModelHandler
                 Logs.Warning($"Error while scanning model {ModelType} subfolder '{path}': {ex.ReadableString()}");
             }
         });
-        Parallel.ForEach(Directory.EnumerateFiles(actualFolder), file =>
+        ParallelOptions fileScanOptions = new() { MaxDegreeOfParallelism = SpokeModePolicy.IsActive ? 4 : -1 };
+        Parallel.ForEach(Directory.EnumerateFiles(actualFolder), fileScanOptions, file =>
         {
             if (Program.GlobalProgramCancel.IsCancellationRequested)
             {

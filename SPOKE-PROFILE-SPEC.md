@@ -320,6 +320,49 @@ These are external and remain unverified until run on the deployment:
    inventory unavailable rather than routing against a partial set. Restore access and
    confirm recovery requires a complete refresh.
 
+## Spoke memory and model-cache behavior
+
+Spoke model scans persist generation metadata in the local
+`Data/model_metadata_spoke.ldb`. They omit embedded previews, image sidecars, and
+presentation-only descriptions, author, license, usage hints, tags, dates, and merge
+history. Architecture, dimensions, triggers, loader defaults, special formats, encoder
+markers, hashes, and timestamps remain available. Normal mode retains its rich cache.
+The hub supplies model previews; the spoke's diagnostic listings use placeholders.
+Spoke directory and per-directory file loops have four workers; expensive raw-header
+and JSON sidecar reads share a separate four-worker limit.
+
+An empty lightweight database requires one header scan. Large existing installations
+can seed generation-only fields from the rich cache through a read-only LiteDB field
+projection before first deployment. Preserve the original database; model modification
+times are revalidated during the ordinary scan. Never copy rich preview records into
+the lightweight cache. A one-time seed is an operator migration, not an automatic
+runtime rewrite of the old database.
+
+Background model transfers coalesce by target, run one at a time, and pause while a
+generation is queued or using a backend. Cache entries are current only when file size
+and modification time match the shared source. A stale local file is retired before
+the expensive transfer; a locked target therefore fails before copying model bytes.
+Failed source versions have a five-minute retry cooldown. Interrupted partial files
+are removed, and completed copies preserve the source modification time.
+
+Managed Comfy receives `SWARM_SPOKE_CACHE_ROOT` only for a configured spoke cache. Its
+Swarm-owned path-resolution hook verifies cached model freshness and chooses the first
+shared model in the existing folder order when local bytes are stale. An unavailable
+source fails closed. Third-party nodes bypassing `folder_paths` are outside this hook,
+and already loaded tensors/output caches need an unload or restart when the source
+changes. Matching size and modification time do not detect deliberate same-size,
+timestamp-preserving edits; no full-model hash is added to each load.
+
+Laptop idle-release intervals remain operator settings, not global defaults. A
+starting point is five minutes for VRAM and fifteen minutes for system RAM; measure
+the next-job reload cost with the intended models. Precision and attention settings
+are independent of these changes. No automatic disk eviction is introduced.
+
+Regression command for the Python resolver (use the managed backend interpreter):
+
+```text
+python tools/test_spoke_cache_resolution.py
+```
 ## Scope limits
 
 - This code does not create SMB credentials, filesystem ACLs, firewall rules, drive maps,

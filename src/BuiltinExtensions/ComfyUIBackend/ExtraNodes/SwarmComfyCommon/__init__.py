@@ -1,5 +1,7 @@
 import os, folder_paths, traceback
 
+from . import SwarmSpokeCache
+
 from . import SwarmBlending, SwarmImages, SwarmInternalUtil, SwarmKSampler, SwarmLoadImageB64, SwarmLoraLoader, SwarmMasks, SwarmSaveImageWS, SwarmTiling, SwarmExtractLora, SwarmUnsampler, SwarmLatents, SwarmInputNodes, SwarmTextHandling, SwarmText, SwarmReference, SwarmMath, SwarmSam2, SwarmAudio, SwarmVideo, SwarmModels
 
 WEB_DIRECTORY = "./web"
