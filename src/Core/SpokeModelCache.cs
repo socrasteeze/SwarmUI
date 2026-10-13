@@ -55,6 +55,12 @@ public static class SpokeModelCache
     /// also using, so one copy at a time bounds the contention.</summary>
     private static readonly SemaphoreSlim CopyQueue = new(1, 1);
 
+    /// <summary>Coalesces queued jobs before they allocate a waiting background task.</summary>
+    private static readonly ConcurrentDictionary<string, byte> PendingTargets = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Retries a failed target at most once in five minutes, unless the shared source changes.</summary>
+    private static readonly ConcurrentDictionary<string, (long Length, DateTime Modified, long RetryAt)> FailedTargets = new(StringComparer.OrdinalIgnoreCase);
+
     private static readonly StringComparison PathComparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <summary>Returns the path of <paramref name="rawFilePath"/> relative to whichever configured model root
@@ -118,6 +124,7 @@ public static class SpokeModelCache
         string source = model.RawFilePath;
         SemaphoreSlim gate = TargetLocks.GetOrAdd(target, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(cancel);
+        string partial = $"{target}.partial";
         try
         {
             FileInfo sourceInfo = new(source);
@@ -127,23 +134,32 @@ public static class SpokeModelCache
                 return false;
             }
             FileInfo targetInfo = new(target);
-            if (targetInfo.Exists && targetInfo.Length == sourceInfo.Length)
+            DateTime sourceModified = sourceInfo.LastWriteTimeUtc;
+            long sourceLength = sourceInfo.Length;
+            if (targetInfo.Exists && targetInfo.Length == sourceLength && targetInfo.LastWriteTimeUtc == sourceModified)
             {
+                FailedTargets.TryRemove(target, out _);
                 Logs.Verbose($"[SpokeCache] '{model.Name}' already cached.");
                 return true;
             }
+            if (FailedTargets.TryGetValue(target, out (long Length, DateTime Modified, long RetryAt) failure)
+                && failure.Length == sourceLength && failure.Modified == sourceModified && Environment.TickCount64 < failure.RetryAt)
+            {
+                return false;
+            }
             SpokeModePolicy.AssertSpokeCacheWriteAllowed(target, $"cache model '{model.Name}'");
-            // A same-name file of a different size is a superseded copy (the hub replaced the model) or a torn
-            // earlier write; either way the cached bytes are wrong and get replaced, never served.
+            // Retire a stale entry BEFORE the expensive transfer. Windows model mappings can deny replacement
+            // even with a writable ACL. If this rename is blocked, no multi-GB source stream is opened.
             if (targetInfo.Exists)
             {
-                Logs.Info($"[SpokeCache] Cached '{model.Name}' is {targetInfo.Length} bytes but source is {sourceInfo.Length}; re-copying.");
+                string retired = $"{target}.{Guid.NewGuid():N}.stale";
+                File.Move(target, retired);
+                TryDelete(retired);
             }
             Directory.CreateDirectory(Path.GetDirectoryName(target));
             // Written to a sibling temp name and moved into place so a reader can never observe a half-written
             // model at the real path. ComfyUI resolves by existence, so a partial file at the final name would be
             // picked up and fail deep inside a loader with an unhelpful error.
-            string partial = $"{target}.partial";
             long startTime = Environment.TickCount64;
             Logs.Info($"[SpokeCache] Caching '{model.Name}' ({sourceInfo.Length / (1024 * 1024)} MB) to local cache...");
             try
@@ -151,13 +167,29 @@ public static class SpokeModelCache
                 await using (FileStream input = new(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan))
                 await using (FileStream output = new(partial, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan))
                 {
-                    await input.CopyToAsync(output, 1 << 20, cancel);
+                    byte[] buffer = new byte[1 << 20];
+                    while (true)
+                    {
+                        await WaitForIdle(cancel);
+                        int read = await input.ReadAsync(buffer.AsMemory(), cancel);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+                        await output.WriteAsync(buffer.AsMemory(0, read), cancel);
+                    }
                 }
                 long written = new FileInfo(partial).Length;
                 if (written != sourceInfo.Length)
                 {
                     throw new IOException($"copied {written} bytes but source is {sourceInfo.Length}");
                 }
+                sourceInfo.Refresh();
+                if (!sourceInfo.Exists || sourceInfo.Length != sourceLength || sourceInfo.LastWriteTimeUtc != sourceModified)
+                {
+                    throw new IOException("shared source changed while copying");
+                }
+                File.SetLastWriteTimeUtc(partial, sourceModified);
                 File.Move(partial, target, true);
             }
             catch (OperationCanceledException)
@@ -170,11 +202,29 @@ public static class SpokeModelCache
             {
                 TryDelete(partial);
                 Logs.Warning($"[SpokeCache] Failed to cache '{model.Name}': {ex.ReadableString()}. Generation will read the shared tree instead.");
+                FailedTargets[target] = (sourceLength, sourceModified, Environment.TickCount64 + 300_000);
                 return false;
             }
+            FailedTargets.TryRemove(target, out _);
             double seconds = (Environment.TickCount64 - startTime) / 1000.0;
             Logs.Info($"[SpokeCache] Cached '{model.Name}' in {seconds:0.0}s. Future loads on this spoke are local.");
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            TryDelete(partial);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            TryDelete(partial);
+            FileInfo sourceInfo = new(source);
+            if (sourceInfo.Exists)
+            {
+                FailedTargets[target] = (sourceInfo.Length, sourceInfo.LastWriteTimeUtc, Environment.TickCount64 + 300_000);
+            }
+            Logs.Warning($"[SpokeCache] Cannot prepare cache for '{model.Name}': {ex.Message}. Will retry after five minutes; generation uses the shared tree.");
+            return false;
         }
         finally
         {
@@ -205,21 +255,45 @@ public static class SpokeModelCache
         {
             return;
         }
-        _ = Utilities.RunCheckedTask(async () =>
+        foreach (T2IModel model in models)
         {
-            foreach (T2IModel model in models)
+            string target = CacheTargetFor(model);
+            if (target is null || !PendingTargets.TryAdd(target, 0))
             {
-                await CopyQueue.WaitAsync(Program.GlobalProgramCancel);
+                continue;
+            }
+            _ = Utilities.RunCheckedTask(async () =>
+            {
                 try
                 {
-                    await EnsureCached(model, Program.GlobalProgramCancel);
+                    await CopyQueue.WaitAsync(Program.GlobalProgramCancel);
+                    try
+                    {
+                        // Queued generations get first use of the share. This wait is only on the worker;
+                        // submission and progress feedback never wait for cache work.
+                        await WaitForIdle(Program.GlobalProgramCancel);
+                        await EnsureCached(model, Program.GlobalProgramCancel);
+                    }
+                    finally
+                    {
+                        CopyQueue.Release();
+                    }
                 }
                 finally
                 {
-                    CopyQueue.Release();
+                    PendingTargets.TryRemove(target, out _);
                 }
-            }
-        });
+            });
+        }
+    }
+
+    /// <summary>Pauses only background transfers while generation is queued or using a backend.</summary>
+    private static async Task WaitForIdle(CancellationToken cancel)
+    {
+        while (Program.Backends is not null && Program.Backends.QueuedRequests > 0)
+        {
+            await Task.Delay(1000, cancel);
+        }
     }
 
     /// <summary>Finds every known model a generated ComfyUI workflow names. Values are ComfyUI filenames (a model's

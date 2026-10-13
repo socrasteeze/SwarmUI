@@ -513,7 +513,17 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
         await DoLibFixes(doFixFrontend, doLatestFrontend);
         AddLoadStatus("Starting self-start ComfyUI process...");
         string launchArguments = ApplySpokeLoopbackListener(Settings.ExtraArgs.Trim() + " --port {PORT}" + addedArgs, SpokeModePolicy.IsActive);
-        await NetworkBackendUtils.DoSelfStart(Settings.StartScript, this, $"ComfyUI-{BackendData.ID}", $"backend-{BackendData.ID}", Settings.GPU_ID, launchArguments, InitInternal, (p, r) => { Port = p; RunningProcess = r; }, Settings.AutoRestart);
+        await NetworkBackendUtils.DoSelfStart(Settings.StartScript, this, $"ComfyUI-{BackendData.ID}", $"backend-{BackendData.ID}", Settings.GPU_ID, launchArguments, InitInternal, (p, r) =>
+        {
+            Port = p;
+            RunningProcess = r;
+            // This callback runs before Start(): policy stays confined to this Comfy child process.
+            r.StartInfo.Environment.Remove("SWARM_SPOKE_CACHE_ROOT");
+            if (SpokeModelCache.Enabled)
+            {
+                r.StartInfo.Environment["SWARM_SPOKE_CACHE_ROOT"] = SpokeModePolicy.CacheRoot;
+            }
+        }, Settings.AutoRestart);
     }
 
     public async Task DoLibFixes(bool doFixFrontend, bool doLatestFrontend)
