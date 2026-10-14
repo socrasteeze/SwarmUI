@@ -21,6 +21,16 @@ public static class T2ICivitaiBaseModelMap
     public static readonly Dictionary<string, string> LoraClassIdsByBaseModel = new()
     {
         ["anima"] = "anima/lora",
+        ["anima 2.9b"] = "anima-2.9b/lora",
+        ["anima-2.9b"] = "anima-2.9b/lora",
+        ["anima_2.9b"] = "anima-2.9b/lora",
+        ["anima 29b"] = "anima-2.9b/lora",
+        ["anima-29b"] = "anima-2.9b/lora",
+        ["anima 3.8b"] = "anima-3.8b/lora",
+        ["anima-3.8b"] = "anima-3.8b/lora",
+        ["anima_3.8b"] = "anima-3.8b/lora",
+        ["anima 38b"] = "anima-3.8b/lora",
+        ["anima-38b"] = "anima-3.8b/lora",
         ["illustrious"] = "stable-diffusion-xl-v1-base/lora",
         ["pony"] = "stable-diffusion-xl-v1-base/lora",
         ["noobai"] = "stable-diffusion-xl-v1-base/lora",
@@ -49,6 +59,16 @@ public static class T2ICivitaiBaseModelMap
     public static readonly Dictionary<string, string> UsageHintByBaseModel = new()
     {
         ["anima"] = "Anima",
+        ["anima 2.9b"] = "Anima 2.9B",
+        ["anima-2.9b"] = "Anima 2.9B",
+        ["anima_2.9b"] = "Anima 2.9B",
+        ["anima 29b"] = "Anima 2.9B",
+        ["anima-29b"] = "Anima 2.9B",
+        ["anima 3.8b"] = "Anima 3.8B",
+        ["anima-3.8b"] = "Anima 3.8B",
+        ["anima_3.8b"] = "Anima 3.8B",
+        ["anima 38b"] = "Anima 3.8B",
+        ["anima-38b"] = "Anima 3.8B",
         ["illustrious"] = "Illustrious",
         ["pony"] = "Pony",
         ["noobai"] = "NoobAI"
