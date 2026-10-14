@@ -94,6 +94,20 @@ public class AnimaVariantClassTests : SwarmUITest
     {
         AssertClass("anima-2.9b/lora", "LoRA", null, "lora_unet_blocks_32_mlp_layer2.lora_down.weight");
         AssertClass("anima-2.9b/lora", "LoRA", null, "blocks.30.self_attn.v_proj.lora_A.weight");
+        AssertClass("anima-2.9b/lora", "LoRA", null, "blocks.31.self_attn.q_proj.lora_A.weight");
+        AssertClass("anima-2.9b/lora", "LoRA", null, "lora_unet_blocks_33_cross_attn_k_proj.lora_down.weight");
+        AssertClass("anima-2.9b/lora", "LoRA", null, "blocks.34.mlp.layer1.lora_A.weight");
+        AssertClass("anima-2.9b/lora", "LoRA", null, "lora_unet_blocks_35_adaln_modulation_self_attn_1.lora_down.weight");
+    }
+
+    /// <summary>A sparse block index only selects Anima when the key names an Anima DiT module.</summary>
+    [Test]
+    public void Lora_SparseForeignBlockKey_IsNotAnima()
+    {
+        AssertClass(null, "LoRA", null, "blocks.32.self_attn.q.lora_A.weight");
+        AssertClass(null, "LoRA", null, "llm_adapter.blocks.39.self_attn.v_proj.lora_A.weight");
+        AssertClass(null, "LoRA", null, "blocks.32.self_attn.v_projection.lora_A.weight");
+        AssertClass(null, "LoRA", null, "lora_unet_blocks_32_mlp_layer12.lora_down.weight");
     }
 
     /// <summary>Block 40 or higher is 3.8B, including when block 39 is also present.</summary>
@@ -135,6 +149,17 @@ public class AnimaVariantClassTests : SwarmUITest
         Assert.That(T2ICivitaiBaseModelMap.TryGetLoraClass("Anima")?.ID, Is.EqualTo("anima/lora"));
     }
 
+    /// <summary>A precise Anima BaseModel refines only generic Anima architecture metadata.</summary>
+    [Test]
+    public void CivitaiBaseModel_Variant_RefinesGenericAnimaArchitecture()
+    {
+        AssertClassWithBaseModel("anima-2.9b/lora", "anima/lora", "Anima 2.9B", "blocks.5.self_attn.v_proj.lora_A.weight");
+        AssertClassWithBaseModel("anima-2.9b/lora", "anima-preview/lora", "Anima 2.9B", "blocks.5.self_attn.v_proj.lora_A.weight");
+        AssertClassWithBaseModel("anima-3.8b/lora", "anima/lora", "Anima 3.8B", "blocks.5.self_attn.q_proj.lora_A.weight");
+        AssertClassWithBaseModel("anima-2.9b/lora", "anima-2.9b/lora", "Anima 3.8B");
+        AssertClassWithBaseModel("krea-2/lora", "krea-2/lora", "Anima 2.9B");
+    }
+
     /// <summary>Builds the three tensors every Anima checkpoint shares, plus any extra names.</summary>
     private static string[] AnimaKeys(params string[] extra)
     {
@@ -167,6 +192,26 @@ public class AnimaVariantClassTests : SwarmUITest
         }
         T2IModel model = new(null, "", "model.safetensors", "model");
         T2IModelClass clazz = T2IModelClassSorter.IdentifyClassFor(model, header, modelType);
+        Assert.That(clazz?.ID, Is.EqualTo(expectedId));
+    }
+
+    /// <summary>Classifies a synthetic LoRA header with architecture and Civitai BaseModel metadata.</summary>
+    private static void AssertClassWithBaseModel(string expectedId, string architecture, string baseModel, params string[] keys)
+    {
+        JObject header = new()
+        {
+            ["__metadata__"] = new JObject()
+            {
+                ["modelspec.architecture"] = architecture,
+                ["BaseModel"] = baseModel
+            }
+        };
+        foreach (string key in keys)
+        {
+            header[key] = new JObject();
+        }
+        T2IModel model = new(null, "", "model.safetensors", "model");
+        T2IModelClass clazz = T2IModelClassSorter.IdentifyClassFor(model, header, "LoRA");
         Assert.That(clazz?.ID, Is.EqualTo(expectedId));
     }
 }

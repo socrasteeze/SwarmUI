@@ -832,12 +832,11 @@ class MState {
      * narrower gate than the architecture picker and independent of it: the picker is a manual folder/class
      * filter the user chooses, this follows whatever checkpoint is selected without being asked.
      *
-     * Folder prefix mirrors filterByArch: a LoRA in a *different* known preset group whose group's
-     * checkpoints resolve to other compat classes is out, even when its own class metadata is missing or
-     * wrong. That is what stopped Flux/Klein rows from surviving an SDXL "Limited to ..." banner just
-     * because ListT2IParams had no class for them. Untagged models outside any known group are still kept
-     * (unknown is not incompatible). Starred models are NOT exempt: Limited means Limited (same rule as
-     * filterByArch). Favourites still sort first among survivors; "tap to show all" reveals the rest. */
+     * A model's own known compat class is authoritative. Folder and preset-group evidence is only a fallback
+     * for models with unknown class metadata. This matters when several incompatible variants share one
+     * folder. Untagged models outside any known group are still kept (unknown is not incompatible). Starred
+     * models are NOT exempt: Limited means Limited (same rule as filterByArch). Favourites still sort first
+     * among survivors; "tap to show all" reveals the rest. */
     filterByModelCompat(models, subtype) {
         let compat = this.activeModelCompat();
         if (!compat) {
@@ -849,8 +848,12 @@ class MState {
         }
         let folderClasses = this.folderCompatClasses();
         return models.filter(model => {
+            let modelCompat = this.compatClassOf(subtype, model.name);
+            if (modelCompat) {
+                return modelCompat == compat;
+            }
             let folder = MState.modelFolder(model.name).toLowerCase();
-            // Preset-group folder whose checkpoints never use this compat: hard-hide (incl. untagged/wrong).
+            // Preset-group folder whose checkpoints never use this compat: hard-hide untagged models.
             if (folder && groupClasses.has(folder)) {
                 let classes = groupClasses.get(folder);
                 if (classes.size > 0 && !classes.has(compat)) {
@@ -871,8 +874,7 @@ class MState {
                     return true;
                 }
             }
-            let modelCompat = this.compatClassOf(subtype, model.name);
-            return !modelCompat || modelCompat == compat;
+            return true;
         });
     }
 

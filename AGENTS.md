@@ -1,3 +1,38 @@
+<!-- ghost:start -->
+## Ghost data-handling policy
+Treat every data file in this repo (images, video, audio, documents, exports,
+datasets, anything a person or customer could be identified from) as private.
+Names and contents of data stay on this machine. This applies to every agent.
+
+Names
+- Never write a real data file or folder name in replies, docs, commits, PR or
+  ticket text, handoffs, logs, or code comments. Say "14 images in data/",
+  "the third PDF", or use the alias if ghost lockdown is active.
+- Prefer commands that do not print names: count, filter by extension, act by
+  glob. Do not list or tree data folders unless the task needs it.
+- Files you create get generic names: `screenshot-01.png`, `preview-02.jpg`,
+  `export-2026-01.csv`. Never derive an output name from a data file name.
+
+Visuals
+- Every screenshot, image preview, thumbnail, contact sheet, GIF, or rendered
+  page you save, commit, embed, or send to the user is redacted first. Pixelate
+  faces, people, plates, and any data text; keep UI chrome only if it shows no
+  data. When unsure, pixelate the whole frame.
+- Redact with `ghost.py redact <in> --out=<out>` (from the ghost skill's scripts) or any pixelate/blur tool. ghost.py also strips EXIF/GPS metadata; with another
+  tool, strip it yourself.
+- Delete or overwrite the unredacted capture. Never commit one.
+- You may view raw data images to do the work (for example captioning). That
+  view never leaves as an output.
+
+Contents
+- Do not quote data contents (names, addresses, account numbers, message text)
+  in replies or docs. Summarize by shape: field names, counts, types.
+- Test fixtures, examples, and seed data use invented values, never copies of
+  real rows.
+
+If a rule blocks the task, stop and ask. Do not work around it.
+<!-- ghost:end -->
+
 # AGENTS.md
 
 Guidance for AI coding agents working in this repository (socrasteeze's fork of SwarmUI).
@@ -260,7 +295,7 @@ equirements.txt; RMBG also 15 behind origin, left alone per dirty-checkout rule)
 
   Author/committer on this commit: `socrasteeze <socradeez@gmail.com>`; no AI-attribution trailer.
 
-- 2026-10-01 (12:35 PT, live Windows box) - routine automated sync; merged 1 upstream commit. Ran at the fork owner's request (ZSIX90 back online; prior blockers cleared). Working tree was clean on `main` at `6762cea4` ("Pin CI to the .NET 10 SDK"), matching `origin/main` 0/0 (prior MobileEnhancements WIP and unpushed `3cc9ead8` already resolved/pushed). Remotes already correct: `origin` -> `socrasteeze/SwarmUI`, `upstream` fetch -> `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Git identity already `socrasteeze <socradeez@gmail.com>`. `git pull --ff-only origin main` - already up to date. `git fetch upstream`; upstream default branch resolved as `master`. Incoming 1 commit `de7b834b..d9ecb52d`: `d9ecb52d` "minor doc fix" (`Settings.cs` CloudflaredPath `ConfigComment` string -> interpolated `$"{...}"` so `Utilities.RepoDocsRoot` expands). Merged `git merge upstream/master` (`a363809c`) - auto-merged `Settings.cs`, zero conflicts. Fork AGENTS.md not reintroduced.
+- 2026-10-01 (12:35 PT, live Windows box) - routine automated sync; merged 1 upstream commit. Ran at the fork owner's request (workstation back online; prior blockers cleared). Working tree was clean on `main` at `6762cea4` ("Pin CI to the .NET 10 SDK"), matching `origin/main` 0/0 (prior MobileEnhancements WIP and unpushed `3cc9ead8` already resolved/pushed). Remotes already correct: `origin` -> `socrasteeze/SwarmUI`, `upstream` fetch -> `mcmonkeyprojects/SwarmUI`, push URL pinned to `DISABLED-NEVER-PUSH-TO-UPSTREAM`. Git identity already `socrasteeze <socradeez@gmail.com>`. `git pull --ff-only origin main` - already up to date. `git fetch upstream`; upstream default branch resolved as `master`. Incoming 1 commit `de7b834b..d9ecb52d`: `d9ecb52d` "minor doc fix" (`Settings.cs` CloudflaredPath `ConfigComment` string -> interpolated `$"{...}"` so `Utilities.RepoDocsRoot` expands). Merged `git merge upstream/master` (`a363809c`) - auto-merged `Settings.cs`, zero conflicts. Fork AGENTS.md not reintroduced.
 
   Gates: `dotnet build src/SwarmUI.csproj --configuration Release` - 0 warnings / 0 errors. Format/headless suite skipped (ConfigComment-only Settings change).
 
@@ -1110,6 +1145,8 @@ Entries below are dated in **local time (-0700)** and listed newest first. One e
 - 2026-08-12 — merged 2 commits (`82dbd7f7`, `f9367de5`) for LTX 2.5 model, workflow, asset, and documentation support. Adopted 2 as-is; rejected 0; divergence work 0; conflict and clean-merge sweep findings 0. Release build, format, style-format, isolated core boot, and isolated extension boot passed before and after the merge. The baseline extension build retained 21 pre-existing `CS0618` warnings from the ignored `SwarmUI-WildcardImporter` extension and no errors. Native Linux launcher execution was unavailable on Windows, so the boot gates invoked the built DLL directly with isolated `--data_dir` roots.
 
 ## Fork Delta (living list — keep updated)
+
+- `src/Text2Image/T2IModelHandler.cs`, `T2IModelClassSorter.cs`, `T2ICivitaiBaseModelMap.cs`, and `/simple` `m_state.js` — **Anima class integration fixes (2026-10-14).** Legacy generic Anima cache entries are reclassified once from headers and sidecars without replacing saved metadata. Other cache entries keep their existing read path. Sparse adapter depth requires an Anima module signature; explicit variant BaseModel metadata refines generic Anima headers. The standalone client's compatibility filter checks a model's own class before using folder or preset-group inference. Regression coverage includes normal/per-folder/spoke caches and shared-folder adapter filtering.
 
 - `src/Text2Image/T2IModelClassSorter.cs`, `T2ICivitaiBaseModelMap.cs`, `WorkflowGeneratorModelSupport.cs`, `WorkflowGeneratorSteps.cs`, Prompt Enhance `PromptEnhanceProfiles.cs`, `/simple` `m_coach.js` — **Anima depth classes (2026-10-14).** Compat `anima` stays the 28-block base. `anima-2.9b` is 40 blocks (0-39) and `anima-3.8b` is 52 blocks (0-51), each with checkpoint, LoRA, and ControlNet classes and the same Qwen-Image VAE. Block 51, or a bundled `anima_v2_connector` tensor, selects 3.8B before the block-39 rule selects 2.9B. A generic `anima` / `anima-preview` header loses to those keys. `IsAnima()` covers all three, so text encoder, VAE, sampler, and LLLite routing still run.
 
