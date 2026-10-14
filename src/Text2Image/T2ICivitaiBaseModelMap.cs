@@ -101,7 +101,8 @@ public static class T2ICivitaiBaseModelMap
     }
 
     /// <summary>True when the mapped class should replace the architecture already read from the header.
-    /// Specific tensor identities (Anima, Krea, Flux, ...) are kept. Generic SD1/SDXL stamps are not.</summary>
+    /// Specific tensor identities (Anima variants, Krea, Flux, ...) are kept. Generic SD1/SDXL stamps and
+    /// generic Anima architecture IDs can be refined by a more specific Anima BaseModel variant.</summary>
     public static bool ShouldPreferMappedLoraClass(T2IModelClass current, T2IModelClass mapped)
     {
         if (mapped is null)
@@ -112,11 +113,14 @@ public static class T2ICivitaiBaseModelMap
         {
             return true;
         }
-        if (current.ID.ToLowerFast() == mapped.ID.ToLowerFast())
+        string currentId = current.ID.ToLowerFast();
+        string mappedId = mapped.ID.ToLowerFast();
+        if (currentId == mappedId)
         {
             return false;
         }
-        return IsGenericLoraClass(current);
+        return IsGenericLoraClass(current)
+            || (currentId == "anima/lora" && (mappedId == "anima-2.9b/lora" || mappedId == "anima-3.8b/lora"));
     }
 
     /// <summary>True when this class is the SD1/SDXL/SD2 LoRA fallback rather than a named family.</summary>

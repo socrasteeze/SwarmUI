@@ -103,6 +103,16 @@ public class T2IModelHandler
 
         public string ModelClassType { get; set; }
 
+        /// <summary>Backing value for the persistent Anima depth migration marker.</summary>
+        private bool animaDepthClassified;
+
+        /// <summary>True once this cache entry has passed the Anima depth classifier. LiteDB requires a writable property.</summary>
+        public bool AnimaDepthClassified
+        {
+            get => animaDepthClassified;
+            set => animaDepthClassified = value;
+        }
+
         public string Title { get; set; }
 
         public string Author { get; set; }
@@ -487,6 +497,51 @@ public class T2IModelHandler
     /// <summary>Model compat-class IDs that have variable text encoder content.</summary>
     public static HashSet<string> VariableTextEncModelClasses = ["stable-diffusion-v3-medium", "stable-diffusion-v3.5-large", "stable-diffusion-v3.5-medium", "flux-1"];
 
+    /// <summary>Reclassifies a same-version legacy Anima entry once, preserving all other saved metadata.</summary>
+    private void UpgradeAnimaMetadata(T2IModel model, ModelMetadataStore metadata, ModelDatabase cache)
+    {
+        string id = (metadata.ModelClassType ?? "").ToLowerFast();
+        id = T2IModelClassSorter.Remaps.GetValueOrDefault(id, id);
+        if (metadata.AnimaDepthClassified || (id != "anima" && id != "anima/lora" && id != "anima/controlnet"))
+        {
+            return;
+        }
+        JObject header = new();
+        if (model.Name.EndsWith(".safetensors") || model.Name.EndsWith(".sft") || model.Name.EndsWith(".gguf"))
+        {
+            header = SpokeModePolicy.IsActive ? SpokeModelMetadata.ReadHeader(model.RawFilePath) : T2IModel.GetMetadataHeaderFrom(model.RawFilePath);
+        }
+        JObject metaHeader = header["__metadata__"] as JObject ?? [];
+        string prefix = $"{model.OriginatingFolderPath}/{model.Name.BeforeLast('.')}";
+        foreach (string suffix in AltModelMetadataJsonFileSuffixes)
+        {
+            if (File.Exists(prefix + suffix))
+            {
+                JObject sidecar = SpokeModePolicy.IsActive ? SpokeModelMetadata.ReadSidecar(prefix + suffix) : File.ReadAllText(prefix + suffix).ParseToJson();
+                foreach (JProperty property in sidecar.Properties())
+                {
+                    metaHeader[property.Name] = property.Value;
+                    header[property.Name] = property.Value;
+                }
+            }
+        }
+        metadata.ModelClassType = T2IModelClassSorter.IdentifyClassFor(model, header, ModelType)?.ID ?? metadata.ModelClassType;
+        metadata.AnimaDepthClassified = true;
+        lock (MetadataLock)
+        {
+            try
+            {
+                SpokeModelMetadata.TrimForSpoke(metadata);
+                cache.Metadata.Upsert(metadata);
+            }
+            catch (Exception ex)
+            {
+                Logs.Warning($"Error updating Anima metadata cache: {ex.ReadableString()}");
+                cache.HadNewError();
+            }
+        }
+    }
+
     /// <summary>Force-load the metadata for a model.</summary>
     public void LoadMetadata(T2IModel model)
     {
@@ -780,6 +835,7 @@ public class T2IModelHandler
                 TimeCreated = new DateTimeOffset(File.GetCreationTimeUtc(model.RawFilePath)).ToUnixTimeMilliseconds(),
                 ModelName = modelCacheId,
                 ModelClassType = clazz?.ID,
+                AnimaDepthClassified = true,
                 Title = limitLength(resolvedTitle, basicLimit),
                 Author = limitLength(pickBest(metaHeader?.Value<string>("modelspec.author"), metaHeader?.Value<string>("author")), basicLimit),
                 Description = limitLength(pickBest(metaHeader?.Value<string>("modelspec.description"), metaHeader?.Value<string>("description"), altDescription), 1024 * 1024 * 4),
@@ -814,6 +870,10 @@ public class T2IModelHandler
                     cache.HadNewError();
                 }
             }
+        }
+        else
+        {
+            UpgradeAnimaMetadata(model, metadata, cache);
         }
         SpokeModelMetadata.TrimForSpoke(metadata);
         if (!string.IsNullOrWhiteSpace(metadata.ModelClassType))

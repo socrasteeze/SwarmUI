@@ -1132,12 +1132,87 @@ check('checkpoint compat: an incompatible LoRA is hidden without the arch picker
     compat.picked == 'qwen/keep.safetensors,misc/unknown.safetensors', JSON.stringify(compat));
 check('checkpoint compat: starred other-arch LoRA is hidden under Limited (not exempt)',
     !compat.picked.split(',').includes('ill/starred.safetensors'), JSON.stringify(compat));
-check('checkpoint compat: other-arch folders are hidden even when untagged or mis-classed',
-    compat.sdxlPicked == 'ill/hide.safetensors,misc/unknown.safetensors', JSON.stringify(compat));
+check('checkpoint compat: untagged other-arch folders hide, but a known compatible class takes precedence',
+    compat.sdxlPicked == 'ill/hide.safetensors,misc/unknown.safetensors,flux/wrongclass.safetensors',
+    JSON.stringify(compat));
 check('checkpoint compat: the class comes from the picked checkpoint',
     compat.active == 'qwen-image' && compat.cleared == null, JSON.stringify(compat));
 check('checkpoint compat: no checkpoint picked means no filtering at all',
     compat.unpicked == 6, JSON.stringify(compat));
+
+// A model's own known compat class outranks folder and preset-group inference. Anima variants share folders,
+// so treating the folder's aggregate classes as decisive lets incompatible 2.9B, 3.8B and base LoRAs mix.
+const animaVariantCompat = await page.evaluate(() => {
+    mState.loadParamMeta({
+        list: [],
+        models: {
+            'Stable-Diffusion': [
+                ['anima/checkpoint.safetensors', 'anima-29-checkpoint'],
+                ['anima/checkpoint-38.safetensors', 'anima-38-checkpoint'],
+                ['anima/checkpoint-base.safetensors', 'anima-base-checkpoint'],
+                ['anima38/checkpoint.safetensors', 'anima-38-checkpoint']
+            ],
+            'LoRA': [
+                ['anima/lora-29.safetensors', 'anima-29-lora'],
+                ['anima/lora-38.safetensors', 'anima-38-lora'],
+                ['anima/adapter.safetensors', 'anima-base-lora'],
+                ['anima/unknown.safetensors', null],
+                ['anima38/known-29.safetensors', 'anima-29-lora'],
+                ['anima38/unknown.safetensors', null]
+            ]
+        },
+        model_classes: {
+            'anima-29-checkpoint': { compat_class: 'anima-2.9b' },
+            'anima-38-checkpoint': { compat_class: 'anima-3.8b' },
+            'anima-base-checkpoint': { compat_class: 'anima' },
+            'anima-29-lora': { compat_class: 'anima-2.9b' },
+            'anima-38-lora': { compat_class: 'anima-3.8b' },
+            'anima-base-lora': { compat_class: 'anima' }
+        }
+    });
+    mState.presets = [
+        { title: 'anima/2.9B', param_map: { model: 'anima/checkpoint.safetensors' } },
+        { title: 'anima/3.8B', param_map: { model: 'anima/checkpoint-38.safetensors' } },
+        { title: 'anima/Base', param_map: { model: 'anima/checkpoint-base.safetensors' } },
+        { title: 'anima38/3.8B', param_map: { model: 'anima38/checkpoint.safetensors' } }
+    ];
+    let shared = [
+        { name: 'anima/lora-29.safetensors' },
+        { name: 'anima/lora-38.safetensors' },
+        { name: 'anima/adapter.safetensors' },
+        { name: 'anima/unknown.safetensors' }
+    ];
+    let selected = {};
+    for (let model of [
+        ['29', 'anima/checkpoint.safetensors'],
+        ['38', 'anima/checkpoint-38.safetensors'],
+        ['base', 'anima/checkpoint-base.safetensors']
+    ]) {
+        mState.params['model'] = model[1];
+        selected[model[0]] = mState.filterByModelCompat(shared, 'LoRA').map(row => row.name).join(',');
+    }
+    mState.params['model'] = 'anima/checkpoint.safetensors';
+    selected.mismatchingFolder = mState.filterByModelCompat([
+        { name: 'anima38/known-29.safetensors' }
+    ], 'LoRA').map(row => row.name).join(',');
+    selected.unknownFallback = mState.filterByModelCompat([
+        { name: 'anima38/unknown.safetensors' }
+    ], 'LoRA').map(row => row.name).join(',');
+    return selected;
+});
+check('Anima compat: 2.9B excludes known 3.8B/base LoRAs in the shared preset-group folder',
+    animaVariantCompat['29'] == 'anima/lora-29.safetensors,anima/unknown.safetensors',
+    JSON.stringify(animaVariantCompat));
+check('Anima compat: 3.8B excludes known 2.9B/base LoRAs in the shared preset-group folder',
+    animaVariantCompat['38'] == 'anima/lora-38.safetensors,anima/unknown.safetensors',
+    JSON.stringify(animaVariantCompat));
+check('Anima compat: base excludes known 2.9B/3.8B LoRAs in the shared preset-group folder',
+    animaVariantCompat.base == 'anima/adapter.safetensors,anima/unknown.safetensors',
+    JSON.stringify(animaVariantCompat));
+check('Anima compat: a known compatible class survives mismatching preset-group folder inference',
+    animaVariantCompat.mismatchingFolder == 'anima38/known-29.safetensors', JSON.stringify(animaVariantCompat));
+check('Anima compat: unknown metadata still falls back to preset-group folder inference',
+    animaVariantCompat.unknownFallback == '', JSON.stringify(animaVariantCompat));
 
 // Klein/ with no presets must still hard-hide under an SDXL Limited banner once any classed model in that
 // folder is a different architecture - folderCompatClasses covers hand-laid folders presetGroups() misses.

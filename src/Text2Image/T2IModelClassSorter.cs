@@ -1276,8 +1276,46 @@ public class T2IModelClassSorter
                 return false;
             }
         }
-        return TryReadBlockNumber(name, found + 7, out block);
+        int digitStart = found + 7;
+        if (!TryReadBlockNumber(name, digitStart, out block))
+        {
+            return false;
+        }
+        int digitEnd = digitStart;
+        while (digitEnd < name.Length && char.IsDigit(name[digitEnd]))
+        {
+            digitEnd++;
+        }
+        return HasAnimaDitModuleSuffix(name, digitEnd);
     }
+
+    /// <summary>True when the text after a block index names a known Anima DiT module in dotted or remapped form.</summary>
+    private static bool HasAnimaDitModuleSuffix(string name, int suffixStart)
+    {
+        string suffix = name.Substring(suffixStart);
+        foreach (string module in AnimaDitModulePrefixes)
+        {
+            if (suffix.StartsWith(module, StringComparison.Ordinal) && suffix.Length > module.Length
+                && (suffix[module.Length] == '.' || suffix[module.Length] == '_'))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Anima DiT adapter module names in native dotted and remapped underscore formats.</summary>
+    private static readonly string[] AnimaDitModulePrefixes =
+    [
+        ".self_attn.q_proj", ".self_attn.k_proj", ".self_attn.v_proj", ".self_attn.output_proj",
+        ".cross_attn.q_proj", ".cross_attn.k_proj", ".cross_attn.v_proj", ".cross_attn.output_proj",
+        ".mlp.layer1", ".mlp.layer2",
+        ".adaln_modulation_self_attn", ".adaln_modulation_cross_attn", ".adaln_modulation_mlp",
+        "_self_attn_q_proj", "_self_attn_k_proj", "_self_attn_v_proj", "_self_attn_output_proj",
+        "_cross_attn_q_proj", "_cross_attn_k_proj", "_cross_attn_v_proj", "_cross_attn_output_proj",
+        "_mlp_layer1", "_mlp_layer2",
+        "_adaln_modulation_self_attn", "_adaln_modulation_cross_attn", "_adaln_modulation_mlp"
+    ];
 
     /// <summary>Highest <c>lllite_dit_blocks_N</c> index in <paramref name="header"/>, or -1.</summary>
     private static int HighestAnimaLlliteBlock(JObject header)
