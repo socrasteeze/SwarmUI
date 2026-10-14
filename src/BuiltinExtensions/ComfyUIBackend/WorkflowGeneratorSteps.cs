@@ -1207,7 +1207,7 @@ public class WorkflowGeneratorSteps
                         g.CurrentModel = g.CurrentModel.WithPath([diffsynthNode, 0]);
                         continue;
                     }
-                    else if (controlModel.ModelClass?.CompatClass?.ID == T2IModelClassSorter.CompatAnima.ID)
+                    else if (T2IModelClassSorter.IsAnimaCompat(controlModel.ModelClass?.CompatClass))
                     {
                         // kohya's Anima lineart LLLite was trained on black lines over white, but Comfy lineart preprocessors output white lines over black.
                         if (preprocessor.ToLowerFast().Contains("lineart") && controlModel.Name.ToLowerFast().Contains("lineart"))

@@ -156,11 +156,15 @@ await page.evaluate(() => {
             'Stable-Diffusion': [
                 ['anima/anima-aesthetic-v1.safetensors', 'anima-image'],
                 ['anima/some-finetune.safetensors', 'anima-image'],
+                ['anima/anima-2.9b.safetensors', 'anima-29'],
+                ['anima/anima-3.8b.safetensors', 'anima-38'],
                 ['ill/anime-checkpoint.safetensors', 'sdxl-base']
             ]
         },
         model_classes: {
             'anima-image': { 'compat_class': 'anima' },
+            'anima-29': { 'compat_class': 'anima-2.9b' },
+            'anima-38': { 'compat_class': 'anima-3.8b' },
             'sdxl-base': { 'compat_class': 'stable-diffusion-xl-v1' }
         }
     });
@@ -207,6 +211,18 @@ check('an Anima-compat third-party finetune with no matching filename is family-
     + '(never auto-picked)',
     finetuneResolve.family == 'anima' && finetuneResolve.profileId == null && finetuneResolve.confidence == 'unassigned',
     JSON.stringify(finetuneResolve));
+
+const depthResolve = await page.evaluate(() => {
+    mState.params['model'] = 'anima/anima-2.9b.safetensors';
+    let two = mCoach.resolveProfile();
+    mState.params['model'] = 'anima/anima-3.8b.safetensors';
+    let three = mCoach.resolveProfile();
+    return { two, three };
+});
+check('Anima 2.9B and 3.8B stay in the Anima family without a base/aesthetic/turbo profile',
+    depthResolve.two.family == 'anima' && depthResolve.two.profileId == null && depthResolve.two.confidence == 'unassigned'
+        && depthResolve.three.family == 'anima' && depthResolve.three.profileId == null && depthResolve.three.confidence == 'unassigned',
+    JSON.stringify(depthResolve));
 
 const remembered = await page.evaluate(() => {
     mCoach.setProfileOverride('anima-turbo');
