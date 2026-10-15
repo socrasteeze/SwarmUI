@@ -92,6 +92,8 @@ public class T2IModelClassSorter
         CompatZImage = RegisterCompat(new() { ID = "z-image", ShortCode = "ZImg", LorasTargetTextEnc = false, VaeFamily = VaeFlux1 }),
         CompatZetaChroma = RegisterCompat(new() { ID = "zeta-chroma", ShortCode = "ZChr", LorasTargetTextEnc = false }),
         CompatAnima = RegisterCompat(new() { ID = "anima", ShortCode = "Anima", VaeFamily = VaeQwenImage, SupportLegacyPromptParser = true }),
+        CompatAnima2_9B = RegisterCompat(new() { ID = "anima-2.9b", ShortCode = "Anima2.9B", VaeFamily = VaeQwenImage, SupportLegacyPromptParser = true }),
+        CompatAnima3_8B = RegisterCompat(new() { ID = "anima-3.8b", ShortCode = "Anima3.8B", VaeFamily = VaeQwenImage, SupportLegacyPromptParser = true }),
         CompatHiDreamO1 = RegisterCompat(new() { ID = "hidream-o1", ShortCode = "HiDrO1", LorasTargetTextEnc = false }),
         CompatSenseNovaU15 = RegisterCompat(new() { ID = "sensenova-u1.5", ShortCode = "SNU15", LorasTargetTextEnc = false }),
         CompatLens = RegisterCompat(new() { ID = "lens", ShortCode = "Lens", LorasTargetTextEnc = false, VaeFamily = VaeFlux2 }),
@@ -292,11 +294,27 @@ public class T2IModelClassSorter
         bool isKan5VidLite(JObject h) => tryGetKan5IdKey(h, out JToken tok) && tok["shape"].ToArray()[0].Value<long>() == 1792;
         bool isKan5ImgLite(JObject h) => tryGetKan5IdKey(h, out JToken tok) && tok["shape"].ToArray()[0].Value<long>() == 2560;
         bool isKan5VidPro(JObject h) => tryGetKan5IdKey(h, out JToken tok) && tok["shape"].ToArray()[0].Value<long>() == 4096;
-        bool isAnima(JObject h) => hasKey(h, "t_embedder.1.linear_2.weight") && hasKey(h, "llm_adapter.blocks.0.self_attn.v_proj.weight") && hasKey(h, "blocks.27.adaln_modulation_cross_attn.2.weight");
+        // Base is 28 DiT blocks (0-27). 2.9B is 40 (0-39). 3.8B is 52 (0-51). Deeper rules are checked first.
+        bool isAnima38(JObject h) => IsAnima38Checkpoint(h);
+        bool isAnima29(JObject h) => IsAnima29Checkpoint(h);
+        bool isAnima(JObject h) => IsAnimaBaseCheckpoint(h);
         // 'llm_adapter' keys are only present when the text encoder was trained, which is optional, so match on the DiT blocks alone.
-        bool isAnimaLora(JObject h) => (hasLoraKey(h, "blocks.27.self_attn.v_proj") && hasLoraKey(h, "blocks.27.adaln_modulation_cross_attn.1"))
-                                    || (hasLoraKey(h, "lora_unet_blocks_27_self_attn_v_proj") && hasLoraKey(h, "lora_unet_blocks_27_cross_attn_output_proj") && hasLoraKey(h, "lora_unet_blocks_27_mlp_layer2"));
-        bool isAnimaControlnet(JObject h) => h.ContainsKey("lllite_dit_blocks_0_self_attn_q_proj.depth_embed") && h.ContainsKey("lllite_dit_blocks_0_self_attn_q_proj.cond_to_film.weight") && h.ContainsKey("lllite_dit_blocks_27_self_attn_q_proj.up.weight");
+        // A remapped 2.9B LoRA may only name blocks 28-39, so that rule does not require block 27.
+        bool isAnima38Lora(JObject h) => HighestAnimaDitBlock(h) >= 40;
+        bool isAnima29Lora(JObject h)
+        {
+            int block = HighestAnimaDitBlock(h);
+            return block >= 28 && block <= 39;
+        }
+        bool isAnimaLora(JObject h) => HighestAnimaDitBlock(h) < 28 && ((hasLoraKey(h, "blocks.27.self_attn.v_proj") && hasLoraKey(h, "blocks.27.adaln_modulation_cross_attn.1"))
+                                    || (hasLoraKey(h, "lora_unet_blocks_27_self_attn_v_proj") && hasLoraKey(h, "lora_unet_blocks_27_cross_attn_output_proj") && hasLoraKey(h, "lora_unet_blocks_27_mlp_layer2")));
+        bool isAnima38Controlnet(JObject h) => HighestAnimaLlliteBlock(h) >= 40;
+        bool isAnima29Controlnet(JObject h)
+        {
+            int block = HighestAnimaLlliteBlock(h);
+            return block >= 28 && block <= 39;
+        }
+        bool isAnimaControlnet(JObject h) => HighestAnimaLlliteBlock(h) < 28 && h.ContainsKey("lllite_dit_blocks_0_self_attn_q_proj.depth_embed") && h.ContainsKey("lllite_dit_blocks_0_self_attn_q_proj.cond_to_film.weight") && h.ContainsKey("lllite_dit_blocks_27_self_attn_q_proj.up.weight");
         bool isLongcat(JObject h) => hasKey(h, "double_blocks.0.txt_attn.norm.query_norm.weight") && hasKey(h, "time_in.out_layer.weight") && hasKey(h, "final_layer.adaLN_modulation.1.weight") && hasKey(h, "double_blocks.0.txt_mod.lin.weight");
         // Segmentation models
         bool isSam3(JObject h) => hasKey(h, "detector.backbone.vision_backbone.trunk.blocks.0.attn.qkv.weight") && hasKey(h, "detector.transformer.decoder.query_embed.weight");
@@ -678,7 +696,7 @@ public class T2IModelClassSorter
         }});
         Register(new() { ID = "nvidia-cosmos-predict2-t2i-14b", CompatClass = CompatCosmosPredict2_14b, Name = "NVIDIA Cosmos Predict2 Text2Image 14B", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
         {
-            return isCosmosPredict2_14B(h) && !isAnima(h);
+            return isCosmosPredict2_14B(h) && !HasAnimaCheckpointKeys(h);
         }});
         // ====================== Z-Image ======================
         Register(new() { ID = "z-image", CompatClass = CompatZImage, Name = "Z-Image", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
@@ -922,6 +940,31 @@ public class T2IModelClassSorter
             return isAuraFlow(h);
         }});
         // ====================== Anima ======================
+        // Variants register before base. A 3.8B file also contains block 39, so it must win that tie.
+        Register(new() { ID = "anima-3.8b", CompatClass = CompatAnima3_8B, Name = "Anima 3.8B", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
+        {
+            return isAnima38(h);
+        }});
+        Register(new() { ID = "anima-3.8b/lora", CompatClass = CompatAnima3_8B, Name = "Anima 3.8B LoRA", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
+        {
+            return isAnima38Lora(h);
+        }});
+        Register(new() { ID = "anima-3.8b/controlnet", CompatClass = CompatAnima3_8B, Name = "Anima 3.8B ControlNet", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
+        {
+            return isAnima38Controlnet(h);
+        }});
+        Register(new() { ID = "anima-2.9b", CompatClass = CompatAnima2_9B, Name = "Anima 2.9B", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
+        {
+            return isAnima29(h);
+        }});
+        Register(new() { ID = "anima-2.9b/lora", CompatClass = CompatAnima2_9B, Name = "Anima 2.9B LoRA", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
+        {
+            return isAnima29Lora(h);
+        }});
+        Register(new() { ID = "anima-2.9b/controlnet", CompatClass = CompatAnima2_9B, Name = "Anima 2.9B ControlNet", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
+        {
+            return isAnima29Controlnet(h);
+        }});
         Register(new() { ID = "anima", CompatClass = CompatAnima, Name = "Anima", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
         {
             return isAnima(h);
@@ -1055,9 +1098,24 @@ public class T2IModelClassSorter
         Remaps["stable-diffusion-v3.5-large-turbo"] = "stable-diffusion-v3.5-large";
         Remaps["stable-diffusion-3-3-5-medium"] = "stable-diffusion-v3.5-medium";
         Remaps["stable-diffusion-3-3-5-medium/lora"] = "stable-diffusion-v3.5-medium/lora";
-        Remaps["anima-preview"] = "anima";
-        Remaps["anima-preview/lora"] = "anima/lora";
-        Remaps["anima-preview/control-net-lllite"] = "anima/controlnet";
+        void MapAnimaAlias(string alias, string target)
+        {
+            Remaps[alias] = target;
+            Remaps[$"{alias}/lora"] = $"{target}/lora";
+            Remaps[$"{alias}/controlnet"] = $"{target}/controlnet";
+            Remaps[$"{alias}/control-net-lllite"] = $"{target}/controlnet";
+        }
+        MapAnimaAlias("anima-preview", "anima");
+        MapAnimaAlias("anima-29b", "anima-2.9b");
+        MapAnimaAlias("anima_2.9b", "anima-2.9b");
+        MapAnimaAlias("anima2.9b", "anima-2.9b");
+        MapAnimaAlias("anima_29b", "anima-2.9b");
+        MapAnimaAlias("anima-2_9b", "anima-2.9b");
+        MapAnimaAlias("anima-38b", "anima-3.8b");
+        MapAnimaAlias("anima_3.8b", "anima-3.8b");
+        MapAnimaAlias("anima3.8b", "anima-3.8b");
+        MapAnimaAlias("anima_38b", "anima-3.8b");
+        MapAnimaAlias("anima-3_8b", "anima-3.8b");
         // ====================== Comfy model_type remaps ======================
         Remaps["hunyuanvideo1.5_480p_t2v_distilled"] = "hunyuan-video-1_5";
         Remaps["hunyuanvideo1.5_480p_i2v_distilled"] = "hunyuan-video-1_5";
@@ -1072,6 +1130,295 @@ public class T2IModelClassSorter
         Remaps["hidream_o1_image"] = "hidream-o1";
         // ====================== kohya ss_network_module remaps ======================
         Remaps["networks.lora_minimax_h3"] = "minimax-h3/lora";
+    }
+
+    /// <summary>True when <paramref name="clazz"/> is base Anima, Anima 2.9B, or Anima 3.8B.</summary>
+    public static bool IsAnimaCompat(T2IModelCompatClass clazz)
+    {
+        if (clazz is null)
+        {
+            return false;
+        }
+        string id = clazz.ID;
+        return id == CompatAnima.ID || id == CompatAnima2_9B.ID || id == CompatAnima3_8B.ID;
+    }
+
+    /// <summary>True when the header has the tensors shared by every Anima checkpoint depth.</summary>
+    private static bool HasAnimaCheckpointKeys(JObject header)
+    {
+        return HasTensorKey(header, "t_embedder.1.linear_2.weight")
+            && HasTensorKey(header, "llm_adapter.blocks.0.self_attn.v_proj.weight")
+            && HasTensorKey(header, "blocks.27.adaln_modulation_cross_attn.2.weight");
+    }
+
+    /// <summary>True when the header is a 52-block Anima 3.8B checkpoint.
+    /// Block 51 is the depth key. A bundled Semantic Connector v2 file also carries <c>anima_v2_connector</c> tensors.</summary>
+    private static bool IsAnima38Checkpoint(JObject header)
+    {
+        return HasAnimaCheckpointKeys(header)
+            && (HasTensorKey(header, "blocks.51.adaln_modulation_cross_attn.2.weight") || HasAnimaConnectorKey(header));
+    }
+
+    /// <summary>True when the header is a 40-block Anima 2.9B checkpoint and not a 3.8B file.</summary>
+    private static bool IsAnima29Checkpoint(JObject header)
+    {
+        return HasAnimaCheckpointKeys(header)
+            && HasTensorKey(header, "blocks.39.adaln_modulation_cross_attn.2.weight")
+            && !IsAnima38Checkpoint(header);
+    }
+
+    /// <summary>True when the header is a 28-block base Anima checkpoint.</summary>
+    private static bool IsAnimaBaseCheckpoint(JObject header)
+    {
+        return HasAnimaCheckpointKeys(header)
+            && !HasTensorKey(header, "blocks.39.adaln_modulation_cross_attn.2.weight")
+            && !IsAnima38Checkpoint(header);
+    }
+
+    /// <summary>True when a tensor name is present under any of the usual checkpoint prefixes.</summary>
+    private static bool HasTensorKey(JObject header, string key)
+    {
+        if (header is null)
+        {
+            return false;
+        }
+        return header.ContainsKey(key)
+            || header.ContainsKey($"diffusion_model.{key}")
+            || header.ContainsKey($"model.diffusion_model.{key}")
+            || header.ContainsKey($"net.{key}")
+            || header.ContainsKey($"transformer.{key}");
+    }
+
+    /// <summary>True when the header bundles Anima 3.8B Semantic Connector v2 weights.</summary>
+    private static bool HasAnimaConnectorKey(JObject header)
+    {
+        if (header is null)
+        {
+            return false;
+        }
+        foreach (JProperty property in header.Properties())
+        {
+            if (property.Name.Contains("anima_v2_connector"))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Highest Anima DiT block index named in <paramref name="header"/>, or -1.
+    /// Accepts <c>blocks.N</c> and <c>blocks_N</c>. Ignores <c>llm_adapter.blocks</c> and other families' <c>*_blocks</c> modules.</summary>
+    private static int HighestAnimaDitBlock(JObject header)
+    {
+        if (header is null)
+        {
+            return -1;
+        }
+        int highest = -1;
+        foreach (JProperty property in header.Properties())
+        {
+            string name = property.Name;
+            int index = 0;
+            while (index < name.Length)
+            {
+                int found = name.IndexOf("blocks", index, StringComparison.Ordinal);
+                if (found < 0)
+                {
+                    break;
+                }
+                if (TryReadAnimaDitBlock(name, found, out int block) && block > highest)
+                {
+                    highest = block;
+                }
+                index = found + 6;
+            }
+        }
+        return highest;
+    }
+
+    /// <summary>Reads a DiT block index at <paramref name="found"/> when that <c>blocks</c> token is an Anima block, not another module.</summary>
+    private static bool TryReadAnimaDitBlock(string name, int found, out int block)
+    {
+        block = -1;
+        if (found + 6 >= name.Length)
+        {
+            return false;
+        }
+        char separator = name[found + 6];
+        if (separator != '.' && separator != '_')
+        {
+            return false;
+        }
+        if (found > 0)
+        {
+            char previous = name[found - 1];
+            if (char.IsLetterOrDigit(previous))
+            {
+                return false;
+            }
+            if (previous == '_')
+            {
+                int wordEnd = found - 1;
+                int wordStart = wordEnd;
+                while (wordStart > 0 && char.IsLetter(name[wordStart - 1]))
+                {
+                    wordStart--;
+                }
+                string word = name.Substring(wordStart, wordEnd - wordStart);
+                if (word == "transformer" || word == "double" || word == "single" || word == "joint" || word == "context" || word == "noise" || word == "pixel" || word == "triple" || word == "adapter")
+                {
+                    return false;
+                }
+            }
+            string adapterPrefix = "llm_adapter.";
+            if (previous == '.' && found >= adapterPrefix.Length && name.Substring(found - adapterPrefix.Length, adapterPrefix.Length) == adapterPrefix)
+            {
+                return false;
+            }
+        }
+        int digitStart = found + 7;
+        if (!TryReadBlockNumber(name, digitStart, out block))
+        {
+            return false;
+        }
+        int digitEnd = digitStart;
+        while (digitEnd < name.Length && char.IsDigit(name[digitEnd]))
+        {
+            digitEnd++;
+        }
+        return HasAnimaDitModuleSuffix(name, digitEnd);
+    }
+
+    /// <summary>True when the text after a block index names a known Anima DiT module in dotted or remapped form.</summary>
+    private static bool HasAnimaDitModuleSuffix(string name, int suffixStart)
+    {
+        string suffix = name.Substring(suffixStart);
+        foreach (string module in AnimaDitModulePrefixes)
+        {
+            if (suffix.StartsWith(module, StringComparison.Ordinal) && suffix.Length > module.Length
+                && (suffix[module.Length] == '.' || suffix[module.Length] == '_'))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Anima DiT adapter module names in native dotted and remapped underscore formats.</summary>
+    private static readonly string[] AnimaDitModulePrefixes =
+    [
+        ".self_attn.q_proj", ".self_attn.k_proj", ".self_attn.v_proj", ".self_attn.output_proj",
+        ".cross_attn.q_proj", ".cross_attn.k_proj", ".cross_attn.v_proj", ".cross_attn.output_proj",
+        ".mlp.layer1", ".mlp.layer2",
+        ".adaln_modulation_self_attn", ".adaln_modulation_cross_attn", ".adaln_modulation_mlp",
+        "_self_attn_q_proj", "_self_attn_k_proj", "_self_attn_v_proj", "_self_attn_output_proj",
+        "_cross_attn_q_proj", "_cross_attn_k_proj", "_cross_attn_v_proj", "_cross_attn_output_proj",
+        "_mlp_layer1", "_mlp_layer2",
+        "_adaln_modulation_self_attn", "_adaln_modulation_cross_attn", "_adaln_modulation_mlp"
+    ];
+
+    /// <summary>Highest <c>lllite_dit_blocks_N</c> index in <paramref name="header"/>, or -1.</summary>
+    private static int HighestAnimaLlliteBlock(JObject header)
+    {
+        if (header is null)
+        {
+            return -1;
+        }
+        int highest = -1;
+        string marker = "lllite_dit_blocks_";
+        foreach (JProperty property in header.Properties())
+        {
+            string name = property.Name;
+            int index = 0;
+            while (index < name.Length)
+            {
+                int found = name.IndexOf(marker, index, StringComparison.Ordinal);
+                if (found < 0)
+                {
+                    break;
+                }
+                if (TryReadBlockNumber(name, found + marker.Length, out int block) && block > highest)
+                {
+                    highest = block;
+                }
+                index = found + marker.Length;
+            }
+        }
+        return highest;
+    }
+
+    /// <summary>Parses a decimal block index at <paramref name="digitStart"/>.</summary>
+    private static bool TryReadBlockNumber(string name, int digitStart, out int block)
+    {
+        block = -1;
+        if (digitStart >= name.Length || !char.IsDigit(name[digitStart]))
+        {
+            return false;
+        }
+        int value = 0;
+        int digit = digitStart;
+        while (digit < name.Length && char.IsDigit(name[digit]))
+        {
+            value = (value * 10) + (name[digit] - '0');
+            digit++;
+        }
+        block = value;
+        return true;
+    }
+
+    /// <summary>When a generic Anima header is sitting on a 2.9B or 3.8B file, the tensor keys win.</summary>
+    private static T2IModelClass PreferAnimaDepthVariant(T2IModelClass matched, JObject header)
+    {
+        if (matched is null || header is null)
+        {
+            return matched;
+        }
+        string id = matched.ID;
+        string variant = null;
+        if (id == "anima")
+        {
+            if (IsAnima38Checkpoint(header))
+            {
+                variant = "anima-3.8b";
+            }
+            else if (IsAnima29Checkpoint(header))
+            {
+                variant = "anima-2.9b";
+            }
+        }
+        else if (id == "anima/lora")
+        {
+            int block = HighestAnimaDitBlock(header);
+            if (block >= 40)
+            {
+                variant = "anima-3.8b/lora";
+            }
+            else if (block >= 28)
+            {
+                variant = "anima-2.9b/lora";
+            }
+        }
+        else if (id == "anima/controlnet")
+        {
+            int block = HighestAnimaLlliteBlock(header);
+            if (block >= 40)
+            {
+                variant = "anima-3.8b/controlnet";
+            }
+            else if (block >= 28)
+            {
+                variant = "anima-2.9b/controlnet";
+            }
+        }
+        if (variant is null)
+        {
+            return matched;
+        }
+        if (ModelClasses.TryGetValue(variant, out T2IModelClass upgraded))
+        {
+            return upgraded;
+        }
+        return matched;
     }
 
     /// <summary>Returns the model class that matches this model, or null if none.</summary>
@@ -1137,6 +1484,7 @@ public class T2IModelClassSorter
                 matchedClass = fromBase;
             }
         }
+        matchedClass = PreferAnimaDepthVariant(matchedClass, header);
         if (!model.RawFilePath.EndsWith(".safetensors") && !model.RawFilePath.EndsWith(".sft") && header is null)
         {
             Logs.Debug($"{modelType} Model {model.Name} cannot have known type, not safetensors and no header");

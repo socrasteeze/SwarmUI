@@ -276,8 +276,9 @@ class MCoach {
      *   2. an official filename pattern (`anima-base-*` / `anima-aesthetic-*` / `anima-turbo-*`), a suggestion
      *      until confirmed via "Remember for this checkpoint";
      *   3. Anima compat class with no matching filename - family known, variant not, so no profile is chosen
-     *      automatically (base/aesthetic/turbo all report the same family/compat class - see the plan's
-     *      resolver notes on why neither field may pick a variant alone);
+     *      automatically (base/aesthetic/turbo all report compat class anima; 2.9B and 3.8B report their
+     *      own compat classes and still count as this family - see the plan's resolver notes on why
+     *      neither field may pick a base/aesthetic/turbo variant alone);
      *   4. no match -> No coach.
      * A custom profile is reachable only via step 1 (an explicit override) - it is never filename- or
      * compat-class-suggested, since it names no known checkpoint family the resolver could recognize.
@@ -305,7 +306,8 @@ class MCoach {
             let id = `anima-${match[1]}`;
             return { 'family': 'anima', 'profileId': id, 'profile': MCoach.PROFILES[id], 'confidence': 'inferred' };
         }
-        if (mState.compatClassOf('Stable-Diffusion', model) == 'anima') {
+        let compat = mState.compatClassOf('Stable-Diffusion', model);
+        if (compat == 'anima' || compat == 'anima-2.9b' || compat == 'anima-3.8b') {
             return { 'family': 'anima', 'profileId': null, 'profile': null, 'confidence': 'unassigned' };
         }
         return { 'family': null, 'profileId': null, 'profile': null, 'confidence': 'unassigned' };
