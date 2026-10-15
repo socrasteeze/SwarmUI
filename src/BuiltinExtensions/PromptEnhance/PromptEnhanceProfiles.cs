@@ -147,13 +147,16 @@ public static class PromptEnhanceProfiles
     /// - the filename override map handles IllustriousXL, and vanilla SDXL has no profile at all). Anima, Krea 2,
     /// MiniMax H3 and Qwen Image 2.1 each have their own distinct compat class (<c>anima</c>, <c>krea-2</c>,
     /// <c>minimax-h3</c>, <c>qwen-image-2.1</c>, see <c>T2IModelClassSorter.cs</c>) and so are mapped here
-    /// directly rather than via a filename guess. The H3 compat class covers both the FL2VA and Ref2VA
+    /// directly rather than via a filename guess. Anima 2.9B and 3.8B share the Anima writer profile.
+    /// The H3 compat class covers both the FL2VA and Ref2VA
     /// checkpoints; the profile itself handles the Ref2VA case.</summary>
     private static readonly Dictionary<string, string> CompatClassMap = new()
     {
         ["flux-2-klein-4b"] = "flux2-klein-4b",
         ["flux-2-klein-9b"] = "flux2-klein-9b",
         ["anima"] = "anima",
+        ["anima-2.9b"] = "anima",
+        ["anima-3.8b"] = "anima",
         ["krea-2"] = "krea-2",
         ["minimax-h3"] = "minimax-h3",
         ["qwen-image-2.1"] = "qwen-image-2.1"

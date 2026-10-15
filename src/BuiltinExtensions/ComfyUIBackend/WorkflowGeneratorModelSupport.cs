@@ -78,8 +78,8 @@ public partial class WorkflowGenerator
     /// <summary>Returns true if the current model is AuraFlow.</summary>
     public bool IsAuraFlow() => IsModelCompatClass(T2IModelClassSorter.CompatAuraFlow);
 
-    /// <summary>Returns true if the current model is Anima.</summary>
-    public bool IsAnima() => IsModelCompatClass(T2IModelClassSorter.CompatAnima);
+    /// <summary>Returns true if the current model is Anima (base, 2.9B, or 3.8B).</summary>
+    public bool IsAnima() => T2IModelClassSorter.IsAnimaCompat(CurrentCompat());
 
     /// <summary>Returns true if the current model is a Kontext model (eg Flux.1 Kontext Dev).</summary>
     public bool IsKontext()
