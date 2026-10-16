@@ -1214,6 +1214,36 @@ check('Anima compat: a known compatible class survives mismatching preset-group 
 check('Anima compat: unknown metadata still falls back to preset-group folder inference',
     animaVariantCompat.unknownFallback == '', JSON.stringify(animaVariantCompat));
 
+// Dimming uses the same exact compat_class compare. A shared anima/ folder must not make
+// base, 2.9B, and 3.8B look interchangeable, and a class id without '/' is still a LoRA.
+const animaDim = await page.evaluate(() => {
+    mState.params['model'] = 'anima/checkpoint.safetensors';
+    let rows = [
+        { name: 'anima/adapter.safetensors' },
+        { name: 'anima/lora-29.safetensors' },
+        { name: 'anima/lora-38.safetensors' }
+    ];
+    let order = mState.compatFirst(rows, 'LoRA').map(row => row.name).join(',');
+    let chroma = MState.compatMatches('flux-1/lora', 'flux-1', 'chroma');
+    let baseOn29 = MState.compatMatches('anima/lora', 'anima', 'anima-2.9b');
+    let checkpoint = mState.rowMatchesActive({ name: 'anima/checkpoint-base.safetensors' }, 'Stable-Diffusion');
+    return {
+        order,
+        base: mState.rowMatchesActive(rows[0], 'LoRA'),
+        two: mState.rowMatchesActive(rows[1], 'LoRA'),
+        three: mState.rowMatchesActive(rows[2], 'LoRA'),
+        chroma,
+        baseOn29,
+        checkpoint
+    };
+});
+check('Anima dim: 2.9B keeps its LoRA and marks base and 3.8B incompatible',
+    !animaDim.base && animaDim.two && !animaDim.three && animaDim.checkpoint
+    && animaDim.order == 'anima/lora-29.safetensors,anima/adapter.safetensors,anima/lora-38.safetensors',
+    JSON.stringify(animaDim));
+check('Anima dim: compat match is exact, and the Chroma/Flux LoRA allowance still holds',
+    animaDim.chroma && !animaDim.baseOn29, JSON.stringify(animaDim));
+
 // Klein/ with no presets must still hard-hide under an SDXL Limited banner once any classed model in that
 // folder is a different architecture - folderCompatClasses covers hand-laid folders presetGroups() misses.
 const klein = await page.evaluate(() => {

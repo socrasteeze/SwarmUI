@@ -2852,7 +2852,7 @@ class MCreate {
             for (let i = 0; i < curLoras.length; i++) {
                 active.add(MState.stripModelExt(curLoras[i].name));
             }
-            let matches = mState.starredFirst(MCreate.sortLoras(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name)))), 'LoRA');
+            let matches = mState.compatFirst(mState.starredFirst(MCreate.sortLoras(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name)))), 'LoRA'), 'LoRA');
             let pages = Math.max(1, Math.ceil(matches.length / MCreate.PickerPageSize));
             page = Math.min(page, pages - 1);
             let start = page * MCreate.PickerPageSize;
@@ -2865,6 +2865,10 @@ class MCreate {
                     item.appendChild(thumb);
                 }
                 item.appendChild(mUI.modelText(model, null, true));
+                if (!mState.rowMatchesActive(model, 'LoRA')) {
+                    item.classList.add('m-model-unavailable');
+                    item.title = 'Incompatible with current model';
+                }
                 let star = mUI.starBadge('LoRA', model.name);
                 if (star) {
                     item.appendChild(star);
