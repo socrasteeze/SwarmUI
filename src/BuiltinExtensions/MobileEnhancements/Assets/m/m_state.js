@@ -38,6 +38,8 @@ class MState {
         this.modelClasses = {};
         /** subtype -> Map(strippedName -> compat class), built lazily by compatMapFor. */
         this.compatCache = {};
+        /** subtype -> Map(strippedName -> architecture id), built in the same pass as compatCache. */
+        this.archIdCache = {};
         /** folder (lower) -> Set(compat class) across checkpoints+LoRAs, built lazily by folderCompatClasses.
          * Cleared with compatCache whenever models/modelClasses reload. */
         this.folderCompatCache = null;
@@ -107,6 +109,7 @@ class MState {
         this.wildcards = data.wildcards || [];
         // Both inputs to the compat map just changed.
         this.compatCache = {};
+        this.archIdCache = {};
         this.folderCompatCache = null;
     }
 
@@ -686,13 +689,89 @@ class MState {
     compatMapFor(subtype) {
         if (!this.compatCache[subtype]) {
             let map = new Map();
+            let arch = new Map();
             for (let entry of (this.models[subtype] || [])) {
                 let clazz = this.modelClasses[entry[1]];
-                map.set(MState.starKey(entry[0]), clazz && clazz.compat_class ? clazz.compat_class : null);
+                let key = MState.starKey(entry[0]);
+                map.set(key, clazz && clazz.compat_class ? clazz.compat_class : null);
+                arch.set(key, entry[1] || '');
             }
             this.compatCache[subtype] = map;
+            this.archIdCache[subtype] = arch;
         }
         return this.compatCache[subtype];
+    }
+
+    /** Architecture id from the boot list ('anima-2.9b/lora'), or '' when this name is not in it.
+     * ListModels rows carry their own `architecture`; this is the fallback for name-only stubs. */
+    archIdOf(subtype, modelName) {
+        if (!modelName) {
+            return '';
+        }
+        this.compatMapFor(subtype);
+        let map = this.archIdCache[subtype];
+        return map ? (map.get(MState.starKey(modelName)) || '') : '';
+    }
+
+    /** Same rule as genpage `isModelArchCorrect`: exact `compat_class` on a sub-model (architecture
+     * contains '/'), plus the same VAE and Chroma allowances. A base model, or a row with no class,
+     * counts as compatible. `anima`, `anima-2.9b`, and `anima-3.8b` stay distinct because the compare
+     * is equality, not a prefix. */
+    static compatMatches(architecture, modelCompat, curCompat) {
+        if (!modelCompat || !curCompat) {
+            return true;
+        }
+        let arch = `${architecture || ''}`;
+        if (arch.indexOf('/') == -1) {
+            return true;
+        }
+        if (arch.endsWith('/vae') && modelCompat.startsWith('stable-diffusion-v3') && curCompat.startsWith('stable-diffusion-v3')) {
+            return true;
+        }
+        if (arch.endsWith('/vae') && modelCompat.startsWith('flux-1') && curCompat.startsWith('hidream-i1')) {
+            return true;
+        }
+        if (arch.endsWith('/lora') && modelCompat.startsWith('flux-1') && curCompat.startsWith('chroma')) {
+            return true;
+        }
+        return modelCompat == curCompat;
+    }
+
+    /** Whether one picker row fits the checkpoint the next generation will use.
+     * Checkpoints are always kept, matching the main Models tab (it does not dim Stable-Diffusion).
+     * A LoRA/ControlNet/VAE whose class id has no '/' is still a sub-model: the id is only a label,
+     * and treating it as a base model would mark every Anima variant compatible with the others. */
+    rowMatchesActive(model, subtype, curCompat) {
+        if (subtype == 'Stable-Diffusion') {
+            return true;
+        }
+        let cur = curCompat == undefined ? this.activeModelCompat() : curCompat;
+        if (!cur) {
+            return true;
+        }
+        let compat = (model && model.compat_class) || this.compatClassOf(subtype, model && model.name);
+        if (!compat) {
+            return true;
+        }
+        let arch = (model && model.architecture) || this.archIdOf(subtype, model && model.name) || '';
+        if (arch.indexOf('/') == -1) {
+            arch = subtype == 'VAE' ? 'x/vae' : (subtype == 'ControlNet' ? 'x/controlnet' : 'x/lora');
+        }
+        return MState.compatMatches(arch, compat, cur);
+    }
+
+    /** Stable sort: rows the active checkpoint can load come first. Star order inside each group is kept,
+     * so call this after starredFirst. Copies, so a cached ListModels array is not reordered in place. */
+    compatFirst(list, subtype) {
+        if (!list || subtype == 'Stable-Diffusion') {
+            return list;
+        }
+        let cur = this.activeModelCompat();
+        if (!cur) {
+            return list;
+        }
+        let rank = (model) => this.rowMatchesActive(model, subtype, cur) ? 0 : 1;
+        return list.slice().sort((a, b) => rank(a) - rank(b));
     }
 
     /** The compat class of one model, via the class id that ListT2IParams already shipped alongside it.
@@ -848,9 +927,9 @@ class MState {
         }
         let folderClasses = this.folderCompatClasses();
         return models.filter(model => {
-            let modelCompat = this.compatClassOf(subtype, model.name);
+            let modelCompat = (model && model.compat_class) || this.compatClassOf(subtype, model.name);
             if (modelCompat) {
-                return modelCompat == compat;
+                return this.rowMatchesActive(model, subtype, compat);
             }
             let folder = MState.modelFolder(model.name).toLowerCase();
             // Preset-group folder whose checkpoints never use this compat: hard-hide untagged models.

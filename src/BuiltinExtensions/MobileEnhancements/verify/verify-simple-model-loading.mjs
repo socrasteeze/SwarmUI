@@ -31,7 +31,7 @@ await page.evaluate(() => {
         modelText: model => { let wrap = document.createElement('div'); wrap.className = 'm-model-text'; let name = document.createElement('div'); name.className = 'm-model-name'; name.textContent = model.name; wrap.appendChild(name); return wrap; },
         modelName: name => name, modelLines: model => ({ primary: model.name }), note: () => {}, warn: message => window.__warnings.push(message), openSheet: () => () => {}
     };
-    window.mState = { params: {}, models: {}, modelClasses: {}, refreshUserData: () => {}, isStarred: () => false, onChange: callback => window.__stateChanged = callback, starredFirst: files => [...files].sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)), getLoras: () => [], setLoras: () => {}, changed: () => {} };
+    window.mState = { params: {}, models: {}, modelClasses: {}, refreshUserData: () => {}, isStarred: () => false, onChange: callback => window.__stateChanged = callback, starredFirst: files => [...files].sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)), compatFirst: rows => rows, rowMatchesActive: () => true, getLoras: () => [], setLoras: () => {}, changed: () => {} };
     window.MState = { sameModel: (a, b) => a == b, stripModelExt: name => name };
     window.mCreate = { loraList: null, modelList: null, insertTriggerPhrase: () => {}, indexLoras: () => {}, enrichLoraMetadata: done => done(), buildCountRow: (shown, total) => mUI.el('div', 'm-list-count', `${shown}/${total}`) };
     window.permissions = { hasPermission: () => false };

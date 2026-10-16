@@ -1091,6 +1091,11 @@ button.m-header-link {
     padding: 0.4rem 0.2rem;
     min-height: 48px;
 }
+/* Same signal as genpage .model-unavailable: a LoRA or other sub-model whose compat class
+   does not match the selected checkpoint stays in the list, dimmed, and sorts after matches. */
+.m-model-unavailable {
+    opacity: 0.3;
+}
 .m-model-thumb,
 .m-lora-thumb {
     width: 44px;

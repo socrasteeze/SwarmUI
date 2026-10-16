@@ -208,7 +208,7 @@ class MModels {
             // Starred first, same as the Create-tab pickers and the genpage's own browsers. The folder result
             // remains complete, then renders in pages: a favourite belongs in the first visible page even
             // when the folder has hundreds of rows.
-            this.folderModels = mState.starredFirst(data.files || [], this.subtype);
+            this.folderModels = mState.compatFirst(mState.starredFirst(data.files || [], this.subtype), this.subtype);
             this.updateArchitectures();
             if (this.folderModels.length == 0) {
                 this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
@@ -345,7 +345,7 @@ class MModels {
         if (architecture) {
             matches = matches.filter(model => this.architectureOf(model) == architecture);
         }
-        matches = mState.starredFirst(MCreate.sortModels(matches, this.sortSetting()), this.subtype);
+        matches = mState.compatFirst(mState.starredFirst(MCreate.sortModels(matches, this.sortSetting()), this.subtype), this.subtype);
         this.renderPage(matches);
         let count = mCreate.buildCountRow(matches.length, matches.length, isLora ? 'LoRAs' : 'checkpoints');
         count.classList.add('m-models-search-count');
@@ -435,6 +435,11 @@ class MModels {
         }
         card.title = [model.title, model.name, model.author, model.trigger_phrase].filter(Boolean).join('\n');
         card.setAttribute('aria-label', card.title.replace(/\n/g, '. '));
+        if (!mState.rowMatchesActive(model, this.subtype)) {
+            card.classList.add('m-model-unavailable');
+            card.title = `${card.title}\nIncompatible with current model`;
+            card.setAttribute('aria-label', `${card.getAttribute('aria-label')}. Incompatible with current model`);
+        }
         let subtype = this.subtype;
         let favorite = mState.isStarred(subtype, model.name);
         let star = mUI.el('button', 'm-model-favorite', favorite ? '\u2605' : '\u2606');

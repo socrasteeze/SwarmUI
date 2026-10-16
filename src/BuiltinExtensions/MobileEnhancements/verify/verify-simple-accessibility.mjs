@@ -203,7 +203,7 @@ async function verifyCards(browser, name) {
         window.permissions = { hasPermission: () => true };
         window.genericRequest = () => { };
         window.mState = { params: {}, getLoras: () => [], setLoras: () => { }, changed: () => counts.changed++,
-            isStarred: () => false, starredFirst: rows => rows };
+            isStarred: () => false, starredFirst: rows => rows, compatFirst: rows => rows, rowMatchesActive: () => true };
         window.MState = { sameModel: (a, b) => a == b };
         window.MCreate = { ListCap: 120, filterModels: rows => rows };
         window.mCreate = { insertTriggerPhrase: trigger => { counts.triggers++; counts.triggerText = trigger; }, buildCountRow: () => document.createElement('div') };

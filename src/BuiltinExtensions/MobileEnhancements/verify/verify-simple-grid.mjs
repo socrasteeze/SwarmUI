@@ -94,9 +94,9 @@ await page.addInitScript(() => {
     window.genericRequest = (route, args, callback) => {
         if (route == 'ListModels') {
             callback({ files: [
-                { name: 'ill/style_a.safetensors', title: 'Style A' },
-                { name: 'ill/style_b.safetensors', title: 'Style B' },
-                { name: 'flux/detail.safetensors', title: 'Detail' }
+                { name: 'ill/style_a.safetensors', title: 'Style A', architecture: 'anima-2.9b/lora', compat_class: 'anima-2.9b' },
+                { name: 'ill/style_b.safetensors', title: 'Style B', architecture: 'anima/lora', compat_class: 'anima' },
+                { name: 'flux/detail.safetensors', title: 'Detail', architecture: 'anima-3.8b/lora', compat_class: 'anima-3.8b' }
             ], folders: [] });
         }
         else if (route == 'GetMyUserData') {
@@ -122,6 +122,12 @@ await page.evaluate(() => {
             value_names: ['Euler', 'DPM++ 2M', 'ER-SDE'] },
         scheduler: { name: 'Scheduler', values: ['normal', 'karras', 'beta'] }
     };
+    // The LoRA axis is built when the sheet opens, so the checkpoint has to be in place first.
+    mState.models = { 'Stable-Diffusion': [['anima/checkpoint.safetensors', 'anima-29']] };
+    mState.modelClasses = { 'anima-29': { compat_class: 'anima-2.9b' } };
+    mState.compatCache = {};
+    mState.archIdCache = {};
+    mState.params['model'] = 'anima/checkpoint.safetensors';
     // Intercepted rather than sent: this is the payload every check below reads.
     window.__grid = null;
     mGen.runGrid = (base, axes) => { window.__grid = { base, axes }; };
@@ -237,6 +243,13 @@ const loraNames = await page.evaluate(() =>
     [...__sheet().querySelectorAll('.m-grid-lora-options .m-grid-option')].map(e => e.textContent));
 check('the LoRA axis loads the library even though the Create LoRA sheet was never opened',
     loraNames.length == 3, loraNames.join(','));
+const loraDim = await page.evaluate(() => [...__sheet().querySelectorAll('.m-grid-lora-options .m-grid-option')].map(e => ({
+    name: e.textContent, dim: e.classList.contains('m-model-unavailable')
+})));
+check('the LoRA axis sorts the matching Anima variant first and dims the others',
+    loraDim.map(row => row.name).join(',') == 'style_a,detail,style_b'
+    && loraDim.map(row => row.dim).join(',') == 'false,true,true',
+    JSON.stringify(loraDim));
 await page.evaluate(() => {
     // Picked by name, not by index: indexLoras sorts its corpus, so the fixture's declaration order is not
     // the order the options render in.

@@ -444,8 +444,8 @@ class MGrid {
                     list.appendChild(mUI.el('div', 'm-strip-empty', 'Loading LoRAs...'));
                     return;
                 }
-                let matches = mState.starredFirst(
-                    MCreate.filterModels(mCreate.loraList, search.value), 'LoRA');
+                let matches = mState.compatFirst(mState.starredFirst(
+                    MCreate.filterModels(mCreate.loraList, search.value), 'LoRA'), 'LoRA');
                 if (matches.length == 0) {
                     list.appendChild(mUI.el('div', 'm-strip-empty', 'No LoRAs match.'));
                     return;
@@ -460,6 +460,10 @@ class MGrid {
                     let value = MState.stripModelExt(model.name);
                     let button = mUI.el('button', 'm-grid-option', mUI.modelName(value));
                     button.classList.toggle('m-selected', this.valuesFor(axis.key).includes(value));
+                    if (!mState.rowMatchesActive(model, 'LoRA')) {
+                        button.classList.add('m-model-unavailable');
+                        button.title = 'Incompatible with current model';
+                    }
                     button.addEventListener('click', () => {
                         // Dismiss the on-screen keyboard before the list reflows - otherwise iOS keeps the
                         // search focused and the keyboard covers the options Adam just tried to reach.
