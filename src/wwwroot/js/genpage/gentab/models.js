@@ -368,19 +368,27 @@ function edit_model_load_civitai() {
             info.innerText = `Failed to load metadata. ${(errMsg ?? '')}`;
             return;
         }
-        getRequiredElementById('edit_model_name').value = metadata['modelspec.title'];
-        for (let key of ['author', 'description', 'date', 'trigger_phrase', 'usage_hint', 'tags']) {
-            if (metadata[`modelspec.${key}`]) {
-                getRequiredElementById(`edit_model_${key}`).value = metadata[`modelspec.${key}`];
-            }
+        if (!img) {
+            info.innerText = 'No preview image on CivitAI. Title, tags, and description were left unchanged.';
+            return;
         }
-        if (img) {
+        info.innerText = 'Saving preview...';
+        genericRequest('SaveModelPreviewImage', {
+            'model': curModelMenuModel.name,
+            'subtype': curModelMenuBrowser.subType,
+            'image': img
+        }, () => {
             setMediaFileDirect(modelsHelpers.imageElem, img, 'image', 'cur', 'cur', () => {
                 modelsHelpers.enableImageElem.checked = false;
                 triggerChangeFor(modelsHelpers.enableImageElem);
             });
-        }
-        info.innerText = 'Loaded.';
+            info.innerText = 'Preview saved. Title, tags, and description were left unchanged. Save in this editor still rewrites the .swarm.json sidecar and can replace tags.';
+            if (curModelMenuBrowser && curModelMenuBrowser.browser) {
+                curModelMenuBrowser.browser.lightRefresh();
+            }
+        }, 0, (err) => {
+            info.innerText = `Could not save preview. ${err || ''}`;
+        });
     }, curModelMenuModel.name, false);
 }
 

@@ -101,6 +101,12 @@ public class T2IModelHandler
 
         public long ModelFileVersion { get; set; }
 
+        /// <summary>Unix-millisecond last-write time of the adjacent <c>.swarm.json</c>, or 0 when that file was absent.</summary>
+        public long SidecarFileVersion { get; set; }
+
+        /// <summary>False on cache rows saved before sidecar mtimes were recorded. Those rows store the current mtime and do not reread.</summary>
+        public bool SidecarVersionKnown { get; set; }
+
         public string ModelClassType { get; set; }
 
         /// <summary>Backing value for the persistent Anima depth migration marker.</summary>
@@ -438,9 +444,14 @@ public class T2IModelHandler
                 metadata.ModelName = perFolder ? fileName : model.RawFilePath;
                 metadata.Title = model.Title;
                 metadata.Description = model.Description;
-                metadata.ModelClassType = model.ModelClass?.ID;
+                if (model.ModelClass is not null)
+                {
+                    metadata.ModelClassType = model.ModelClass.ID;
+                }
                 metadata.StandardWidth = model.StandardWidth;
                 metadata.StandardHeight = model.StandardHeight;
+                metadata.SidecarFileVersion = ReadSwarmSidecarVersion(model);
+                metadata.SidecarVersionKnown = true;
                 lock (MetadataLock)
                 {
                     SpokeModelMetadata.TrimForSpoke(metadata);
@@ -458,6 +469,15 @@ public class T2IModelHandler
 
     public static readonly string[] AutoImageFormatSuffixes = [".jpg", ".png", ".preview.png", ".preview.jpg", ".jpeg", ".preview.jpeg", ".thumb.jpg", ".thumb.png"];
 
+    /// <summary>Placeholder stored when a model has no preview image.</summary>
+    public const string PlaceholderPreviewImage = "imgs/model_placeholder.jpg";
+
+    /// <summary>Maximum accepted preview payload, matching the header-image guard in <see cref="LoadMetadata"/>.</summary>
+    public const int MaxPreviewDataLength = 1024 * 1024 * 8;
+
+    /// <summary>How many updated model names <see cref="RefreshMissingPreviews"/> returns.</summary>
+    public const int PreviewRefreshNameLimit = 50;
+
     public static readonly string[] AltModelMetadataJsonFileSuffixes = [".swarm.json", ".json", ".cm-info.json", ".civitai.info"];
 
     public static readonly string[] AllModelAttachedExtensions = [.. AutoImageFormatSuffixes.Concat(AltModelMetadataJsonFileSuffixes)];
@@ -468,30 +488,251 @@ public class T2IModelHandler
 
     public static readonly string[] AltMetadataNameKeys = ["UserTitle", "ModelName", "name"];
 
+    /// <summary>Path prefix shared by a model's sidecars and adjacent preview files.</summary>
+    public static string ModelAttachmentPrefix(T2IModel model)
+    {
+        return $"{model.OriginatingFolderPath}/{model.Name.BeforeLast('.')}";
+    }
+
+    /// <summary>Full path of the <c>.swarm.json</c> sidecar next to this model.</summary>
+    public static string SwarmSidecarPath(T2IModel model)
+    {
+        return ModelAttachmentPrefix(model) + ".swarm.json";
+    }
+
+    /// <summary>Full path of the preview JPEG written beside the model's primary file.</summary>
+    public static string PreviewJpegPath(T2IModel model)
+    {
+        return model.RawFilePath.Replace('\\', '/').BeforeLast('.') + ".preview.jpeg";
+    }
+
+    /// <summary>True when the cached preview is missing or still the placeholder.</summary>
+    public static bool PreviewImageMissing(string preview)
+    {
+        return string.IsNullOrWhiteSpace(preview) || preview == PlaceholderPreviewImage;
+    }
+
+    /// <summary>True when a preview data string is present and within <see cref="MaxPreviewDataLength"/>.</summary>
+    public static bool PreviewDataAcceptable(string preview)
+    {
+        return !string.IsNullOrWhiteSpace(preview) && preview.Length <= MaxPreviewDataLength;
+    }
+
+    /// <summary>Unix-millisecond mtime of <c>.swarm.json</c>, or 0 when the file is absent. Does not create or modify the file.</summary>
+    public static long ReadSwarmSidecarVersion(T2IModel model)
+    {
+        string path = SwarmSidecarPath(model);
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return 0;
+        }
+        return new DateTimeOffset(File.GetLastWriteTimeUtc(path)).ToUnixTimeMilliseconds();
+    }
+
+    /// <summary>Loads the first adjacent preview that exists and fits the metadata size limit.</summary>
     public string GetAutoFormatImage(T2IModel model)
     {
         if (SpokeModePolicy.IsActive)
         {
             return null;
         }
-        string prefix = $"{model.OriginatingFolderPath}/{model.Name.BeforeLast('.')}";
+        string prefix = ModelAttachmentPrefix(model);
         foreach (string suffix in AutoImageFormatSuffixes)
         {
+            string path = prefix + suffix;
             try
             {
-                if (File.Exists(prefix + suffix))
+                FileInfo info = new(path);
+                if (!info.Exists)
                 {
-                    ImageFile loaded = new Image(File.ReadAllBytes(prefix + suffix), MediaType.GetByExtension(suffix.AfterLast('.')));
-                    return loaded.ToMetadataFormat();
+                    continue;
                 }
+                if (info.Length > MaxPreviewDataLength)
+                {
+                    Logs.Warning($"Ignoring preview '{path}' as it is too large (over {info.Length / 1024 / 1024} megabytes)!");
+                    continue;
+                }
+                ImageFile loaded = new Image(File.ReadAllBytes(path), MediaType.GetByExtension(suffix.AfterLast('.')));
+                string formatted = loaded.ToMetadataFormat();
+                if (!PreviewDataAcceptable(formatted))
+                {
+                    Logs.Warning($"Ignoring preview '{path}' as it is too large after encoding.");
+                    continue;
+                }
+                return formatted;
             }
             catch (Exception ex)
             {
-                Logs.Error($"Caught an exception trying to load legacy model thumbnail at '{prefix}{suffix}'");
+                Logs.Error($"Caught an exception trying to load legacy model thumbnail at '{path}'");
                 Logs.Debug($"Details for above error {ex.ReadableString()}");
             }
         }
         return null;
+    }
+
+    /// <summary>True when a known sidecar mtime no longer matches the file. Legacy rows (version not yet recorded) are not stale.</summary>
+    public static bool SidecarRequiresRebuild(T2IModel model, ModelMetadataStore metadata)
+    {
+        if (metadata is null || !metadata.SidecarVersionKnown)
+        {
+            return false;
+        }
+        return metadata.SidecarFileVersion != ReadSwarmSidecarVersion(model);
+    }
+
+    /// <summary>Records the current sidecar mtime on a legacy row. Returns true when the row changed.</summary>
+    private static bool NoteLegacySidecarVersion(T2IModel model, ModelMetadataStore metadata)
+    {
+        if (metadata.SidecarVersionKnown)
+        {
+            return false;
+        }
+        metadata.SidecarFileVersion = ReadSwarmSidecarVersion(model);
+        metadata.SidecarVersionKnown = true;
+        return true;
+    }
+
+    /// <summary>Copies an adjacent preview into the cache object when the stored preview is blank. Does not write files.</summary>
+    private bool TryAttachAutoPreview(T2IModel model, ModelMetadataStore metadata)
+    {
+        if (!PreviewImageMissing(metadata.PreviewImage))
+        {
+            return false;
+        }
+        string autoImg = GetAutoFormatImage(model);
+        if (!PreviewDataAcceptable(autoImg))
+        {
+            return false;
+        }
+        metadata.PreviewImage = autoImg;
+        return true;
+    }
+
+    /// <summary>Upserts one metadata row. Does not write the model file or any sidecar.</summary>
+    private void UpsertCached(ModelDatabase cache, ModelMetadataStore metadata)
+    {
+        if (cache is null || metadata is null)
+        {
+            return;
+        }
+        lock (MetadataLock)
+        {
+            try
+            {
+                SpokeModelMetadata.TrimForSpoke(metadata);
+                cache.Metadata.Upsert(metadata);
+            }
+            catch (Exception ex)
+            {
+                Logs.Warning($"Error updating metadata cache: {ex.ReadableString()}");
+                cache.HadNewError();
+            }
+        }
+    }
+
+    /// <summary>Fills blank previews from adjacent image files and stores them in the metadata cache only.</summary>
+    /// <param name="pathPrefix">Empty, or a case-sensitive prefix of the model name. <c>folder</c> matches <c>folder/a.safetensors</c>.</param>
+    /// <param name="exactName">When set, only this model name is examined.</param>
+    /// <param name="allowed">Permission check. Null allows every name.</param>
+    /// <param name="nameLimit">Maximum number of updated names to keep.</param>
+    public PreviewRefreshCounts RefreshMissingPreviews(string pathPrefix, string exactName, Func<string, bool> allowed, int nameLimit)
+    {
+        PreviewRefreshCounts counts = new();
+        string prefix = (pathPrefix ?? "").Replace('\\', '/').Trim().TrimEnd('/');
+        string exact = (exactName ?? "").Replace('\\', '/').Trim();
+        if (nameLimit < 0)
+        {
+            nameLimit = 0;
+        }
+        T2IModel[] models = [.. Models.Values];
+        foreach (T2IModel model in models)
+        {
+            if (!string.IsNullOrEmpty(exact) && model.Name != exact)
+            {
+                continue;
+            }
+            if (!string.IsNullOrEmpty(prefix) && (model.Name is null || !model.Name.StartsWithFast(prefix)))
+            {
+                continue;
+            }
+            if (allowed is not null && !allowed(model.Name))
+            {
+                continue;
+            }
+            counts.Checked++;
+            if (model.Metadata is null || !PreviewImageMissing(model.Metadata.PreviewImage))
+            {
+                continue;
+            }
+            string autoImg = GetAutoFormatImage(model);
+            if (!PreviewDataAcceptable(autoImg))
+            {
+                continue;
+            }
+            lock (ModificationLock)
+            {
+                model.PreviewImage = autoImg;
+                model.Metadata.PreviewImage = autoImg;
+            }
+            ResetMetadataFrom(model);
+            counts.Updated++;
+            if (counts.Names.Count < nameLimit)
+            {
+                counts.Names.Add(model.Name);
+            }
+        }
+        return counts;
+    }
+
+    /// <summary>Writes a JPEG preview beside the model and stores it in the metadata cache. Does not resave the model or any JSON sidecar.</summary>
+    public string StorePreviewJpeg(T2IModel model, ImageFile image)
+    {
+        if (model is null || string.IsNullOrWhiteSpace(model.RawFilePath))
+        {
+            throw new SwarmReadableErrorException("Model not found.");
+        }
+        if (image is null)
+        {
+            throw new SwarmReadableErrorException("Could not read that image.");
+        }
+        ImageFile jpg = image.ToMetadataJpg();
+        if (jpg is null || jpg.RawData is null || jpg.RawData.Length == 0)
+        {
+            throw new SwarmReadableErrorException("Could not read that image.");
+        }
+        string data = jpg.AsDataString();
+        if (!PreviewDataAcceptable(data))
+        {
+            throw new SwarmReadableErrorException("Preview image is too large.");
+        }
+        string previewPath = PreviewJpegPath(model);
+        string modelPath = model.RawFilePath.Replace('\\', '/');
+        if (!previewPath.EndsWithFast(".preview.jpeg") || previewPath == modelPath)
+        {
+            throw new SwarmReadableErrorException("Refusing to overwrite the model file.");
+        }
+        File.WriteAllBytes(previewPath, jpg.RawData);
+        lock (ModificationLock)
+        {
+            model.Metadata ??= new();
+            model.PreviewImage = data;
+            model.Metadata.PreviewImage = data;
+        }
+        ResetMetadataFrom(model);
+        return data;
+    }
+
+    /// <summary>Counts from <see cref="RefreshMissingPreviews"/>.</summary>
+    public class PreviewRefreshCounts
+    {
+        /// <summary>Models that matched the filter and were examined.</summary>
+        public int Checked;
+
+        /// <summary>Models whose blank preview was filled from an adjacent image.</summary>
+        public int Updated;
+
+        /// <summary>Names of updated models, capped by the caller.</summary>
+        public List<string> Names = [];
     }
 
     /// <summary>Model compat-class IDs that have variable text encoder content.</summary>
@@ -578,6 +819,10 @@ public class T2IModelHandler
             }
         }
         if (metadata is not null && metadata.TextEncoders is null && VariableTextEncModelClasses.Contains(metadata.ModelClassType))
+        {
+            metadata = null;
+        }
+        if (metadata is not null && metadata.ModelFileVersion == modified && SidecarRequiresRebuild(model, metadata))
         {
             metadata = null;
         }
@@ -831,6 +1076,8 @@ public class T2IModelHandler
             metadata = new()
             {
                 ModelFileVersion = modified,
+                SidecarFileVersion = ReadSwarmSidecarVersion(model),
+                SidecarVersionKnown = true,
                 TimeModified = modified,
                 TimeCreated = new DateTimeOffset(File.GetCreationTimeUtc(model.RawFilePath)).ToUnixTimeMilliseconds(),
                 ModelName = modelCacheId,
@@ -873,7 +1120,16 @@ public class T2IModelHandler
         }
         else
         {
+            bool cacheTouched = NoteLegacySidecarVersion(model, metadata);
             UpgradeAnimaMetadata(model, metadata, cache);
+            if (TryAttachAutoPreview(model, metadata))
+            {
+                cacheTouched = true;
+            }
+            if (cacheTouched)
+            {
+                UpsertCached(cache, metadata);
+            }
         }
         SpokeModelMetadata.TrimForSpoke(metadata);
         if (!string.IsNullOrWhiteSpace(metadata.ModelClassType))
@@ -890,7 +1146,7 @@ public class T2IModelHandler
             model.Title = metadata.Title;
             model.Description = metadata.Description;
             model.ModelClass = T2IModelClassSorter.ModelClasses.GetValueOrDefault((metadata.ModelClassType ?? "").ToLowerFast());
-            model.PreviewImage = string.IsNullOrWhiteSpace(metadata.PreviewImage) ? "imgs/model_placeholder.jpg" : metadata.PreviewImage;
+            model.PreviewImage = string.IsNullOrWhiteSpace(metadata.PreviewImage) ? PlaceholderPreviewImage : metadata.PreviewImage;
             model.StandardWidth = metadata.StandardWidth;
             model.StandardHeight = metadata.StandardHeight;
             model.Metadata = metadata;

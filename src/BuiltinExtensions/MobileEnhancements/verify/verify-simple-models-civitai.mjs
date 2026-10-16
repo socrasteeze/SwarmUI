@@ -1,14 +1,14 @@
 /**
- * /simple Models-tab Load CivitAI harness (fork). Classic edit_model_load_civitai fills a form; this path
- * auto-saves through EditModelMetadata. Checks aim at ways the enrich+save can silently fail or corrupt:
+ * /simple Models-tab Load CivitAI preview harness (fork). The button saves a preview through
+ * SaveModelPreviewImage and must not call EditModelMetadata:
  *
- * 1. Local cards with edit_model_metadata show a Load CivitAI button; remote cards and no-permission do not.
+ * 1. Local cards with edit_model_metadata show Load CivitAI preview; remote cards and no-permission do not.
  * 2. The button stops propagation so it does not also select/add the model.
  * 3. No hash and no description URL -> GetModelHash, then ForwardMetadataRequest by-hash.
- * 4. No CivitAI match surfaces a warn toast and does not call EditModelMetadata.
- * 5. A successful fetch builds modelspec fields and saves title/author/trigger/tags plus preview_image when
- *    imageToData returns a face/preview; architecture and resolution from the card are preserved.
+ * 4. No CivitAI match surfaces a warn toast and does not call SaveModelPreviewImage or EditModelMetadata.
+ * 5. A successful fetch sends the first still-image URL (skipping a leading video) and nothing else.
  * 6. Description URL short-circuits the hash path (same guess Classic uses).
+ * 7. The Create-tab cache row updates preview_image only.
  *
  * Runs the REAL shipped source with a scripted fake server. Requires playwright + chromium. Run from repo root:
  *     node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-models-civitai.mjs
@@ -179,7 +179,10 @@ await page.evaluate(() => {
                             trainedWords: ['ohwx', 'person'],
                             baseModel: 'Illustrious',
                             description: 'Vers desc',
-                            images: [{ type: 'image', url: 'https://image.civitai.com/x/preview.jpg' }]
+                            images: [
+                                { type: 'video', url: 'https://image.civitai.com/x/clip.mp4' },
+                                { type: 'image', url: 'https://image.civitai.com/x/preview.jpg' }
+                            ]
                         }, {
                             id: 77,
                             name: 'vKnown',
@@ -196,11 +199,15 @@ await page.evaluate(() => {
             callback({ response: {} });
             return;
         }
-        if (route == 'EditModelMetadata') {
+        if (route == 'SaveModelPreviewImage') {
             if (window.__saveMode == 'fail') {
                 if (errorCallback) { errorCallback('save failed'); }
                 return;
             }
+            callback({ success: true, preview_image: '/ViewSpecial/LoRA/' + args.model + '?editid=9' });
+            return;
+        }
+        if (route == 'EditModelMetadata') {
             callback({ success: true });
             return;
         }
@@ -237,7 +244,7 @@ const buttons = await page.evaluate(() => {
         hasBtn: !!card.querySelector('.m-model-civitai-btn')
     }));
 });
-check('local model card shows Load CivitAI', buttons.some(b => b.hasBtn && b.text.includes('Alpha')), JSON.stringify(buttons));
+check('local model card shows Load CivitAI preview', buttons.some(b => b.hasBtn && b.text.includes('Alpha')), JSON.stringify(buttons));
 check('remote model card hides Load CivitAI', buttons.some(b => !b.hasBtn && (b.text.includes('Beta') || b.text.includes('Remote'))), JSON.stringify(buttons));
 
 // Permission gate: rebuild without permission.
@@ -280,8 +287,9 @@ const miss = await page.evaluate(() => ({
     loras: mState.getLoras(),
     sheetOpen: !!document.querySelector('.m-sheet')
 }));
-check('no match: GetModelHash then ForwardMetadataRequest, never EditModelMetadata',
-    miss.routes.includes('GetModelHash') && miss.routes.includes('ForwardMetadataRequest') && !miss.routes.includes('EditModelMetadata'),
+check('no match: GetModelHash then ForwardMetadataRequest, never saves',
+    miss.routes.includes('GetModelHash') && miss.routes.includes('ForwardMetadataRequest')
+    && !miss.routes.includes('SaveModelPreviewImage') && !miss.routes.includes('EditModelMetadata'),
     miss.routes.join(','));
 check('no match: warns the user', miss.warnings.some(w => /No CivitAI match/i.test(w)), miss.warnings.join('|'));
 check('Load CivitAI click does not add the LoRA', miss.loras.length == 0, JSON.stringify(miss.loras));
@@ -303,6 +311,7 @@ await page.evaluate(() => {
     window.__calls = [];
     mUI.notes = [];
     mUI.warnings = [];
+    mCreate.loraList = [{ name: 'local/Known.safetensors', title: 'Old', tags: ['old'], preview_image: 'imgs/model_placeholder.jpg' }];
     mModels.refresh();
 });
 await page.waitForFunction(() => document.querySelectorAll('.m-model-civitai-btn').length >= 2);
@@ -312,40 +321,33 @@ await page.evaluate(() => {
             || b.closest('.m-model-card').textContent.includes('Old'));
     btn.click();
 });
-await page.waitForFunction(() => window.__calls.some(c => c.route == 'EditModelMetadata'));
+await page.waitForFunction(() => window.__calls.some(c => c.route == 'SaveModelPreviewImage'));
 const saved = await page.evaluate(() => {
-    let edit = window.__calls.find(c => c.route == 'EditModelMetadata');
+    let edit = window.__calls.find(c => c.route == 'SaveModelPreviewImage');
+    let row = mCreate.loraList.find(m => m.name == 'local/Known.safetensors');
     return {
         routes: window.__calls.map(c => c.route),
         args: edit ? edit.args : null,
         notes: (mUI.notes || []).slice(),
         hashCalls: window.__calls.filter(c => c.route == 'GetModelHash').length,
-        forwardUrls: window.__calls.filter(c => c.route == 'ForwardMetadataRequest').map(c => c.args.url)
+        forwardUrls: window.__calls.filter(c => c.route == 'ForwardMetadataRequest').map(c => c.args.url),
+        row
     };
 });
 check('description URL skips GetModelHash', saved.hashCalls == 0, `${saved.hashCalls}`);
 check('description URL fetches the model metadata API',
     saved.forwardUrls.some(u => u.includes('/api/v1/models/99')), saved.forwardUrls.join('|'));
-check('EditModelMetadata saves CivitAI title/author/trigger/usage_hint',
-    saved.args
-    && saved.args.title == 'Face Card - vKnown'
-    && saved.args.author == 'artist'
-    && saved.args.trigger_phrase == 'known'
-    && saved.args.usage_hint == 'Pony',
-    JSON.stringify(saved.args && {
-        title: saved.args.title, author: saved.args.author,
-        trigger: saved.args.trigger_phrase, hint: saved.args.usage_hint
-    }));
-check('EditModelMetadata preserves architecture and resolution from the card',
-    saved.args && saved.args.type == 'flux-1/lora'
-    && saved.args.standard_width == 768 && saved.args.standard_height == 768,
-    JSON.stringify(saved.args && {
-        type: saved.args.type, w: saved.args.standard_width, h: saved.args.standard_height
-    }));
-check('EditModelMetadata includes the preview face card image',
-    saved.args && typeof saved.args.preview_image == 'string' && saved.args.preview_image.startsWith('data:image/'),
-    saved.args && String(saved.args.preview_image).slice(0, 40));
-check('success notes the user', saved.notes.some(n => /CivitAI metadata saved/i.test(n)), saved.notes.join('|'));
+check('SaveModelPreviewImage sends only the still-image URL',
+    saved.args && saved.args.model == 'local/Known.safetensors' && saved.args.subtype == 'LoRA'
+    && saved.args.url == 'https://image.civitai.com/x/known.jpg' && !saved.args.image
+    && !saved.args.title && !saved.args.tags && !saved.args.description && !saved.args.type,
+    JSON.stringify(saved.args));
+check('picker cache updates the preview and keeps the title and tags',
+    saved.row && saved.row.preview_image == '/ViewSpecial/LoRA/local/Known.safetensors?editid=9'
+    && saved.row.title == 'Old' && saved.row.tags.join(',') == 'old',
+    JSON.stringify(saved.row));
+check('description URL never calls EditModelMetadata', !saved.routes.includes('EditModelMetadata'), saved.routes.join(','));
+check('success notes the user', saved.notes.some(n => /CivitAI preview saved/i.test(n)), saved.notes.join('|'));
 
 // ---- Hash happy path for Alpha ----
 await page.evaluate(() => {
@@ -366,25 +368,26 @@ await page.evaluate(() => {
         .find(b => b.closest('.m-model-card').textContent.includes('Alpha'));
     btn.click();
 });
-await page.waitForFunction(() => window.__calls.some(c => c.route == 'EditModelMetadata'));
+await page.waitForFunction(() => window.__calls.some(c => c.route == 'SaveModelPreviewImage'));
 const hashPath = await page.evaluate(() => {
-    let edit = window.__calls.find(c => c.route == 'EditModelMetadata');
+    let edit = window.__calls.find(c => c.route == 'SaveModelPreviewImage');
     let byHash = window.__calls.find(c => c.route == 'ForwardMetadataRequest'
         && (c.args.url || '').includes('by-hash'));
     return {
         routes: window.__calls.map(c => c.route),
         byHashUrl: byHash ? byHash.args.url : null,
-        title: edit && edit.args.title,
-        weight: edit && edit.args.lora_default_weight,
-        tags: edit && edit.args.tags
+        url: edit && edit.args.url,
+        image: edit && edit.args.image
     };
 });
-check('hash path: GetModelHash then by-hash then models then EditModelMetadata',
-    hashPath.routes.indexOf('GetModelHash') < hashPath.routes.indexOf('EditModelMetadata')
+check('hash path: GetModelHash then by-hash then models then SaveModelPreviewImage',
+    hashPath.routes.indexOf('GetModelHash') < hashPath.routes.indexOf('SaveModelPreviewImage')
+    && hashPath.routes.indexOf('ForwardMetadataRequest') < hashPath.routes.indexOf('SaveModelPreviewImage')
+    && !hashPath.routes.includes('EditModelMetadata')
     && hashPath.byHashUrl && hashPath.byHashUrl.includes('by-hash/ABCDEF123456'),
     JSON.stringify({ routes: hashPath.routes, byHashUrl: hashPath.byHashUrl }));
-check('hash path saves the matched version title and keeps LoRA default weight',
-    hashPath.title == 'Face Card - v1' && hashPath.weight == '0.8' && hashPath.tags == 'character, style',
+check('hash path saves the first still image and skips the leading video',
+    hashPath.url == 'https://image.civitai.com/x/preview.jpg' && !hashPath.image,
     JSON.stringify(hashPath));
 
 const failed = results.filter(r => !r.pass);

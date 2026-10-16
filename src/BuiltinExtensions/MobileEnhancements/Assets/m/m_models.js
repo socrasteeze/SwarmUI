@@ -1,8 +1,9 @@
 /** MobileEnhancements standalone client - Models tab.
  * Browse checkpoints and LoRAs via ListModels; tap a checkpoint to set it as the generation model, tap a
- * LoRA to add it to the active set. Local cards also expose Load CivitAI: hash lookup + metadata enrich +
- * save via the same ForwardMetadataRequest / GetModelHash / EditModelMetadata / imageToData path Classic
- * uses, without pulling utiltab.js's ModelDownloader (genpage DOM). */
+ * LoRA to add it to the active set. Local cards also expose Load CivitAI preview: hash lookup, then the
+ * first still image (or a video frame) saved through SaveModelPreviewImage. That writes a JPEG beside
+ * the model and updates the preview cache only. It does not call EditModelMetadata, so tags and the
+ * .swarm.json sidecar stay untouched. */
 class MModels {
 
     constructor() {
@@ -10,7 +11,7 @@ class MModels {
         this.subtype = 'Stable-Diffusion';
         /** Current folder path within the subtype. */
         this.folder = '';
-        /** True while a Load CivitAI run is in flight, so a second tap does not stack requests. */
+        /** True while a Load CivitAI preview run is in flight, so a second tap does not stack requests. */
         this.civitaiBusy = false;
         /** Current folder's starred-first model rows. */
         this.folderModels = [];
@@ -412,7 +413,7 @@ class MModels {
         }
     }
 
-    /** EditModelMetadata / ForwardMetadataRequest / GetModelHash share this permission. Fail open before the
+    /** SaveModelPreviewImage / ForwardMetadataRequest / GetModelHash share edit_model_metadata. Fail open before the
      * session lands (same pattern as presets/restart), so a slow boot does not hide the button forever. */
     canEditMetadata() {
         return typeof permissions == 'undefined' || !permissions.hasPermission
@@ -421,7 +422,7 @@ class MModels {
 
     /** One model card: preview, heading, subtitle, trigger phrase; tap = select (checkpoint) or add (LoRA).
      * Checkpoints stay file-name first; LoRAs prefer the metadata title - see mUI.modelLines.
-     * Local models with edit permission also get Load CivitAI (stopPropagation so it does not select/add). */
+     * Local models with edit permission also get Load CivitAI preview (stopPropagation so it does not select/add). */
     buildCard(model) {
         let card = mUI.el('div', 'm-model-card');
         card.tabIndex = 0;
@@ -457,7 +458,7 @@ class MModels {
         card.appendChild(star);
         card.appendChild(mUI.modelText(model, trigger => mCreate.insertTriggerPhrase(trigger), this.subtype == 'LoRA'));
         if (model.local !== false && this.canEditMetadata()) {
-            let civitBtn = mUI.el('button', 'm-model-civitai-btn', 'Load CivitAI');
+            let civitBtn = mUI.el('button', 'm-model-civitai-btn', 'Load CivitAI preview');
             civitBtn.type = 'button';
             civitBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -502,10 +503,10 @@ class MModels {
         return card;
     }
 
-    /** Opens the Load CivitAI progress sheet and starts enrich+save for one local model card. */
+    /** Opens the Load CivitAI preview sheet and saves one still image for a local model card. */
     openCivitaiLoad(model) {
         if (this.civitaiBusy) {
-            mUI.warn('CivitAI load already in progress.');
+            mUI.warn('CivitAI preview load already in progress.');
             return;
         }
         if (!this.canEditMetadata()) {
@@ -517,7 +518,7 @@ class MModels {
             return;
         }
         let content = mUI.el('div', 'm-model-civitai-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'Load CivitAI'));
+        content.appendChild(mUI.el('div', 'm-sheet-title', 'Load CivitAI preview'));
         content.appendChild(mUI.el('div', 'm-model-civitai-name', mUI.modelLines(model, this.subtype == 'LoRA').primary));
         let status = mUI.el('div', 'm-model-civitai-status', 'Starting...');
         content.appendChild(status);
@@ -544,8 +545,8 @@ class MModels {
         });
     }
 
-    /** Classic Load CivitAI pipeline, auto-saved: hash (or description URL) -> ForwardMetadataRequest ->
-     * preview via imageToData -> EditModelMetadata. setStatus updates the sheet; done(ok, message) finishes. */
+    /** Hash (or description URL) -> version metadata -> first still image or video frame ->
+     * SaveModelPreviewImage. setStatus updates the sheet; done(ok, message) finishes. */
     runCivitaiLoad(model, setStatus, done) {
         let subtype = this.subtype;
         let finishErr = (msg) => done(false, msg);
@@ -560,16 +561,17 @@ class MModels {
                 finishErr('Invalid CivitAI URL.');
                 return;
             }
-            this.fetchCivitaiMetadata(id, versId, (metadata, img, errMsg) => {
+            this.fetchCivitaiMetadata(id, versId, (metadata, img, errMsg, imageUrl) => {
                 if (!metadata) {
                     finishErr(`Failed to load metadata.${errMsg ? ' ' + errMsg : ''}`);
                     return;
                 }
-                setStatus(img ? 'Saving metadata and preview...' : 'Saving metadata...');
-                this.saveCivitaiMetadata(model, subtype, metadata, img, (ok, msg) => {
-                    if (ok) {
-                        this.patchCachedModel(model.name, subtype, metadata, img);
-                    }
+                if (!img && !imageUrl) {
+                    finishErr('No preview image on CivitAI.');
+                    return;
+                }
+                setStatus('Saving preview...');
+                this.saveCivitaiPreview(model, subtype, img, imageUrl, (ok, msg) => {
                     done(ok, msg);
                 });
             });
@@ -683,8 +685,8 @@ class MModels {
         return [null, null];
     }
 
-    /** Fetches models/{id}, picks the matching version, builds modelspec.* fields, and loads the face/preview
-     * image (or a video frame) through imageToData / ForwardImageRequest - same serverside proxies Classic uses. */
+    /** Fetches models/{id}, picks the matching version, and returns the first still-image URL
+     * (or a video-frame data URL). Does not write metadata. */
     fetchCivitaiMetadata(id, versId, callback) {
         let doError = (msg) => callback(null, null, msg);
         let loadByVersOnly = () => {
@@ -735,17 +737,17 @@ class MModels {
                 metadata['modelspec.usage_hint'] = rawVersion.baseModel;
             }
             let imgs = rawVersion.images ? rawVersion.images.filter(img => img.type == 'image') : [];
-            let applyPreview = (img) => callback(metadata, img || '', null);
+            let applyPreview = (img, imageUrl) => callback(metadata, img || '', null, imageUrl || '');
             if (imgs.length > 0) {
-                imageToData(imgs[0].url, applyPreview, true);
+                applyPreview('', imgs[0].url);
                 return;
             }
             let videos = rawVersion.images ? rawVersion.images.filter(img => img.type == 'video') : [];
             if (videos.length > 0) {
-                this.previewFromCivitaiVideo(videos[0].url, applyPreview);
+                this.previewFromCivitaiVideo(videos[0].url, (frame) => applyPreview(frame, ''));
                 return;
             }
-            applyPreview('');
+            applyPreview('', '');
         }, 0, () => doError());
     }
 
@@ -772,77 +774,41 @@ class MModels {
         }, 0, () => done(''));
     }
 
-    /** Writes CivitAI fields through EditModelMetadata; keeps architecture / resolution / license / LoRA
-     * defaults the card already had. preview_image is only set when a face/preview was pulled. */
-    saveCivitaiMetadata(model, subtype, metadata, img, done) {
-        let tags = metadata['modelspec.tags'];
-        if (!tags && model.tags) {
-            tags = Array.isArray(model.tags) ? model.tags.join(', ') : model.tags;
+    /** Writes one preview through SaveModelPreviewImage. image is a data URL (video frame); imageUrl is
+     * a still image the server fetches. Never sends title, tags, or other metadata. */
+    saveCivitaiPreview(model, subtype, image, imageUrl, done) {
+        let payload = { 'model': model.name, 'subtype': subtype };
+        if (image) {
+            payload['image'] = image;
         }
-        let payload = {
-            'model': model.name,
-            'subtype': subtype,
-            'title': metadata['modelspec.title'] || model.title || '',
-            'author': metadata['modelspec.author'] || model.author || '',
-            'type': model.architecture || '',
-            'description': metadata['modelspec.description'] || model.description || '',
-            'standard_width': model.standard_width || 0,
-            'standard_height': model.standard_height || 0,
-            'date': metadata['modelspec.date'] || model.date || '',
-            'license': model.license || '',
-            'trigger_phrase': metadata['modelspec.trigger_phrase'] || model.trigger_phrase || '',
-            'usage_hint': metadata['modelspec.usage_hint'] || model.usage_hint || '',
-            'prediction_type': model.prediction_type || '',
-            'tags': tags || '',
-            'preview_image_metadata': null,
-            'is_negative_embedding': !!model.is_negative_embedding,
-            'lora_default_weight': model.lora_default_weight || '',
-            'lora_default_confinement': model.lora_default_confinement || ''
-        };
-        if (img) {
-            payload['preview_image'] = img;
+        else if (imageUrl) {
+            payload['url'] = imageUrl;
         }
-        genericRequest('EditModelMetadata', payload, () => {
-            done(true, 'CivitAI metadata saved.');
+        else {
+            done(false, 'No preview image on CivitAI.');
+            return;
+        }
+        genericRequest('SaveModelPreviewImage', payload, (data) => {
+            let preview = data && data.preview_image ? data.preview_image : (image || '');
+            this.patchCachedPreview(model.name, subtype, preview);
+            done(true, 'CivitAI preview saved.');
         }, 0, err => {
-            done(false, `Could not save metadata: ${err || 'request failed'}`);
+            done(false, `Could not save preview: ${err || 'request failed'}`);
         });
     }
 
-    /** Keeps Create-tab picker caches in step with the Models-tab save so titles/triggers/previews match. */
-    patchCachedModel(name, subtype, metadata, img) {
-        let patch = (row) => {
-            if (!row) {
-                return;
-            }
-            if (metadata['modelspec.title']) {
-                row.title = metadata['modelspec.title'];
-            }
-            if (metadata['modelspec.author']) {
-                row.author = metadata['modelspec.author'];
-            }
-            if (metadata['modelspec.description']) {
-                row.description = metadata['modelspec.description'];
-            }
-            if (metadata['modelspec.trigger_phrase']) {
-                row.trigger_phrase = metadata['modelspec.trigger_phrase'];
-            }
-            if (metadata['modelspec.usage_hint']) {
-                row.usage_hint = metadata['modelspec.usage_hint'];
-            }
-            if (metadata['modelspec.date']) {
-                row.date = metadata['modelspec.date'];
-            }
-            if (metadata['modelspec.tags']) {
-                row.tags = metadata['modelspec.tags'].split(',').map(t => t.trim()).filter(Boolean);
-            }
-            if (img) {
-                row.preview_image = img;
-            }
-        };
+    /** Updates preview_image on the Create-tab picker cache. Leaves title, tags, and description alone. */
+    patchCachedPreview(name, subtype, img) {
+        if (!img) {
+            return;
+        }
         let list = subtype == 'LoRA' ? mCreate.loraList : mCreate.modelList;
-        if (list) {
-            patch(list.find(m => MState.sameModel(m.name, name)));
+        if (!list) {
+            return;
+        }
+        let row = list.find(m => MState.sameModel(m.name, name));
+        if (row) {
+            row.preview_image = img;
         }
     }
 }

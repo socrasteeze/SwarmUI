@@ -36,6 +36,8 @@ public static class ModelsAPI
         API.RegisterAPICall(TestPromptFill, false, Permissions.FundamentalModelAccess);
         API.RegisterAPICall(EditWildcard, true, Permissions.EditWildcards);
         API.RegisterAPICall(EditModelMetadata, true, Permissions.EditModelMetadata);
+        API.RegisterAPICall(RefreshModelPreviews, true, Permissions.EditModelMetadata);
+        API.RegisterAPICall(SaveModelPreviewImage, true, Permissions.EditModelMetadata);
         API.RegisterAPICall(GetModelHeaders, true, Permissions.EditModelMetadata);
         API.RegisterAPICall(DoModelDownloadWS, true, Permissions.DownloadModels);
         API.RegisterAPICall(GetModelHash, true, Permissions.EditModelMetadata);
@@ -1043,6 +1045,152 @@ public static class ModelsAPI
         return new JObject() { ["success"] = true };
     }
 
+    /// <summary>True when a URL is one of the CivitAI image hosts <see cref="ForwardImageRequest"/> will fetch.</summary>
+    public static bool IsForwardablePreviewUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+        return url.StartsWithFast("https://image.civitai.com/") || url.StartsWithFast("https://blobs-b2.civitai.com/");
+    }
+
+    [API.APIDescription("Fills blank model previews from adjacent image files already on disk. Does not modify model files or sidecars.",
+        """
+            "checked": 10,
+            "updated": 2,
+            "names": ["folder/a.safetensors"]
+        """)]
+    public static Task<JObject> RefreshModelPreviews(Session session,
+        [API.APIParameter("Model sub-type, such as `LoRA` or `Stable-Diffusion`. Empty, or `all`, checks every sub-type.")] string subtype = "",
+        [API.APIParameter("Optional case-sensitive model-name prefix. `folder` matches `folder/a.safetensors`.")] string path = "",
+        [API.APIParameter("Optional exact model name. When set, only that model is checked.")] string model = "")
+    {
+        using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
+        List<T2IModelHandler> handlers = [];
+        if (string.IsNullOrWhiteSpace(subtype) || subtype == "all")
+        {
+            handlers.AddRange(Program.T2IModelSets.Values);
+        }
+        else if (!Program.T2IModelSets.TryGetValue(subtype, out T2IModelHandler oneHandler))
+        {
+            return Task.FromResult(new JObject() { ["error"] = "Invalid sub-type." });
+        }
+        else
+        {
+            handlers.Add(oneHandler);
+        }
+        if (!string.IsNullOrWhiteSpace(model) && TryGetRefusalForModel(session, model, out JObject refusal))
+        {
+            return Task.FromResult(refusal);
+        }
+        int checkedCount = 0;
+        int updated = 0;
+        List<string> names = [];
+        foreach (T2IModelHandler handler in handlers)
+        {
+            int room = T2IModelHandler.PreviewRefreshNameLimit - names.Count;
+            T2IModelHandler.PreviewRefreshCounts part = handler.RefreshMissingPreviews(path, model, session.User.IsAllowedModel, room);
+            checkedCount += part.Checked;
+            updated += part.Updated;
+            names.AddRange(part.Names);
+        }
+        if (!string.IsNullOrWhiteSpace(model) && checkedCount == 0)
+        {
+            return Task.FromResult(new JObject() { ["error"] = "Model not found." });
+        }
+        if (updated > 0)
+        {
+            Interlocked.Increment(ref ModelEditID);
+        }
+        return Task.FromResult(new JObject()
+        {
+            ["checked"] = checkedCount,
+            ["updated"] = updated,
+            ["names"] = JArray.FromObject(names)
+        });
+    }
+
+    [API.APIDescription("Saves a JPEG preview beside a model and updates the metadata cache only. Does not resave the model or its .swarm.json sidecar.",
+        """
+            "success": true,
+            "preview_image": "/ViewSpecial/LoRA/folder/model.safetensors?editid=1"
+        """)]
+    public static async Task<JObject> SaveModelPreviewImage(Session session,
+        [API.APIParameter("Exact model name.")] string model,
+        [API.APIParameter("The model's sub-type, eg `Stable-Diffusion`, `LoRA`, etc.")] string subtype = "Stable-Diffusion",
+        [API.APIParameter("Image data-string (`data:image/...;base64,...`). Used when set.")] string image = null,
+        [API.APIParameter("Remote preview URL on an allowed CivitAI image host. Used when `image` is empty.")] string url = null)
+    {
+        using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
+        if (!Program.T2IModelSets.TryGetValue(subtype, out T2IModelHandler handler))
+        {
+            return new JObject() { ["error"] = "Invalid sub-type." };
+        }
+        if (TryGetRefusalForModel(session, model, out JObject refusal))
+        {
+            return refusal;
+        }
+        if (!handler.Models.TryGetValue(model, out T2IModel actualModel))
+        {
+            return new JObject() { ["error"] = "Model not found." };
+        }
+        SpokeModePolicy.AssertModelTreeWriteAllowed("save a model preview image");
+        byte[] raw;
+        MediaType type;
+        if (!string.IsNullOrWhiteSpace(image))
+        {
+            try
+            {
+                ImageFile parsed = ImageFile.FromDataString(image);
+                raw = parsed.RawData;
+                type = parsed.Type;
+            }
+            catch (Exception ex)
+            {
+                Logs.Warning($"SaveModelPreviewImage could not read image data for '{model}': {ex.ReadableString()}");
+                return new JObject() { ["error"] = "Could not read that image." };
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(url))
+        {
+            if (!IsForwardablePreviewUrl(url))
+            {
+                return new JObject() { ["error"] = "Invalid URL." };
+            }
+            try
+            {
+                raw = await Utilities.UtilWebClient.GetByteArrayAsync(url);
+            }
+            catch (Exception ex)
+            {
+                Logs.Warning($"While fetching preview '{url}', got exception: {ex.ReadableString()}");
+                return new JObject() { ["error"] = $"{ex.GetType().Name}: {ex.Message}" };
+            }
+            string ext = url.Before('?').AfterLast('.');
+            type = MediaType.GetByExtension(ext) ?? MediaType.ImageJpg;
+        }
+        else
+        {
+            return new JObject() { ["error"] = "No image given." };
+        }
+        try
+        {
+            handler.StorePreviewJpeg(actualModel, new Image(raw, type));
+        }
+        catch (SwarmReadableErrorException ex)
+        {
+            return new JObject() { ["error"] = ex.Message };
+        }
+        Interlocked.Increment(ref ModelEditID);
+        string previewUrl = actualModel.ToNetObject(dataImgs: false).Value<string>("preview_image");
+        return new JObject()
+        {
+            ["success"] = true,
+            ["preview_image"] = previewUrl
+        };
+    }
+
     [API.APIDescription("Gets the raw headers of a model as raw JSON.", "\"headers\": { \"diffusion_model.some.key\": { \"dtype\": \"BF16\", ... }, ... }")]
     public static async Task<JObject> GetModelHeaders(Session session,
         [API.APIParameter("Exact filepath name of the model.")] string model,
@@ -1299,7 +1447,7 @@ public static class ModelsAPI
     [API.APIDescription("Forwards an image file request, eg to civitai image CDN.", "\"image\": \"data:image/jpeg;base64,...\"")]
     public static async Task<JObject> ForwardImageRequest(Session session, string url)
     {
-        if (!url.StartsWithFast("https://image.civitai.com/") && !url.StartsWithFast("https://blobs-b2.civitai.com/"))
+        if (!IsForwardablePreviewUrl(url))
         {
             return new JObject() { ["error"] = "Invalid URL." };
         }
