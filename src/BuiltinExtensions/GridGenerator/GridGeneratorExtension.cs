@@ -151,19 +151,9 @@ public class GridGeneratorExtension : Extension
                 string prompt = param.InternalSet.Get(T2IParamTypes.Prompt, "") + " " + data.Additions.JoinString(" ");
                 param.InternalSet.Set(T2IParamTypes.Prompt, prompt.Trim());
             }
-            foreach ((T2IParamType key, List<string> vals) in data.CommaStackable)
-            {
-                string joined = vals.JoinString(",");
-                if (param.TryGetRaw(key, out object existing))
-                {
-                    if (existing is List<string> strs)
-                    {
-                        existing = strs.JoinString(",");
-                    }
-                    joined = $"{existing},{joined}";
-                }
-                param.Set(key, joined);
-            }
+            // Base count is fixed before the loop. Dictionary order is not axis order, and a confinement
+            // list the UI omitted (every base LoRA global) must be padded before the axis value is appended.
+            ApplyCommaStackable(param, data.CommaStackable);
         };
         GridRunnerPreRunHook = (runner) =>
         {
@@ -389,6 +379,136 @@ public class GridGeneratorExtension : Extension
             matches.Add(match);
         }
         return true;
+    }
+
+    /// <summary>Appends comma-stackable grid axis values onto <paramref name="param"/>.
+    /// LoRA weights, text-encoder weights, and section confinement are padded out to the base LoRA count first,
+    /// so an axis value lines up with the axis LoRA. Other stackable params (presets) stay a plain comma join.</summary>
+    /// <param name="param">The cell's parameter input. The base LoRA list is read before any append.</param>
+    /// <param name="stackable">Axis values grouped by parameter, as collected for one grid cell.</param>
+    public static void ApplyCommaStackable(T2IParamInput param, Dictionary<T2IParamType, List<string>> stackable)
+    {
+        int baseLoraCount = 0;
+        if (param.TryGetRaw(T2IParamTypes.Loras.Type, out object loraRaw))
+        {
+            baseLoraCount = CountStackedEntries(loraRaw);
+        }
+        List<string> baseWeights = null;
+        if (param.TryGetRaw(T2IParamTypes.LoraWeights.Type, out object weightRaw))
+        {
+            baseWeights = ReadStackedEntries(weightRaw);
+        }
+        foreach ((T2IParamType key, List<string> vals) in stackable)
+        {
+            if (IsAlignedLoraList(key))
+            {
+                List<string> existing = null;
+                if (param.TryGetRaw(key, out object raw))
+                {
+                    existing = ReadStackedEntries(raw);
+                }
+                List<string> aligned = AlignStackedLoraList(existing, baseLoraCount, PadForLoraList(key, baseWeights), vals);
+                param.Set(key, aligned.JoinString(","));
+            }
+            else
+            {
+                string joined = vals.JoinString(",");
+                if (param.TryGetRaw(key, out object prior))
+                {
+                    if (prior is List<string> strs)
+                    {
+                        prior = strs.JoinString(",");
+                    }
+                    joined = $"{prior},{joined}";
+                }
+                param.Set(key, joined);
+            }
+        }
+    }
+
+    /// <summary>Pads <paramref name="existing"/> up to <paramref name="baseCount"/>, then appends <paramref name="axisValues"/>.
+    /// A null existing list is empty. Entries past <paramref name="baseCount"/> are kept.</summary>
+    /// <param name="existing">Current entries, or null when the parameter is unset.</param>
+    /// <param name="baseCount">How many base LoRAs the list must cover before axis entries.</param>
+    /// <param name="padAt">Value for each missing index. Called with that index.</param>
+    /// <param name="axisValues">Axis entries to append after the padded base. Null appends nothing.</param>
+    /// <returns>The aligned entries.</returns>
+    public static List<string> AlignStackedLoraList(IReadOnlyList<string> existing, int baseCount, Func<int, string> padAt, IReadOnlyList<string> axisValues)
+    {
+        List<string> result = [];
+        if (existing is not null)
+        {
+            result.AddRange(existing);
+        }
+        while (result.Count < baseCount)
+        {
+            result.Add(padAt(result.Count));
+        }
+        if (axisValues is not null)
+        {
+            result.AddRange(axisValues);
+        }
+        return result;
+    }
+
+    /// <summary>True for the lists that are index-aligned with <see cref="T2IParamTypes.Loras"/>.</summary>
+    static bool IsAlignedLoraList(T2IParamType key)
+    {
+        string id = key.ID;
+        return id == T2IParamTypes.LoraWeights.Type.ID
+            || id == T2IParamTypes.LoraTencWeights.Type.ID
+            || id == T2IParamTypes.LoraSectionConfinement.Type.ID;
+    }
+
+    /// <summary>Pad value for one missing index of a LoRA-parallel list.
+    /// Confinement pads with global (0). Weights pad with 1. Text-encoder weights copy the base LoRA weight at that index, else 1.</summary>
+    static Func<int, string> PadForLoraList(T2IParamType key, List<string> baseWeights)
+    {
+        if (key.ID == T2IParamTypes.LoraSectionConfinement.Type.ID)
+        {
+            return _ => "0";
+        }
+        if (key.ID == T2IParamTypes.LoraWeights.Type.ID)
+        {
+            return _ => "1";
+        }
+        return index =>
+        {
+            if (baseWeights is not null && index < baseWeights.Count && !string.IsNullOrWhiteSpace(baseWeights[index]))
+            {
+                return baseWeights[index];
+            }
+            return "1";
+        };
+    }
+
+    /// <summary>How many entries a stored stackable value has. Unset is 0.</summary>
+    static int CountStackedEntries(object raw)
+    {
+        if (raw is null)
+        {
+            return 0;
+        }
+        return ReadStackedEntries(raw).Count;
+    }
+
+    /// <summary>Reads a stored stackable value into entries. Accepts a string list or a comma-separated string. Unset is empty.</summary>
+    static List<string> ReadStackedEntries(object raw)
+    {
+        if (raw is null)
+        {
+            return [];
+        }
+        if (raw is List<string> list)
+        {
+            return [.. list];
+        }
+        string text = raw as string ?? $"{raw}";
+        if (text.Length == 0)
+        {
+            return [];
+        }
+        return [.. text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
     }
 
     public class GridCallData
