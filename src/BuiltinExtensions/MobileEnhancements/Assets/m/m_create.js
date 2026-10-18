@@ -360,6 +360,9 @@ class MCreate {
             mState.activePresets = title ? [title] : [];
             // A newly chosen preset's aspect is the default again. Tapping the aspect stepper pins over it.
             mState.aspectPinned = false;
+            // Upscale Off deletes its key, so the pin set — not the key — is what remembers an explicit
+            // pick. Clear it with the selection, or a previous Off would keep stripping the new preset.
+            mState.clearPinnedUpscale();
             let picked = title ? mState.presets.find(preset => preset.title == title) : null;
             let presetAspect = picked && picked.param_map && picked.param_map['aspectratio'];
             if (presetAspect) {
@@ -2227,7 +2230,9 @@ class MCreate {
         return wrap;
     }
 
-    /** Numeric upscale params that get a fixed-scale picklist rather than a free-text field. */
+    /** Numeric upscale params that get a fixed-scale picklist rather than a free-text field.
+     * The Create row writes refinerupscale. seedvrupscale uses the same ladder in the preset editor
+     * and the same preset-pin rules; nothing in this row writes it. */
     static UpscaleScaleParams = ['refinerupscale', 'seedvrupscale'];
 
     /** Preferred upscale scales. Always used (clipped to min/view_max), then unioned with Examples. */
@@ -2272,12 +2277,15 @@ class MCreate {
         select.setAttribute('aria-label', 'Upscale');
         select.addEventListener('change', () => {
             let val = select.value;
+            // "1" is Off. Deleting the key matches the server IgnoreIf, so metadata does not record an upscale.
+            // The pin is what makes that Off beat a preset that still has a scale.
             if (val == '' || val == '1') {
                 delete mState.params['refinerupscale'];
             }
             else {
                 mState.params['refinerupscale'] = val;
             }
+            mState.pinUpscale('refinerupscale');
             mState.changed();
         });
         this.upscaleScaleSelect = select;
@@ -2293,7 +2301,9 @@ class MCreate {
             return false;
         }
         select.style.display = '';
-        let current = `${mState.params['refinerupscale'] ?? ''}`;
+        // Effective value, so an untouched preset scale is what the picklist shows and what gets sent.
+        // A pinned Off has no key after the merge, which is the "Upscale: Off" option.
+        let current = `${mState.buildGenInput()['refinerupscale'] ?? ''}`;
         if (current == '') {
             current = '1';
         }
@@ -2316,6 +2326,9 @@ class MCreate {
             else {
                 mState.params[paramId] = select.value;
             }
+            // Sampler and scheduler stay preset-owned. Only the Upscale row's method (and any later
+            // upscale choice wired through this helper) pins over the preset, including the blank default.
+            mState.pinUpscale(paramId);
             mState.changed();
         });
         this.choiceSelects[paramId] = { 'select': select, 'label': label };

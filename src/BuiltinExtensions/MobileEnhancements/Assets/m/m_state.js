@@ -23,6 +23,12 @@ class MState {
         /** True after the /simple aspect stepper (or an image-ratio match) is used, so that pick wins over
          * a preset aspectratio. Left false, a preset's own aspect stays the default. */
         this.aspectPinned = false;
+        /** Upscale param ids the user has explicitly picked since the preset selection changed.
+         * Steps and CFG can use "key in params" because those steppers always store a value. Upscale Off
+         * deletes the key (the server IgnoreIf is "1"), so a missing key is also a choice and needs its
+         * own marker. Cleared when the preset selection changes and on reset, so the new preset's value
+         * shows and applies again. Persisted: otherwise a reload would send the preset's upscale again. */
+        this.pinnedUpscale = new Set();
         /** True once a save() has failed, so the "not being saved" warning fires once and not per keystroke. */
         this.saveFailed = false;
         /** Param metadata map (id -> param object) from ListT2IParams. */
@@ -417,6 +423,19 @@ class MState {
                 input[key] = this.params[key];
             }
         }
+        // Same rule for the Upscale row, with one difference: picking Off deletes the key (IgnoreIf "1"),
+        // so "key in params" cannot tell a deliberate Off from "never touched". The pin set can. An
+        // unpinned control keeps the preset value, which is also what the picklist displays.
+        for (let key of MState.UpscalePinParams) {
+            if (this.pinnedUpscale.has(key)) {
+                if (key in this.params) {
+                    input[key] = this.params[key];
+                }
+                else {
+                    delete input[key];
+                }
+            }
+        }
         // First-frame MiniMax hybrid / FL2VA (Eros included) sizes the video from Video Resolution, not
         // from Aspect Ratio. With the param absent the server falls back to "Model Preferred", and MiniMax
         // H3's standard is square 960, so the /simple aspect stepper changed its label while the video stayed
@@ -616,8 +635,21 @@ class MState {
         this.videoEndImage = null;
         this.seedLocked = false;
         this.aspectPinned = false;
+        this.clearPinnedUpscale();
         this.customRatio = 0;
         this.changed();
+    }
+
+    /** Records an explicit Upscale-row pick, including Off (the key is then absent). Other params are ignored. */
+    pinUpscale(key) {
+        if (MState.UpscalePinParams.includes(key)) {
+            this.pinnedUpscale.add(key);
+        }
+    }
+
+    /** Drops explicit upscale picks so the current preset's values show and apply. */
+    clearPinnedUpscale() {
+        this.pinnedUpscale.clear();
     }
 
     /** Re-fetches presets and starred models. Boot loads them once, but stars set from the genpage (or
@@ -1068,6 +1100,7 @@ class MState {
                 'activePresets': this.activePresets,
                 'seedLocked': this.seedLocked,
                 'aspectPinned': this.aspectPinned,
+                'pinnedUpscale': [...this.pinnedUpscale],
                 'customRatio': this.customRatio,
                 'archFilter': this.archFilter,
                 'promptImagePaths': this.promptImages.filter(img => img.kind == 'path').map(img => img.value),
@@ -1108,6 +1141,10 @@ class MState {
             this.activePresets = (data.activePresets || []).slice(0, 1);
             this.seedLocked = !!data.seedLocked;
             this.aspectPinned = !!data.aspectPinned;
+            this.pinnedUpscale = new Set(
+                (Array.isArray(data.pinnedUpscale) ? data.pinnedUpscale : [])
+                    .filter(key => MState.UpscalePinParams.includes(key))
+            );
             this.customRatio = data.customRatio || 0;
             this.archFilter = data.archFilter || '';
             this.promptImages = (data.promptImagePaths || []).map(path => ({ 'kind': 'path', 'value': path }));
@@ -1141,6 +1178,11 @@ class MState {
         }
     }
 }
+
+/** Upscale params an explicit /simple pick beats the active preset for.
+ * refinerupscale and refinerupscalemethod are the Create row. seedvrupscale is the other numeric
+ * upscale (same IgnoreIf "1"); the row does not write it, but a pin recorded for it is honored. */
+MState.UpscalePinParams = ['refinerupscale', 'refinerupscalemethod', 'seedvrupscale'];
 
 /** Reference width/height per aspect ratio at a 512 side length. UPSTREAM COUPLING: this table and the
  * scaling math in resolutionFor must stay identical to T2IParamInput.ResolutionAspectReferences (C#) and
