@@ -925,14 +925,21 @@ class TagDexTabClass {
         this.insertTag(TagDexTabClass.allTagsOf(file.data));
     }
 
-    /** The full tag line for a record: trigger first, then its core tags, deduplicated. */
+    /** Loose tag identity. Case, underscores, repeated spaces, and backslashes before parentheses do not count. */
+    static tagKey(text) {
+        return `${text || ''}`.replace(/\\([()])/g, '$1').replace(/_/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    /** The full tag line for a record: trigger first, then its core tags, deduplicated on tagKey.
+     * The first spelling is kept. */
     static allTagsOf(record) {
         let out = [];
         let seen = new Set();
         for (let tag of (record.trigger || '').split(',').concat(record.core_tags || [])) {
             let clean = tag.trim();
-            if (clean.length > 0 && !seen.has(clean)) {
-                seen.add(clean);
+            let key = TagDexTabClass.tagKey(clean);
+            if (clean.length > 0 && !seen.has(key)) {
+                seen.add(key);
                 out.push(clean);
             }
         }
@@ -1188,7 +1195,21 @@ class TagDexTabClass {
         if (typeof tagDexCore != 'undefined' && tagDexCore.escapePromptParens) {
             text = tagDexCore.escapePromptParens(text);
         }
-        let wanted = text.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        let wanted = [];
+        let seen = new Set();
+        let pieces = text.split(',');
+        for (let i = 0; i < pieces.length; i++) {
+            let clean = pieces[i].trim();
+            if (clean.length == 0) {
+                continue;
+            }
+            let key = TagDexTabClass.tagKey(clean);
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            wanted.push(clean);
+        }
         if (wanted.length == 0) {
             return;
         }

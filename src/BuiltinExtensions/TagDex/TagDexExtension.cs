@@ -202,10 +202,13 @@ public partial class TagDexExtension : Extension
 /// <summary>Builds the lean client-side typeahead index.</summary>
 public static class TagDexIndexBlob
 {
-    /// <summary>Cached serialized blobs, keyed by source ID, minimum count, and the list's file timestamp and row
-    /// count. A rebuilt list gets a new key, so it never reads a stale blob - but the old key would otherwise stay
-    /// resident forever, so <see cref="TagDexData.Unload"/> calls <see cref="Evict"/> to drop every entry for
-    /// that source.</summary>
+    /// <summary>Bumped when serialized trigger text changes, so the immutable URL and the in-process cache both miss.</summary>
+    public const string FormatVersion = "s2";
+
+    /// <summary>Cached serialized blobs, keyed by source ID, minimum count, format version, and the list's file
+    /// timestamp and row count. A rebuilt list gets a new key, so it never reads a stale blob - but the old key
+    /// would otherwise stay resident forever, so <see cref="TagDexData.Unload"/> calls <see cref="Evict"/> to drop
+    /// every entry for that source.</summary>
     public static ConcurrentDictionary<string, string> Cache = new();
 
     /// <summary>Drops every cached blob belonging to one source, whatever its minimum count or fingerprint.</summary>
@@ -224,7 +227,7 @@ public static class TagDexIndexBlob
     /// <summary>A short fingerprint of a loaded list, used as the immutable-cache URL segment.</summary>
     public static string Fingerprint(TagDexList list, int minCount)
     {
-        return $"{list.FileModifiedUtc:x}-{list.Entries.Length:x}-{minCount:x}";
+        return $"{list.FileModifiedUtc:x}-{list.Entries.Length:x}-{minCount:x}-{FormatVersion}";
     }
 
     /// <summary>Serializes the top entries of a list as newline-delimited, tab-separated records.
@@ -234,7 +237,7 @@ public static class TagDexIndexBlob
     /// descending, which the client relies on to make an early-terminated scan return the most popular matches.</para></summary>
     public static string Build(TagDexList list, int minCount)
     {
-        string key = $"{list.Source.ID}\n{minCount}\n{list.FileModifiedUtc}\n{list.Entries.Length}";
+        string key = $"{list.Source.ID}\n{minCount}\n{list.FileModifiedUtc}\n{list.Entries.Length}\n{FormatVersion}";
         return Cache.GetOrCreate(key, () =>
         {
             StringBuilder builder = new(1024 * 512);
@@ -250,7 +253,7 @@ public static class TagDexIndexBlob
                     break;
                 }
                 builder.Append(Clean(entry.Name)).Append('\t');
-                builder.Append(Clean(entry.Trigger)).Append('\t');
+                builder.Append(Clean(TagDexNames.DropRedundantSeries(entry.Trigger))).Append('\t');
                 builder.Append(Clean(entry.Copyright)).Append('\t');
                 builder.Append(Clean(entry.CoreTags)).Append('\t');
                 builder.Append(entry.Count).Append('\n');
