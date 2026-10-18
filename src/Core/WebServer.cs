@@ -742,9 +742,10 @@ public class WebServer
             {
                 if (handler.Models.TryGetValue(name + ".safetensors", out T2IModel model) || handler.Models.TryGetValue(name, out model))
                 {
-                    if (model.Metadata?.PreviewImage?.StartsWithFast("data:") ?? false)
+                    string preview = T2IModel.PreviewDataFor(model);
+                    if (preview is not null)
                     {
-                        await yieldResult(model.Metadata.PreviewImage);
+                        await yieldResult(preview);
                         return;
                     }
                 }

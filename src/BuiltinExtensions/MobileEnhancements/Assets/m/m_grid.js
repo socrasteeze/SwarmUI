@@ -492,17 +492,22 @@ class MGrid {
             renderOptions();
             body.appendChild(list);
             // The Create tab loads this list when its own LoRA sheet is opened, which may never have
-            // happened in this session. Fetched here rather than at boot: the grid sheet is the first place
-            // that needs it and the request is not free.
+            // happened in this session. enrichLoraMetadata indexes the boot corpus immediately, then fills
+            // titles past the list cap one folder at a time. Render the corpus now and again when it settles.
             if (!mCreate.loraList) {
-                genericRequest('ListModels', { 'path': '', 'depth': MCreate.ListDepth, 'subtype': 'LoRA',
-                    'sortBy': 'Name', 'allowRemote': true, 'sortReverse': false, 'dataImages': false }, data => {
-                    mCreate.indexLoras(data.files || []);
+                let settled = false;
+                mCreate.enrichLoraMetadata((failed, error) => {
+                    settled = true;
+                    if (failed && (!mCreate.loraList || mCreate.loraList.length == 0)) {
+                        list.innerHTML = '';
+                        list.appendChild(mUI.el('div', 'm-strip-empty', `Could not load LoRAs: ${error}`));
+                        return;
+                    }
                     renderOptions();
-                }, 0, error => {
-                    list.innerHTML = '';
-                    list.appendChild(mUI.el('div', 'm-strip-empty', `Could not load LoRAs: ${error}`));
                 });
+                if (!settled) {
+                    renderOptions();
+                }
             }
         }
         renderChosen();

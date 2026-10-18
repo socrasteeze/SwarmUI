@@ -2614,22 +2614,58 @@ class MCreate {
     }
 
     /** Loads titles/previews without losing LoRAs past ModelListSanityCap.
-     * Root is fetched at depth 1 (folders + loose files), then each top-level folder is fetched with its
-     * own depth budget so a 19k library is not truncated to an arbitrary 5k slice of the root. */
+     * Root is fetched at depth 1 (direct files + folder names), then each top-level folder at
+     * MCreate.ListDepth. A truncated response is merged as far as it goes, then that same path is
+     * fetched again at depth 1 and each immediate subfolder is fetched at the deep depth. The same
+     * path+depth pair is requested once. onDone(failed, errorText) runs after every request settles. */
     enrichLoraMetadata(onDone) {
         let pending = 0;
         let anyError = false;
+        let errorText = '';
+        let requested = new Set();
         let finish = () => {
             if (--pending > 0) {
                 return;
             }
-            onDone(anyError);
+            onDone(anyError, errorText);
         };
-        let fetchPath = (path) => {
+        /** Immediate child paths. Depth 1 returns names relative to the request; a full path is kept only when its parent is that path. */
+        let childPaths = (path, folders) => {
+            let children = [];
+            let seen = new Set();
+            let base = `${path || ''}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+            for (let folder of (folders || [])) {
+                let name = `${folder}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+                if (!name) {
+                    continue;
+                }
+                let child = null;
+                if (!name.includes('/')) {
+                    child = base == '' ? name : `${base}/${name}`;
+                }
+                else {
+                    let parent = name.substring(0, name.lastIndexOf('/'));
+                    if (parent == base) {
+                        child = name;
+                    }
+                }
+                if (child && !seen.has(child)) {
+                    seen.add(child);
+                    children.push(child);
+                }
+            }
+            return children;
+        };
+        let fetchPath = (path, depth) => {
+            let key = `${depth}\n${path}`;
+            if (requested.has(key)) {
+                return;
+            }
+            requested.add(key);
             pending++;
             genericRequest('ListModels', {
                 'path': path,
-                'depth': path == '' ? 1 : MCreate.ListDepth,
+                'depth': depth,
                 'subtype': 'LoRA',
                 'sortBy': 'Name',
                 'allowRemote': true,
@@ -2637,25 +2673,25 @@ class MCreate {
                 'dataImages': false
             }, data => {
                 this.mergeLoraMetadata(data.files || []);
-                if (path == '') {
-                    for (let folder of (data.folders || [])) {
-                        // Nested paths arrive inside the deep per-folder fetch; only enqueue top-level ones.
-                        if (`${folder}`.includes('/')) {
-                            continue;
-                        }
-                        fetchPath(folder);
+                if (data.truncated && depth != 1) {
+                    fetchPath(path, 1);
+                }
+                else if (depth == 1) {
+                    for (let child of childPaths(path, data.folders)) {
+                        fetchPath(child, MCreate.ListDepth);
                     }
                 }
                 finish();
-            }, 0, () => {
+            }, 0, error => {
                 anyError = true;
+                errorText = `${error || ''}`;
                 finish();
             });
         };
         if (!this.loraList) {
             this.indexLoras([]);
         }
-        fetchPath('');
+        fetchPath('', 1);
     }
 
     /** The cached LoRA model object for a name, or a minimal stand-in before the list has loaded. */
