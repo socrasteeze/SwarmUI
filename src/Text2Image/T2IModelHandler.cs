@@ -1028,14 +1028,6 @@ public class T2IModelHandler
                     tags = tagsTok.Value<string>().Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
                 }
             }
-            static string[] limitSize(string[] arr, int max)
-            {
-                if (arr is null || arr.Length <= max)
-                {
-                    return arr;
-                }
-                return arr[0..max];
-            }
             static string limitLength(string str, int max)
             {
                 if (str is null || str.Length <= max)
@@ -1095,7 +1087,7 @@ public class T2IModelHandler
                 License = limitLength(pickBest(metaHeader?.Value<string>("modelspec.license"), metaHeader?.Value<string>("license")), basicLimit),
                 Date = limitLength(pickBest(metaHeader?.Value<string>("modelspec.date"), metaHeader?.Value<string>("date")), basicLimit),
                 Preprocessor = limitLength(pickBest(metaHeader?.Value<string>("modelspec.preprocessor"), metaHeader?.Value<string>("preprocessor")), basicLimit),
-                Tags = limitSize(tags, 128),
+                Tags = T2IModel.CleanTags(tags),
                 IsNegativeEmbedding = (pickBest(metaHeader?.Value<string>("modelspec.is_negative_embedding"), metaHeader?.Value<string>("is_negative_embedding")) ?? "false").ToLowerFast() == "true",
                 LoraDefaultWeight = limitLength(pickBest(metaHeader?.Value<string>("modelspec.lora_default_weight"), metaHeader?.Value<string>("lora_default_weight")), basicLimit),
                 LoraDefaultConfinement = limitLength(pickBest(metaHeader?.Value<string>("modelspec.lora_default_confinement"), metaHeader?.Value<string>("lora_default_confinement")), basicLimit),
