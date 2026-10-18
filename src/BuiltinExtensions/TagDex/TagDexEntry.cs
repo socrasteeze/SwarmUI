@@ -241,4 +241,145 @@ public static class TagDexNames
         }
         return slug.Replace('_', ' ');
     }
+
+    /// <summary>Drops a later comma-separated part when it repeats a parenthesized qualifier of the first part.
+    /// <para>Character triggers often look like <c>nessa (pokemon), pokemon</c>. The standalone series is already
+    /// in the name. Only an exact key match is removed, and the first part is never removed. A trigger with
+    /// nothing to drop is returned unchanged.</para></summary>
+    public static string DropRedundantSeries(string trigger)
+    {
+        if (string.IsNullOrWhiteSpace(trigger) || trigger.IndexOf(',') < 0)
+        {
+            return trigger;
+        }
+        string[] parts = trigger.Split(',');
+        HashSet<string> qualifiers = QualifierKeys(parts[0]);
+        if (qualifiers.Count == 0)
+        {
+            return trigger;
+        }
+        bool dropped = false;
+        List<string> kept = new(parts.Length);
+        kept.Add(parts[0].Trim());
+        for (int i = 1; i < parts.Length; i++)
+        {
+            string trimmed = parts[i].Trim();
+            if (trimmed.Length > 0 && qualifiers.Contains(CompareKey(trimmed)))
+            {
+                dropped = true;
+                continue;
+            }
+            kept.Add(trimmed);
+        }
+        if (!dropped)
+        {
+            return trigger;
+        }
+        return string.Join(", ", kept);
+    }
+
+    /// <summary>Comparison keys of every parenthesized qualifier in a name. <c>\(fate\)</c> and <c>(fate)</c> both yield <c>fate</c>.</summary>
+    private static HashSet<string> QualifierKeys(string name)
+    {
+        HashSet<string> keys = [];
+        if (string.IsNullOrEmpty(name))
+        {
+            return keys;
+        }
+        int i = 0;
+        while (i < name.Length)
+        {
+            int openLength = ParenTokenLength(name, i, '(');
+            if (openLength == 0)
+            {
+                i++;
+                continue;
+            }
+            int contentStart = i + openLength;
+            int depth = 1;
+            int j = contentStart;
+            bool closed = false;
+            while (j < name.Length && depth > 0)
+            {
+                int innerOpen = ParenTokenLength(name, j, '(');
+                if (innerOpen > 0)
+                {
+                    depth++;
+                    j += innerOpen;
+                    continue;
+                }
+                int closeLength = ParenTokenLength(name, j, ')');
+                if (closeLength > 0)
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        string key = CompareKey(name.Substring(contentStart, j - contentStart));
+                        if (key.Length > 0)
+                        {
+                            keys.Add(key);
+                        }
+                        j += closeLength;
+                        closed = true;
+                        break;
+                    }
+                    j += closeLength;
+                    continue;
+                }
+                j++;
+            }
+            i = closed ? j : i + openLength;
+        }
+        return keys;
+    }
+
+    /// <summary>Length of a bare or escaped parenthesis at <paramref name="index"/>, or zero when that parenthesis is not there.</summary>
+    private static int ParenTokenLength(string text, int index, char paren)
+    {
+        if (index < text.Length && text[index] == paren)
+        {
+            return 1;
+        }
+        if (index + 1 < text.Length && text[index] == '\\' && text[index + 1] == paren)
+        {
+            return 2;
+        }
+        return 0;
+    }
+
+    /// <summary>Series comparison key: backslashes before parentheses removed, invariant lowercase, underscores as spaces, whitespace collapsed and trimmed.</summary>
+    private static string CompareKey(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "";
+        }
+        StringBuilder builder = new(value.Length);
+        bool pendingSpace = false;
+        bool any = false;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (c == '\\' && i + 1 < value.Length && (value[i + 1] == '(' || value[i + 1] == ')'))
+            {
+                continue;
+            }
+            if (c == '_' || char.IsWhiteSpace(c))
+            {
+                if (any)
+                {
+                    pendingSpace = true;
+                }
+                continue;
+            }
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+            }
+            builder.Append(char.ToLowerInvariant(c));
+            any = true;
+        }
+        return builder.ToString();
+    }
 }

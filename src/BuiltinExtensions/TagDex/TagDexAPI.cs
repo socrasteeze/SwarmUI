@@ -467,7 +467,7 @@ public partial class TagDexExtension
         {
             ["name"] = entry.Name,
             ["display"] = TagDexNames.Humanize(entry.Name),
-            ["trigger"] = entry.Trigger,
+            ["trigger"] = TagDexNames.DropRedundantSeries(entry.Trigger),
             ["count"] = entry.Count,
             ["solo_count"] = entry.SoloCount,
             ["kind"] = list.Source.Kind == TagDexKind.Character ? "character" : "artist"
