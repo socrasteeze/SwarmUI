@@ -72,7 +72,9 @@ class MUI {
         return mState.isStarred(subtype, name) ? this.el('span', 'm-model-star', '\u2605') : null;
     }
 
-    /** Thumbnail for a model, or null when it has no preview image. */
+    /** Thumbnail for a model, or null when it has no preview image.
+     * A broken preview URL swaps to the placeholder once. An empty preview stays null so rows without one
+     * keep their current layout. */
     modelThumb(model, className) {
         if (!model.preview_image) {
             return null;
@@ -85,6 +87,13 @@ class MUI {
         // finger is on the glass, so a scrolled list decodes its whole newly-visible batch the moment the scroll
         // settles. Synchronous, that batch is a multi-second freeze right after the list comes to rest.
         img.decoding = 'async';
+        img.addEventListener('error', () => {
+            if (img.dataset.mThumbFallback) {
+                return;
+            }
+            img.dataset.mThumbFallback = '1';
+            img.src = 'imgs/model_placeholder.jpg';
+        });
         return img;
     }
 

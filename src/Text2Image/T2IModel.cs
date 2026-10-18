@@ -385,6 +385,28 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
         return key.ToString();
     }
 
+    /// <summary>Data-URL preview served by <c>ViewSpecial</c>.
+    /// <see cref="PreviewImage"/> wins when it is a data URL, which is how a legacy model stores an adjacent preview while <see cref="Metadata"/> stays null.
+    /// A placeholder path such as <c>imgs/model_placeholder.jpg</c> falls through to <see cref="T2IModelHandler.ModelMetadataStore.PreviewImage"/> when that value is a data URL.</summary>
+    /// <param name="model">Model to read. Null returns null.</param>
+    /// <returns>The data URL to serve, or null when neither field holds one.</returns>
+    public static string PreviewDataFor(T2IModel model)
+    {
+        if (model is null)
+        {
+            return null;
+        }
+        if (model.PreviewImage?.StartsWithFast("data:") ?? false)
+        {
+            return model.PreviewImage;
+        }
+        if (model.Metadata?.PreviewImage?.StartsWithFast("data:") ?? false)
+        {
+            return model.Metadata.PreviewImage;
+        }
+        return null;
+    }
+
     /// <summary>Gets a networkable copy of this model's data.</summary>
     public JObject ToNetObject(string prefix = "", bool dataImgs = true)
     {

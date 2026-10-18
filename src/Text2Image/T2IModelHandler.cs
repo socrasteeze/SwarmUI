@@ -467,7 +467,7 @@ public class T2IModelHandler
         }
     }
 
-    public static readonly string[] AutoImageFormatSuffixes = [".jpg", ".png", ".preview.png", ".preview.jpg", ".jpeg", ".preview.jpeg", ".thumb.jpg", ".thumb.png"];
+    public static readonly string[] AutoImageFormatSuffixes = [".jpg", ".png", ".preview.png", ".preview.jpg", ".jpeg", ".preview.jpeg", ".thumb.jpg", ".thumb.png", ".preview.webp"];
 
     /// <summary>Placeholder stored when a model has no preview image.</summary>
     public const string PlaceholderPreviewImage = "imgs/model_placeholder.jpg";
