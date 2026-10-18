@@ -6,6 +6,7 @@ using SwarmUI.Utils;
 using SwarmUI.WebAPI;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace SwarmUI.Text2Image;
 
@@ -317,6 +318,73 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
         }
     }
 
+    /// <summary>How many tags are kept after cleaning.</summary>
+    private const int MaxTags = 128;
+
+    /// <summary>Splits, trims, and dedupes model tags. Keeps the first display spelling. Returns null when nothing remains.</summary>
+    /// <param name="tags">Raw tag entries. Null means there are no tags.</param>
+    /// <returns>Cleaned tags in first-seen order, or null when <paramref name="tags"/> is null or nothing remains.</returns>
+    public static string[] CleanTags(IEnumerable<string> tags)
+    {
+        if (tags is null)
+        {
+            return null;
+        }
+        List<string> kept = new(MaxTags);
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (string raw in tags)
+        {
+            if (string.IsNullOrEmpty(raw))
+            {
+                continue;
+            }
+            string[] pieces = raw.Split([',', '\n', '\r'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            foreach (string piece in pieces)
+            {
+                string key = TagComparisonKey(piece);
+                if (key.Length == 0 || !seen.Add(key))
+                {
+                    continue;
+                }
+                kept.Add(piece);
+                if (kept.Count == MaxTags)
+                {
+                    return [.. kept];
+                }
+            }
+        }
+        if (kept.Count == 0)
+        {
+            return null;
+        }
+        return [.. kept];
+    }
+
+    /// <summary>Comparison key for one tag. Lowercase, with '_' and '-' as spaces, and whitespace collapsed.</summary>
+    /// <param name="display">Trimmed display spelling. This value is not rewritten.</param>
+    /// <returns>The key used to detect duplicates.</returns>
+    private static string TagComparisonKey(string display)
+    {
+        string lowered = display.ToLowerInvariant();
+        StringBuilder key = new(lowered.Length);
+        bool pendingSpace = false;
+        foreach (char c in lowered)
+        {
+            if (c == '_' || c == '-' || char.IsWhiteSpace(c))
+            {
+                pendingSpace = key.Length > 0;
+                continue;
+            }
+            if (pendingSpace)
+            {
+                key.Append(' ');
+                pendingSpace = false;
+            }
+            key.Append(c);
+        }
+        return key.ToString();
+    }
+
     /// <summary>Gets a networkable copy of this model's data.</summary>
     public JObject ToNetObject(string prefix = "", bool dataImgs = true)
     {
@@ -325,6 +393,7 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
         {
             previewImg = $"/ViewSpecial/{Handler.ModelType}/{Name}?editid={ModelsAPI.ModelEditID}";
         }
+        string[] tags = CleanTags(Metadata?.Tags);
         return new JObject()
         {
             [$"{prefix}name"] = Name,
@@ -345,7 +414,7 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
             [$"{prefix}usage_hint"] = Metadata?.UsageHint,
             [$"{prefix}trigger_phrase"] = Metadata?.TriggerPhrase,
             [$"{prefix}merged_from"] = Metadata?.MergedFrom,
-            [$"{prefix}tags"] = Metadata?.Tags is null ? null : new JArray(Metadata.Tags),
+            [$"{prefix}tags"] = tags is null ? null : new JArray(tags),
             [$"{prefix}is_supported_model_format"] = IsSupportedModelType,
             [$"{prefix}is_negative_embedding"] = Metadata?.IsNegativeEmbedding ?? false,
             [$"{prefix}lora_default_weight"] = Metadata?.LoraDefaultWeight ?? "",

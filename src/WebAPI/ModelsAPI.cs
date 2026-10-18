@@ -983,7 +983,8 @@ public static class ModelsAPI
             actualModel.Metadata.Date = date;
             actualModel.Metadata.License = license;
             actualModel.Metadata.TriggerPhrase = trigger_phrase;
-            actualModel.Metadata.Tags = string.IsNullOrWhiteSpace(tags) ? null : tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            string[] rawTags = string.IsNullOrWhiteSpace(tags) ? null : tags.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            actualModel.Metadata.Tags = T2IModel.CleanTags(rawTags);
             actualModel.Metadata.IsNegativeEmbedding = is_negative_embedding;
             actualModel.Metadata.LoraDefaultWeight = lora_default_weight;
             actualModel.Metadata.LoraDefaultConfinement = lora_default_confinement;
