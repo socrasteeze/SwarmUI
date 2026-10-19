@@ -45,6 +45,48 @@ class MPresets {
         ['h3memmlpmemory', 'auto']
     ];
 
+    /** Prompt, then negative prompt, then every other key in its existing order.
+     * `keys` is already sorted by the caller. Video keys are filtered out before this and stay in the
+     * video section. */
+    static orderPromptFirst(keys) {
+        let rest = [];
+        let prompt = false;
+        let negative = false;
+        for (let i = 0; i < keys.length; i++) {
+            if (keys[i] == 'prompt') {
+                prompt = true;
+            }
+            else if (keys[i] == 'negativeprompt') {
+                negative = true;
+            }
+            else {
+                rest.push(keys[i]);
+            }
+        }
+        let ordered = [];
+        if (prompt) {
+            ordered.push('prompt');
+        }
+        if (negative) {
+            ordered.push('negativeprompt');
+        }
+        for (let i = 0; i < rest.length; i++) {
+            ordered.push(rest[i]);
+        }
+        return ordered;
+    }
+
+    /** When a label-sorted list already places prompt and negative prompt next to each other, put prompt first. */
+    static preferAdjacentPrompt(keys) {
+        let promptAt = keys.indexOf('prompt');
+        let negativeAt = keys.indexOf('negativeprompt');
+        if (promptAt >= 0 && negativeAt == promptAt - 1) {
+            keys[negativeAt] = 'prompt';
+            keys[promptAt] = 'negativeprompt';
+        }
+        return keys;
+    }
+
     /** Registers the More-tab entry. Called at script load: registerMoreItem's contract is that every
      * registration happens before m_app.js builds that tab. */
     install() {
@@ -229,6 +271,12 @@ class MPresets {
         let videoKeys = MPresets.FL2VAParams.map(([key]) => key).filter(key => mState.paramMeta[key]);
         videoSection.open = videoKeys.some(key => key in working);
         let renderVideo = () => {
+            let oldFields = videoList.querySelectorAll('.m-preset-textarea');
+            for (let i = 0; i < oldFields.length; i++) {
+                if (oldFields[i].mRelease) {
+                    oldFields[i].mRelease();
+                }
+            }
             videoList.innerHTML = '';
             for (let key of videoKeys) {
                 let row = mUI.el('div', 'm-preset-param-row');
@@ -246,9 +294,15 @@ class MPresets {
             }
         };
         let renderParams = () => {
+            let oldFields = paramList.querySelectorAll('.m-preset-textarea');
+            for (let i = 0; i < oldFields.length; i++) {
+                if (oldFields[i].mRelease) {
+                    oldFields[i].mRelease();
+                }
+            }
             paramList.innerHTML = '';
             renderVideo();
-            let keys = Object.keys(working).filter(key => !videoKeys.includes(key)).sort();
+            let keys = MPresets.orderPromptFirst(Object.keys(working).filter(key => !videoKeys.includes(key)).sort());
             if (Object.keys(working).length == 0) {
                 paramList.appendChild(mUI.el('div', 'm-strip-empty',
                     'No parameters. A preset with none does nothing.'));
@@ -273,6 +327,14 @@ class MPresets {
                 row.appendChild(valueWrap);
                 paramList.appendChild(row);
             }
+            requestAnimationFrame(() => {
+                let areas = paramList.querySelectorAll('.m-preset-textarea');
+                for (let i = 0; i < areas.length; i++) {
+                    if (areas[i].mGrow) {
+                        areas[i].mGrow();
+                    }
+                }
+            });
         };
         content.appendChild(videoSection);
         renderParams();
@@ -475,6 +537,9 @@ class MPresets {
             input.placeholder = opts.placeholder;
         }
         let grow = () => {
+            if (!input.isConnected) {
+                return;
+            }
             input.style.height = 'auto';
             input.style.height = `${input.scrollHeight + 2}px`;
         };
@@ -485,10 +550,30 @@ class MPresets {
             }
         });
         if (multiline) {
-            // scrollHeight is 0 while detached, so openEditor calls this once the sheet is in the DOM. The
-            // frame callback covers rows re-rendered later (Add parameter, remove).
+            // scrollHeight is 0 while detached, so openEditor calls this once the sheet is in the DOM.
+            // renderParams also calls it after Add parameter, Use current, and remove. Width changes
+            // (sheet resize, orientation) and late fonts need another pass; height-only notifications
+            // are ignored so the resize observer does not loop on its own write.
             input.mGrow = grow;
+            let lastWidth = -1;
+            let observer = new ResizeObserver(entries => {
+                if (!input.isConnected) {
+                    observer.disconnect();
+                    return;
+                }
+                let width = Math.round(entries[0].contentRect.width);
+                if (width == lastWidth) {
+                    return;
+                }
+                lastWidth = width;
+                grow();
+            });
+            observer.observe(input);
+            input.mRelease = () => observer.disconnect();
             requestAnimationFrame(grow);
+            if (document.fonts && document.fonts.ready) {
+                document.fonts.ready.then(() => grow());
+            }
         }
         return input;
     }
@@ -522,6 +607,7 @@ class MPresets {
             let keys = Object.keys(mState.paramMeta).filter(key => !(key in working)
                 && (!term || `${key} ${MCreate.paramLabel(key)}`.toLowerCase().includes(term)));
             keys.sort((a, b) => MCreate.paramLabel(a).localeCompare(MCreate.paramLabel(b)));
+            MPresets.preferAdjacentPrompt(keys);
             if (keys.length == 0) {
                 results.appendChild(mUI.el('div', 'm-strip-empty', Object.keys(mState.paramMeta).length == 0
                     ? 'The parameter list has not loaded yet.' : 'No parameters match.'));

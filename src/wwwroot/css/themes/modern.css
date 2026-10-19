@@ -520,8 +520,10 @@
 
 .input-group .auto-text {
     border: 1px solid var(--border-color);
-    padding: 5px 10px !important;
     margin-top: 5px;
+}
+.input-group textarea.auto-text-block {
+    padding: 5px 10px !important;
 }
 
 .simple-outer-wall {

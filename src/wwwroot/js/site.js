@@ -331,17 +331,19 @@ function textPromptDoCount(elem, countElem = null, prefix = '') {
 
 let jitterDebug = false;
 
-function textBoxSizeAdjust(elem) {
+function textBoxSizeAdjust(elem, maxHeight = null) {
+    let cap = maxHeight || '15rem';
     elem.style.height = '0px';
     let height = elem.scrollHeight;
-    elem.style.height = `max(3.4rem, min(15rem, ${height + 5}px))`;
+    elem.style.height = `max(3.4rem, min(${cap}, ${height + 5}px))`;
     if (jitterDebug) {
         console.log(`JitterDebug textBoxSizeAdjust: ${elem.id} height adjust: ${height}, now ${elem.scrollHeight}`);
     }
 }
 
 function textPromptInputHandle(elem) {
-    textBoxSizeAdjust(elem);
+    let cap = elem.id && elem.id.startsWith('preset_input_') ? '40vh' : null;
+    textBoxSizeAdjust(elem, cap);
     textPromptDoCount(elem);
 }
 
