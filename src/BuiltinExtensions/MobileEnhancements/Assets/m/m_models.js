@@ -15,8 +15,16 @@ class MModels {
         this.civitaiBusy = false;
         /** Current folder's starred-first model rows. */
         this.folderModels = [];
-        /** Warning shown when ListModels reports a capped folder result. */
+        /** Warning shown when ListModels reports a capped folder result that this tab cannot page. */
         this.folderIncomplete = false;
+        /** Server files accumulated for the current folder, before the starred reorder. */
+        this.folderServerFiles = [];
+        /** Match count reported for the current folder. */
+        this.folderTotal = 0;
+        /** True when the current LoRA folder still has pages past folderServerFiles. */
+        this.folderHasMore = false;
+        /** True while renderPage is drawing a search result rather than the open folder. */
+        this.showingSearch = false;
         /** Current page in either the folder or global-search result set. */
         this.page = 0;
         /** Monotonic token that invalidates stale folder listing callbacks. */
@@ -200,23 +208,24 @@ class MModels {
         this.grid.innerHTML = '';
         this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'Loading...'));
         let version = this.folderRequestVersion;
+        if (isLora && mCreate.enrichLoraFolder) {
+            mCreate.enrichLoraFolder(this.folder, sort, 0, (failed, error, data) => {
+                if (version != this.folderRequestVersion) {
+                    return;
+                }
+                if (failed) {
+                    mUI.warn(`Could not list models: ${error}`);
+                    return;
+                }
+                this.applyFolderResult(data || {});
+            });
+            return;
+        }
         genericRequest('ListModels', { 'path': this.folder, 'depth': 1, 'subtype': this.subtype, 'sortBy': sort.mode, 'allowRemote': true, 'sortReverse': sort.reverse, 'dataImages': false }, data => {
             if (version != this.folderRequestVersion) {
                 return;
             }
-            this.renderFolders(data.folders || []);
-            this.grid.innerHTML = '';
-            // Starred first, same as the Create-tab pickers and the genpage's own browsers. The folder result
-            // remains complete, then renders in pages: a favourite belongs in the first visible page even
-            // when the folder has hundreds of rows.
-            this.folderModels = mState.compatFirst(mState.starredFirst(data.files || [], this.subtype), this.subtype);
-            this.updateArchitectures();
-            if (this.folderModels.length == 0) {
-                this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
-                return;
-            }
-            this.folderIncomplete = data.complete === false;
-            this.renderPage();
+            this.applyFolderResult(data || {});
         }, 0, err => {
             if (version != this.folderRequestVersion) {
                 return;
@@ -225,11 +234,69 @@ class MModels {
         });
     }
 
+    /** Renders one folder response. LoRA pages that stop early offer Load more; other subtypes keep the cap note. */
+    applyFolderResult(data) {
+        this.renderFolders(data.folders || []);
+        this.grid.innerHTML = '';
+        this.showingSearch = false;
+        this.folderServerFiles = (data.files || []).slice();
+        this.folderTotal = data.total != null ? data.total : this.folderServerFiles.length;
+        this.folderHasMore = this.subtype == 'LoRA' && this.folderServerFiles.length < this.folderTotal;
+        // Starred first, same as the Create-tab pickers and the genpage's own browsers. The folder result
+        // remains complete, then renders in pages: a favourite belongs in the first visible page even
+        // when the folder has hundreds of rows.
+        this.folderModels = mState.compatFirst(mState.starredFirst(this.folderServerFiles, this.subtype), this.subtype);
+        this.updateArchitectures();
+        if (this.folderModels.length == 0) {
+            this.grid.appendChild(mUI.el('div', 'm-strip-empty', 'No models here.'));
+            this.pager.hidden = true;
+            return;
+        }
+        this.folderIncomplete = data.complete === false && !this.folderHasMore;
+        this.renderPage();
+    }
+
+    /** Appends the next page of the open LoRA folder. */
+    loadMoreFolder() {
+        if (this.folderMoreBusy || !this.folderHasMore || !mCreate.enrichLoraFolder) {
+            return;
+        }
+        this.folderMoreBusy = true;
+        let version = this.folderRequestVersion;
+        let sort = this.sortSetting();
+        mCreate.enrichLoraFolder(this.folder, sort, this.folderServerFiles.length, (failed, error, data) => {
+            this.folderMoreBusy = false;
+            if (version != this.folderRequestVersion) {
+                return;
+            }
+            if (failed) {
+                mUI.warn(`Could not list models: ${error}`);
+                return;
+            }
+            let seen = {};
+            for (let file of this.folderServerFiles) {
+                seen[file.name] = true;
+            }
+            for (let file of ((data && data.files) || [])) {
+                if (!seen[file.name]) {
+                    this.folderServerFiles.push(file);
+                    seen[file.name] = true;
+                }
+            }
+            this.folderTotal = data && data.total != null ? data.total : this.folderTotal;
+            this.folderHasMore = this.folderServerFiles.length < this.folderTotal;
+            this.folderModels = mState.compatFirst(mState.starredFirst(this.folderServerFiles, this.subtype), this.subtype);
+            this.renderPage();
+        });
+    }
+
     /** Clears folder-listing state and prevents an older request from changing the current view. */
     invalidateFolderRender() {
         this.folderRequestVersion++;
         this.folderModels = [];
         this.folderIncomplete = false;
+        this.folderHasMore = false;
+        this.folderServerFiles = [];
         this.pager.hidden = true;
     }
 
@@ -312,7 +379,15 @@ class MModels {
         for (let i = start; i < end; i++) {
             this.grid.appendChild(this.buildCard(models[i]));
         }
-        if (this.folderIncomplete) {
+        if (!this.showingSearch && this.folderHasMore) {
+            let more = mUI.el('div', 'm-models-search-count m-list-count', `Showing ${this.folderServerFiles.length} of ${this.folderTotal} - search or open a subfolder to see more`);
+            let button = mUI.el('button', 'm-model-plain-row', 'Load more');
+            button.type = 'button';
+            button.addEventListener('click', () => this.loadMoreFolder());
+            more.appendChild(button);
+            this.grid.appendChild(more);
+        }
+        else if (!this.showingSearch && this.folderIncomplete) {
             this.grid.appendChild(mUI.el('div', 'm-models-search-count m-list-count', 'The server capped this folder listing. Search or open a narrower folder to find more models.'));
         }
         this.pager.hidden = models.length <= MModels.PageSize;
@@ -332,8 +407,23 @@ class MModels {
     /** Search results across every folder of the current subtype. The lists are loaded on first search and
      * cached on mCreate, which the pickers share; explicit pages keep every cached match reachable. */
     renderSearch() {
+        this.paintSearch();
+        let term = `${this.search.value || ''}`.trim();
+        if (this.subtype == 'LoRA' && term && mCreate.searchLoraMetadata) {
+            mCreate.searchLoraMetadata(term, () => {
+                if (`${this.search.value || ''}`.trim().toLowerCase() != term.toLowerCase()) {
+                    return;
+                }
+                this.paintSearch();
+            });
+        }
+    }
+
+    /** Draws the current search from the local corpus. Does not fetch. */
+    paintSearch() {
         this.folderChips.style.display = 'none';
         this.grid.innerHTML = '';
+        this.showingSearch = true;
         let isLora = this.subtype == 'LoRA';
         let list = isLora ? mCreate.loraList : mCreate.modelList;
         if (!list) {

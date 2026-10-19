@@ -1357,6 +1357,13 @@ body.small-window > .tab-content.tab-hundred {
     margin-left: 0.5rem;
     opacity: 0.8;
 }
+.browser-list-more {
+    padding: 0.6rem;
+    text-align: center;
+}
+.browser-list-more-button {
+    margin-left: 0.5rem;
+}
 .browser-multiselect-mode .image-block.image-block-current {
     outline: none;
 }

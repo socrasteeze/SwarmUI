@@ -34,6 +34,7 @@ const M = `${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m`;
 const TAGDEX = `${REPO}/src/BuiltinExtensions/TagDex/Assets`;
 const OUTPUT_HISTORY = `${REPO}/src/wwwroot/js/genpage/gentab/outputhistory.js`;
 const WIDTH = 390, HEIGHT = 844;
+const M_SEARCH_WAIT = 250;
 const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 const TOAST = '<div class="center-toast toast-error-box" id="center_toast">'
@@ -361,9 +362,8 @@ check('LoRA weight uses a stepped picker, not a slider', await page.evaluate(() 
 check('LoRA remove and decrease controls show single symbols', await page.evaluate(() =>
     document.querySelector('.m-lora-remove').textContent == '\u00d7'
         && document.querySelector('.m-lora-weight-button').textContent == '\u2212'));
-// ListModels truncates at the server's ModelListSanityCap and truncates before it sorts, so on a large
-// library it answers with an arbitrary slice - which is why the picker's corpus is the uncapped boot list
-// from ListT2IParams, with the ListModels rows only as a metadata overlay on top of it.
+// The picker's corpus is the uncapped boot list from ListT2IParams. ListModels rows are only a metadata
+// overlay: the first page, plus search hits. A boot-list name ListModels has not returned yet still appears.
 const loraCorpus = await page.evaluate(() => ({
     names: mCreate.loraList.map(model => model.name).sort(),
     enriched: mCreate.loraByName('Consistency_Edit_V2.safetensors').title
@@ -835,6 +835,7 @@ check('LoRA picker: only the starred row is marked', loraRows.filter(r => r.star
 
 // Same list, searched: the sort has to survive filtering, or a search that matches a favourite buries it.
 await page.fill('.m-lora-sheet .m-lora-search', 'zzz');
+await page.waitForTimeout(M_SEARCH_WAIT);
 const searched = await page.evaluate(() => [...document.querySelectorAll('.m-lora-results .m-model-result')]
     .map(row => row.querySelector('.m-model-name').textContent));
 check('LoRA picker: starred still leads a filtered list', searched.join(',') == 'zzz_starred,zzz_unstarred', searched.join(','));
@@ -879,6 +880,7 @@ await page.locator('.m-lora-sort select').selectOption('DateCreated');
 check('LoRA sort: a star stays first when the date order would bury it',
     (await loraKeys()).join(',') == 'old,nostamp,new,mid');
 await page.fill('.m-lora-sheet .m-lora-search', 'mid');
+await page.waitForTimeout(M_SEARCH_WAIT);
 check('LoRA sort: search still narrows the sorted list', (await loraKeys()).join(',') == 'mid');
 await page.fill('.m-lora-sheet .m-lora-search', '');
 const sortLayout = async (width, height) => {
@@ -935,6 +937,7 @@ pickerPage = await page.evaluate(() => ({
 }));
 check('LoRA picker Next reaches the second distinct page', pickerPage.first == 'paged_048' && pickerPage.rows == 48 && pickerPage.status == 'Page 2 of 3', JSON.stringify(pickerPage));
 await page.fill('.m-lora-sheet .m-lora-search', 'paged_109');
+await page.waitForTimeout(M_SEARCH_WAIT);
 pickerPage = await page.evaluate(() => ({
     rows: document.querySelectorAll('.m-lora-results .m-model-result').length,
     name: document.querySelector('.m-lora-results .m-model-name')?.textContent,
@@ -1360,6 +1363,7 @@ const wordSearch = await page.evaluate(async () => {
     let search = sheet.querySelector('.m-lora-search');
     search.value = 'aria zen';
     search.dispatchEvent(new Event('input'));
+    await new Promise(resolve => setTimeout(resolve, MCreate.SearchDebounceMs + 100));
     let hint = [...sheet.querySelectorAll('.m-arch-note')].map(e => e.textContent).find(t => t.includes('outside the filters'));
     out.hint = hint || null;
     if (hint) {
@@ -1960,6 +1964,96 @@ check('prompt-image + opens server/phone chooser', promptChooser.chooser && prom
 await page.evaluate(() => {
     document.querySelectorAll('.m-sheet-backdrop').forEach(el => el.click());
 });
+
+const loraSearchBurst = await page.evaluate(async () => {
+    let calls = 0;
+    let origFilter = MCreate.filterModels;
+    let sorts = 0;
+    let origSort = MCreate.sortLoras;
+    MCreate.filterModels = (list, term) => {
+        calls++;
+        return origFilter(list, term);
+    };
+    MCreate.sortLoras = list => {
+        sorts++;
+        return origSort(list);
+    };
+    let saved = {
+        arch: mState.archFilter,
+        starred: mState.starredModels,
+        model: mState.params['model'],
+        presets: mState.activePresets,
+        list: mCreate.loraList,
+        map: mCreate.loraMap,
+        version: mCreate.loraSortVersion,
+        cache: mCreate.loraSortCache
+    };
+    mState.archFilter = '';
+    mState.starredModels = {};
+    mState.activePresets = [];
+    delete mState.params['model'];
+    localStorage.setItem('models_LoRA_sort_by', 'Name');
+    localStorage.setItem('models_LoRA_sort_reverse', 'false');
+    mCreate.indexLoras([
+        { name: 'alpha.safetensors', title: 'Alpha' },
+        { name: 'beta.safetensors', title: 'Beta' },
+        { name: 'hatsune.safetensors', title: 'Miku' },
+        { name: 'other.safetensors', title: 'Hatsune extra' }
+    ]);
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mCreate.openLoraSheet();
+    let baseline = calls;
+    let search = [...document.querySelectorAll('.m-lora-search')].pop();
+    for (let value of ['h', 'ha', 'hat', 'hats']) {
+        search.value = value;
+        search.dispatchEvent(new Event('input'));
+    }
+    let during = calls;
+    await new Promise(resolve => setTimeout(resolve, MCreate.SearchDebounceMs + 80));
+    let after = calls;
+    let shown = [...document.querySelectorAll('.m-lora-results .m-model-name')].map(elem => elem.textContent);
+    let expected = origFilter(mCreate.sortedLoraList(mCreate.loraList), 'hats').map(model => mUI.modelLines(model, true).primary);
+    let sortsAfterOpen = sorts;
+    mCreate.sortedLoraList(mCreate.loraList);
+    let sortsCached = sorts;
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    let cleared = calls;
+    let clearedNames = [...document.querySelectorAll('.m-lora-results .m-model-name')].map(elem => elem.textContent);
+    MCreate.filterModels = origFilter;
+    MCreate.sortLoras = origSort;
+    mState.archFilter = saved.arch;
+    mState.starredModels = saved.starred;
+    if (saved.model == null) {
+        delete mState.params['model'];
+    }
+    else {
+        mState.params['model'] = saved.model;
+    }
+    mState.activePresets = saved.presets;
+    mCreate.loraList = saved.list;
+    mCreate.loraMap = saved.map;
+    mCreate.loraSortVersion = saved.version;
+    mCreate.loraSortCache = saved.cache;
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    return { baseline, during, after, cleared, shown, expected, sortsAfterOpen, sortsCached, clearedNames };
+});
+check('LoRA search debounce renders once for a fast-typed word',
+    loraSearchBurst.during == loraSearchBurst.baseline && loraSearchBurst.after == loraSearchBurst.baseline + 1,
+    JSON.stringify({ baseline: loraSearchBurst.baseline, during: loraSearchBurst.during, after: loraSearchBurst.after }));
+check('debounced LoRA search matches the undebounced filter',
+    loraSearchBurst.shown.join(',') == loraSearchBurst.expected.join(','),
+    `${loraSearchBurst.shown.join(',')} vs ${loraSearchBurst.expected.join(',')}`);
+check('clearing the LoRA search renders immediately',
+    loraSearchBurst.cleared == loraSearchBurst.after + 1 && loraSearchBurst.clearedNames.length == 4,
+    JSON.stringify({ cleared: loraSearchBurst.cleared, names: loraSearchBurst.clearedNames }));
+check('the sorted LoRA base list is reused until metadata changes',
+    loraSearchBurst.sortsCached == loraSearchBurst.sortsAfterOpen,
+    `${loraSearchBurst.sortsAfterOpen} -> ${loraSearchBurst.sortsCached}`);
 
 await browser.close();
 

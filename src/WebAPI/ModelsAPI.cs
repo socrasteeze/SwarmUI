@@ -457,8 +457,6 @@ public static class ModelsAPI
 
     public enum ModelHistorySortMode { Name, Title, DateCreated, DateModified }
 
-    public record struct ModelListEntry(string Name, string Title, long TimeCreated, long TimeModified, JObject NetData);
-
     /// <summary>Returns a compact, deterministic snapshot of every model subtype for authenticated Swarm-to-Swarm routing.</summary>
     [API.APIDescription("Returns a compact, deterministic snapshot of every model subtype. Intended for authenticated Swarm-to-Swarm routing inventory.",
         """
@@ -617,7 +615,10 @@ public static class ModelsAPI
         [API.APIParameter("What to sort the list by - `Name`, `DateCreated`, or `DateModified.")] string sortBy = "Name",
         [API.APIParameter("If true, allow remote models. If false, only local models.")] bool allowRemote = true,
         [API.APIParameter("If true, the sorting should be done in reverse.")] bool sortReverse = false,
-        [API.APIParameter("If true, provide model images in raw data format. If false, use URLs.")] bool dataImages = false)
+        [API.APIParameter("If true, provide model images in raw data format. If false, use URLs.")] bool dataImages = false,
+        [API.APIParameter("If non-empty, only files whose name, title, or trigger phrase contain every whitespace-separated word, case-insensitively. Applied before total and before the cap, so total is the match count. Wildcards match on name and title only.")] string search = "",
+        [API.APIParameter("If greater than 0, return at most this many files after sorting, and never more than ModelListSanityCap. 0 uses ModelListSanityCap alone.")] int limit = 0,
+        [API.APIParameter("How many sorted matches to skip before taking limit. 0 starts at the first match.")] int offset = 0)
     {
         if (!Enum.TryParse(sortBy, true, out ModelHistorySortMode sortMode))
         {
@@ -639,14 +640,19 @@ public static class ModelsAPI
         }
         path = path.TrimStart('/');
         HashSet<string> folders = [];
-        List<ModelListEntry> files = [];
+        List<ModelListCandidate> matched = [];
         HashSet<string> dedup = [];
-        int total = 0;
-        bool tryMatch(string name)
+        // Folders are recorded for matches only, including matches deeper than `depth`, so a search can still be browsed into.
+        // An empty search matches everything, which keeps the previous folder list.
+        void consider(string name, string title, string trigger, long created, long modified, Func<JObject> materialize)
         {
             if (!name.StartsWith(path) || name.Length <= path.Length || !session.User.IsAllowedModel(name))
             {
-                return false;
+                return;
+            }
+            if (!ModelListWindow.Matches(name, title, trigger, search))
+            {
+                return;
             }
             string part = name[path.Length..];
             int slashes = part.CountCharacter('/');
@@ -659,90 +665,80 @@ public static class ModelsAPI
                     folders.Add(string.Join('/', subfolders[..i]));
                 }
             }
-            return slashes < depth && dedup.Add(name);
+            if (slashes < depth && dedup.Add(name))
+            {
+                matched.Add(new ModelListCandidate()
+                {
+                    Name = name,
+                    Title = title ?? "",
+                    TriggerPhrase = trigger ?? "",
+                    TimeCreated = created,
+                    TimeModified = modified,
+                    Materialize = materialize
+                });
+            }
         }
         int sanityCap = Math.Max(0, Program.ServerSettings.Performance.ModelListSanityCap);
         using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
         if (subtype == "Wildcards")
         {
+            // Wildcards have no trigger phrase. Search uses the file name and the leaf title, and limit/offset use the same window as other subtypes.
             foreach (string file in WildcardsHelper.ListFiles)
             {
-                if (tryMatch(file))
+                if (!file.StartsWith(path) || file.Length <= path.Length || !session.User.IsAllowedModel(file))
                 {
-                    total++;
-                    if (files.Count < sanityCap)
-                    {
-                        WildcardsHelper.Wildcard card = WildcardsHelper.GetWildcard(file);
-                        files.Add(new(card.Name, card.Name.AfterLast('/'), card.TimeCreated, card.TimeModified, card.GetNetObject(dataImages, truncate: true)));
-                    }
+                    continue;
                 }
+                WildcardsHelper.Wildcard card = WildcardsHelper.GetWildcard(file);
+                consider(file, card.Name.AfterLast('/'), "", card.TimeCreated, card.TimeModified, () => card.GetNetObject(dataImages, truncate: true));
             }
         }
         else
         {
             foreach (T2IModel possible in handler.Models.Values)
             {
-                if (tryMatch(possible.Name))
-                {
-                    total++;
-                    if (files.Count < sanityCap)
-                    {
-                        files.Add(new(possible.Name, possible.Title, possible.Metadata?.TimeCreated ?? long.MaxValue, possible.Metadata?.TimeModified ?? long.MaxValue, possible.ToNetObject(dataImgs: dataImages)));
-                    }
-                }
+                consider(possible.Name, possible.Title, possible.Metadata?.TriggerPhrase, possible.Metadata?.TimeCreated ?? long.MaxValue, possible.Metadata?.TimeModified ?? long.MaxValue, () => possible.ToNetObject(dataImgs: dataImages));
             }
         }
         if (allowRemote)
         {
             foreach ((string name, JObject possible) in InternalExtraModels(subtype))
             {
-                if (tryMatch(name))
+                string remoteTitle = possible["title"]?.ToString();
+                if (string.IsNullOrEmpty(remoteTitle))
                 {
-                    total++;
-                    if (files.Count < sanityCap)
-                    {
-                        JObject toAdd = possible;
-                        if (!dataImages && toAdd.TryGetValue("preview_image", out JToken previewImg) && previewImg.ToString().StartsWith("data:"))
-                        {
-                            toAdd = toAdd.DeepClone() as JObject;
-                            toAdd["preview_image"] = $"/ViewSpecial/{subtype}/{name}";
-                        }
-                        files.Add(new(name, name.AfterLast('/'), long.MaxValue, long.MaxValue, toAdd));
-                    }
+                    remoteTitle = name.AfterLast('/');
                 }
+                string remoteTrigger = possible["trigger_phrase"]?.ToString() ?? "";
+                consider(name, remoteTitle, remoteTrigger, long.MaxValue, long.MaxValue, () =>
+                {
+                    JObject toAdd = possible;
+                    if (!dataImages && toAdd.TryGetValue("preview_image", out JToken previewImg) && previewImg.ToString().StartsWith("data:"))
+                    {
+                        toAdd = toAdd.DeepClone() as JObject;
+                        toAdd["preview_image"] = $"/ViewSpecial/{subtype}/{name}";
+                    }
+                    return toAdd;
+                });
             }
         }
-        if (sortMode == ModelHistorySortMode.Name)
+        ModelListPage window = ModelListWindow.Page(matched, sortMode, sortReverse, offset, limit, sanityCap);
+        List<JObject> files = new();
+        foreach (ModelListCandidate row in window.Rows)
         {
-            files = [.. files.OrderBy(a => a.Name)];
-        }
-        else if (sortMode == ModelHistorySortMode.Title)
-        {
-            files = [.. files.OrderBy(a => a.Title).ThenBy(a => a.Name)];
-        }
-        else if (sortMode == ModelHistorySortMode.DateCreated)
-        {
-            files = [.. files.OrderByDescending(a => a.TimeCreated).ThenBy(a => a.Name)];
-        }
-        else if (sortMode == ModelHistorySortMode.DateModified)
-        {
-            files = [.. files.OrderByDescending(a => a.TimeModified).ThenBy(a => a.Name)];
-        }
-        if (sortReverse)
-        {
-            files.Reverse();
+            files.Add(row.Materialize());
         }
         Utilities.QuickGC(); // (Could potentially be quite large data, so encourage GC to not slam RAM from listing out model data)
         bool scanSucceeded = subtype == "Wildcards" || handler.LastRefreshSucceeded;
         return new JObject()
         {
             ["folders"] = JArray.FromObject(folders.ToList()),
-            ["files"] = JArray.FromObject(files.Select(f => f.NetData).ToList()),
-            ["complete"] = scanSucceeded && total == files.Count,
+            ["files"] = JArray.FromObject(files),
+            ["complete"] = scanSucceeded && window.Total == window.Returned,
             ["scan_succeeded"] = scanSucceeded,
-            ["total"] = total,
-            ["returned"] = files.Count,
-            ["truncated"] = total != files.Count
+            ["total"] = window.Total,
+            ["returned"] = window.Returned,
+            ["truncated"] = window.Truncated
         };
     }
 
