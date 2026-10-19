@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-05 · **Branch:** main · **Tree:** `/simple` history paging, prompt-save timing, and image-browser place retention, published through `23e6c0fb` at the October 6 review
+**Updated:** 2026-10-18 · **Branch:** main · **Tree:** `/simple` Models-tab trigger lines and Load CivitAI preview visibility
 
 ## State
 The 2026-10-03 web UI, PWA, accessibility, and data-safety delivery is in local `origin/main` through `23e6c0fb`. Live restart/deployment, physical-device checks, and live generation remain separate.
 The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
+
+- 2026-10-18: `/simple` Models cards clamp a trigger to two whole lines, with **more** / **less** for the full phrase. **more** does not add the model or insert the trigger. Title and subtitle clamp to whole lines. **Load CivitAI preview** stays hidden when the card already has a real preview or a CivitAI model link in the description. A placeholder image still shows the button. Covered by `verify-simple-models-civitai.mjs`. Release servers need a restart before the assets load.
 
 - 2026-10-05: `/simple` Images loads one 48-file folder page and requests the next offset after that page is shown. Prompt and negative-prompt typing save once after a short pause; blur, Generate, and leaving the page flush a pending write. Attached-photo rebuild checks no longer serialize image bytes. The image browser keeps each folder's page and scroll until the page reloads. Covered by `verify-simple-page-identity-save.mjs` and `verify-simple-image-browser.mjs` (58/58). Genpage History is unchanged. Recorded in the AGENTS.md Fork Delta. There is no separate `FORK_NOTES.md`.
 

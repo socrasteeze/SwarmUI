@@ -2,7 +2,8 @@
  * /simple Models-tab Load CivitAI preview harness (fork). The button saves a preview through
  * SaveModelPreviewImage and must not call EditModelMetadata:
  *
- * 1. Local cards with edit_model_metadata show Load CivitAI preview; remote cards and no-permission do not.
+ * 1. Local cards with edit_model_metadata show Load CivitAI preview when they still need an image.
+ *    Remote cards, no-permission, a real preview, and a description that already links to CivitAI do not.
  * 2. The button stops propagation so it does not also select/add the model.
  * 3. No hash and no description URL -> GetModelHash, then ForwardMetadataRequest by-hash.
  * 4. No CivitAI match surfaces a warn toast and does not call SaveModelPreviewImage or EditModelMetadata.
@@ -101,7 +102,11 @@ await page.addInitScript(() => {
             architecture: 'flux-1/lora', standard_width: 768, standard_height: 768,
             description: 'From <a href="https://civitai.com/models/99?modelVersionId=77">link</a>',
             hash: '0xDEADBEEFCAFE', trigger_phrase: '', tags: ['old'],
-            preview_image: 'imgs/model_placeholder.jpg', lora_default_weight: '', lora_default_confinement: '' }
+            preview_image: 'imgs/model_placeholder.jpg', lora_default_weight: '', lora_default_confinement: '' },
+        { name: 'local/Pictured.safetensors', title: 'Pictured', author: '', local: true,
+            architecture: 'flux-1/lora', description: 'Local preview only',
+            hash: '', trigger_phrase: 'bow', tags: [],
+            preview_image: '/ViewSpecial/LoRA/local/Pictured.safetensors' }
     ];
     window.__hashMode = 'ok'; // ok | empty | fail
     window.__byHashMode = 'hit'; // hit | miss | error
@@ -246,6 +251,8 @@ const buttons = await page.evaluate(() => {
 });
 check('local model card shows Load CivitAI preview', buttons.some(b => b.hasBtn && b.text.includes('Alpha')), JSON.stringify(buttons));
 check('remote model card hides Load CivitAI', buttons.some(b => !b.hasBtn && (b.text.includes('Beta') || b.text.includes('Remote'))), JSON.stringify(buttons));
+check('real preview hides Load CivitAI', buttons.some(b => !b.hasBtn && b.text.includes('Pictured')), JSON.stringify(buttons));
+check('CivitAI description link hides Load CivitAI', buttons.some(b => !b.hasBtn && b.text.includes('Old')), JSON.stringify(buttons));
 
 // Permission gate: rebuild without permission.
 await page.evaluate(() => {
@@ -314,12 +321,16 @@ await page.evaluate(() => {
     mCreate.loraList = [{ name: 'local/Known.safetensors', title: 'Old', tags: ['old'], preview_image: 'imgs/model_placeholder.jpg' }];
     mModels.refresh();
 });
-await page.waitForFunction(() => document.querySelectorAll('.m-model-civitai-btn').length >= 2);
+await page.waitForFunction(() => {
+    let cards = [...document.querySelectorAll('.m-model-card')];
+    let known = cards.find(card => card.textContent.includes('Old'));
+    let pictured = cards.find(card => card.textContent.includes('Pictured'));
+    return known && pictured && !known.querySelector('.m-model-civitai-btn') && !pictured.querySelector('.m-model-civitai-btn')
+        && document.querySelector('.m-model-civitai-btn');
+});
 await page.evaluate(() => {
-    let btn = [...document.querySelectorAll('.m-model-civitai-btn')]
-        .find(b => b.closest('.m-model-card').textContent.includes('Known')
-            || b.closest('.m-model-card').textContent.includes('Old'));
-    btn.click();
+    let known = window.__models.find(model => model.name.includes('Known'));
+    mModels.openCivitaiLoad(known);
 });
 await page.waitForFunction(() => window.__calls.some(c => c.route == 'SaveModelPreviewImage'));
 const saved = await page.evaluate(() => {
@@ -389,6 +400,107 @@ check('hash path: GetModelHash then by-hash then models then SaveModelPreviewIma
 check('hash path saves the first still image and skips the leading video',
     hashPath.url == 'https://image.civitai.com/x/preview.jpg' && !hashPath.image,
     JSON.stringify(hashPath));
+
+// Trigger phrases clamp to whole lines. more/less reveals the rest and does not add the LoRA.
+const triggers = await page.evaluate(async () => {
+    let phrases = [];
+    for (let i = 0; i < 30; i++) {
+        phrases.push(`tag${i}`);
+    }
+    phrases.push('zzztailtoken');
+    let full = phrases.join(', ');
+    let inserted = [];
+    mCreate.insertTriggerPhrase = (phrase) => { inserted.push(phrase); };
+    mState.setLoras([]);
+    mModels.grid.innerHTML = '';
+    let longCard = mModels.buildCard({
+        name: 'local/Clip.safetensors',
+        title: 'A Very Long Title That Should Clamp On Whole Lines Without Cutting Glyphs In Half',
+        trigger_phrase: full,
+        local: true,
+        preview_image: '/ViewSpecial/LoRA/local/Clip.safetensors',
+        description: ''
+    });
+    let shortCard = mModels.buildCard({
+        name: 'local/Short.safetensors',
+        title: 'Short',
+        trigger_phrase: 'bow',
+        local: true,
+        preview_image: '',
+        description: ''
+    });
+    mModels.grid.appendChild(longCard);
+    mModels.grid.appendChild(shortCard);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    /** Whole rendered lines: client height matches N times the used line height. */
+    let wholeLines = (el) => {
+        let lh = parseFloat(getComputedStyle(el).lineHeight);
+        if (!lh) {
+            return { ok: false, lines: 0, delta: -1, h: el.clientHeight, scroll: el.scrollHeight };
+        }
+        let lines = Math.round(el.clientHeight / lh);
+        let delta = Math.abs(el.clientHeight - lines * lh);
+        return { ok: delta <= 2 && lines >= 1, lines, delta, h: el.clientHeight, scroll: el.scrollHeight, lh };
+    };
+    let text = longCard.querySelector('.m-trigger-chip-text');
+    let name = longCard.querySelector('.m-model-name');
+    let sub = longCard.querySelector('.m-model-sub');
+    let block = longCard.querySelector('.m-model-text');
+    let more = longCard.querySelector('.m-trigger-more');
+    let shortMore = shortCard.querySelector('.m-trigger-more');
+    let before = { loras: mState.getLoras().length, inserted: inserted.length };
+    more.click();
+    let opened = {
+        expanded: more.getAttribute('aria-expanded'),
+        label: more.getAttribute('aria-label'),
+        text: text.textContent,
+        loras: mState.getLoras().length,
+        inserted: inserted.length
+    };
+    more.click();
+    let closed = {
+        expanded: more.getAttribute('aria-expanded'),
+        text: text.textContent
+    };
+    longCard.querySelector('.m-trigger-chip').click();
+    let chip = { inserted: inserted.slice(), loras: mState.getLoras().length };
+    return {
+        before,
+        opened,
+        closed,
+        chip,
+        triggerLines: wholeLines(text),
+        nameLines: wholeLines(name),
+        subLines: wholeLines(sub),
+        blockOverflow: getComputedStyle(block).overflow,
+        blockClips: block.scrollHeight > block.clientHeight + 1,
+        moreVisible: !more.hidden && getComputedStyle(more).display != 'none',
+        shortMoreHidden: shortMore.hidden || getComputedStyle(shortMore).display == 'none',
+        longButton: !!longCard.querySelector('.m-model-civitai-btn'),
+        shortButton: !!shortCard.querySelector('.m-model-civitai-btn'),
+        nameClamp: getComputedStyle(name).webkitLineClamp,
+        subClamp: getComputedStyle(sub).webkitLineClamp
+    };
+});
+check('trigger clamp is two whole lines', triggers.triggerLines.ok && triggers.triggerLines.lines == 2
+    && triggers.triggerLines.scroll > triggers.triggerLines.h + 1, JSON.stringify(triggers.triggerLines));
+check('title clamps to two whole lines', triggers.nameLines.ok && triggers.nameLines.lines == 2
+    && triggers.nameClamp == '2', JSON.stringify(triggers.nameLines));
+check('subtitle clamps to one whole line', triggers.subLines.ok && triggers.subLines.lines == 1
+    && triggers.subClamp == '1', JSON.stringify(triggers.subLines));
+check('card text block does not cut its children', triggers.blockOverflow != 'hidden' && !triggers.blockClips,
+    JSON.stringify({ overflow: triggers.blockOverflow, clips: triggers.blockClips }));
+check('more reveals the full trigger and does not add the LoRA', triggers.moreVisible && triggers.before.inserted == 0
+    && triggers.opened.expanded == 'true' && triggers.opened.text.includes('zzztailtoken')
+    && triggers.opened.inserted == 0 && triggers.opened.loras == 0 && triggers.opened.label == 'Hide full trigger',
+    JSON.stringify(triggers.opened));
+check('less collapses back to the preview', triggers.closed.expanded == 'false' && !triggers.closed.text.includes('zzztailtoken'),
+    JSON.stringify(triggers.closed));
+check('trigger chip still inserts the full phrase', triggers.chip.inserted.length == 1
+    && triggers.chip.inserted[0].includes('zzztailtoken') && triggers.chip.loras == 0, JSON.stringify(triggers.chip));
+check('a short trigger hides more', triggers.shortMoreHidden, JSON.stringify(triggers.shortMoreHidden));
+check('preview card hides Load CivitAI and an empty card keeps it', !triggers.longButton && triggers.shortButton,
+    JSON.stringify({ longButton: triggers.longButton, shortButton: triggers.shortButton }));
 
 const failed = results.filter(r => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
