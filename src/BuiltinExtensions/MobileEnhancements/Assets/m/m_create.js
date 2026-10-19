@@ -920,6 +920,37 @@ class MCreate {
      * did not exist as far as the picker was concerned. */
     static ListDepth = 32;
 
+    /** How many ListModels calls the LoRA metadata queue keeps in flight. */
+    static MetadataFetchParallel = 4;
+
+    /** How many LoRA metadata rows one ListModels page asks for. Search uses the same size. */
+    static LoraCacheLimit = 500;
+
+    /** Trailing delay for LoRA search. Clearing the field renders on the same turn. */
+    static SearchDebounceMs = 150;
+
+    /**
+     * Runs render once after a burst of input, and immediately when the field is cleared.
+     * The timer reads the field at fire time, so a later clear cancels a pending filtered render.
+     */
+    static bindSearchInput(input, render) {
+        let timer = null;
+        input.addEventListener('input', () => {
+            if (timer != null) {
+                clearTimeout(timer);
+                timer = null;
+            }
+            if (`${input.value}` == '') {
+                render();
+                return;
+            }
+            timer = setTimeout(() => {
+                timer = null;
+                render();
+            }, MCreate.SearchDebounceMs);
+        });
+    }
+
     /** LoRA section chip values, in tap order: [section ID, label]. IDs are Swarm's section IDs
      * (T2IParamInput.SectionID_*): 0 every section, 5 base only, 1 refiner only. */
     static LoraSections = [['0', 'Full'], ['5', 'Base'], ['1', 'Refine']];
@@ -2555,18 +2586,10 @@ class MCreate {
      * Presets and starred_models store `ill/foo`; ListModels reports `ill/foo.safetensors`, and looking up
      * only the full name left every active row as a bare stem with no title or thumbnail.
      *
-     * The corpus is NOT the ListModels result. ListModels truncates at the server's
-     * Performance.ModelListSanityCap (5000 by default), and it truncates BEFORE it sorts - so past that cap
-     * what comes back is an arbitrary slice of the model dictionary rather than the first 5000 by name. A
-     * 19.6k-LoRA library was answered with 9 of its 48 `qwen/` files, with nothing on screen saying anything
-     * was missing and no search term that could reach the rest: the reported "I'm on a Qwen model but no
-     * Qwen LoRAs appear". ListT2IParams already ships every LoRA name and class id at boot, uncapped and
-     * cheap, so that is the corpus and the ListModels rows are a metadata overlay on top of it.
-     *
-     * Titles/previews live on that overlay. A single root ListModels call only paints the first cap-budget
-     * of the whole library, so enrichLoraMetadata fetches per top-level folder (each folder gets its own
-     * cap) and mergeLoraMetadata writes titles onto the stubs. Until that lands a row is still searchable
-     * and selectable - it just shows as a plain name. */
+     * The corpus is the name list from ListT2IParams, not a full ListModels dump. Titles and previews are a
+     * metadata overlay: the first LoraCacheLimit rows, plus whatever a search or a folder page has fetched.
+     * A row with no overlay yet still renders from its name. ListT2IParams already ships every LoRA name
+     * and class id at boot, uncapped and cheap. */
     indexLoras(list) {
         let rich = new Map();
         for (let model of (list || [])) {
@@ -2583,6 +2606,7 @@ class MCreate {
             this.loraMap.set(model.name, model);
             this.loraMap.set(MState.stripModelExt(model.name), model);
         }
+        this.loraSortVersion = (this.loraSortVersion || 0) + 1;
     }
 
     /** Overlays ListModels metadata (title, preview, trigger) onto the uncapped corpus stubs. */
@@ -2592,6 +2616,7 @@ class MCreate {
             return;
         }
         let added = false;
+        let touched = false;
         for (let model of (files || [])) {
             let existing = this.loraMap.get(model.name) || this.loraMap.get(MState.stripModelExt(model.name));
             if (existing) {
@@ -2600,98 +2625,206 @@ class MCreate {
                 }
                 // Search corpus cached the old title-less text; drop it so the next keystroke reindexes.
                 existing._mSearchText = null;
+                touched = true;
             }
             else {
                 this.loraList.push(model);
                 this.loraMap.set(model.name, model);
                 this.loraMap.set(MState.stripModelExt(model.name), model);
                 added = true;
+                touched = true;
             }
         }
         if (added) {
             this.loraList.sort((a, b) => `${a.name}`.localeCompare(`${b.name}`));
         }
+        if (touched) {
+            this.loraSortVersion = (this.loraSortVersion || 0) + 1;
+        }
     }
 
-    /** Loads titles/previews without losing LoRAs past ModelListSanityCap.
-     * Root is fetched at depth 1 (direct files + folder names), then each top-level folder at
-     * MCreate.ListDepth. A truncated response is merged as far as it goes, then that same path is
-     * fetched again at depth 1 and each immediate subfolder is fetched at the deep depth. The same
-     * path+depth pair is requested once. onDone(failed, errorText) runs after every request settles. */
-    enrichLoraMetadata(onDone) {
-        let pending = 0;
-        let anyError = false;
-        let errorText = '';
-        let requested = new Set();
-        let finish = () => {
-            if (--pending > 0) {
-                return;
-            }
-            onDone(anyError, errorText);
+    /** Name/title/date order of a LoRA array, cached until the list, sort setting, or metadata version changes.
+     * The comparator looks only at the pair, so filtering this copy matches sorting the filtered copy. */
+    sortedLoraList(list) {
+        let setting = MCreate.loraSortSetting();
+        let version = this.loraSortVersion || 0;
+        let cache = this.loraSortCache;
+        if (cache && cache.list == list && cache.length == list.length && cache.version == version
+            && cache.mode == setting.mode && cache.reverse == setting.reverse) {
+            return cache.sorted;
+        }
+        let sorted = MCreate.sortLoras(list);
+        this.loraSortCache = {
+            'list': list,
+            'length': list.length,
+            'version': version,
+            'mode': setting.mode,
+            'reverse': setting.reverse,
+            'sorted': sorted
         };
-        /** Immediate child paths. Depth 1 returns names relative to the request; a full path is kept only when its parent is that path. */
-        let childPaths = (path, folders) => {
-            let children = [];
-            let seen = new Set();
-            let base = `${path || ''}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-            for (let folder of (folders || [])) {
-                let name = `${folder}`.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-                if (!name) {
-                    continue;
-                }
-                let child = null;
-                if (!name.includes('/')) {
-                    child = base == '' ? name : `${base}/${name}`;
-                }
-                else {
-                    let parent = name.substring(0, name.lastIndexOf('/'));
-                    if (parent == base) {
-                        child = name;
-                    }
-                }
-                if (child && !seen.has(child)) {
-                    seen.add(child);
-                    children.push(child);
-                }
-            }
-            return children;
-        };
-        let fetchPath = (path, depth) => {
-            let key = `${depth}\n${path}`;
-            if (requested.has(key)) {
-                return;
-            }
-            requested.add(key);
-            pending++;
+        return sorted;
+    }
+
+    /** Queues one LoRA ListModels call. At most MetadataFetchParallel run at once. */
+    enqueueLoraFetch(job, done) {
+        if (!this.loraFetchQueue) {
+            this.loraFetchQueue = [];
+            this.loraFetchInFlight = 0;
+        }
+        this.loraFetchQueue.push({ 'job': job, 'done': done });
+        this.pumpLoraFetch();
+    }
+
+    /** Starts queued LoRA metadata requests up to the concurrency cap. */
+    pumpLoraFetch() {
+        while (this.loraFetchInFlight < MCreate.MetadataFetchParallel && this.loraFetchQueue.length > 0) {
+            let item = this.loraFetchQueue.shift();
+            let sort = item.job.sort || { 'mode': 'Name', 'reverse': false };
+            this.loraFetchInFlight++;
             genericRequest('ListModels', {
-                'path': path,
-                'depth': depth,
+                'path': item.job.path,
+                'depth': item.job.depth,
                 'subtype': 'LoRA',
-                'sortBy': 'Name',
+                'sortBy': sort.mode,
                 'allowRemote': true,
-                'sortReverse': false,
-                'dataImages': false
+                'sortReverse': sort.reverse,
+                'dataImages': false,
+                'limit': item.job.limit,
+                'offset': item.job.offset || 0,
+                'search': item.job.search || ''
             }, data => {
-                this.mergeLoraMetadata(data.files || []);
-                if (data.truncated && depth != 1) {
-                    fetchPath(path, 1);
-                }
-                else if (depth == 1) {
-                    for (let child of childPaths(path, data.folders)) {
-                        fetchPath(child, MCreate.ListDepth);
-                    }
-                }
-                finish();
+                this.loraFetchInFlight--;
+                item.done(false, '', data || {});
+                this.pumpLoraFetch();
             }, 0, error => {
-                anyError = true;
-                errorText = `${error || ''}`;
-                finish();
+                this.loraFetchInFlight--;
+                item.done(true, `${error || ''}`, null);
+                this.pumpLoraFetch();
             });
-        };
+        }
+    }
+
+    /** Loads titles and previews for the first LoraCacheLimit LoRAs, in the picker's current sort.
+     * onDone(failed, errorText) runs once per call. A second call while the first is in flight shares it. */
+    enrichLoraMetadata(onDone) {
         if (!this.loraList) {
             this.indexLoras([]);
         }
-        fetchPath('', 1);
+        if (this.loraMetaRootDone) {
+            onDone(false, '');
+            return;
+        }
+        if (!this.loraMetaRootWaiters) {
+            this.loraMetaRootWaiters = [];
+        }
+        this.loraMetaRootWaiters.push(onDone);
+        if (this.loraMetaRootWaiters.length > 1) {
+            return;
+        }
+        let sort = MCreate.loraSortSetting();
+        this.enqueueLoraFetch({
+            'path': '',
+            'depth': MCreate.ListDepth,
+            'search': '',
+            'offset': 0,
+            'limit': MCreate.LoraCacheLimit,
+            'sort': sort
+        }, (failed, error, data) => {
+            if (!failed) {
+                this.mergeLoraMetadata((data && data.files) || []);
+                this.loraMetaRootDone = true;
+            }
+            let waiters = this.loraMetaRootWaiters || [];
+            this.loraMetaRootWaiters = [];
+            for (let waiter of waiters) {
+                waiter(failed, `${error || ''}`);
+            }
+        });
+    }
+
+    /** One folder page of LoRA metadata, cached per path, sort, and offset. Depth is 1 so subfolders stay navigable. */
+    enrichLoraFolder(path, sort, offset, onDone) {
+        let mode = sort && sort.mode ? sort.mode : 'Name';
+        let reverse = sort && sort.reverse ? '1' : '0';
+        let key = `${path || ''}\n${mode}\n${reverse}\n${offset || 0}`;
+        if (!this.loraFolderCache) {
+            this.loraFolderCache = new Map();
+        }
+        if (this.loraFolderCache.has(key)) {
+            onDone(false, '', this.loraFolderCache.get(key));
+            return;
+        }
+        this.enqueueLoraFetch({
+            'path': path || '',
+            'depth': 1,
+            'search': '',
+            'offset': offset || 0,
+            'limit': MCreate.LoraCacheLimit,
+            'sort': sort || { 'mode': 'Name', 'reverse': false }
+        }, (failed, error, data) => {
+            if (!failed && data) {
+                this.mergeLoraMetadata(data.files || []);
+                this.loraFolderCache.set(key, data);
+            }
+            onDone(failed, `${error || ''}`, data);
+        });
+    }
+
+    /** Server search for LoRAs whose title or trigger matches, merged into the name corpus.
+     * Repeated terms share one request. A response for an older term still fills the cache and does not call that term's waiters. */
+    searchLoraMetadata(term, onDone) {
+        let key = `${term || ''}`.trim().toLowerCase();
+        if (!key) {
+            if (onDone) {
+                onDone(false, '');
+            }
+            return;
+        }
+        if (!this.loraSearchFetched) {
+            this.loraSearchFetched = new Set();
+        }
+        if (this.loraSearchFetched.has(key)) {
+            if (onDone) {
+                onDone(false, '');
+            }
+            return;
+        }
+        if (!this.loraSearchWaiters) {
+            this.loraSearchWaiters = new Map();
+        }
+        let existing = this.loraSearchWaiters.get(key);
+        if (existing) {
+            existing.push(onDone);
+            return;
+        }
+        this.loraSearchSerial = (this.loraSearchSerial || 0) + 1;
+        let mine = this.loraSearchSerial;
+        this.loraSearchLatest = mine;
+        this.loraSearchWaiters.set(key, [onDone]);
+        let sort = MCreate.loraSortSetting();
+        this.enqueueLoraFetch({
+            'path': '',
+            'depth': MCreate.ListDepth,
+            'search': `${term || ''}`.trim(),
+            'offset': 0,
+            'limit': MCreate.LoraCacheLimit,
+            'sort': sort
+        }, (failed, error, data) => {
+            let waiters = this.loraSearchWaiters.get(key) || [];
+            this.loraSearchWaiters.delete(key);
+            if (!failed) {
+                this.mergeLoraMetadata((data && data.files) || []);
+                this.loraSearchFetched.add(key);
+            }
+            if (mine != this.loraSearchLatest) {
+                return;
+            }
+            for (let waiter of waiters) {
+                if (waiter) {
+                    waiter(failed, `${error || ''}`);
+                }
+            }
+        });
     }
 
     /** The cached LoRA model object for a name, or a minimal stand-in before the list has loaded. */
@@ -2888,7 +3021,7 @@ class MCreate {
             // filter (matching the banner: Limited to X, N hidden). Checkpoint compat is automatic and
             // independent: a Qwen checkpoint must not leave 17k SDXL LoRAs in a list it can never load.
             // Other-arch LoRAs (Flux/Klein under SDXL, etc.) stay hidden until the user taps show all.
-            let arch = this.applyArchFilter(this.loraList, 'LoRA', archState, renderResults);
+            let arch = this.applyArchFilter(this.sortedLoraList(this.loraList), 'LoRA', archState, renderResults);
             if (arch.row) {
                 results.appendChild(arch.row);
             }
@@ -2901,7 +3034,7 @@ class MCreate {
             for (let i = 0; i < curLoras.length; i++) {
                 active.add(MState.stripModelExt(curLoras[i].name));
             }
-            let matches = mState.compatFirst(mState.starredFirst(MCreate.sortLoras(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name)))), 'LoRA'), 'LoRA');
+            let matches = mState.compatFirst(mState.starredFirst(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name))), 'LoRA'), 'LoRA');
             let pages = Math.max(1, Math.ceil(matches.length / MCreate.PickerPageSize));
             page = Math.min(page, pages - 1);
             let start = page * MCreate.PickerPageSize;
@@ -2952,9 +3085,17 @@ class MCreate {
                 }
             }
         };
-        search.addEventListener('input', () => {
+        MCreate.bindSearchInput(search, () => {
             page = 0;
             renderResults();
+            let term = `${search.value || ''}`.trim();
+            if (term) {
+                this.searchLoraMetadata(term, () => {
+                    if (`${search.value || ''}`.trim().toLowerCase() == term.toLowerCase()) {
+                        renderResults();
+                    }
+                });
+            }
         });
         content.appendChild(addWrap);
         let loadLoraList = () => {

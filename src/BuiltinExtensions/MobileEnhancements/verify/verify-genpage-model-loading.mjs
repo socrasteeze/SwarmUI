@@ -6,9 +6,9 @@ import { dirname, resolve } from 'path';
 import vm from 'vm';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const MODELS = readFileSync(`${REPO}/src/wwwroot/js/genpage/gentab/models.js`, 'utf8');
-const BROWSERS = readFileSync(`${REPO}/src/wwwroot/js/genpage/helpers/browsers.js`, 'utf8');
-const LORAS = readFileSync(`${REPO}/src/wwwroot/js/genpage/gentab/loras.js`, 'utf8');
+const MODELS = readFileSync(`${REPO}/src/wwwroot/js/genpage/gentab/models.js`, 'utf8').replaceAll('\r\n', '\n');
+const BROWSERS = readFileSync(`${REPO}/src/wwwroot/js/genpage/helpers/browsers.js`, 'utf8').replaceAll('\r\n', '\n');
+const LORAS = readFileSync(`${REPO}/src/wwwroot/js/genpage/gentab/loras.js`, 'utf8').replaceAll('\r\n', '\n');
 
 function check(name, condition, detail = '') {
     assert.equal(condition, true, name);

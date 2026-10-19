@@ -475,6 +475,9 @@ function browseModelHistory(type, model) {
 }
 
 class ModelBrowserWrapper {
+    /** One page of a LoRA listing. Search and Load more use the same size. */
+    static ClientModelListLimit = 500;
+
     constructor(subType, subIds, container, id, selectOne, extraHeader = '') {
         this.subType = subType;
         this.subIds = subIds;
@@ -486,6 +489,16 @@ class ModelBrowserWrapper {
         this.browser.maxPreBuild = 50;
         this.promptBox = getRequiredElementById('alt_prompt_textbox');
         this.models = {};
+        this.listCache = new Map();
+        this.listToken = 0;
+        this.missingLookups = {};
+        this.pageMore = false;
+        this.pageMoreBusy = false;
+        this.pageShown = 0;
+        this.pageTotal = 0;
+        this.unfilteredTruncated = false;
+        this.browser.afterBuildContent = container => this.appendListMore(container);
+        this.browser.resolveMissingFile = name => this.resolveMissingModel(name);
         this.browser.refreshHandler = (callback) => {
             refreshParameterValues(true, subType == 'Wildcards' ? 'wildcards' : null, callback);
         };
@@ -537,6 +550,13 @@ class ModelBrowserWrapper {
             }, 100);
             return;
         }
+        let sort = this.readSort();
+        let fix = sort.fix;
+        this.fetchModels(path, depth, sort.sortBy, sort.reverse, '', 0, isRefresh, callback, fix, false);
+    }
+
+    /** The sort the header is showing, or the stored sort on the first call before that header exists. */
+    readSort() {
         let sortBy = localStorage.getItem(`models_${this.subType}_sort_by`) ?? 'Name';
         let reverse = localStorage.getItem(`models_${this.subType}_sort_reverse`) == 'true';
         let sortElem = document.getElementById(`models_${this.subType}_sort_by`);
@@ -562,64 +582,257 @@ class ModelBrowserWrapper {
                 });
             }
         }
-        let prefix = path == '' ? '' : (path.endsWith('/') ? path : `${path}/`);
-        genericRequest('ListModels', {'path': path, 'depth': Math.round(depth), 'subtype': this.subType, 'sortBy': sortBy, 'sortReverse': reverse}, data => {
+        return { 'sortBy': sortBy, 'reverse': reverse, 'fix': fix };
+    }
+
+    /** Cache key for one folder page. Offset is not part of the key: the entry stores every page loaded so far. */
+    listCacheKey(path, depth, sortBy, reverse, search) {
+        return `${path}\n${Math.round(depth)}\n${sortBy}\n${reverse ? '1' : '0'}\n${search || ''}`;
+    }
+
+    /**
+     * Loads one ListModels window. LoRA sends limit/offset/search. Other subtypes keep the uncapped request.
+     * A saved filter on a truncated LoRA folder is sent as a follow-up search instead of hiding the first page locally.
+     */
+    fetchModels(path, depth, sortBy, reverse, search, offset, isRefresh, callback, fix, append) {
+        if (isRefresh && offset == 0 && !append) {
+            this.listCache = new Map();
+            this.unfilteredTruncated = false;
+        }
+        let key = this.listCacheKey(path, depth, sortBy, reverse, search);
+        if (!append && offset == 0 && !isRefresh) {
+            let cached = this.listCache.get(key);
+            if (cached) {
+                this.applyCached(path, depth, sortBy, reverse, search, cached, callback, fix);
+                return;
+            }
+        }
+        let token = ++this.listToken;
+        this.pageMoreBusy = true;
+        let request = {
+            'path': path,
+            'depth': Math.round(depth),
+            'subtype': this.subType,
+            'sortBy': sortBy,
+            'sortReverse': reverse
+        };
+        if (this.subType == 'LoRA') {
+            request.limit = ModelBrowserWrapper.ClientModelListLimit;
+            request.offset = offset;
+            request.search = search || '';
+        }
+        genericRequest('ListModels', request, data => {
+            if (token != this.listToken) {
+                return;
+            }
+            this.pageMoreBusy = false;
             this.browser.loadRequested = false;
-            let files = data.files.sort((a,b) => this.sortModelLocal(a, b, data.files)).map(f => { return { 'name': f.name, 'data': f }; });
-            for (let file of files) {
-                file.data.display = cleanModelName(file.data.name.substring(prefix.length));
-                this.models[file.name] = file;
-                if (this.subType == 'Stable-Diffusion') {
-                    modelIconUrlCache[file.name] = file.data.preview_image;
+            let pageFiles = data.files || [];
+            let prior = append ? this.listCache.get(key) : null;
+            let files = pageFiles;
+            if (prior) {
+                let seen = {};
+                files = prior.files.slice();
+                for (let file of files) {
+                    seen[file.name] = true;
+                }
+                for (let file of pageFiles) {
+                    if (!seen[file.name]) {
+                        files.push(file);
+                        seen[file.name] = true;
+                    }
                 }
             }
-            if (this.subType == 'VAE') {
-                let autoFile = {
-                    'name': `Automatic`,
-                    'data': {
-                        'name': 'Automatic',
-                        'title': 'Automatic',
-                        'author': '(Internal)',
-                        'architecture': 'VAE',
-                        'class': 'VAE',
-                        'description': translate('Use the VAE sepcified in your User Settings, the system default VAE for the selected model class, or the VAE built-in to the selected model'),
-                        'preview_image': '/imgs/automatic.jpg',
-                        'is_supported_model_format': true,
-                        'local': true,
-                        standard_width: 0,
-                        standard_height: 0
-                    }
-                };
-                let noneFile = {
-                    'name': `None`,
-                    'data': {
-                        'name': 'None',
-                        'title': 'None',
-                        'author': '(Internal)',
-                        'architecture': 'VAE',
-                        'class': 'VAE',
-                        'description': translate('Use the system default VAE for the selected model class, or the VAE built-in to the selected model'),
-                        'preview_image': '/imgs/none.jpg',
-                        'is_supported_model_format': true,
-                        'local': true,
-                        standard_width: 0,
-                        standard_height: 0
-                    }
-                };
-                files = [autoFile, noneFile].concat(files);
+            let total = data.total != null ? data.total : files.length;
+            let cached = {
+                'folders': prior && prior.folders ? prior.folders : (data.folders || []),
+                'files': files,
+                'total': total
+            };
+            this.listCache.set(key, cached);
+            if (search == '' && this.subType == 'LoRA' && files.length < total && this.browser.filter) {
+                this.unfilteredTruncated = true;
+                this.fetchModels(path, depth, sortBy, reverse, this.browser.filter, 0, false, callback, fix, false);
+                return;
             }
-            callback(data.folders.sort((a, b) => a.localeCompare(b)), files);
-            if (fix) {
-                fix();
-            }
+            this.publishListing(path, depth, sortBy, reverse, search, cached, callback, fix);
         }, 0, e => {
+            if (token != this.listToken) {
+                return;
+            }
+            this.pageMoreBusy = false;
             this.browser.loadRequested = false;
             let hadLoaded = this.browser.everLoaded;
             showError(`Failed to list models: ${e}`);
-            callback([], []);
+            if (callback) {
+                callback([], []);
+            }
             if (!hadLoaded) {
                 this.browser.everLoaded = false;
             }
+        });
+    }
+
+    /** Publishes a cache hit, or follows a saved filter with a server search when the folder is still truncated. */
+    applyCached(path, depth, sortBy, reverse, search, cached, callback, fix) {
+        if (search == '' && this.subType == 'LoRA' && cached.files.length < cached.total && this.browser.filter) {
+            this.unfilteredTruncated = true;
+            this.fetchModels(path, depth, sortBy, reverse, this.browser.filter, 0, false, callback, fix, false);
+            return;
+        }
+        this.browser.loadRequested = false;
+        this.publishListing(path, depth, sortBy, reverse, search, cached, callback, fix);
+    }
+
+    /** Hands the window to the browser and remembers how to load the next page. */
+    publishListing(path, depth, sortBy, reverse, search, cached, callback, fix) {
+        if (search == '') {
+            this.unfilteredTruncated = this.subType == 'LoRA' && cached.files.length < cached.total;
+        }
+        this.pagePath = path;
+        this.pageDepth = depth;
+        this.pageSortBy = sortBy;
+        this.pageReverse = reverse;
+        this.pageSearch = search || '';
+        this.pageShown = cached.files.length;
+        this.pageTotal = cached.total;
+        this.pageMore = this.subType == 'LoRA' && this.pageShown < this.pageTotal;
+        this.browser.serverFilter = (this.subType == 'LoRA' && this.unfilteredTruncated) ? text => this.onServerFilter(text) : null;
+        this.browser.skipClientFilter = this.pageSearch != '';
+        this.browser.countText = this.pageMore ? `${this.pageShown} / ${this.pageTotal}` : null;
+        let folders = (cached.folders || []).slice().sort((a, b) => a.localeCompare(b));
+        let files = this.decorateFiles(path, cached.files);
+        if (callback) {
+            callback(folders, files);
+        }
+        else {
+            this.browser.lastListCache = { 'folder': path, 'folders': folders, 'files': files };
+            this.browser.build(path, folders, files);
+        }
+        if (fix) {
+            fix();
+        }
+    }
+
+    /** Starred and architecture order, display names, and the VAE sentinels. */
+    decorateFiles(path, serverFiles) {
+        let prefix = path == '' ? '' : (path.endsWith('/') ? path : `${path}/`);
+        let ordered = (serverFiles || []).slice();
+        ordered.sort((a, b) => this.sortModelLocal(a, b, ordered));
+        let files = ordered.map(f => { return { 'name': f.name, 'data': f }; });
+        for (let file of files) {
+            file.data.display = cleanModelName(file.data.name.substring(prefix.length));
+            this.models[file.name] = file;
+            if (this.subType == 'Stable-Diffusion') {
+                modelIconUrlCache[file.name] = file.data.preview_image;
+            }
+        }
+        if (this.subType == 'VAE') {
+            let autoFile = {
+                'name': `Automatic`,
+                'data': {
+                    'name': 'Automatic',
+                    'title': 'Automatic',
+                    'author': '(Internal)',
+                    'architecture': 'VAE',
+                    'class': 'VAE',
+                    'description': translate('Use the VAE sepcified in your User Settings, the system default VAE for the selected model class, or the VAE built-in to the selected model'),
+                    'preview_image': '/imgs/automatic.jpg',
+                    'is_supported_model_format': true,
+                    'local': true,
+                    standard_width: 0,
+                    standard_height: 0
+                }
+            };
+            let noneFile = {
+                'name': `None`,
+                'data': {
+                    'name': 'None',
+                    'title': 'None',
+                    'author': '(Internal)',
+                    'architecture': 'VAE',
+                    'class': 'VAE',
+                    'description': translate('Use the system default VAE for the selected model class, or the VAE built-in to the selected model'),
+                    'preview_image': '/imgs/none.jpg',
+                    'is_supported_model_format': true,
+                    'local': true,
+                    standard_width: 0,
+                    standard_height: 0
+                }
+            };
+            files = [autoFile, noneFile].concat(files);
+        }
+        return files;
+    }
+
+    /** Filter box on a truncated LoRA folder. Clearing returns to the cached first pages. */
+    onServerFilter(text) {
+        let sort = this.readSort();
+        let path = this.browser.folder || '';
+        let depth = this.browser.depth;
+        if (!text) {
+            this.browser.skipClientFilter = false;
+            let key = this.listCacheKey(path, depth, sort.sortBy, sort.reverse, '');
+            let cached = this.listCache.get(key);
+            if (cached) {
+                this.publishListing(path, depth, sort.sortBy, sort.reverse, '', cached, null, null);
+                return;
+            }
+        }
+        this.fetchModels(path, depth, sort.sortBy, sort.reverse, text, 0, false, null, null, false);
+    }
+
+    /** Requests the next LoRA page and appends it to the cached window. */
+    loadMoreModels() {
+        if (this.pageMoreBusy || !this.pageMore) {
+            return;
+        }
+        this.fetchModels(this.pagePath, this.pageDepth, this.pageSortBy, this.pageReverse, this.pageSearch, this.pageShown, false, null, null, true);
+    }
+
+    /** The row under a truncated LoRA listing. */
+    appendListMore(container) {
+        if (!this.pageMore || !container) {
+            return;
+        }
+        let row = createDiv(null, 'browser-list-more');
+        let label = createSpan(null, 'browser-list-more-label');
+        let shown = this.pageShown.toLocaleString();
+        let total = this.pageTotal.toLocaleString();
+        label.innerText = `Showing ${shown} of ${total} - search or open a subfolder to see more`;
+        row.appendChild(label);
+        let button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'basic-button browser-list-more-button';
+        button.innerText = 'Load more';
+        button.disabled = this.pageMoreBusy == true;
+        button.addEventListener('click', () => {
+            button.disabled = true;
+            this.loadMoreModels();
+        });
+        row.appendChild(button);
+        container.appendChild(row);
+    }
+
+    /** One model that was not in the loaded page. DescribeModel fills the browser cache for later lookups. */
+    resolveMissingModel(name) {
+        if (!name || this.models[name] || this.missingLookups[name]) {
+            return;
+        }
+        this.missingLookups[name] = true;
+        genericRequest('DescribeModel', { 'modelName': name, 'subtype': this.subType }, data => {
+            if (!data || !data.model) {
+                return;
+            }
+            let canonical = data.model.name || name;
+            let file = { 'name': canonical, 'data': data.model };
+            this.models[name] = file;
+            this.models[canonical] = file;
+            if (this.browser.lastFiles) {
+                this.browser.lastFiles.push(file);
+            }
+        }, 0, () => {
+            delete this.missingLookups[name];
         });
     }
 

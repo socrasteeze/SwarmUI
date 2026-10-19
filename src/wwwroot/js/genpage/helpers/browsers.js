@@ -5,6 +5,10 @@ class BrowserUtil {
     constructor() {
         /** Elements that already have a lazy-load scan booked for the next animation frame. */
         this.pendingVisible = new Set();
+        /** Elements that already have a delayed lazy-load scan booked. */
+        this.pendingVisibleSoon = new Set();
+        /** Section loaders built in one makeVisible() pass. The rest wait for a later pass. */
+        this.maxSectionLoadersPerPass = 2;
     }
 
     /**
@@ -28,26 +32,74 @@ class BrowserUtil {
     }
 
     /**
+     * Books one makeVisible() pass after delayMs.
+     * Repeated calls for the same element before that pass runs share the one timer.
+     */
+    scheduleVisibleSoon(elem, delayMs) {
+        if (this.pendingVisibleSoon.has(elem)) {
+            return;
+        }
+        this.pendingVisibleSoon.add(elem);
+        setTimeout(() => {
+            this.pendingVisibleSoon.delete(elem);
+            this.makeVisible(elem);
+        }, delayMs);
+    }
+
+    /**
      * Make any visible images within a container actually load now.
+     * Reads every candidate rect before changing the DOM. Section loaders are invoked directly so a
+     * synthetic click cannot bubble into document handlers that force layout. At most
+     * maxSectionLoadersPerPass loaders run; a later coalesced pass builds the rest.
      */
     makeVisible(elem) {
-        let elementsToLoad = Array.from(elem.querySelectorAll('.lazyload')).filter(e => {
-            let top = e.getBoundingClientRect().top;
-            return top != 0 && top < window.innerHeight + 512; // Note top=0 means not visible
-        });
-        for (let subElem of elementsToLoad) {
+        if (!elem || !elem.querySelectorAll) {
+            return;
+        }
+        let nodes = elem.querySelectorAll('.lazyload');
+        let limit = window.innerHeight + 512;
+        let near = [];
+        for (let i = 0; i < nodes.length; i++) {
+            let rect = nodes[i].getBoundingClientRect();
+            // top=0 means not visible (detached or display:none). bottom > -512 keeps content
+            // far above the viewport from loading until a scroll scan brings it back.
+            if (rect.top != 0 && rect.top < limit && rect.bottom > -512) {
+                near.push(nodes[i]);
+            }
+        }
+        let loaderBudget = this.maxSectionLoadersPerPass;
+        let moreLoaders = false;
+        for (let i = 0; i < near.length; i++) {
+            let subElem = near[i];
+            let isLoader = subElem.classList.contains('browser-section-loader');
+            if (isLoader) {
+                if (loaderBudget <= 0) {
+                    moreLoaders = true;
+                    continue;
+                }
+                loaderBudget--;
+            }
             subElem.classList.remove('lazyload');
             if (subElem.tagName == 'IMG') {
                 if (!subElem.dataset.src) {
                     continue;
                 }
+                subElem.decoding = 'async';
                 subElem.src = subElem.dataset.src;
                 delete subElem.dataset.src;
             }
-            else if (subElem.classList.contains('browser-section-loader')) {
-                subElem.click();
+            else if (isLoader) {
+                if (typeof subElem.lazyLoadChunk == 'function') {
+                    subElem.lazyLoadChunk();
+                }
+                else {
+                    subElem.click();
+                }
                 subElem.remove();
             }
+        }
+        if (moreLoaders) {
+            this.scheduleVisible(elem);
         }
     }
 }
@@ -128,6 +180,17 @@ class GenPageBrowserClass {
         this.builtEvent = null;
         this.sizeChangedEvent = null;
         this.filterEvent = null;
+        /** When set, a non-empty filter debounces through this instead of hiding rows locally. */
+        this.serverFilter = null;
+        this.serverFilterTimer = null;
+        /** Server-search results are already filtered. The local substring test would drop multi-word matches. */
+        this.skipClientFilter = false;
+        /** Replaces the header count when a listing is a window of a larger total. */
+        this.countText = null;
+        /** Optional hook after the content rows are built. Model browsers use it for the Load more row. */
+        this.afterBuildContent = null;
+        /** Optional lookup when getFileFor misses. LoRA browsers use it for models outside the loaded page. */
+        this.resolveMissingFile = null;
         this.maxPreBuild = 512;
         this.chunksRendered = 0;
         this.rerenderPlanned = false;
@@ -458,7 +521,7 @@ class GenPageBrowserClass {
             let file = files[i];
             id++;
             let desc = this.describe(file);
-            if (this.filter && !desc.searchable.toLowerCase().includes(this.filter)) {
+            if (this.filter && !this.skipClientFilter && !desc.searchable.toLowerCase().includes(this.filter)) {
                 continue;
             }
             if (i >= maxBuildNow) {
@@ -469,8 +532,16 @@ class GenPageBrowserClass {
                     let chunk = remainingFiles.splice(0, chunkSize);
                     let chunkStartId = nextChunkStartId;
                     let sectionDiv = createDiv(null, 'lazyload browser-section-loader');
-                    sectionDiv.onclick = () => {
+                    let chunkBuilt = false;
+                    sectionDiv.lazyLoadChunk = () => {
+                        if (chunkBuilt) {
+                            return;
+                        }
+                        chunkBuilt = true;
                         this.buildContentList(container, chunk, sectionDiv, chunkStartId);
+                    };
+                    sectionDiv.onclick = () => {
+                        sectionDiv.lazyLoadChunk();
                     };
                     container.appendChild(sectionDiv);
                     nextChunkStartId += chunkSize;
@@ -661,9 +732,14 @@ class GenPageBrowserClass {
                 container.appendChild(div);
             }
         }
-        setTimeout(() => {
-            browserUtil.makeVisible(container);
-        }, 100);
+        if (browserUtil.scheduleVisibleSoon) {
+            browserUtil.scheduleVisibleSoon(container, 100);
+        }
+        else {
+            setTimeout(() => {
+                browserUtil.makeVisible(container);
+            }, 100);
+        }
     }
 
     /** Removes popovers owned by this browser before its content is rebuilt. */
@@ -693,7 +769,14 @@ class GenPageBrowserClass {
      * Returns the file object for a given path.
      */
     getFileFor(path) {
-        return this.lastFiles.find(f => f.name == path);
+        if (!this.lastFiles) {
+            return null;
+        }
+        let found = this.lastFiles.find(f => f.name == path);
+        if (!found && path && this.resolveMissingFile) {
+            this.resolveMissingFile(path);
+        }
+        return found;
     }
 
     /**
@@ -796,6 +879,23 @@ class GenPageBrowserClass {
                 }
                 else {
                     clearFilterBtn.style.display = 'none';
+                }
+                if (this.serverFilter) {
+                    if (this.serverFilterTimer) {
+                        clearTimeout(this.serverFilterTimer);
+                        this.serverFilterTimer = null;
+                    }
+                    if (this.filter.length == 0) {
+                        this.serverFilter('');
+                        return;
+                    }
+                    this.serverFilterTimer = setTimeout(() => {
+                        this.serverFilterTimer = null;
+                        if (this.serverFilter) {
+                            this.serverFilter(this.filter);
+                        }
+                    }, 250);
+                    return;
                 }
                 setTimeout(() => {
                     this.update();
@@ -930,12 +1030,15 @@ class GenPageBrowserClass {
         this.headerPath = this.genPath(path, this.upButton);
         this.headerBar.appendChild(this.headerPath);
         this.headerCount = createSpan(null, 'browser-header-count');
-        this.headerCount.innerText = files.length;
+        this.headerCount.innerText = this.countText != null ? this.countText : files.length;
         this.headerBar.appendChild(this.headerCount);
         this.buildTreeElements(this.folderTreeDiv, '', this.tree);
         applyTranslations(this.headerBar);
         if (!this.noContentUpdates) {
             this.buildContentList(this.contentDiv, files);
+            if (this.afterBuildContent) {
+                this.afterBuildContent(this.contentDiv);
+            }
             if (this.preservedMultiSelect && this.preservedMultiSelect.size > 0) {
                 for (let child of this.contentDiv.children) {
                     if (child.dataset && child.dataset.name && this.preservedMultiSelect.has(child.dataset.name)) {

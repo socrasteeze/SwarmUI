@@ -479,6 +479,51 @@ const presetEmpty = await page.evaluate(() => {
 check('an empty Preset axis is left out of the run',
     presetEmpty.join(',') == 'steps', presetEmpty.join(','));
 
+const gridLoraSearch = await page.evaluate(async () => {
+    let calls = 0;
+    let orig = MCreate.filterModels;
+    MCreate.filterModels = (list, term) => {
+        calls++;
+        return orig(list, term);
+    };
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.params['model'] = 'anima/checkpoint.safetensors';
+    mGrid.selected = {};
+    mGrid.open();
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(entry => entry.querySelector('.m-grid-card-name').textContent == 'LoRAs');
+    card.open = true;
+    let baseline = calls;
+    let search = card.querySelector('.m-grid-search');
+    for (let value of ['s', 'st', 'sty']) {
+        search.value = value;
+        search.dispatchEvent(new Event('input'));
+    }
+    let during = calls;
+    await new Promise(resolve => setTimeout(resolve, MCreate.SearchDebounceMs + 80));
+    let after = calls;
+    let shown = [...card.querySelectorAll('.m-grid-option')].map(elem => elem.textContent);
+    let expected = mState.compatFirst(mState.starredFirst(orig(mCreate.loraList, 'sty'), 'LoRA'), 'LoRA')
+        .map(model => mUI.modelName(MState.stripModelExt(model.name)));
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    let cleared = calls;
+    MCreate.filterModels = orig;
+    return { baseline, during, after, cleared, shown, expected };
+});
+// The debounced local render is one filter pass. searchLoraMetadata then re-renders when ListModels
+// returns, which this harness answers immediately, so the settled count is two.
+check('grid LoRA search debounce renders once for a fast-typed word',
+    gridLoraSearch.during == gridLoraSearch.baseline && gridLoraSearch.after == gridLoraSearch.baseline + 2,
+    JSON.stringify({ baseline: gridLoraSearch.baseline, during: gridLoraSearch.during, after: gridLoraSearch.after }));
+check('debounced grid LoRA search matches the undebounced filter',
+    gridLoraSearch.shown.join(',') == gridLoraSearch.expected.join(','),
+    `${gridLoraSearch.shown.join(',')} vs ${gridLoraSearch.expected.join(',')}`);
+check('clearing the grid LoRA search renders immediately',
+    gridLoraSearch.cleared == gridLoraSearch.after + 1, `${gridLoraSearch.cleared} vs ${gridLoraSearch.after}`);
+
 // ---- Permission ----
 const denied = await page.evaluate(() => {
     for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {

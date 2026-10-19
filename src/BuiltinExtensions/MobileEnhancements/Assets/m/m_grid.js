@@ -479,7 +479,17 @@ class MGrid {
                         `${matches.length - shown.length} more - search to narrow.`));
                 }
             };
-            search.addEventListener('input', () => renderOptions());
+            MCreate.bindSearchInput(search, () => {
+                renderOptions();
+                let term = `${search.value || ''}`.trim();
+                if (term && mCreate.searchLoraMetadata) {
+                    mCreate.searchLoraMetadata(term, () => {
+                        if (`${search.value || ''}`.trim().toLowerCase() == term.toLowerCase()) {
+                            renderOptions();
+                        }
+                    });
+                }
+            });
             // Scroll/drag on the results list means Adam is hunting a row - blur so the keyboard gets out of
             // the way. touchstart on an option also blurs (click handler above covers the select case).
             let dismissKb = () => {
@@ -492,8 +502,8 @@ class MGrid {
             renderOptions();
             body.appendChild(list);
             // The Create tab loads this list when its own LoRA sheet is opened, which may never have
-            // happened in this session. enrichLoraMetadata indexes the boot corpus immediately, then fills
-            // titles past the list cap one folder at a time. Render the corpus now and again when it settles.
+            // happened in this session. enrichLoraMetadata indexes the boot corpus immediately, then
+            // fetches the first metadata page. Render the corpus now and again when it settles.
             if (!mCreate.loraList) {
                 let settled = false;
                 mCreate.enrichLoraMetadata((failed, error) => {
