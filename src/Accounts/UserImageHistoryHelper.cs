@@ -62,6 +62,75 @@ public class UserImageHistoryHelper
         return path;
     }
 
+    /// <summary>Returns whether one history file or folder name is excluded because it starts with a dot.</summary>
+    /// <param name="name">A single path segment, not a combined path.</param>
+    public static bool IsDotPrefixedHistoryName(string name)
+    {
+        return !string.IsNullOrEmpty(name) && name.StartsWith('.');
+    }
+
+    /// <summary>Returns whether a history folder path has any dot-prefixed segment, such as <c>.trash</c> or <c>folder/.starred</c>.</summary>
+    /// <param name="path">A history path relative to the output root. Slashes in either direction are separators.</param>
+    public static bool IsDotPrefixedHistoryPath(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+        string normalized = path.Replace('\\', '/').Trim('/');
+        foreach (string segment in normalized.Split('/'))
+        {
+            if (IsDotPrefixedHistoryName(segment))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Enumerates immediate subdirectories of <paramref name="path"/>.
+    /// The result is read fully before it is returned. A missing directory, a dangling link, or an unreadable directory yields an empty list.</summary>
+    /// <param name="path">Directory to read.</param>
+    public static string[] TryEnumerateDirectories(string path)
+    {
+        return TryEnumerate(path, directory => Directory.EnumerateDirectories(directory), -1);
+    }
+
+    /// <summary>Enumerates immediate files in <paramref name="path"/>, stopping after <paramref name="maxCount"/> when that count is zero or greater.
+    /// The result is read fully before it is returned. A missing directory, a dangling link, or an unreadable directory yields an empty list.</summary>
+    /// <param name="path">Directory to read.</param>
+    /// <param name="maxCount">Maximum files to return. Negative means no limit.</param>
+    public static string[] TryEnumerateFiles(string path, int maxCount = -1)
+    {
+        return TryEnumerate(path, directory => Directory.EnumerateFiles(directory), maxCount);
+    }
+
+    /// <summary>Reads one directory enumeration inside the catch, so a failure on a later entry is not deferred past this method.</summary>
+    /// <param name="path">Directory to read.</param>
+    /// <param name="enumerate">Enumeration to run. It must list only the immediate contents the caller asked for.</param>
+    /// <param name="maxCount">Maximum entries to keep. Negative means no limit.</param>
+    private static string[] TryEnumerate(string path, Func<string, IEnumerable<string>> enumerate, int maxCount)
+    {
+        try
+        {
+            List<string> entries = [];
+            foreach (string entry in enumerate(path))
+            {
+                if (maxCount >= 0 && entries.Count >= maxCount)
+                {
+                    break;
+                }
+                entries.Add(entry);
+            }
+            return [.. entries];
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException or IOException)
+        {
+            Logs.Debug($"Skipping unavailable directory '{path}': {ex.Message}");
+            return [];
+        }
+    }
+
     /// <summary>Ffmpeg can get weird with overlapping calls, so max one at a time.</summary>
     public static SemaphoreSlim FfmpegLock = new(1, 1);
 

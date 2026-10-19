@@ -164,7 +164,7 @@ public static class SimpleImageBrowserAPI
             HashSet<string> hiddenRoots = T2IAPI.ParseHiddenFolders(session.User.Settings.HiddenHistoryFolders);
             List<string> folders = ListOutputFolders(session.User, path, root, browseBase, hiddenRoots, mediaTypes);
             HashSet<string> acceptedExtensions = GetOutputExtensions(mediaTypes);
-            IEnumerable<string> directFiles = Directory.Exists(path) ? Directory.EnumerateFiles(path) : [];
+            IEnumerable<string> directFiles = Directory.Exists(path) ? UserImageHistoryHelper.TryEnumerateFiles(path) : [];
             List<OutputImageRow> files = directFiles
                 .Where(file => IsOutputMediaFile(file, acceptedExtensions, search))
                 .Select(file => new OutputImageRow(Path.GetFileName(file), file, File.GetLastWriteTimeUtc(file).Ticks))
@@ -382,7 +382,7 @@ public static class SimpleImageBrowserAPI
     {
         HashSet<string> extensions = GetOutputExtensions(mediaTypes);
         HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
-        IEnumerable<string> directFolders = Directory.Exists(path) ? Directory.EnumerateDirectories(path) : [];
+        IEnumerable<string> directFolders = Directory.Exists(path) ? UserImageHistoryHelper.TryEnumerateDirectories(path) : [];
         foreach (string folder in directFolders)
         {
             string name = GetName(folder);
