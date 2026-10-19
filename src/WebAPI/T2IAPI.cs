@@ -825,6 +825,11 @@ public static class T2IAPI
                     {
                         dir = dir[..^1];
                     }
+                    // Dot-prefixed folders stay out of history. This also covers grafted special-folder keys.
+                    if (UserImageHistoryHelper.IsDotPrefixedHistoryPath(dir))
+                    {
+                        return;
+                    }
                     if (dir != "")
                     {
                         (subDepth == 0 ? finalDirs : dirsConc).TryAdd(dir, dir);
@@ -837,10 +842,10 @@ public static class T2IAPI
                         {
                             return;
                         }
-                        IEnumerable<string> subDirs = Directory.EnumerateDirectories(actualPath).Select(Path.GetFileName).OrderDescending();
+                        IEnumerable<string> subDirs = UserImageHistoryHelper.TryEnumerateDirectories(actualPath).Select(Path.GetFileName).OrderDescending();
                         foreach (string subDir in subDirs)
                         {
-                            if (subDir.StartsWithFast('.'))
+                            if (UserImageHistoryHelper.IsDotPrefixedHistoryName(subDir))
                             {
                                 continue;
                             }
@@ -924,7 +929,7 @@ public static class T2IAPI
                 {
                     return;
                 }
-                List<string> subFiles = [.. Directory.EnumerateFiles(actualPath).Take(localLimit)];
+                List<string> subFiles = [.. UserImageHistoryHelper.TryEnumerateFiles(actualPath, localLimit)];
                 IEnumerable<string> newFileNames = subFiles.Select(f => f.Replace('\\', '/')).Where(isAllowed).Where(f => !f.AfterLast('/').StartsWithFast('.') && extensions.Contains(f.AfterLast('.')) && !f.EndsWith(".swarmpreview.jpg") && !f.EndsWith(".swarmpreview.webp"));
                 List<ImageHistoryHelper> localFiles = [.. newFileNames.Select(f => new ImageHistoryHelper(prefix + f.AfterLast('/'), OutputMetadataTracker.GetMetadataFor(f, root, starNoFolders))).Where(f => f.Metadata is not null)];
                 int leftOver = Interlocked.Add(ref remaining, -localFiles.Count);
