@@ -16,6 +16,10 @@ Fork-owned assets live in this extension. Small core integration changes are rec
 
 The `/simple` Models tab displays 48 cards per page with **Previous** and **Next** controls. Genpage History uses its existing progressive renderer with a 50-card first batch. Search, starred ordering, and image actions retain their existing behavior.
 
+A Models card trigger shows two whole lines, then an ellipsis. **more** opens the full phrase in the card, and **less** closes it. **more** does not add the LoRA and does not insert the trigger. Tapping the phrase still inserts it. The title clamps to two lines and the subtitle to one. The card's accessible name keeps the full wording. A row stretches to the tallest card, including one with **more** open. Restart SwarmUI before a Release server shows the change.
+
+**Load CivitAI preview** is on a local card only when the session may edit model metadata, the card has no real preview, and the description has no CivitAI model link. A real preview is any `preview_image` other than empty or `imgs/model_placeholder.jpg`. A trigger phrase or a title does not hide the button. The button only saves a preview image. There is no card sheet for fetching that preview again.
+
 **Skip Navigation** moves keyboard focus into the main content. Model and History tiles support Enter and Space. Open sheets and the History viewer contain Tab navigation; Escape closes them and restores focus. The History viewer also supports Left and Right arrow navigation. Sheets, toasts, preview indicators, and viewer travel honor the device's reduced-motion setting.
 
 Genpage applies the saved mobile/desktop layout choice before first paint. The standalone client's fallback status polling pauses while hidden and reconciles the queue when the app returns. These changes require a server restart and client cache refresh before a running Release installation adopts them.

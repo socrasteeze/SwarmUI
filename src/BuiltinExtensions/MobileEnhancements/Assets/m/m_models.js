@@ -1,9 +1,9 @@
 /** MobileEnhancements standalone client - Models tab.
  * Browse checkpoints and LoRAs via ListModels; tap a checkpoint to set it as the generation model, tap a
- * LoRA to add it to the active set. Local cards also expose Load CivitAI preview: hash lookup, then the
- * first still image (or a video frame) saved through SaveModelPreviewImage. That writes a JPEG beside
- * the model and updates the preview cache only. It does not call EditModelMetadata, so tags and the
- * .swarm.json sidecar stay untouched. */
+ * LoRA to add it to the active set. A local card with no real preview and no CivitAI model link in its
+ * description exposes Load CivitAI preview: hash lookup, then the first still image (or a video frame)
+ * saved through SaveModelPreviewImage. That writes a JPEG beside the model and updates the preview cache
+ * only. It does not call EditModelMetadata, so tags and the .swarm.json sidecar stay untouched. */
 class MModels {
 
     constructor() {
@@ -510,9 +510,40 @@ class MModels {
             || permissions.hasPermission('edit_model_metadata');
     }
 
+    /** SwarmUI's generic model image. A card still showing this has no real preview. */
+    static PlaceholderPreview = 'imgs/model_placeholder.jpg';
+
+    /** True when preview_image is a saved or served image, not blank and not the generic placeholder. */
+    hasRealPreview(model) {
+        let preview = `${model.preview_image || ''}`.trim();
+        if (!preview) {
+            return false;
+        }
+        let path = preview.split('?')[0].split('#')[0].replace(/\\/g, '/');
+        if (path == MModels.PlaceholderPreview || path.endsWith(`/${MModels.PlaceholderPreview}`) || path.endsWith('/model_placeholder.jpg')) {
+            return false;
+        }
+        return true;
+    }
+
+    /** Load CivitAI preview is only for a local card that still needs an image.
+     * Hidden when a real preview is already present, or when the description already holds a CivitAI model
+     * link (the same link guessCivitUrl reads). A trigger phrase, title, or author does not hide it: those
+     * often ship in the file, and the button only saves a preview. There is no card details sheet, so a
+     * card that already has a preview or that link does not grow a second control. */
+    shouldOfferCivitaiPreview(model) {
+        if (model.local === false || !this.canEditMetadata()) {
+            return false;
+        }
+        if (this.hasRealPreview(model) || this.guessCivitUrl(model)) {
+            return false;
+        }
+        return true;
+    }
+
     /** One model card: preview, heading, subtitle, trigger phrase; tap = select (checkpoint) or add (LoRA).
      * Checkpoints stay file-name first; LoRAs prefer the metadata title - see mUI.modelLines.
-     * Local models with edit permission also get Load CivitAI preview (stopPropagation so it does not select/add). */
+     * Local models that still need a preview get Load CivitAI preview (stopPropagation so it does not select/add). */
     buildCard(model) {
         let card = mUI.el('div', 'm-model-card');
         card.tabIndex = 0;
@@ -546,8 +577,8 @@ class MModels {
             this.toggleFavorite(subtype, model.name);
         });
         card.appendChild(star);
-        card.appendChild(mUI.modelText(model, trigger => mCreate.insertTriggerPhrase(trigger), this.subtype == 'LoRA'));
-        if (model.local !== false && this.canEditMetadata()) {
+        card.appendChild(mUI.modelText(model, trigger => mCreate.insertTriggerPhrase(trigger), this.subtype == 'LoRA', true));
+        if (this.shouldOfferCivitaiPreview(model)) {
             let civitBtn = mUI.el('button', 'm-model-civitai-btn', 'Load CivitAI preview');
             civitBtn.type = 'button';
             civitBtn.addEventListener('click', (e) => {
@@ -590,7 +621,45 @@ class MModels {
                 activate();
             }
         });
+        if (card.querySelector('.m-trigger-more')) {
+            this.scheduleTriggerFit();
+        }
         return card;
+    }
+
+    /** Coalesces one measurement so more appears only when the two-line clamp still hides text. */
+    scheduleTriggerFit() {
+        if (this.triggerFitQueued) {
+            return;
+        }
+        this.triggerFitQueued = true;
+        requestAnimationFrame(() => {
+            this.triggerFitQueued = false;
+            this.fitTriggerExpands();
+        });
+    }
+
+    /** Reveals more on a clamped trigger that still hides text. A shortened preview keeps more. */
+    fitTriggerExpands() {
+        if (!this.grid) {
+            return;
+        }
+        let rows = this.grid.querySelectorAll('.m-trigger-block');
+        for (let i = 0; i < rows.length; i++) {
+            let more = rows[i].querySelector('.m-trigger-more');
+            let text = rows[i].querySelector('.m-trigger-chip-text');
+            if (!more || !text || rows[i].classList.contains('m-trigger-open')) {
+                continue;
+            }
+            if (more.dataset.force == '1') {
+                more.hidden = false;
+                continue;
+            }
+            if (text.clientHeight <= 0) {
+                continue;
+            }
+            more.hidden = text.scrollHeight <= text.clientHeight + 1;
+        }
     }
 
     /** Opens the Load CivitAI preview sheet and saves one still image for a local model card. */

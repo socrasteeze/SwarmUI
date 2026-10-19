@@ -101,8 +101,10 @@ class MUI {
      * Trigger phrases are the reason a LoRA row needs more than a name - onTrigger, when given, makes the
      * phrase a tappable chip. The chip shows the literal phrase (so you know what you are getting) but the
      * callback receives the full phrase, even when the displayed preview is shortened.
-     * preferTitle is the LoRA heading rule from modelLines - checkpoints omit it. */
-    modelText(model, onTrigger, preferTitle) {
+     * preferTitle is the LoRA heading rule from modelLines - checkpoints omit it.
+     * expandableTrigger is the Models-tab card: the chip clamps to whole lines, and more/less reveals the
+     * full phrase in place. That control does not insert the phrase and does not select the model. */
+    modelText(model, onTrigger, preferTitle, expandableTrigger) {
         let text = this.el('div', 'm-model-text');
         let lines = this.modelLines(model, preferTitle);
         text.appendChild(this.el('div', 'm-model-name', lines.primary));
@@ -113,13 +115,11 @@ class MUI {
         if (trigger) {
             let row = this.el('div', 'm-model-trigger');
             let shown = MUI.triggerPreview(trigger);
-            if (onTrigger) {
-                let button = this.el('button', 'm-trigger-chip', `+ ${shown}`);
-                button.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    onTrigger(trigger);
-                });
-                row.appendChild(button);
+            if (onTrigger && expandableTrigger) {
+                row.appendChild(this.triggerChip(trigger, shown, onTrigger, true));
+            }
+            else if (onTrigger) {
+                row.appendChild(this.triggerChip(trigger, shown, onTrigger, false));
             }
             else {
                 row.appendChild(this.el('span', 'm-trigger-text', shown));
@@ -129,8 +129,59 @@ class MUI {
         return text;
     }
 
+    /** The tappable trigger chip. expandable adds more/less for a Models-tab card.
+     * more toggles the full phrase inside the card and does not call onTrigger. */
+    triggerChip(trigger, shown, onTrigger, expandable) {
+        let button = this.el('button', 'm-trigger-chip');
+        button.type = 'button';
+        let label = null;
+        if (expandable) {
+            label = this.el('span', 'm-trigger-chip-text', `+ ${shown}`);
+            label.id = `m-trigger-text-${++MUI.triggerTextSeq}`;
+            button.appendChild(label);
+        }
+        else {
+            button.textContent = `+ ${shown}`;
+        }
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            onTrigger(trigger);
+        });
+        if (!label) {
+            return button;
+        }
+        let wrap = this.el('div', 'm-trigger-block');
+        wrap.appendChild(button);
+        let more = this.el('button', 'm-trigger-more', 'more');
+        more.type = 'button';
+        more.setAttribute('aria-expanded', 'false');
+        more.setAttribute('aria-controls', label.id);
+        more.setAttribute('aria-label', 'Show full trigger');
+        if (shown != trigger) {
+            more.dataset.force = '1';
+        }
+        else {
+            more.hidden = true;
+        }
+        more.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            let open = !wrap.classList.contains('m-trigger-open');
+            wrap.classList.toggle('m-trigger-open', open);
+            label.textContent = open ? `+ ${trigger}` : `+ ${shown}`;
+            more.textContent = open ? 'less' : 'more';
+            more.setAttribute('aria-expanded', open ? 'true' : 'false');
+            more.setAttribute('aria-label', open ? 'Hide full trigger' : 'Show full trigger');
+        });
+        wrap.appendChild(more);
+        return wrap;
+    }
+
     /** Most phrases a model row shows from a trigger phrase. */
     static TriggerPreviewPhrases = 6;
+
+    /** Ids for Models-tab trigger text, so more/less can name the phrase it toggles. */
+    static triggerTextSeq = 0;
 
     /** Most characters a model row shows from a trigger phrase. */
     static TriggerPreviewChars = 120;
