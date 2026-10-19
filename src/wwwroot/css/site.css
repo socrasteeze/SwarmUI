@@ -1120,12 +1120,39 @@ input,
 select {
     color: var(--text);
 }
+/* One border-box height for every single-line param control. The select used
+   content-box plus extra vertical padding, so it stood taller than the number
+   and text fields in the same row. em follows the control font (14px desktop,
+   16px on touch) without changing that font. Multi-line textareas, checks,
+   and range sliders are not in this set. */
+.input-group select.auto-dropdown,
+.input-group input.auto-number,
+.input-group input.auto-slider-number,
+.input-group input.auto-text,
+.input-group textarea.auto-text:not(.auto-text-block) {
+    box-sizing: border-box;
+    height: calc(1.5em + 8px);
+    border-width: 1px;
+    border-style: solid;
+    line-height: 1.5;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+.input-group input.auto-number,
+.input-group input.auto-text,
+.input-group textarea.auto-text:not(.auto-text-block) {
+    padding: 0 10px;
+}
 .input-group input[type="number"].auto-slider-number {
     padding: 0 4px;
 }
-.input-group input[type="number"],
-.input-group .auto-text {
+.input-group textarea.auto-text {
     padding: 0 10px;
+    transition: background-color 0.2s;
+    color: var(--text);
+}
+.input-group input[type="number"],
+.input-group input.auto-text {
     transition: background-color 0.2s;
     color: var(--text);
 }
@@ -1137,11 +1164,14 @@ select {
     outline: none;
     border-color: rgba(255, 255, 255, 0.15);
 }
-.input-group .auto-dropdown {
-    padding: 3px 8px;
-    box-sizing: content-box;
+.input-group select.auto-dropdown {
+    padding: 0 8px;
     width: auto !important;
     max-width: calc(100% - 16px);
+}
+.preset-modal-inputs textarea.auto-text-block {
+    max-height: 40vh;
+    overflow-y: auto;
 }
 .auto-slider-box {
     display: flex;

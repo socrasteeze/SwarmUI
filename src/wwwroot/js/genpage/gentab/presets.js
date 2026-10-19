@@ -200,6 +200,29 @@ function ensurePresetInputsBuilt() {
     }
 }
 
+/** Grows the preset modal's prompt boxes to their text. Call after the modal is visible — a hidden textarea reports no scroll height. */
+function growPresetPromptAreas() {
+    let area = document.getElementById('new_preset_modal_inputs');
+    if (!area) {
+        return;
+    }
+    let boxes = area.querySelectorAll('textarea.auto-text-block');
+    for (let i = 0; i < boxes.length; i++) {
+        let box = boxes[i];
+        let onInput = box.getAttribute('oninput') || '';
+        if (onInput.includes('textPromptInputHandle')) {
+            textBoxSizeAdjust(box, '40vh');
+        }
+    }
+}
+
+/** Opens the create/edit preset modal and sizes its prompt boxes to the values just filled in. */
+function showPresetEditorModal() {
+    $('#add_preset_modal').modal('show');
+    growPresetPromptAreas();
+    requestAnimationFrame(growPresetPromptAreas);
+}
+
 function clearPresetView() {
     preset_to_edit = null;
     getRequiredElementById('preset_advanced_options_checkbox').checked = false;
@@ -263,7 +286,7 @@ function create_new_preset_button() {
     let run = () => {
         triggerChangeFor(presetHelpers.enableImageElem);
         fixPresetParamClickables();
-        $('#add_preset_modal').modal('show');
+        showPresetEditorModal();
     };
     if (curImg && curImg.tagName == 'IMG') {
         setMediaFileDirect(presetHelpers.imageElem, curImg.src, 'image', 'cur', 'cur', () => {
@@ -522,7 +545,7 @@ function editPreset(preset) {
     let curImg = currentImageHelper.getCurrentImage();
     let run = () => {
         triggerChangeFor(presetHelpers.enableImageElem);
-        $('#add_preset_modal').modal('show');
+        showPresetEditorModal();
         fixPresetParamClickables();
     };
     if (curImg && curImg.tagName == 'IMG') {
