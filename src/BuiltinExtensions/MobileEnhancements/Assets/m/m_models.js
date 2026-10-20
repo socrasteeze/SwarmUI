@@ -192,6 +192,9 @@ class MModels {
             btn.classList.toggle('m-selected', btn.dataset.subtype == this.subtype);
         }
         let isLora = this.subtype == 'LoRA';
+        if (!isLora && mCreate.cancelLoraMetaScope) {
+            mCreate.cancelLoraMetaScope('models-lora');
+        }
         let sort = this.sortSetting();
         this.sortSelect.value = sort.mode;
         this.sortReverse.classList.toggle('m-selected', sort.reverse);
@@ -395,6 +398,34 @@ class MModels {
         this.nextPage.disabled = this.page >= pages - 1;
         this.pageStatus.textContent = `Page ${this.page + 1} of ${pages} · ${models.length}`;
         this.pageModels = models;
+        if (this.subtype == 'LoRA' && mCreate.ensureLoraMetadata) {
+            let visible = [];
+            for (let n = start; n < end; n++) {
+                visible.push(models[n]);
+            }
+            mCreate.ensureLoraMetadata(visible, () => {
+                if (this.subtype != 'LoRA' || !this.grid || !this.grid.isConnected) {
+                    return;
+                }
+                mCreate.paintLoraMetadataRows(this.grid, '.m-model-card', {
+                    'thumbClass': null,
+                    'preferTitle': true,
+                    'expandable': true,
+                    'placeholderClass': 'm-model-card-placeholder',
+                    'onTrigger': trigger => mCreate.insertTriggerPhrase(trigger),
+                    'after': (row, model) => {
+                        let civit = row.querySelector('.m-model-civitai-btn');
+                        if (civit && !this.shouldOfferCivitaiPreview(model)) {
+                            civit.remove();
+                        }
+                        let title = [model.title, model.name, model.author, model.trigger_phrase].filter(Boolean).join('\n');
+                        row.title = title;
+                        row.setAttribute('aria-label', title.replaceAll('\n', '. '));
+                    }
+                });
+                this.scheduleTriggerFit();
+            }, 'models-lora');
+        }
     }
 
     /** Moves one page without issuing another request. */
@@ -548,6 +579,12 @@ class MModels {
         let card = mUI.el('div', 'm-model-card');
         card.tabIndex = 0;
         card.setAttribute('role', 'button');
+        if (this.subtype == 'LoRA') {
+            card.dataset.loraName = model.name;
+            if (mCreate.loraMetadataKnown && mCreate.loraMetadataKnown(model)) {
+                card.dataset.loraMetaRev = `${model._mMetaRev || 0}`;
+            }
+        }
         let thumb = mUI.modelThumb(model, null);
         if (thumb) {
             card.appendChild(thumb);

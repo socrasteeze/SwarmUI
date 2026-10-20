@@ -926,6 +926,12 @@ class MCreate {
     /** How many LoRA metadata rows one ListModels page asks for. Search uses the same size. */
     static LoraCacheLimit = 500;
 
+    /** ListModels limit for one visible LoRA row. The search is that file's stem, inside its folder. */
+    static LoraRowFetchLimit = 10;
+
+    /** Wait before painting a burst of visible-row metadata, so 48 responses share a few updates. */
+    static LoraMetaPaintMs = 80;
+
     /** Trailing delay for LoRA search. Clearing the field renders on the same turn. */
     static SearchDebounceMs = 150;
 
@@ -2587,9 +2593,10 @@ class MCreate {
      * only the full name left every active row as a bare stem with no title or thumbnail.
      *
      * The corpus is the name list from ListT2IParams, not a full ListModels dump. Titles and previews are a
-     * metadata overlay: the first LoraCacheLimit rows, plus whatever a search or a folder page has fetched.
-     * A row with no overlay yet still renders from its name. ListT2IParams already ships every LoRA name
-     * and class id at boot, uncapped and cheap. */
+     * metadata overlay: the first LoraCacheLimit rows, plus whatever a search, a folder page, or a visible
+     * row (`ensureLoraMetadata`) has fetched. A row with no overlay yet still renders from its name.
+     * ListT2IParams already ships every LoRA name and class id at boot, uncapped and cheap.
+     * Re-indexing drops attempted-fetch flags, because the stubs are new and a miss has to be allowed again. */
     indexLoras(list) {
         let rich = new Map();
         for (let model of (list || [])) {
@@ -2600,7 +2607,20 @@ class MCreate {
         for (let name of rich.keys()) {
             names.add(name);
         }
-        this.loraList = [...names].sort().map(name => rich.get(name) || { 'name': name });
+        this.loraMetaAttempted = new Set();
+        this.loraList = [...names].sort().map(name => {
+            let model = rich.get(name);
+            if (!model) {
+                return { 'name': name };
+            }
+            if (model._mListed || 'title' in model || 'preview_image' in model || 'trigger_phrase' in model || 'local' in model) {
+                model._mListed = true;
+                if (!model._mMetaRev) {
+                    model._mMetaRev = 1;
+                }
+            }
+            return model;
+        });
         this.loraMap = new Map();
         for (let model of this.loraList) {
             this.loraMap.set(model.name, model);
@@ -2625,9 +2645,13 @@ class MCreate {
                 }
                 // Search corpus cached the old title-less text; drop it so the next keystroke reindexes.
                 existing._mSearchText = null;
+                existing._mListed = true;
+                existing._mMetaRev = (existing._mMetaRev || 0) + 1;
                 touched = true;
             }
             else {
+                model._mListed = true;
+                model._mMetaRev = (model._mMetaRev || 0) + 1;
                 this.loraList.push(model);
                 this.loraMap.set(model.name, model);
                 this.loraMap.set(MState.stripModelExt(model.name), model);
@@ -2665,6 +2689,247 @@ class MCreate {
         return sorted;
     }
 
+    /** Folder that contains a LoRA file. `pack/sub/file.safetensors` is `pack/sub`. A root file is `''`. */
+    static loraParentFolder(name) {
+        let clean = `${name || ''}`.replaceAll('\\', '/');
+        let slash = clean.lastIndexOf('/');
+        return slash >= 0 ? clean.substring(0, slash) : '';
+    }
+
+    /** File stem used as the ListModels search for one row. The extension is stripped. The folder is not. */
+    static loraFileStem(name) {
+        let clean = `${name || ''}`.replaceAll('\\', '/');
+        let slash = clean.lastIndexOf('/');
+        let base = slash >= 0 ? clean.substring(slash + 1) : clean;
+        return MState.stripModelExt(base);
+    }
+
+    /** True when this object already carries ListModels metadata, or a fetch for it already finished.
+     * A name-only stub is false. A LoRA that came back with no preview stays true so it is not fetched again. */
+    loraMetadataKnown(model) {
+        if (!model || !model.name) {
+            return true;
+        }
+        if (model._mListed || 'title' in model || 'preview_image' in model || 'trigger_phrase' in model || 'local' in model) {
+            return true;
+        }
+        if (!this.loraMetaAttempted) {
+            return false;
+        }
+        return this.loraMetaAttempted.has(model.name) || this.loraMetaAttempted.has(MState.stripModelExt(model.name));
+    }
+
+    /** True when a queued visible-row fetch belongs to a list the user has already left. */
+    loraMetaJobStale(job) {
+        if (!job || job.generation == null) {
+            return false;
+        }
+        let current = this.loraMetaScopes ? this.loraMetaScopes[job.scope] : null;
+        return current != job.generation;
+    }
+
+    /** Drops the in-queue name so a later page can ask for that LoRA. */
+    releaseLoraMetaWanted(job) {
+        if (job && job.wanted && this.loraMetaQueued) {
+            this.loraMetaQueued.delete(job.wanted);
+        }
+    }
+
+    /** Removes not-yet-started visible-row fetches for one scope. In-flight requests are left to finish. */
+    dropStaleLoraMetaJobs(scope) {
+        if (!this.loraFetchQueue || this.loraFetchQueue.length == 0) {
+            return;
+        }
+        let kept = [];
+        for (let i = 0; i < this.loraFetchQueue.length; i++) {
+            let item = this.loraFetchQueue[i];
+            if (item.job && item.job.scope == scope && this.loraMetaJobStale(item.job)) {
+                this.releaseLoraMetaWanted(item.job);
+                continue;
+            }
+            kept.push(item);
+        }
+        this.loraFetchQueue = kept;
+    }
+
+    /** Bumps one list's generation so its queued row fetches are dropped and its paint is ignored. */
+    cancelLoraMetaScope(scope) {
+        if (!this.loraMetaScopes) {
+            this.loraMetaScopes = {};
+        }
+        this.loraMetaScopes[scope] = (this.loraMetaScopes[scope] || 0) + 1;
+        if (this.loraMetaPaintTarget) {
+            delete this.loraMetaPaintTarget[scope];
+        }
+        this.dropStaleLoraMetaJobs(scope);
+    }
+
+    /** Fetches metadata for the LoRA rows actually on screen. At most one page is requested.
+     * `scope` is the list (sheet results, active rows, Models page). A later call for that same scope
+     * drops queued fetches from the previous page, sort, or search. `onUpdate` runs debounced, and only
+     * while that call is still the latest one. It does not run for a closed sheet or a page that moved on. */
+    ensureLoraMetadata(models, onUpdate, scope) {
+        let scopeName = scope || 'lora';
+        if (!this.loraMetaScopes) {
+            this.loraMetaScopes = {};
+        }
+        if (!this.loraMetaAttempted) {
+            this.loraMetaAttempted = new Set();
+        }
+        if (!this.loraMetaQueued) {
+            this.loraMetaQueued = new Set();
+        }
+        let serial = (this.loraMetaScopes[scopeName] || 0) + 1;
+        this.loraMetaScopes[scopeName] = serial;
+        if (!this.loraMetaPaintTarget) {
+            this.loraMetaPaintTarget = {};
+        }
+        this.loraMetaPaintTarget[scopeName] = { 'serial': serial, 'onUpdate': onUpdate };
+        this.dropStaleLoraMetaJobs(scopeName);
+        let list = models || [];
+        let cap = MCreate.PickerPageSize;
+        let queued = 0;
+        for (let i = 0; i < list.length && queued < cap; i++) {
+            let model = list[i];
+            if (!model || !model.name || this.loraMetadataKnown(model)) {
+                continue;
+            }
+            let wanted = `${model.name}`;
+            if (this.loraMetaQueued.has(wanted)) {
+                continue;
+            }
+            this.loraMetaQueued.add(wanted);
+            queued++;
+            this.enqueueLoraFetch({
+                'path': MCreate.loraParentFolder(wanted),
+                'depth': 1,
+                'search': MCreate.loraFileStem(wanted),
+                'offset': 0,
+                'limit': MCreate.LoraRowFetchLimit,
+                'sort': { 'mode': 'Name', 'reverse': false },
+                'scope': scopeName,
+                'generation': serial,
+                'wanted': wanted
+            }, (failed, error, data) => {
+                this.releaseLoraMetaWanted({ 'wanted': wanted });
+                if (!failed) {
+                    let files = (data && data.files) || [];
+                    let exact = null;
+                    for (let f = 0; f < files.length; f++) {
+                        if (files[f] && files[f].name == wanted) {
+                            exact = files[f];
+                            break;
+                        }
+                    }
+                    if (!exact) {
+                        for (let f = 0; f < files.length; f++) {
+                            if (files[f] && MState.sameModel(files[f].name, wanted)) {
+                                exact = files[f];
+                                break;
+                            }
+                        }
+                    }
+                    if (exact) {
+                        this.mergeLoraMetadata([exact]);
+                    }
+                    this.loraMetaAttempted.add(wanted);
+                    this.loraMetaAttempted.add(MState.stripModelExt(wanted));
+                }
+                let target = this.loraMetaPaintTarget ? this.loraMetaPaintTarget[scopeName] : null;
+                if (!target || !this.loraMetaScopes || this.loraMetaScopes[scopeName] != target.serial || !target.onUpdate) {
+                    return;
+                }
+                this.scheduleLoraMetaPaint(scopeName, target.serial, target.onUpdate);
+            });
+        }
+    }
+
+    /** Coalesces visible-row paints. The first response in a burst arms one timer; later responses share it. */
+    scheduleLoraMetaPaint(scope, serial, onUpdate) {
+        if (!this.loraMetaPaint) {
+            this.loraMetaPaint = {};
+        }
+        this.loraMetaPaint[scope] = { 'serial': serial, 'onUpdate': onUpdate };
+        if (this.loraMetaPaintTimer != null) {
+            return;
+        }
+        this.loraMetaPaintTimer = setTimeout(() => {
+            this.loraMetaPaintTimer = null;
+            let batch = this.loraMetaPaint || {};
+            this.loraMetaPaint = {};
+            for (let key in batch) {
+                let item = batch[key];
+                if (!item || !this.loraMetaScopes || this.loraMetaScopes[key] != item.serial) {
+                    continue;
+                }
+                item.onUpdate();
+            }
+        }, MCreate.LoraMetaPaintMs);
+    }
+
+    /** Writes a thumbnail and title block into rows that were painted from name stubs.
+     * The row element, its click handler, and its star stay. Scroll and the search field are not touched. */
+    paintLoraMetadataRows(root, selector, opts) {
+        if (!root || !root.isConnected) {
+            return;
+        }
+        let options = opts || {};
+        let rows = root.querySelectorAll(selector);
+        for (let i = 0; i < rows.length; i++) {
+            let row = rows[i];
+            if (!row.isConnected) {
+                continue;
+            }
+            let name = row.dataset.loraName;
+            if (!name) {
+                continue;
+            }
+            let model = this.loraByName(name);
+            if (!this.loraMetadataKnown(model)) {
+                continue;
+            }
+            let rev = `${model._mMetaRev || 0}`;
+            if (row.dataset.loraMetaRev == rev) {
+                continue;
+            }
+            let host = options.topClass ? row.querySelector(`.${options.topClass}`) : row;
+            if (!host) {
+                continue;
+            }
+            let thumb = mUI.modelThumb(model, options.thumbClass || null);
+            let existingImg = null;
+            for (let child = host.firstElementChild; child; child = child.nextElementSibling) {
+                if (child.tagName == 'IMG') {
+                    existingImg = child;
+                    break;
+                }
+            }
+            if (thumb) {
+                if (existingImg) {
+                    existingImg.replaceWith(thumb);
+                }
+                else {
+                    let placeholder = options.placeholderClass ? host.querySelector(`.${options.placeholderClass}`) : null;
+                    if (placeholder) {
+                        placeholder.replaceWith(thumb);
+                    }
+                    else {
+                        host.insertBefore(thumb, host.firstChild);
+                    }
+                }
+            }
+            let oldText = host.querySelector('.m-model-text');
+            if (oldText) {
+                let next = mUI.modelText(model, options.onTrigger || null, options.preferTitle !== false, !!options.expandable);
+                oldText.replaceWith(next);
+            }
+            row.dataset.loraMetaRev = rev;
+            if (options.after) {
+                options.after(row, model);
+            }
+        }
+    }
+
     /** Queues one LoRA ListModels call. At most MetadataFetchParallel run at once. */
     enqueueLoraFetch(job, done) {
         if (!this.loraFetchQueue) {
@@ -2679,6 +2944,10 @@ class MCreate {
     pumpLoraFetch() {
         while (this.loraFetchInFlight < MCreate.MetadataFetchParallel && this.loraFetchQueue.length > 0) {
             let item = this.loraFetchQueue.shift();
+            if (this.loraMetaJobStale(item.job)) {
+                this.releaseLoraMetaWanted(item.job);
+                continue;
+            }
             let sort = item.job.sort || { 'mode': 'Name', 'reverse': false };
             this.loraFetchInFlight++;
             genericRequest('ListModels', {
@@ -2881,12 +3150,18 @@ class MCreate {
             if (loras.length == 0) {
                 listWrap.appendChild(mUI.el('div', 'm-strip-empty', 'No active LoRAs.'));
             }
+            let activeModels = [];
             for (let i = 0; i < loras.length; i++) {
                 let row = mUI.el('div', 'm-lora-row');
                 let top = mUI.el('div', 'm-lora-row-top');
                 // Look the full model up so an active LoRA shows the same thumbnail and trigger phrase as it
                 // does in the picker; falls back to a bare name until the lazy ListModels call lands.
                 let model = this.loraByName(loras[i].name);
+                activeModels.push(model);
+                row.dataset.loraName = loras[i].name;
+                if (this.loraMetadataKnown(model)) {
+                    row.dataset.loraMetaRev = `${model._mMetaRev || 0}`;
+                }
                 let thumb = mUI.modelThumb(model, 'm-lora-thumb');
                 if (thumb) {
                     top.appendChild(thumb);
@@ -2958,6 +3233,14 @@ class MCreate {
                 row.appendChild(weight);
                 listWrap.appendChild(row);
             }
+            this.ensureLoraMetadata(activeModels, () => {
+                this.paintLoraMetadataRows(listWrap, '.m-lora-row', {
+                    'topClass': 'm-lora-row-top',
+                    'thumbClass': 'm-lora-thumb',
+                    'preferTitle': true,
+                    'onTrigger': trigger => this.insertTriggerPhrase(trigger)
+                });
+            }, 'sheet-active');
         };
         renderRows();
         let addWrap = mUI.el('div', 'm-lora-add-wrap');
@@ -3039,9 +3322,15 @@ class MCreate {
             page = Math.min(page, pages - 1);
             let start = page * MCreate.PickerPageSize;
             let end = Math.min(start + MCreate.PickerPageSize, matches.length);
+            let visible = [];
             for (let i = start; i < end; i++) {
                 let model = matches[i];
+                visible.push(model);
                 let item = mUI.el('div', 'm-model-result');
+                item.dataset.loraName = model.name;
+                if (this.loraMetadataKnown(model)) {
+                    item.dataset.loraMetaRev = `${model._mMetaRev || 0}`;
+                }
                 let thumb = mUI.modelThumb(model, 'm-model-thumb');
                 if (thumb) {
                     item.appendChild(thumb);
@@ -3084,6 +3373,12 @@ class MCreate {
                     results.appendChild(reveal);
                 }
             }
+            this.ensureLoraMetadata(visible, () => {
+                this.paintLoraMetadataRows(results, '.m-model-result', {
+                    'thumbClass': 'm-model-thumb',
+                    'preferTitle': true
+                });
+            }, 'sheet-results');
         };
         MCreate.bindSearchInput(search, () => {
             page = 0;
@@ -3119,7 +3414,10 @@ class MCreate {
             loadLoraList();
         }
         renderResults();
-        mUI.openSheet(content);
+        mUI.openSheet(content, () => {
+            this.cancelLoraMetaScope('sheet-results');
+            this.cancelLoraMetaScope('sheet-active');
+        });
     }
 
     /** Opens the grid builder (m_grid.js). Kept as a method here because the Generate long-press and the

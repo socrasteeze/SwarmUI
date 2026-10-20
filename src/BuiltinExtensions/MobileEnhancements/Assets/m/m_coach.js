@@ -850,18 +850,25 @@ class MCoach {
         for (let row of this.activeLoraRows()) {
             let stripped = MState.stripModelExt(row.name);
             let cached = mCreate.loraMap && (mCreate.loraMap.get(row.name) || mCreate.loraMap.get(stripped));
-            if (cached || this.enrichInFlight.has(row.name) || this.enrichFailed.has(row.name)) {
+            // A name-only corpus stub is not metadata. DescribeModel still runs for those active rows.
+            let cachedMeta = cached && (cached._mListed || 'title' in cached || 'trigger_phrase' in cached || 'preview_image' in cached || 'local' in cached);
+            if (cachedMeta || this.enrichInFlight.has(row.name) || this.enrichFailed.has(row.name)) {
                 continue;
             }
             this.enrichInFlight.add(row.name);
             genericRequest('DescribeModel', { 'modelName': row.name, 'subtype': 'LoRA' }, data => {
                 this.enrichInFlight.delete(row.name);
                 if (data && data.model) {
-                    if (!mCreate.loraMap) {
-                        mCreate.loraMap = new Map();
+                    if (mCreate.loraList && mCreate.mergeLoraMetadata) {
+                        mCreate.mergeLoraMetadata([data.model]);
                     }
-                    mCreate.loraMap.set(row.name, data.model);
-                    mCreate.loraMap.set(stripped, data.model);
+                    else {
+                        if (!mCreate.loraMap) {
+                            mCreate.loraMap = new Map();
+                        }
+                        mCreate.loraMap.set(row.name, data.model);
+                        mCreate.loraMap.set(stripped, data.model);
+                    }
                 }
                 else {
                     this.enrichFailed.add(row.name);
