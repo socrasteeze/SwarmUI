@@ -60,3 +60,7 @@ package-lock.json
 tmp_*.mjs
 tmp_*.txt
 
+# Claudesloppers
+
+CLAUDE.md
+.claude/
