@@ -32,6 +32,8 @@ Use the star button on a checkpoint or LoRA card in the Models tab to add or rem
 
 The Models tab has an Architecture dropdown for checkpoints and LoRAs. Select an architecture to browse matching models across all folders. Text search narrows those results. Sorting, favorites-first ordering, and 48-card pages still apply. Unknown shows models without a detected architecture. Each subtype keeps its own selection until the page reloads. All Architectures restores folder browsing when the search field is empty.
 
+LoRA titles and previews are filled in two steps. Boot keeps every LoRA name. The first ListModels page still loads metadata for 500 rows, and a search or an open folder still loads its own page. Rows on the current Create picker page, the active LoRA rows in that sheet, and the current Models page request metadata for the stubs actually on screen. At most four of those requests run at once. Leaving the page drops requests that have not started. A LoRA that comes back with no preview is not requested again until the name list is rebuilt.
+
 ## /simple FL2VA same-frame prep
 
 For MiniMax H3 FL2VA same-frame / 360-orbit presets (at least minimax/FL2VA_360_Orbit_Eros, plus any title matching FL2VA + orbit/360/same-frame, or extras in localStorage.m_client_same_frame_presets):
