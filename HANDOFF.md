@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-18 · **Branch:** main · **Tree:** `/simple` Models-tab trigger lines and Load CivitAI preview visibility
+**Updated:** 2026-10-21 · **Branch:** main · **Tree:** startup improvements and upstream `d74f8ce4` delivery snapshot
 
 ## State
-The 2026-10-03 web UI, PWA, accessibility, and data-safety delivery is in local `origin/main` through `23e6c0fb`. Live restart/deployment, physical-device checks, and live generation remain separate.
+This snapshot contains startup timing diagnostics, deferred previews, cached indexed metadata lookups, and redundant later-root metadata skipping. Upstream `d74f8ce4` was adopted as-is. Source validation and an isolated boot pass. The live server runs the tested startup code; generation was not used for verification.
 The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
+
+- 2026-10-21: added aggregate startup/cache counters, deferred preview loading with bounded retention, preserved raw previews on metadata writes, and skipped redundant metadata work while retaining alternate source paths. One warm launch reached server readiness in 6.311 s versus 66.824 s in the previous pass; LoRA inventory fell from 64.406 s to 5.541 s with all 21,708 unique LoRAs retained. All 358 tests, the Release solution build, normal format/style checks, and isolated normal CI boot passed. No model/metadata deletion or generation was performed. Read `docs/WebUI-Performance-Review.md` for measurement limits. The upstream sync changed only MOSS guidance and the extension registry description. Private audit files and unrelated untracked tools remain local.
 
 - 2026-10-18: `/simple` Models cards clamp a trigger to two whole lines, with **more** / **less** for the full phrase. **more** does not add the model or insert the trigger. Title and subtitle clamp to whole lines. **Load CivitAI preview** stays hidden when the card already has a real preview or a CivitAI model link in the description. A placeholder image still shows the button. Covered by `verify-simple-models-civitai.mjs`. Release servers need a restart before the assets load.
 

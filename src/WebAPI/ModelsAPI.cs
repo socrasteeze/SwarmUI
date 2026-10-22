@@ -963,6 +963,7 @@ public static class ModelsAPI
                 {
                     actualModel.PreviewImage = "imgs/model_placeholder.jpg";
                     actualModel.Metadata.PreviewImage = null;
+                    actualModel.Metadata.PreviewExplicitlyCleared = true;
                 }
                 else
                 {
@@ -971,6 +972,7 @@ public static class ModelsAPI
                     {
                         actualModel.PreviewImage = img.AsDataString();
                         actualModel.Metadata.PreviewImage = actualModel.PreviewImage;
+                        actualModel.Metadata.PreviewExplicitlyCleared = false;
                     }
                 }
             }
@@ -1038,6 +1040,7 @@ public static class ModelsAPI
                 Program.Backends.CheckBackendsSignal.Set();
             }
         }
+        handler.ResetMetadataFrom(actualModel);
         Interlocked.Increment(ref ModelEditID);
         return new JObject() { ["success"] = true };
     }

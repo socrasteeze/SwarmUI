@@ -4,7 +4,216 @@ Date: 2026-09-12. Reviewed checkout: `dd4ffcbd` on `main`.
 
 Latest follow-up: [Full desktop and PWA audit, 2026-10-03](#full-desktop-and-pwa-audit-2026-10-03).
 
+Startup instrumentation: [Startup timing diagnostics, 2026-10-21](#startup-timing-diagnostics-2026-10-21).
+
+Preview follow-up: [Deferred model previews, 2026-10-21](#deferred-model-previews-2026-10-21).
+
+Lookup follow-up: [Metadata lookup reuse and duplicate sources, 2026-10-21](#metadata-lookup-reuse-and-duplicate-sources-2026-10-21).
+
 Implementation status: the initial handoff and review were committed as `251db0ec`. The first implementation tranche has passed source validation and is included in the clean delivery snapshot. See the checkpoint at the end of this document for results and remaining gates.
+
+## Startup timing diagnostics, 2026-10-21
+
+This pass adds diagnostics. It does not change model discovery, cache invalidation,
+metadata storage, or extension build caching, and it makes no startup speedup claim.
+
+At the normal Info log level, startup now reports elapsed milliseconds for extension
+preparation, each model type, the full model listing, and separate wildcard,
+autocomplete, and audio discovery. Model-type timing rows also appear on later
+full refreshes. The existing debug stopwatch checkpoints remain available.
+
+Each model refresh emits one aggregate `Model refresh diagnostics` summary:
+
+| Field | Meaning |
+|---|---|
+| `cache-acquires`, `cache-acquire-work` | Cache acquisition calls and summed time in `GetCacheForFolder`, including its lock and any database opening. |
+| `cache-lookups`, `hits`, `misses` | Row lookups, rows found, and rows absent or unreadable. A found row can still be stale. |
+| `duplicate-sources-skipped` | Later-root sources whose exact relative model name already exists from an earlier root. Their paths remain available; redundant metadata work is skipped. Added in the lookup follow-up. |
+| `stale-model`, `stale-sidecar` | Rows invalidated by model or known sidecar modification time. Existing text-encoder validation keeps its original ordering. |
+| `cache-lock-wait-work`, `cache-lookup-work` | Summed wait for the row-lookup lock and time spent inside that lookup. |
+| `sidecar-check-work` | Summed time checking sidecar freshness. |
+| `header-reads`, `header-read-work` | Header read attempts and summed duration, including failed reads and Anima classification reads. |
+| `completed-rebuilds`, `completed-rebuild-work` | Completed metadata rebuilds and their inclusive duration. Failed rebuilds do not contribute to these two fields. |
+| `preview-attempts`, `preview-work` | Adjacent preview attempts and summed duration, including missing previews and failed reads. |
+
+These are parallel work totals, not additional wall-clock stages. Completed rebuild
+work includes its nested header and preview work. Do not add the work fields together
+or compare their sum directly with model-type elapsed time. New summaries contain
+counts, durations, and model-type labels, without model names, paths, or contents.
+
+The cache audit used read-only LiteDB access with upgrades and automatic rebuilds
+disabled. It read the ID index, checked local paths only under the configured roots,
+and sampled a bounded set of records. It did not load model weights, generate media,
+delete records, rebuild the database, or compact it. The record sample ran under
+the application's .NET 8 invariant-globalization settings: another runtime's
+collation can produce misleading indexed lookup results. See the official
+[LiteDB connection options](https://www.litedb.org/docs/connection-string/).
+
+Local audit evidence contains aggregates only and stays under ignored `.local/`.
+Missing paths and paths outside the current roots are review candidates, not a
+deletion plan. A sample of preview sizes is not a database-wide byte total. Neither
+a full integrity check nor a reclaimable-space measurement is part of this pass.
+
+Validation used synthetic model trees and temporary databases. At this initial
+checkpoint, live startup timing and backend boot were deferred during training.
+
+The Release build, all 342 NUnit tests, both repository formatting checks, and
+`git diff --check` passed for this pass. Five existing ImageSharp advisory warnings
+remain. The launcher Release output was rebuilt while SwarmUI was stopped, with
+the previous application assembly and symbols backed up locally. No server was
+started at that checkpoint. Later live-launch results are recorded below.
+
+## Deferred model previews, 2026-10-21
+
+Normal metadata-cache hits now use a LiteDB field projection that excludes
+`PreviewImage`. Model refresh does not read adjacent image bytes. Required header
+parsing on a cache miss can still temporarily parse an embedded thumbnail, and
+legacy metadata upgrades can read the raw saved preview when needed to preserve a
+cache write. The model inventory does not retain those preview blobs afterwards.
+
+Preview bytes load when `PreviewDataFor` serves an image, when inline API output
+is requested, or when selected model-list rows are serialized. List serialization
+also resolves previews when returning URLs so that genuine missing-preview
+placeholders remain correct. This is not a claim that only on-screen cards ever
+load a preview. Unselected rows are not materialized by the paged listing.
+
+Concurrent first use coalesces by model. Each model-type handler retains at most
+64 preview entries and approximately 32 MiB of UTF-16 preview strings, evicting
+the least recently used entries. In-flight reads and response objects can temporarily
+use additional memory. Missing or failed results are not retained as permanent
+negative entries. A metadata or preview change invalidates the resolved entry and
+prevents an older in-flight result from reentering the cache.
+
+The public `T2IModel.PreviewImage` field remains available but no longer holds a
+resolved blob for deferred local models. Call `PreviewDataFor` or `ToNetObject`
+to resolve a preview. Existing inline and URL response shapes, adjacent/header
+precedence, legacy models, per-folder caches, and spoke preview restrictions remain.
+No new image route or permission bypass is introduced.
+
+Metadata writes resolve the raw saved preview separately from display fallback.
+Unrelated edits preserve saved previews, including oversized or non-image values;
+they do not persist an adjacent fallback merely because it was viewed. Explicit
+preview saves and missing-preview refresh still persist their requested image.
+The additive `PreviewExplicitlyCleared` cache field preserves a deliberate clear
+across ordinary refreshes. Replacing the preview or explicitly filling it clears
+that marker. Old cache rows default to false without a migration or purge.
+
+A CPU-only synthetic LiteDB probe used 64 records with 512 KiB preview strings
+and metadata fields before and after each preview. Projected reads retained zero
+preview characters and allocated about 61% fewer managed bytes than full reads.
+Both modes still read the same 33,841,152 bytes. This is not a full-application
+startup or physical-disk benchmark. The original database stays in place; projection
+can reduce allocation without eliminating the I/O described by LiteDB's
+[document read implementation](https://github.com/litedb-org/LiteDB/blob/v5.0.21/LiteDB/Engine/Services/DataService.cs).
+
+Synthetic regression coverage includes save-before-preview, raw preview preservation,
+header and sidecar export (including oversized legacy values), clear and replacement,
+missing-preview fill, old rows without the new marker, legacy retry, per-folder and
+spoke behavior, concurrent requests and saves, and both cache limits. Release builds,
+all 354 NUnit tests, both formatting checks, and `git diff --check` passed. The normal
+launcher output contains the new code, with its previous binary backed up locally.
+Five existing ImageSharp advisory warnings remain. During implementation checks,
+the real cache's size and write time were unchanged. Startup was then verified
+after training, as recorded below. No generation test was requested.
+
+### Live startup comparison, 2026-10-21
+
+The verified Release binary started with browser auto-launch disabled. The main
+page returned HTTP 200 and the backend reported running. The batch wrapper was
+bypassed because its automatic-pull marker could change the tested checkout.
+No generation or cleanup request was submitted.
+
+| Measure | Latest old observation | New observation |
+|---|---:|---:|
+| Application start to server readiness | 78.5 s | 66.8 s |
+| Model initialization | 70.9 s | 65.3 s |
+| Post-start process working set | 36.3 GiB | 2.7 GiB |
+
+The observed memory reduction is about 93%. Startup improvement is modest and not
+yet a repeatable benchmark. Across 71 older complete starts, model initialization
+ranged from 14.1 to 95.5 seconds, with an 18.1-second median. The new run remains in
+the historical slow range. The old run also rebuilt external extensions; this run
+reused them, so part of the total startup difference comes from extension caching.
+
+LoRA inventory took 64.4 seconds. It visited 41,955 cached paths for 21,708 unique
+LoRAs; cached lookup work accounted for 63.7 seconds. All startup preview-attempt
+counters were zero. Other model-type scans totalled less than one second. The
+remaining measured target is LoRA metadata lookup and duplicate-path work.
+No model-root changes or additional optimization were applied during this check.
+
+## Metadata lookup reuse and duplicate sources, 2026-10-21
+
+The preview-free LiteDB projection now compiles once per mapper. Cache lookups use
+the stable expression `_id=@0` with a bound value. The ID index still supplies the
+row, and preview blobs remain excluded. Explicit Boolean comparisons keep missing
+legacy fields compatible without a migration.
+
+Refresh still enumerates every configured root in order. An exact relative model
+name already loaded from an earlier root skips metadata loading in later roots.
+The normal merge keeps each later source path. Earlier-root metadata keeps its
+existing precedence. Different relative directories and case-distinct logical
+names remain separate. Unique later-root models still load. The unavailable-root
+guard still preserves an existing inventory when a complete refresh is impossible.
+
+A read-only directory audit found 21,708 unique logical LoRAs across three existing
+root combinations. A later root repeated 20,316 logical names; another contributed
+10 unique models. The roots were physically distinct. The audit also found 99
+repeated physical subdirectory visits and 11 reparse directories, with no cycles
+or scan errors. Physical aliases are not removed or collapsed because different
+relative names can be intentional. The audit read no model weights and changed
+no model, metadata, or configuration.
+
+A CPU-only probe performed 2,048 indexed reads from a synthetic database. The old
+per-lookup projection took 1,311 ms and allocated about 322 MB of managed memory.
+The cached, parameterized query took 328 ms and allocated about 110 MB. Both
+retained zero preview characters. This sequential microbenchmark includes runtime
+and cache effects; it is not a full startup measurement. Private aggregate evidence
+stays under ignored `.local/lookup-pass/`.
+
+### Live lookup comparison
+
+One warm launch used the same configured roots and the tested Release assembly.
+The main page returned HTTP 200. The backend subsequently reported running, with
+all generation and model-loading counters at zero. No generation request was sent.
+
+| Measure | Previous preview pass | Lookup pass |
+|---|---:|---:|
+| Application start to server readiness | 66.824 s | 6.311 s |
+| Full model listing | 65.266 s | 5.685 s |
+| LoRA inventory | 64.406 s | 5.541 s |
+| LoRA cache lookups | 41,955 | 21,641 |
+| Unique LoRAs | 21,708 | 21,708 |
+| Process read bytes after startup | 8.436 GiB | 4.436 GiB |
+
+The LoRA stage skipped 20,316 duplicate sources. Of these, 20,314 would require
+native metadata lookups; the other two use the legacy-model path. All 21,641
+remaining lookups hit the cache. There were no stale rows, metadata rebuilds,
+header reads, or preview attempts. Every model-type inventory retained its prior
+count. The model database remained 11,958,059,008 bytes, with no cleanup or deletion.
+
+The observed LoRA-stage reduction is about 91%. This is a single warm-launch
+comparison, not a cold-disk or repeated statistical benchmark. The previous run
+also performed 15 small metadata rebuilds, and extension preparation fell from
+620 ms to 147 ms. Those differences are included in the totals. Server readiness
+is separate from backend initialization and full browser interaction readiness.
+
+The Release build, all 358 NUnit tests, the repository's normal format and style
+verification gates, and `git diff --check` passed. An additional information-level
+style probe found suggestions across the existing tree; it is not the repository
+gate, and no broad style changes were applied. Five existing ImageSharp package
+advisories remain. The live server
+runs the tested assembly. Its previous assembly and symbols are backed up under
+ignored `.local/lookup-pass/binary-backup/`.
+
+### Delivery verification
+
+Upstream `d74f8ce4` was adopted as-is for its MOSS guidance and extension registry
+description. It changed no application source. The combined snapshot passed the
+Release solution build, all 358 NUnit tests, normal format/style verification,
+and an isolated normal CI boot with empty model folders and separate runtime data.
+The boot reached readiness with zero warnings or errors. Extension-clone CI was
+not run in the live checkout. No backend dependency, real model, or metadata
+cleanup was part of this delivery. Private audit files remain ignored.
 
 ## Recommendation
 

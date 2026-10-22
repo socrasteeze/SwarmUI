@@ -25,7 +25,7 @@ public class ModelPreviewRefreshTests : SwarmUITest
         Setup();
     }
 
-    /// <summary>A blank or placeholder cache row picks up an adjacent preview without rewriting the model or any sidecar.</summary>
+    /// <summary>A blank cache row defers its adjacent preview until first use without rewriting the model or sidecar.</summary>
     [Test]
     public static void CacheHit_BlankPreview_LoadsAdjacentImageWithoutWritingFiles()
     {
@@ -51,7 +51,10 @@ public class ModelPreviewRefreshTests : SwarmUITest
                 SidecarFileVersion = new DateTimeOffset(sidecarTime).ToUnixTimeMilliseconds()
             });
             handler.LoadMetadata(model);
-            Assert.That(model.PreviewImage, Does.StartWith("data:image/"));
+            Assert.That(model.PreviewImage, Is.EqualTo(T2IModelHandler.PlaceholderPreviewImage));
+            Assert.That(handler.DeferredPreviewLoadCount, Is.Zero);
+            Assert.That(T2IModel.PreviewDataFor(model), Does.StartWith("data:image/"));
+            Assert.That(handler.DeferredPreviewLoadCount, Is.EqualTo(1));
             Assert.That(model.Title, Is.EqualTo("cached title"));
             Assert.That(model.Metadata.Tags, Is.EqualTo(new[] { "anima-base", "gynoid" }));
             Assert.That(model.Metadata.Hash, Is.EqualTo("saved hash"));
@@ -83,7 +86,8 @@ public class ModelPreviewRefreshTests : SwarmUITest
                 SidecarFileVersion = 0
             });
             handler.LoadMetadata(model);
-            Assert.That(model.PreviewImage, Is.EqualTo("data:image/jpeg;base64,already"));
+            Assert.That(model.PreviewImage, Is.EqualTo(T2IModelHandler.PlaceholderPreviewImage));
+            Assert.That(T2IModel.PreviewDataFor(model), Is.EqualTo("data:image/jpeg;base64,already"));
             Assert.That(model.Title, Is.EqualTo("cached title"));
         });
     }
@@ -191,7 +195,10 @@ public class ModelPreviewRefreshTests : SwarmUITest
             Assert.That(counts.Checked, Is.EqualTo(3));
             Assert.That(counts.Updated, Is.EqualTo(1));
             Assert.That(counts.Names, Is.EqualTo(new[] { "blank.safetensors" }));
-            Assert.That(blank.PreviewImage, Does.StartWith("data:image/"));
+            Assert.That(blank.PreviewImage, Is.EqualTo(T2IModelHandler.PlaceholderPreviewImage));
+            Assert.That(T2IModel.PreviewDataFor(blank), Does.StartWith("data:image/"));
+            T2IModelHandler.ModelMetadataStore storedBlank = handler.GetCacheForFolder(data).Metadata.FindById(blank.RawFilePath);
+            Assert.That(storedBlank.PreviewImage, Does.StartWith("data:image/"));
             Assert.That(blank.Metadata.Tags, Is.EqualTo(new[] { "anima-base", "gynoid" }));
             Assert.That(blank.Metadata.ModelClassType, Is.EqualTo("anima"));
             Assert.That(kept.PreviewImage, Is.EqualTo("data:image/jpeg;base64,keep"));
@@ -235,7 +242,7 @@ public class ModelPreviewRefreshTests : SwarmUITest
             string dataUrl = handler.StorePreviewJpeg(model, new Image(OnePixelPng, MediaType.ImagePng));
             string previewPath = Path.Combine(folder, "model.preview.jpeg");
             Assert.That(dataUrl, Does.StartWith("data:image/jpeg"));
-            Assert.That(model.PreviewImage, Is.EqualTo(dataUrl));
+            Assert.That(model.PreviewImage, Is.EqualTo(T2IModelHandler.PlaceholderPreviewImage));
             Assert.That(model.Metadata.PreviewImage, Is.EqualTo(dataUrl));
             Assert.That(model.Metadata.Tags, Is.EqualTo(new[] { "anima-base", "gynoid" }));
             Assert.That(model.Metadata.Title, Is.EqualTo("Cached"));

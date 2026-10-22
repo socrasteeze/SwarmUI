@@ -215,7 +215,9 @@ public class Program
         Logs.Init($"Running on OS: {RuntimeInformation.OSDescription}");
         Logs.StartLogSaving();
         timer.Check("Initial settings load");
+        Stopwatch extensionPrepWatch = Stopwatch.StartNew();
         Extensions.PrepExtensions().Wait();
+        Logs.Info($"Startup timing: extension preparation elapsed={extensionPrepWatch.ElapsedMilliseconds} ms.");
         if (IsSpokeMode && ServerSettings.Maintenance.CheckForUpdates)
         {
             Logs.Init("Spoke mode suppresses startup update checks. Update the hub and redeploy the spoke.");
@@ -348,10 +350,18 @@ public class Program
         LanguagesHelper.LoadAll();
         timer.Check("Languages load");
         Logs.Init("Loading models list...");
+        Stopwatch modelListingWatch = Stopwatch.StartNew();
         RefreshAllModelSets();
+        Logs.Info($"Startup timing: total model listing elapsed={modelListingWatch.ElapsedMilliseconds} ms.");
+        Stopwatch wildcardWatch = Stopwatch.StartNew();
         WildcardsHelper.Init();
+        Logs.Info($"Startup timing: wildcard discovery elapsed={wildcardWatch.ElapsedMilliseconds} ms.");
+        Stopwatch autocompleteWatch = Stopwatch.StartNew();
         AutoCompleteListHelper.Init();
+        Logs.Info($"Startup timing: autocomplete discovery elapsed={autocompleteWatch.ElapsedMilliseconds} ms.");
+        Stopwatch soundWatch = Stopwatch.StartNew();
         UserSoundHelper.Init();
+        Logs.Info($"Startup timing: audio discovery elapsed={soundWatch.ElapsedMilliseconds} ms.");
         timer.Check("Model listing");
         Logs.Init("Loading backends...");
         Backends.Load();
@@ -604,12 +614,15 @@ public class Program
         RebuildDataDir();
         foreach (T2IModelHandler handler in T2IModelSets.Values)
         {
+            Stopwatch modelTypeWatch = Stopwatch.StartNew();
             try
             {
                 handler.Refresh();
+                Logs.Info($"Startup timing: model type {handler.ModelType} elapsed={modelTypeWatch.ElapsedMilliseconds} ms; models={handler.Models.Count}; refresh={(handler.LastRefreshSucceeded ? "success" : "partial-or-failed")}.");
             }
             catch (Exception ex)
             {
+                Logs.Info($"Startup timing: model type {handler.ModelType} elapsed={modelTypeWatch.ElapsedMilliseconds} ms; refresh=failed.");
                 Logs.Error($"Failed to load models for {handler.ModelType}: {ex.Message}");
             }
         }
