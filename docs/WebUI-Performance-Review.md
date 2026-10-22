@@ -201,8 +201,8 @@ The Release build, all 358 NUnit tests, the repository's normal format and style
 verification gates, and `git diff --check` passed. An additional information-level
 style probe found suggestions across the existing tree; it is not the repository
 gate, and no broad style changes were applied. Five existing ImageSharp package
-advisories remain. The live server
-runs the tested assembly. Its previous assembly and symbols are backed up under
+advisories remain. The measured live launch used the tested assembly. Its previous
+assembly and symbols are backed up under
 ignored `.local/lookup-pass/binary-backup/`.
 
 ### Delivery verification
@@ -214,6 +214,9 @@ and an isolated normal CI boot with empty model folders and separate runtime dat
 The boot reached readiness with zero warnings or errors. Extension-clone CI was
 not run in the live checkout. No backend dependency, real model, or metadata
 cleanup was part of this delivery. Private audit files remain ignored.
+The final delivery health check found the live process stopped and its HTTP
+endpoint unavailable. The available logs did not establish why it stopped.
+The successful live-launch timing above and isolated boot result remain valid.
 
 ## Recommendation
 
