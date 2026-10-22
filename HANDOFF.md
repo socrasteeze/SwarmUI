@@ -3,7 +3,7 @@
 **Updated:** 2026-10-21 · **Branch:** main · **Tree:** startup improvements and upstream `d74f8ce4` delivery snapshot
 
 ## State
-This snapshot contains startup timing diagnostics, deferred previews, cached indexed metadata lookups, and redundant later-root metadata skipping. Upstream `d74f8ce4` was adopted as-is. Source validation and an isolated boot pass. The live server runs the tested startup code; generation was not used for verification.
+This snapshot contains startup timing diagnostics, deferred previews, cached indexed metadata lookups, and redundant later-root metadata skipping. Upstream `d74f8ce4` was adopted as-is. Source validation and an isolated boot pass. Live startup was verified earlier; the final delivery check found the live process stopped and its HTTP endpoint unavailable. The logs did not establish the stop cause. Generation was not used for verification.
 The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
