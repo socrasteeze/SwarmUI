@@ -1,12 +1,14 @@
 # HANDOFF
 
-**Updated:** 2026-10-21 · **Branch:** main · **Tree:** startup improvements and upstream `d74f8ce4` delivery snapshot
+**Updated:** 2026-10-21 · **Branch:** main · **Tree:** moved-LoRA validation delivery snapshot
 
 ## State
-This snapshot contains startup timing diagnostics, deferred previews, cached indexed metadata lookups, and redundant later-root metadata skipping. Upstream `d74f8ce4` was adopted as-is. Source validation and an isolated boot pass. Live startup was verified earlier; the final delivery check found the live process stopped and its HTTP endpoint unavailable. The logs did not establish the stop cause. Generation was not used for verification.
+Startup improvements and upstream `d74f8ce4` were delivered through `ad6ad1a2`. This snapshot adds recovery for stale qualified LoRA paths only when a filename has one allowed-catalog match. All 366 tests and normal format/style checks pass. The latest rejected selection passed CPU-only validation with its count and order preserved. Live verification confirmed the tested assembly in the restarted server, an HTTP 200 response, and a running backend. Generation was not used for verification. Private repair inputs remain ignored.
 The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
+
+- 2026-10-21 follow-up: fixed stale LoRA path validation in `T2IParamTypes.cs` and added eight synthetic regression cases. The active client's rejected selection contained two outdated paths; each resolves uniquely to an Anima catalog entry. None of the saved presets contained those references. The fix preserves existing exact-path precedence and rejects ambiguous filenames. No model, metadata, preset, or LoRA weight was changed. Private input snapshots stay under ignored `.local/repair-01/`.
 
 - 2026-10-21: added aggregate startup/cache counters, deferred preview loading with bounded retention, preserved raw previews on metadata writes, and skipped redundant metadata work while retaining alternate source paths. One warm launch reached server readiness in 6.311 s versus 66.824 s in the previous pass; LoRA inventory fell from 64.406 s to 5.541 s with all 21,708 unique LoRAs retained. All 358 tests, the Release solution build, normal format/style checks, and isolated normal CI boot passed. No model/metadata deletion or generation was performed. Read `docs/WebUI-Performance-Review.md` for measurement limits. The upstream sync changed only MOSS guidance and the extension registry description. Private audit files and unrelated untracked tools remain local.
 

@@ -1056,6 +1056,36 @@ public class T2IParamTypes
         return backup;
     }
 
+    /// <summary>Resolve a moved LoRA only when a qualified stale path has one exact normalized filename match.</summary>
+    private static string GetUniqueMovedLoraInList(string name, IEnumerable<string> list)
+    {
+        string normalizedName = name.Replace('\\', '/');
+        if (!normalizedName.Contains('/'))
+        {
+            return null;
+        }
+        string fileName = CleanModelName(CleanNameGeneric(normalizedName)).AfterLast('/');
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+        string match = null;
+        foreach (string candidate in list)
+        {
+            string candidateName = CleanModelName(CleanNameGeneric(candidate.Replace('\\', '/'))).AfterLast('/');
+            if (candidateName != fileName)
+            {
+                continue;
+            }
+            if (match is not null)
+            {
+                return null;
+            }
+            match = candidate;
+        }
+        return match;
+    }
+
     /// <summary>Quick hex validator.</summary>
     public static AsciiMatcher ValidBase64Matcher = new(AsciiMatcher.BothCaseLetters + AsciiMatcher.Digits + "+/=");
 
@@ -1132,6 +1162,10 @@ public class T2IParamTypes
                             if (vals[i] is null)
                             {
                                 vals[i] = GetBestModelInList(CleanModelName(search), possible);
+                                if (vals[i] is null && type.Subtype == "LoRA")
+                                {
+                                    vals[i] = GetUniqueMovedLoraInList(search, possible);
+                                }
                                 if (vals[i] is null)
                                 {
                                     if (possible.Length < 10)
