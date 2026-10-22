@@ -40,6 +40,12 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
     /// <summary>URL or data blob of a preview image for this model.</summary>
     public string PreviewImage;
 
+    /// <summary>Key used to invalidate this model's resolved preview cache entry.</summary>
+    internal string DeferredPreviewKey;
+
+    /// <summary>Deferred preview source used by legacy models without metadata rows.</summary>
+    internal Func<string> DeferredPreviewResolver;
+
     /// <summary>This model's standard resolution, eg 1024x1024. 0 means unknown.</summary>
     public int StandardWidth, StandardHeight;
 
@@ -155,7 +161,7 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
                 }
                 if (earlyEnd)
                 {
-                    File.WriteAllText(swarmjspath, ToNetObject("modelspec.").ToString());
+                    File.WriteAllText(swarmjspath, ToNetObject("modelspec.", true, true).ToString());
                 }
             }
             DoClear(RawFilePath);
@@ -184,7 +190,7 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
                 if (len < 0 || len > 100 * 1024 * 1024)
                 {
                     Logs.Warning($"Model {Name} has invalid metadata length {len}, failing to store metadata, will place json copy in main folder.");
-                    File.WriteAllText(rawSwarmJsPath, ToNetObject("modelspec.").ToString());
+                    File.WriteAllText(rawSwarmJsPath, ToNetObject("modelspec.", true, true).ToString());
                     return;
                 }
                 byte[] header = new byte[len];
@@ -228,7 +234,7 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
                 specSet("architecture", Metadata.ModelClassType);
                 specSet("author", Metadata.Author);
                 specSet("description", Metadata.Description);
-                specSet("thumbnail", Metadata.PreviewImage);
+                specSet("thumbnail", Metadata.PreviewForPersistence());
                 specSet("license", Metadata.License);
                 specSetEmptyable("usage_hint", Metadata.UsageHint);
                 specSetEmptyable("trigger_phrase", Metadata.TriggerPhrase);
@@ -386,8 +392,8 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
     }
 
     /// <summary>Data-URL preview served by <c>ViewSpecial</c>.
-    /// <see cref="PreviewImage"/> wins when it is a data URL, which is how a legacy model stores an adjacent preview while <see cref="Metadata"/> stays null.
-    /// A placeholder path such as <c>imgs/model_placeholder.jpg</c> falls through to <see cref="T2IModelHandler.ModelMetadataStore.PreviewImage"/> when that value is a data URL.</summary>
+    /// <see cref="PreviewImage"/> wins when it is already a data URL.
+    /// Placeholder paths fall through to the deferred cache or adjacent-image resolver.</summary>
     /// <param name="model">Model to read. Null returns null.</param>
     /// <returns>The data URL to serve, or null when neither field holds one.</returns>
     public static string PreviewDataFor(T2IModel model)
@@ -396,21 +402,35 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
         {
             return null;
         }
-        if (model.PreviewImage?.StartsWithFast("data:") ?? false)
+        string preview = model.ResolvePreviewImage();
+        if (preview?.StartsWithFast("data:") ?? false)
         {
-            return model.PreviewImage;
-        }
-        if (model.Metadata?.PreviewImage?.StartsWithFast("data:") ?? false)
-        {
-            return model.Metadata.PreviewImage;
+            return preview;
         }
         return null;
+    }
+
+    /// <summary>Resolves a rich preview on demand while retaining the public preview field as placeholder state.</summary>
+    internal string ResolvePreviewImage()
+    {
+        if (PreviewImage?.StartsWithFast("data:") ?? false)
+        {
+            return PreviewImage;
+        }
+        string resolved = Metadata?.PreviewImage ?? DeferredPreviewResolver?.Invoke();
+        return string.IsNullOrWhiteSpace(resolved) ? PreviewImage : resolved;
     }
 
     /// <summary>Gets a networkable copy of this model's data.</summary>
     public JObject ToNetObject(string prefix = "", bool dataImgs = true)
     {
-        string previewImg = PreviewImage;
+        return ToNetObject(prefix, dataImgs, false);
+    }
+
+    /// <summary>Serializes display data or preserves the exact saved preview for metadata export.</summary>
+    private JObject ToNetObject(string prefix, bool dataImgs, bool persistedPreview)
+    {
+        string previewImg = persistedPreview ? Metadata?.PreviewForPersistence() : ResolvePreviewImage();
         if (!dataImgs && previewImg is not null && previewImg.StartsWithFast("data:"))
         {
             previewImg = $"/ViewSpecial/{Handler.ModelType}/{Name}?editid={ModelsAPI.ModelEditID}";
