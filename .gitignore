@@ -64,3 +64,6 @@ tmp_*.txt
 
 CLAUDE.md
 .claude/
+
+# Local scratch helpers, runtime exports, and logs
+/tools/_*
