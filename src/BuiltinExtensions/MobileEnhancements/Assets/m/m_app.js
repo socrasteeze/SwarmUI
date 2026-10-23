@@ -11,6 +11,9 @@ class MApp {
             getSession(() => {
                 genericRequest('ListT2IParams', { 'compact': true }, data => {
                     mState.loadParamMeta(data);
+                    if (typeof mControlNet != 'undefined' && mState.paramMeta.controlnetmodel) {
+                        mControlNet.refresh();
+                    }
                     mState.changed();
                 });
                 genericRequest('GetMyUserData', { 'includeAutocompletions': false }, data => {

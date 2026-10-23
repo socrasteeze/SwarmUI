@@ -24,6 +24,10 @@
         - In the param group, you'll have "ControlNet Start" and "End", to limit where the controlnet applies. Starting late prevents it from affecting overall image structure, and ending early prevents it from messing up the finer details.
         - You also get a "ControlNet Two" and "Three" group, if you want to do more ControlNets in a single generation call.
 
+## Simple layout
+
+The fork's `/simple` page provides an Anima ControlNet panel with independent control presets and compatible model selection. See [Anima ControlNet in Simple Layout](../SimpleControlNet-Plan.md) for setup, dependency checks, preset editing, and current limits. H3 keeps its existing frame controls.
+
 ## Troubleshooting
 
 - If you get an error while running with a ControlNet:

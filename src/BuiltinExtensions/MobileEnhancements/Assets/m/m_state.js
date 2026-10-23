@@ -18,6 +18,8 @@ class MState {
          * params, distinct from the promptimages list. */
         this.initImage = null;
         this.videoEndImage = null;
+        /** Anima control intent and its separate image attachment. */
+        this.control = { selection: 'inherit', values: {}, prepared: false, image: null };
         /** True when the seed is locked (kept between generations) rather than randomized (-1). */
         this.seedLocked = false;
         /** True after the /simple aspect stepper (or an image-ratio match) is used, so that pick wins over
@@ -403,7 +405,7 @@ class MState {
 
     /** Builds the flat input dict for one generation: base params + active presets merged in selection order
      * + prompt images + image count. session_id is added by the transport. Base state is not mutated. */
-    buildGenInput() {
+    mergedParams() {
         let input = {};
         for (let key in this.params) {
             let val = this.params[key];
@@ -411,7 +413,7 @@ class MState {
         }
         for (let title of this.activePresets) {
             let preset = this.presets.find(p => p.title == title);
-            if (preset && preset.param_map) {
+            if (preset && preset.param_map && (typeof MControlNet == 'undefined' || !MControlNet.isPreset(preset))) {
                 this.applyPresetMap(input, preset.param_map);
             }
         }
@@ -436,6 +438,12 @@ class MState {
                 }
             }
         }
+        return input;
+    }
+
+    /** Builds a request from reusable settings, resolved dimensions, and the current image attachments. */
+    buildGenInput() {
+        let input = this.mergedParams();
         // First-frame MiniMax hybrid / FL2VA (Eros included) sizes the video from Video Resolution, not
         // from Aspect Ratio. With the param absent the server falls back to "Model Preferred", and MiniMax
         // H3's standard is square 960, so the /simple aspect stepper changed its label while the video stayed
@@ -541,6 +549,9 @@ class MState {
         if (!this.seedLocked) {
             input['seed'] = '-1';
         }
+        if (typeof mControlNet != 'undefined') {
+            mControlNet.apply(input);
+        }
         return input;
     }
 
@@ -606,6 +617,7 @@ class MState {
                 clean[key] = meta[key];
             }
             this.params = clean;
+            this.control = { selection: 'inherit', values: {}, prepared: false, image: null };
             this.activePresets = [];
             this.changed();
             return true;
@@ -631,6 +643,7 @@ class MState {
         }
         this.activePresets = [];
         this.promptImages = [];
+        this.control = { selection: 'inherit', values: {}, prepared: false, image: null };
         this.initImage = null;
         this.videoEndImage = null;
         this.seedLocked = false;
@@ -683,6 +696,9 @@ class MState {
     presetGroups() {
         let groups = new Set();
         for (let preset of this.presets) {
+            if (typeof MControlNet != 'undefined' && MControlNet.isPreset(preset)) {
+                continue;
+            }
             let group = MState.presetGroup(preset.title);
             if (group) {
                 groups.add(group);
@@ -1108,6 +1124,8 @@ class MState {
                 'videoEndImagePath': this.videoEndImage && this.videoEndImage.kind == 'path' ? this.videoEndImage.value : null,
                 'promptGuide': this.promptGuide,
                 'genTarget': this.genTarget,
+                'control': { selection: this.control.selection, values: this.control.values, prepared: this.control.prepared,
+                    image: this.control.image?.kind == 'path' ? this.control.image : null },
             };
             localStorage.setItem('m_client_state', JSON.stringify(data));
             this.saveFailed = false;
@@ -1139,6 +1157,12 @@ class MState {
             // Sliced to one: this client is single-preset (see MCreate.renderPresets), and a state file
             // written before that change can still carry a whole merge stack that nothing on screen shows.
             this.activePresets = (data.activePresets || []).slice(0, 1);
+            if (data.control && typeof MControlNet != 'undefined') {
+                let image = data.control.image;
+                this.control = { selection: typeof data.control.selection == 'string' ? data.control.selection : 'inherit',
+                    values: MControlNet.settings(data.control.values), prepared: !!data.control.prepared,
+                    image: image?.kind == 'path' && typeof image.value == 'string' && !image.value.startsWith('data:') ? image : null };
+            }
             this.seedLocked = !!data.seedLocked;
             this.aspectPinned = !!data.aspectPinned;
             this.pinnedUpscale = new Set(

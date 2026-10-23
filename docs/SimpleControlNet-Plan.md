@@ -1,202 +1,91 @@
-# /simple Guide — ControlNet for the mobile page
+# Anima ControlNet in Simple Layout
 
-**Status:** spec only. Nothing implemented. Written 2026-09-12 against `ee7869a4`.
+**Status:** implemented on `feat/simple-anima-controlnet`, 2026-10-23. Source and synthetic checks pass. Live image quality and physical-device acceptance remain open. This replaces the earlier proposal.
 
-## Principle
+## Use
 
-`/simple` exposes intent, not ControlNet mechanics. The user says *"match the pose in this photo"*. They never
-pick a model file, a preprocessor, a slot, or start/end steps. Everything the page can decide, it decides.
-Anything that needs those knobs is a full-genpage job.
+1. Open `/simple` and select an Anima generation preset or checkpoint.
+2. Open **ControlNet**, which occupies the Start / End Frame area for Anima.
+3. Select **Pose**, **Lines**, **Sketch**, or **Depth**, or select a saved control preset.
+4. Attach a **Control Image** from a file, clipboard, or the image browser. The Images viewer also has a **Control Image** action.
+5. Select **Light**, **Normal**, or **Strong**. **Custom** indicates saved values outside those combinations.
+6. Generate when the panel reports no missing requirement.
 
-## What the user sees
+A type labelled **(Prepared)** needs an existing skeleton, line drawing, sketch, or depth map. It selects **Prepared Image** automatically. Clear that option only when the backend has the required annotator and cached weights.
 
-One **Guide** row under the prompt-image strip. Hidden entirely when the current checkpoint has no ControlNet.
+**From Preset** reads first-slot ControlNet settings from the generation preset. **Off** suppresses them. Control Image remains a separate attachment. H3 restores its Start / End Frame controls and their original attachments. Other architectures keep their existing frame presentation.
 
-```
-Guide   [ Off ] [ Pose ] [ Depth ] [ Lines ] [ Sketch ]
-        [ photo thumbnail  ✕ ]   Strength: [ Light ] [ Normal ] [ Strong ]
-```
+## Independent presets
 
-- Tap a type → image picker opens (same sheet as prompt images: file, camera, paste, clipboard).
-- Tap the thumbnail → replace. Tap ✕ → back to Off.
-- History image actions gain **Use as guide**, wherever `/simple` already offers "use as prompt image".
-- Only types that have a compatible model for the *effective* checkpoint render. Types never shown as disabled
-  clutter — they are absent.
+The generation preset remains active while a control preset applies only these settings:
 
-That is the whole surface. Three taps: type, photo, generate.
+- `controlnetmodel`
+- `controlnetpreprocessor`
+- `controlnetstrength`
+- `controlnetstart`
+- `controlnetend`
 
-## What exists today (verified)
+Use **Save Preset** in the panel or **More > Presets > New Control Preset**. A control preset title starts with `ControlNet/`, for example `ControlNet/Anima/Pose`. The namespace identifies the preset in the existing server store. No new database or preset schema is required.
 
-| Fact | Where |
-|---|---|
-| ControlNet params: `controlnetimageinput`, `controlnetmodel`, `controlnetstrength` (default 1), `controlnetstart` (0), `controlnetend` (1). Slots Two/Three are separate params | `T2IParamTypes.cs:602-624` |
-| Omitting the preprocessor param makes core pick one **from the ControlNet filename**: `canny`, `depth`/`midas`, `sketch`, `scribble`, `pose` | `WorkflowGeneratorSteps.cs:1073-1085` |
-| `lineart` / `mistoline` are **not** in that keyword list → no preprocessor runs | same |
-| ControlNet preprocessors are installed on the hub | `GetCurrentStatus` feature `controlnetpreprocessors` |
-| `/simple` already has the image-attach path (`addImageFile`, clipboard, history paths) and a compat-class helper | `m_create.js:1238`, `m_state.js:609` |
-| Params not in `coveredParams` render as Advanced chips | `m_create.js:27`, `:1751` |
+A control preset cannot replace the prompt, checkpoint, LoRAs, sampling settings, or output root. The Simple generation and grid preset lists exclude this namespace. Existing generation presets can retain their ControlNet fields. Classic UI continues to see ordinary Swarm presets and does not enforce Simple's control-only overlay rules.
 
-### ControlNets on the hub, by checkpoint family
+Uploaded image bytes remain in memory. Server-relative Control Image paths can survive reload. Neither captured preset settings nor control-only presets include attached images. Reuse Params clears the previous control attachment and restores parameter values for review.
 
-IllustriousXL and NoobAI are SDXL derivatives (compat class `stable-diffusion-xl-v1`), so the whole SDXL
-ControlNet set applies to them. There is no separate Illustrious ControlNet family to look for.
+## Preset editor
 
-| Family | Pose | Depth | Lines | Sketch |
-|---|---|---|---|---|
-| Anima (`anima`) | `anima-lllite-pose-1` | `anima-lllite-depth-1` | `anima-lllite-lineart-1` | `anima-lllite-scribble-1` |
-| SDXL / Illustrious (`stable-diffusion-xl-v1`) | `controlnetxlCNXL_2vxpswa7OpenposeV21`, `control-lora-openposeXL2-rank256`, **†** `controlnetxlCNXL_bdsqlszOpenpose`, **†** `controllllite_v01032064e_sdxl_pose_anime` (+`_v2_500-1000`) | `CN-anytest_v4-marged` + a depth preprocessor | `mistoline_v10`, `mistoLine_rank256` | `control-lora-sketch-rank128-metadata` |
-| SD 1.5 | `control_v11p_sd15_openpose` | — | — | — |
-| Flux2 Klein, Krea 2, Qwen, H3 | none | none | none | none |
+The editor groups existing fields into Model, Prompts, LoRAs, Sampling, Resolution, Upscale, ControlNet, and Advanced. Unknown fields remain editable and survive save. Anima controls have compatible model choices, explicit preprocessing choices, strength, and Start/End fields. Control-only presets also have an Architecture choice. Video fields stay hidden for a control-only preset and for Anima presets without stored video values.
 
-`CN-anytest_v4-marged` is a universal SDXL ControlNet: it takes whatever the preprocessor produces, so the
-preprocessor decides whether it acts as depth, pose, or lines. That is what closes the SDXL depth gap without a
-depth-specific model, and it is the fork owner's existing Illustrious workflow.
+**Capture Settings** opens a preview of old and proposed values. Choose **Manual Settings** for explicit Create settings or **With Preset** to include the current generation preset. Select the fields to apply. Capture updates only the unsaved editor. Unchecked fields remain unchanged. Image inputs, batch size, backend pin, and session identifiers are excluded. Aspect ratios remain symbolic instead of becoming generated pixel dimensions.
 
-Also present and deliberately unused by this feature: `control-lora-canny-rank128`,
-`xinsircontrolnet-tile-sdxl-1`, `control-lora-recolor-rank128`, `control_v11p_sd15_{canny,seg}`, the Anima
-`inpainting`/`any-test` patches, and `detection_Resnet50_Final` (not a ControlNet).
+Saved control presets keep their independent selection through rename. Deleting a selected control preset switches its control selection to Off. Generation preset selection remains separate.
 
-48 preprocessors are installed, including `DepthAnythingV2Preprocessor`, `OpenposePreprocessor`,
-`AnimeLineArtPreprocessor`, and `LineArtPreprocessor` (`ListT2IParams` → `controlnetpreprocessor`).
+## Compatibility and dependencies
 
-**† Prerequisite, do this before building.** Those four report `architecture: None` because their metadata was
-never set, so nothing can prove they are SDXL and rule 2 below discards them. That would throw away
-`controllllite_v01032064e_sdxl_pose_anime`, the only *anime-tuned* SDXL pose model in the library and the best
-pose guide for an Illustrious checkpoint. Set the architecture on each in the Models tab (same job as SWR.59),
-then re-check with `ListModels` before the builder starts. The `.pth` duplicates of the SD1.5 models can stay
-untagged; their `.safetensors` twins are already correct.
+- The effective checkpoint after generation-preset application decides compatibility. The architecture browsing filter cannot override it.
+- `anima`, `anima-2.9b`, and `anima-3.8b` remain separate. Unknown or incompatible model classes are excluded.
+- The first version uses one dedicated Pose, Lines, Sketch, or Depth patch. It excludes inpainting, any-test, and other control families. Extra inherited control slots require removal or Classic UI.
+- Discovery checks each running Comfy backend independently. A backend must register the checkpoint, patch, `ModelPatchLoader`, and the core `AnimaLLLiteApply` input contract.
+- A control job pins to the backend that passed discovery. The session needs ControlNet and exact-backend parameter permissions.
+- Standard Lineart and the basic Scribble processors need no checkpoint. Automatic DWPose and Depth Anything V2 require the exact bundled cache files that the generated graph uses. DWPose uses Swarm's explicit TorchScript detector override.
+- Remote annotator caches cannot be inspected. Such backends can use registered checkpoint-free preprocessors or prepared control maps. Swarm API spokes without a directly inspectable Comfy contract are unavailable to this panel.
+- Discovery never starts generation, loads a model, installs a node, or downloads weights. It filters model names through the session's model restrictions.
+- Grid runs can reuse a shared guide. A grid preset that changes its architecture, backend availability, or control settings is rejected before submission.
 
-So the Guide row appears for **Anima and the SDXL/Illustrious library**, and is hidden on everything else.
-All four types resolve for both families.
+Strength combinations are starting values, not visual-quality guarantees. Dedicated Preview3-era patches may control newer Anima checkpoints less strongly. No generation was used to qualify this implementation.
 
-Verified 2026-09-12: `E:\models\controlnet` plus `E:\models\model_patches` is the entire inventory. The F: root
-has no ControlNet folder, StabilityMatrix's and ComfyUI's folders are symlinks to the same place, nothing is
-misfiled under `loras/`, and the writer laptop has none of its own.
+## Batch editor options
 
-## Resolution rules
+These options are recorded for a follow-up. The Image Batch Editor has not been redesigned.
 
-1. **Family** = compat class of the effective checkpoint (`mState.compatClassOf('Stable-Diffusion', buildGenInput().model)`).
-2. **Candidates** = ControlNet list filtered to that compat class. A model with no detected architecture is
-   skipped, because nothing can prove it compatible and a mismatched ControlNet fails at generation time. This
-   is why the four untagged SDXL models above must have their architecture set first — the rule is correct, the
-   metadata is what is missing.
-3. **Type → (model, preprocessor) pair.** A guide type is not one model — it is a model that accepts the input
-   plus the preprocessor that produces it. Two shapes:
-   - **Dedicated model** (Anima): filename keyword picks the model, and the preprocessor is left unset so core
-     resolves it. Pose: `pose`. Depth: `depth`|`midas`. Lines: `lineart`. Sketch: `scribble`.
-   - **Universal model + explicit preprocessor** (SDXL/Illustrious): `CN-anytest_v4-marged` accepts any
-     preprocessed input, so it serves every type, with the preprocessor carrying the meaning. This is the
-     fork owner's own working setup — anytest plus DepthAnythingV2 for depth on Illustrious.
+| Option | Intended behavior | Implementation impact |
+|---|---|---|
+| Per-image control | Each source image becomes a guide; one control preset applies across the batch | Recommended first follow-up. Existing batch routing already supplies ControlNet images. Add a clear control-only mode and compatible preset selection. |
+| Shared control | One guide applies to every source image used for image-to-image processing | Add a separate shared guide attachment and preserve its role independently of source images. |
+| Compare controls | Compare control presets or strengths against one guide | Extend Simple's grid builder with dedicated control axes and per-cell validation. Current grids only reuse a shared fixed guide. |
 
-   | Type | SDXL/Illustrious model | Preprocessor sent |
-   |---|---|---|
-   | Pose | a `pose` model if one is tagged, else `CN-anytest_v4-marged` | unset (dedicated) / `OpenposePreprocessor` (anytest) |
-   | Depth | `CN-anytest_v4-marged` | `DepthAnythingV2Preprocessor` |
-   | Lines | `mistoline_v10` | `AnimeLineArtPreprocessor` |
-   | Sketch | `control-lora-sketch-rank128-metadata` | unset |
+The current Image Batch Editor enables both Init Image and ControlNet input by default. A future control-only mode must make that role selection explicit. Input/output folder handling and existing batch execution remain unchanged.
 
-   Prefer a dedicated model when the family has one; fall back to a universal model plus an explicit
-   preprocessor. Never offer a type that has neither.
+## Implementation and verification
 
-   Excluded as *models* for every type: `inpaint`, `tile`, `recolor`, `seg`, `canny`. `any-test`/`anytest` is not
-   excluded — it is the SDXL fallback model.
-4. **Several matches** → take the one the user last picked for this family+type, else the first by name.
-   No picker in the row. A long-press on the type chip opens a one-line model list only when there are ≥2.
-5. **Preprocessor** follows from the pair chosen in rule 3:
-   - Dedicated model whose filename carries a keyword core knows (`pose`, `depth`, `midas`, `sketch`,
-     `scribble`) → **do not send**. Core resolves it.
-   - Everything else → send it explicitly. That covers every universal-model type, and `mistoline`/`lineart`,
-     which core's keyword list does not recognise — omitting it there feeds the raw photo to a lineart model.
-   - One toggle inside the image sheet: **"Already a pose/depth/line image"** → send preprocessor `None`, for an
-     existing stick figure, depth map, or line drawing.
-6. **Checkpoint changes to a family with no model for the chosen type** → the Guide state is kept but not sent,
-   and the row shows one line: *"No Pose guide for Flux 2 Klein — guide not applied."* Never send an
-   incompatible ControlNet and let the backend error.
+The implementation stays under `MobileEnhancements`: `SimpleControlNetAPI.cs`, `Assets/m/m_controlnet.js`, and focused integration in state, Create, presets, Images, grid, asset registration, and CSS. The C# workflow generator is unchanged. It already loads Anima patches and handles lineart inversion.
 
-## Strength levels
+CPU-only verification:
 
-One control, three values. Each sets strength **and** end together, because on a phone "how strongly" is the
-only question; start stays 0.
-
-| Level | `controlnetstrength` | `controlnetend` | Intent |
-|---|---|---|---|
-| Light | 0.55 | 0.6 | Rough pose, free detail |
-| Normal (default) | 0.8 | 0.8 | Pose held, hands and folds resolve naturally |
-| Strong | 1.0 | 1.0 | Match closely |
-
-Starting values. Tune them against real Anima generations before shipping; they are the only numbers in this
-spec that aren't read from the tree.
-
-## What gets sent
-
-`buildGenInput()` adds, only when a type is chosen, an image is attached, and a model resolved:
-
-```
-controlnetimageinput   <data URI | output path>     # same normalisation as promptimages
-controlnetmodel        <resolved model name>
-controlnetstrength     <level>
-controlnetend          <level>                      # omitted when 1 (IgnoreIf)
-controlnetpreprocessor <lineart key | None>         # Lines, or "already a pose/line image" only
+```powershell
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-controlnet.mjs
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-presets.mjs
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-create-panel.mjs
+node src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-grid.mjs
+dotnet test SwarmUITests/SwarmUITests.csproj --configuration Release
+dotnet build SwarmUI.sln --configuration Release
+dotnet format SwarmUI.sln --verify-no-changes
+dotnet format style SwarmUI.sln --verify-no-changes
 ```
 
-Add all five ids to `coveredParams` so they never also render as Advanced chips.
+The browser checks use synthetic models, presets, and images. No generation endpoint receives a job. They cover independent preset application, variant rejection, missing annotators, image roles, file upload, storage, capture, save/rename, grid guards, and layout at 360/768/1440 pixels.
 
-## State
+## Activation and rollback
 
-`mState.guide = { type, image: {kind, value}, level, alreadyProcessed, modelPick: {"<family>|<type>": name} }`
+A running Release server caches extension assets and needs a rebuilt assembly for the new API. Rebuild and restart SwarmUI, then bypass the browser cache. Source validation does not activate the feature in an already running server.
 
-- `type`, `level`, `alreadyProcessed`, `modelPick` persist like other `/simple` settings.
-- `image` follows whatever `promptImages` does today. Never write a data URI to localStorage.
-
-## Interactions
-
-| Case | Behavior |
-|---|---|
-| Presets | A preset that sets `controlnet*` params keeps rendering them as Advanced chips as today; the Guide row does not read or write presets. The Guide row wins if both set a value. |
-| Reuse Parameters | Restores type (from the model name keyword), level (nearest match), and model pick. Image slot stays empty with a note — metadata carries no image. |
-| Prompt Enhance | Independent. A pose guide plus an enhanced prompt is the intended pairing. |
-| Spoke routing | Not verified. The spoke mounts the same model roots, but check that a ControlNet job routed to `G18-API` resolves the model before relying on it. |
-| Generate Forever / grids | Guide applies to every image, like any other param. |
-
-## Out of scope
-
-- ControlNet slots Two and Three
-- Start/end sliders, a preprocessor picker, union types
-- Preview-the-preprocessor (`controlnetpreviewonly`) — a Phase 2 candidate if Lines misfires
-- Inpainting and any-test ControlNets
-- Masks
-- Genpage changes
-
-## Build
-
-Fork-owned files only, zero core edits.
-
-| File | Change |
-|---|---|
-| `MobileEnhancements/Assets/m/m_state.js` | `guide` state, resolution helpers, `buildGenInput` additions, `coveredParams` ids |
-| `MobileEnhancements/Assets/m/m_create.js` | Guide row, image sheet reuse, strength chips, mismatch line, history **Use as guide** |
-| `MobileEnhancements/Assets/m/m.css` | Row layout, ≥44px targets |
-| `MobileEnhancements/verify/verify-simple-guide.mjs` | New harness |
-
-One builder agent. Roughly one session.
-
-## Verification
-
-Harness (extraction + stubs, like `verify-simple-coach.mjs`):
-- Row hidden on a Flux/Krea/Qwen checkpoint; shown on Anima and on an `ill/` checkpoint
-- Type chips limited to families' available models; unknown-arch models never chosen
-- Pose/Depth/Sketch send no preprocessor; Lines sends the `lineart` key; "already processed" sends `None`
-- Level → exact strength/end pairs; end omitted at 1
-- Checkpoint switch to a family with no match → nothing `controlnet*` sent, notice shown
-- No `controlnet*` key reaches Advanced chips
-
-Live, on the hub:
-- Anima + Pose + a full-body photo + Normal → pose held, character from the prompt
-- `ill/` checkpoint + Lines + a sketch → line structure held
-- Switch to Flux 2 Klein with a guide set → generates, no ControlNet error, notice visible
-
-## Coupling watchlist
-
-- `T2IParamTypes.cs` ControlNet param names (ids derive from them)
-- `WorkflowGeneratorSteps.cs:1073-1085` filename→preprocessor keywords — if upstream adds `lineart`, drop the explicit Lines preprocessor
-- `ComfyUIBackendExtension.ControlNetPreprocessors` key names
+Rollback reverts the feature files and integration hunks, then rebuilds and restarts. No model files or existing saved presets are migrated. Previously saved control presets remain ordinary Swarm presets in the server store.

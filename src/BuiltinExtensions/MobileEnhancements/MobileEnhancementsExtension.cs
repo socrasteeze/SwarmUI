@@ -91,6 +91,7 @@ public class MobileEnhancementsExtension : Extension
         // Server-backed folder browser for /simple start/end frame + prompt-image attach.
         OtherAssets.Add("Assets/m/m_image_browser.js");
         OtherAssets.Add("Assets/m/m_frame_prep.js");
+        OtherAssets.Add("Assets/m/m_controlnet.js");
         OtherAssets.Add("Assets/m/m_create.js");
         OtherAssets.Add("Assets/m/m_presets.js");
         OtherAssets.Add("Assets/m/m_grid.js");
@@ -100,6 +101,7 @@ public class MobileEnhancementsExtension : Extension
         API.RegisterAPICall(GetSimpleAutocompletions, false, Permissions.FundamentalGenerateTabAccess);
         API.RegisterAPICall(SimpleImageBrowserAPI.ListSimpleImageFolder, false, SimpleImageBrowserAPI.BrowsePermission);
         API.RegisterAPICall(SimpleImageBrowserAPI.ReadSimpleImage, false, SimpleImageBrowserAPI.BrowsePermission);
+        API.RegisterAPICall(SimpleControlNetAPI.GetSimpleControlNetCapabilities, false, Permissions.ParamControlNet);
     }
 
     /// <summary>Returns the current user's autocomplete word list for the standalone client. This endpoint is

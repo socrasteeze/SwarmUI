@@ -1,5 +1,6 @@
 # SwarmUI Documentation
 
+- [Anima ControlNet in Simple Layout](/docs/SimpleControlNet-Plan.md) covers guidance, independent control presets, and batch editor options.
 - [Basic Usage](/docs/Basic%20Usage.md) to learn how to get started.
 - [Why Use Swarm](/docs/Why%20Use%20Swarm.md) to see what advanced Swarm offers you
 - [Advanced Usage](/docs/Advanced%20Usage.md) for various advanced usage topics (use from external device, comfy workflows, ...)

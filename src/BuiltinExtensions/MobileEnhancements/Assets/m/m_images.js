@@ -438,6 +438,22 @@ class MImages {
                 mUI.warn('This image is not a saved file, so it cannot be attached as a path. Paste it into the prompt box instead.');
             }
         });
+        if (typeof mControlNet != 'undefined' && mControlNet.isAnima(mState.mergedParams())) {
+            addAction('Control Image', () => {
+                let attached = this.promptPathEntry(entry.fullsrc || entry.url);
+                if (!attached) {
+                    mUI.warn('This image is unavailable. Attach the image from a file.');
+                    return;
+                }
+                mState.control.image = attached;
+                if (mState.control.selection == 'off') {
+                    mState.control.selection = 'pose';
+                }
+                mState.changed();
+                close();
+                location.hash = 'create';
+            });
+        }
         let starLabel = entry.fullsrc && entry.fullsrc.startsWith('Starred/') ? 'Unstar' : 'Star';
         let starButton = addAction(starLabel, () => {
             if (!entry.fullsrc) {

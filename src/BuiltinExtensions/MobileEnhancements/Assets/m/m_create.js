@@ -492,6 +492,9 @@ class MCreate {
         this.negWrap = negWrap;
         panel.appendChild(negWrap);
         panel.appendChild(this.buildFramesSection());
+        if (typeof mControlNet != 'undefined') {
+            panel.appendChild(mControlNet.build());
+        }
         this.advChips = mUI.el('div', 'm-adv-chips');
         panel.appendChild(this.advChips);
         let fileInput = document.createElement('input');
@@ -643,7 +646,17 @@ class MCreate {
                 if (target.fellBack) {
                     mUI.warn(`${MCreate.genTargetName(mState.genTarget, mState.backendTargets)} is not available - running here instead.`);
                 }
-                mGen.generate(input);
+                if (typeof mControlNet != 'undefined' && mControlNet.isAnima(mState.mergedParams())) {
+                    mControlNet.prepare(() => mState.buildGenInput(), prepared => {
+                        if (!prepared.controlnetimageinput && target.id != null) {
+                            prepared.exactbackendid = target.id;
+                        }
+                        mGen.generate(prepared);
+                    }, () => this.setPending(false));
+                }
+                else {
+                    mGen.generate(input);
+                }
             });
         };
         let afterPrep = () => {
@@ -790,6 +803,9 @@ class MCreate {
         }
         this.negWasFilled = hasNeg;
         this.renderFrames();
+        if (typeof mControlNet != 'undefined') {
+            mControlNet.render();
+        }
         this.renderImageStrip();
         this.renderQuickParams();
         let loras = mState.getLoras();
@@ -830,7 +846,8 @@ class MCreate {
         // An ACTIVE preset always shows, even when the architecture filter would hide it. Filtering it out
         // of the list would not deactivate it - it would keep merging into every generation with no option
         // left on screen to switch it off, which is a trap rather than a filter.
-        let visible = mState.presets.filter(preset => !mState.archFilter
+        let visible = mState.presets.filter(preset => typeof MControlNet == 'undefined' || !MControlNet.isPreset(preset))
+            .filter(preset => !mState.archFilter
             || MState.presetGroup(preset.title) == mState.archFilter
             || mState.activePresets.includes(preset.title));
         if (visible.length == 0) {
@@ -1249,7 +1266,7 @@ class MCreate {
             return;
         }
         mImageBrowser.open({
-            'title': slot === this.startFrameSlot ? 'Start frame' : (slot === this.endFrameSlot ? 'End frame' : 'Pick frame'),
+            'title': slot.pickTitle || (slot === this.startFrameSlot ? 'Start frame' : (slot === this.endFrameSlot ? 'End frame' : 'Pick frame')),
             'mediaTypes': ['image'],
             'allowPhone': true,
             'onPick': (entry) => {
@@ -1371,7 +1388,7 @@ class MCreate {
         if (!slot) {
             return;
         }
-        let title = slot === this.startFrameSlot ? 'Start frame' : (slot === this.endFrameSlot ? 'End frame' : 'Frame');
+        let title = slot.pickTitle || (slot === this.startFrameSlot ? 'Start frame' : (slot === this.endFrameSlot ? 'End frame' : 'Frame'));
         let content = mUI.el('div', 'm-imgbrowser-chooser');
         content.appendChild(mUI.el('div', 'm-sheet-title', title));
         let close = null;
@@ -1628,7 +1645,7 @@ class MCreate {
                 if (!this.panel || this.panel.style.display == 'none') {
                     return;
                 }
-                if (!this.framesWrap || !this.framesWrap.open) {
+                if (!this.framesWrap || this.framesWrap.hidden || !this.framesWrap.open) {
                     return;
                 }
                 if (e.target && e.target.closest) {
@@ -2502,7 +2519,8 @@ class MCreate {
 
     /** Advanced chips: every param set by preset/reuse without a dedicated control, X-clearable. */
     renderAdvChips() {
-        let keys = Object.keys(mState.params).filter(k => !this.coveredParams.includes(k));
+        let keys = Object.keys(mState.params).filter(k => !this.coveredParams.includes(k)
+            && !(typeof mControlNet != 'undefined' && mControlNet.isAnima(mState.mergedParams()) && k.startsWith('controlnet')));
         let labels = keys.map(key => {
             let text = `${MCreate.paramLabel(key)}: ${MCreate.paramValueLabel(key, mState.params[key])}`;
             return text.length > 40 ? `${text.substring(0, 38)}\u2026` : text;
