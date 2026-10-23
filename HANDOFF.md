@@ -1,16 +1,16 @@
 # HANDOFF
 
-**Updated:** 2026-10-23 · **Branch:** feat/simple-anima-controlnet · **Tree:** local Anima ControlNet delivery; unrelated work remains
+**Updated:** 2026-10-23 · **Branch:** main · **Tree:** local delivery snapshot
 
 ## State
-Anima ControlNet and the Simple preset editor refinement are implemented for local feature-branch delivery. Source checks pass: 370 C# tests, 335 browser checks, Release build, normal/style formatting, and isolated CI boot. Live activation, generation quality, and physical-device checks remain open. Batch editor choices are documented follow-ups. Existing unrelated edits and untracked tools remain untouched.
+Anima ControlNet and the Simple preset editor refinement are implemented for delivery on main. Source checks pass: 370 C# tests, 335 browser checks, Release build, normal/style formatting, and isolated CI boot. Live activation, generation quality, and physical-device checks remain open. Batch editor choices are documented follow-ups. The remaining tracked guidance edit is included. Local scratch helpers, logs, and runtime exports stay ignored and unchanged.
 
 Startup improvements and upstream `d74f8ce4` were delivered through `ad6ad1a2`. This snapshot adds recovery for stale qualified LoRA paths only when a filename has one allowed-catalog match. All 366 tests and normal format/style checks pass. The latest rejected selection passed CPU-only validation with its count and order preserved. Live verification confirmed the tested assembly in the restarted server, an HTTP 200 response, and a running backend. Generation was not used for verification. Private repair inputs remain ignored.
 The user waived the handoff line cap; retain the historical MiniMax H3 reference sections below.
 
 ## Done this session
 
-- 2026-10-23: added the Anima panel, independent control presets, strict variant/backend checks, prepared image support, and separate control/frame attachments. Refined the preset editor with grouped fields and selective capture. Added CPU-only regression checks and replaced `docs/SimpleControlNet-Plan.md` with current usage and batch follow-up options. No generation, live service restart, or push. The local commit includes only this feature and its documentation. The live Release server requires rebuild/restart and a browser cache bypass for activation.
+- 2026-10-23: added the Anima panel, independent control presets, strict variant/backend checks, prepared image support, and separate control/frame attachments. Refined the preset editor with grouped fields and selective capture. Added CPU-only regression checks and replaced `docs/SimpleControlNet-Plan.md` with current usage and batch follow-up options. No generation or live service restart. Delivery includes the feature, documentation, the remaining tracked guidance edit, and the local scratch exclusion rule. The live Release server requires rebuild/restart and a browser cache bypass for activation.
 
 - 2026-10-21 follow-up: fixed stale LoRA path validation in `T2IParamTypes.cs` and added eight synthetic regression cases. The active client's rejected selection contained two outdated paths; each resolves uniquely to an Anima catalog entry. None of the saved presets contained those references. The fix preserves existing exact-path precedence and rejects ambiguous filenames. No model, metadata, preset, or LoRA weight was changed. Private input snapshots stay under ignored `.local/repair-01/`.
 

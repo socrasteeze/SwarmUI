@@ -1,6 +1,6 @@
 # Anima ControlNet in Simple Layout
 
-**Status:** implemented on `feat/simple-anima-controlnet`, 2026-10-23. Source and synthetic checks pass. Live image quality and physical-device acceptance remain open. This replaces the earlier proposal.
+**Status:** implemented on `main`, 2026-10-23. Source and synthetic checks pass. Live image quality and physical-device acceptance remain open. This replaces the earlier proposal.
 
 ## Use
 

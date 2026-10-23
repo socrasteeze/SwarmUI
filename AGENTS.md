@@ -229,7 +229,7 @@ The only Python managed directly by SwarmUI. Mostly Comfy node formats, sometime
 
 Runtime config, not source, and gitignored — but agents read and sometimes edit it, so the format's escaping matters.
 
-**`\s` is an escaped literal backslash.** Every Windows path in an `.fds` file carries it: `ModelRoot: E:\smodels` *is* `E:\models`, `DataPath: E:\sSwarmUI\sData` *is* `E:\SwarmUI\Data`, `OutputPath: E:\sPictures\s_output` *is* `E:\Pictures\_output`. A path that looks like it has a stray `s` after the drive separator is correct as written. Rewriting one to a bare backslash silently corrupts the setting and nothing warns you — it was mistaken for a typo once already (2026-09-06) and the value had to be restored from a backup.
+**`\s` is an escaped literal backslash.** Every Windows path in an `.fds` file carries it: `ModelRoot: E:\smodels` *is* `E:\models`, `DataPath: E:\sSwarmUI\sData` *is* `E:\SwarmUI\Data`, `OutputPath: E:\sPictures\s.output` *is* `E:\Pictures\.output`. A path that looks like it has a stray `s` after the drive separator is correct as written. Rewriting one to a bare backslash silently corrupts the setting and nothing warns you — it was mistaken for a typo once already (2026-09-06) and the value had to be restored from a backup.
 
 **`\x` is an empty string.** It is what an unset string setting serializes to (`AuthorizationHeader: \x`, `OAuthReturnURL: \x`). Do not read it as a literal value or as a placeholder to fill in.
 
