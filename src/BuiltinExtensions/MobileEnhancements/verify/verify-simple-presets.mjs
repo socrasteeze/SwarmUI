@@ -184,7 +184,7 @@ check('opening the manager re-fetches rather than trusting the boot copy', liste
 // ---- Editing an existing preset ----
 await page.evaluate(() => [...__sheet().querySelectorAll('.m-preset-row-item')]
     .find(row => row.textContent.includes('flux/Portrait')).click());
-await page.waitForFunction(() => __sheet().querySelector('.m-sheet-title').textContent == 'Edit preset');
+await page.waitForFunction(() => __sheet().querySelector('.m-sheet-title').textContent == 'Edit Preset');
 const loaded = await page.evaluate(() => ({
     title: __sheet().querySelector('.m-preset-field').value,
     labels: [...__sheet().querySelectorAll('.m-preset-param-label')].map(e => e.textContent),
@@ -193,10 +193,10 @@ const loaded = await page.evaluate(() => ({
 }));
 check('the editor loads the preset title', loaded.title == 'flux/Portrait', loaded.title);
 check('every parameter is listed, including ones this client has no control for',
-    loaded.ids.join(',') == 'cfgscale,model,steps,video_frames', loaded.ids.join(','));
+    loaded.ids.join(',') == 'model,cfgscale,steps,video_frames', loaded.ids.join(','));
 check('a known parameter shows its display name, an unknown one its raw id',
-    loaded.labels.join(',') == 'CFG Scale,Model,Steps,video_frames', loaded.labels.join(','));
-check('values load from the param map', loaded.values.join(',') == '1,flux/base,20,81', loaded.values.join(','));
+    loaded.labels.join(',') == 'Model,CFG Scale,Steps,video_frames', loaded.labels.join(','));
+check('values load from the param map', loaded.values.join(',') == 'flux/base,1,20,81', loaded.values.join(','));
 
 const composition = await page.evaluate(() => {
     let input = __sheet().querySelector('.m-preset-sheet > .m-preset-field');
@@ -294,7 +294,7 @@ await page.evaluate(() => {
     window.__calls = [];
     mPresets.openEditor(null, () => {});
 });
-await page.waitForFunction(() => __sheet().querySelector('.m-sheet-title').textContent == 'New preset');
+await page.waitForFunction(() => __sheet().querySelector('.m-sheet-title').textContent == 'New Preset');
 const newSeeded = await page.evaluate(() => ({
     title: __sheet().querySelector('.m-preset-field').value,
     ids: [...__sheet().querySelectorAll('.m-preset-param-label')].map(e => e.title)

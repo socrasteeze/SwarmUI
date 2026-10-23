@@ -2718,6 +2718,65 @@ button.m-header-link {
 
 
 /* --- More tab --- */
+.m-controlnet[hidden], .m-neg-wrap[hidden], .m-preset-video[hidden], .m-frame-slot[hidden] {
+    display: none;
+}
+.m-control-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+    margin: 0.5rem 0;
+    font-size: 13px;
+    color: var(--text-soft);
+}
+.m-controlnet .m-frame-slot {
+    max-width: 16rem;
+}
+.m-control-prepared, .m-preset-capture-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 44px;
+}
+.m-control-prepared input, .m-preset-capture-row input {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.m-control-notice {
+    min-height: 2.7em;
+    margin: 0.4rem 0;
+    font-size: 13px;
+    color: var(--text-soft);
+    overflow-wrap: anywhere;
+}
+.m-control-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+.m-preset-section {
+    border-top: 1px solid var(--border-color);
+    padding: 0.3rem 0;
+    min-width: 0;
+}
+.m-preset-section > summary {
+    min-height: 44px;
+    align-content: center;
+    cursor: pointer;
+}
+.m-preset-capture-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.m-preset-capture-value {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    max-height: 6em;
+    overflow: auto;
+}
 .m-more-list {
     display: flex;
     flex-direction: column;

@@ -191,10 +191,22 @@ class MGrid {
                 mUI.warn('Fill in at least one axis first.');
                 return;
             }
-            let base = this.buildBase();
-            mGen.runGrid(base, axes, { 'rows': this.rows });
-            mUI.note(`Grid started: ${this.totalImages()} images.`);
-            close();
+            let run = (base) => {
+                let error = typeof mControlNet != 'undefined' ? mControlNet.validateGrid(base, this.valuesFor('preset')) : '';
+                if (error) {
+                    mUI.warn(error);
+                    return;
+                }
+                mGen.runGrid(base, axes, { 'rows': this.rows });
+                mUI.note(`Grid started: ${this.totalImages()} images.`);
+                close();
+            };
+            if (typeof mControlNet != 'undefined' && mControlNet.isAnima(mState.mergedParams())) {
+                mState.refreshBackendTargets(() => mControlNet.prepare(() => this.buildBase(), run));
+            }
+            else {
+                run(this.buildBase());
+            }
         });
         let close = mUI.openSheet(content);
         return close;
@@ -373,7 +385,8 @@ class MGrid {
                     return;
                 }
                 let term = search.value.trim().toLowerCase();
-                let matches = presets.filter(preset => !term
+                let matches = presets.filter(preset => typeof MControlNet == 'undefined' || !MControlNet.isPreset(preset))
+                    .filter(preset => !term
                     || `${preset.title} ${preset.description || ''} ${MGrid.shortValue(preset.title)}`.toLowerCase().includes(term));
                 matches = [...matches].sort((a, b) => {
                     if (!!a.is_starred != !!b.is_starred) {
