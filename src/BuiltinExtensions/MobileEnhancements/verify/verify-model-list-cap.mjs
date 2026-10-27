@@ -216,6 +216,142 @@ try {
         JSON.stringify(classic.described));
     check('classic page produced no errors', pageErrors.length == 0, pageErrors.join('\n'));
 
+    // Compatible-only filter: the Classic LoRA browser asks the server to drop incompatible LoRAs, so paging and counts stay honest.
+    let compatUi = await page.evaluate(async () => {
+        let out = {};
+        let nextList = () => {
+            while (window.__queue.length > 0) {
+                let request = window.__queue.shift();
+                if (request.route == 'ListModels') {
+                    return request;
+                }
+            }
+            return null;
+        };
+        let pendingLists = () => window.__queue.filter(entry => entry.route == 'ListModels').length;
+        let respond = (request, names, total, hidden) => request.ok({
+            files: names.map(name => ({ name, title: name })),
+            folders: [],
+            total,
+            returned: names.length,
+            truncated: names.length < total,
+            compat_hidden: hidden
+        });
+        let names = () => sdLoraBrowser.browser.lastFiles.map(file => file.name);
+        let rows = () => [...document.querySelectorAll('#lora_list .browser-list-more-label')].map(el => el.innerText);
+        let pad = (prefix, from, to) => {
+            let list = [];
+            for (let i = from; i < to; i++) {
+                list.push(`${prefix}-${String(i).padStart(4, '0')}.safetensors`);
+            }
+            return list;
+        };
+        window.__queue = [];
+        localStorage.removeItem('models_LoRA_compat_only');
+        currentModelHelper.curCompatClass = 'fam-a';
+        sdLoraBrowser.listCache = new Map();
+        sdLoraBrowser.browser.lastListCache = null;
+        sdLoraBrowser.browser.filter = '';
+        sdLoraBrowser.unfilteredTruncated = false;
+        sdLoraBrowser.browser.update(true);
+        let first = nextList();
+        out.firstCompat = first.args.compat;
+        respond(first, ['on-1.safetensors', 'on-2.safetensors'], 2, 7);
+        let box = document.getElementById('models_LoRA_compat_only');
+        out.boxExists = !!box;
+        out.boxChecked = !!box && box.checked;
+        out.hiddenRow = rows().filter(text => text.includes('hidden as incompatible'));
+        out.hiddenButton = (document.querySelector('#lora_list .browser-list-compat-hidden button') || {}).innerText;
+        out.noLoadMoreWhenComplete = ![...document.querySelectorAll('#lora_list .browser-list-more-button')].some(button => button.innerText == 'Load more');
+
+        document.querySelector('#lora_list .browser-list-compat-hidden button').click();
+        let off = nextList();
+        out.offCompat = off ? off.args.compat : 'no request';
+        out.storedAfterShowAll = localStorage.getItem('models_LoRA_compat_only');
+        out.boxAfterShowAll = box.checked;
+        respond(off, pad('off', 0, 9), 9, 0);
+        out.offCount = names().length;
+        out.hiddenRowAfterShowAll = rows().filter(text => text.includes('hidden as incompatible')).length;
+
+        box.checked = true;
+        box.dispatchEvent(new Event('change'));
+        out.reenableRequests = pendingLists();
+        out.reenableNames = names();
+        out.storedAfterReenable = localStorage.getItem('models_LoRA_compat_only');
+        window.__queue = [];
+
+        currentModelHelper.curCompatClass = 'fam-b';
+        sdLoraBrowser.browser.lightRefresh();
+        let second = nextList();
+        out.secondCompat = second ? second.args.compat : 'no request';
+        respond(second, pad('b', 0, 500), 1200, 3);
+        out.bothRows = rows();
+
+        currentModelHelper.curCompatClass = 'fam-a';
+        document.querySelector('#lora_list .browser-list-more-button').click();
+        let more = nextList();
+        out.moreCompat = more ? more.args.compat : 'no request';
+        out.moreOffset = more ? more.args.offset : null;
+        respond(more, pad('b', 500, 1000), 1200, 3);
+        out.afterMoreCount = names().length;
+
+        currentModelHelper.curCompatClass = 'fam-c';
+        refreshLoraCompatIfChanged();
+        let refreshed = nextList();
+        out.refreshedCompat = refreshed ? refreshed.args.compat : 'no request';
+        if (refreshed) {
+            respond(refreshed, ['c-1.safetensors'], 1, 0);
+        }
+        window.__queue = [];
+        refreshLoraCompatIfChanged();
+        out.unchangedRequests = pendingLists();
+
+        sdLoraBrowser.browser.filter = 'zeta';
+        sdLoraBrowser.onServerFilter('zeta');
+        let searched = nextList();
+        out.searchArgs = searched ? { search: searched.args.search, compat: searched.args.compat } : null;
+        if (searched) {
+            respond(searched, ['zeta-1.safetensors'], 1, 0);
+        }
+        sdLoraBrowser.browser.filter = '';
+        window.__queue = [];
+
+        sdVAEBrowser.listModelFolderAndFiles('', false, () => {}, 1);
+        let vae = nextList();
+        out.vaeCompat = vae ? vae.args.compat : 'no request';
+        return out;
+    });
+
+    check('LoRA listing sends the compat classes by default, before the header exists',
+        compatUi.firstCompat == 'fam-a' && compatUi.boxExists && compatUi.boxChecked,
+        `compat ${compatUi.firstCompat}, box ${compatUi.boxExists}/${compatUi.boxChecked}`);
+    check('hidden rows are reported under the list with a Show all button',
+        compatUi.hiddenRow.length == 1 && compatUi.hiddenRow[0].includes('7') && compatUi.hiddenRow[0].includes('fam-a') && compatUi.hiddenButton == 'Show all',
+        `${compatUi.hiddenRow.join('|')} / ${compatUi.hiddenButton}`);
+    check('the hidden-rows report shows even when the listing is not truncated',
+        compatUi.noLoadMoreWhenComplete, 'no Load more button on a complete listing');
+    check('Show all stores the choice, unchecks the box, and re-lists without compat',
+        compatUi.offCompat == undefined && compatUi.storedAfterShowAll == 'false' && compatUi.boxAfterShowAll == false && compatUi.offCount == 9 && compatUi.hiddenRowAfterShowAll == 0,
+        `compat ${compatUi.offCompat}, stored ${compatUi.storedAfterShowAll}, box ${compatUi.boxAfterShowAll}, ${compatUi.offCount} rows, hidden rows ${compatUi.hiddenRowAfterShowAll}`);
+    check('turning it back on reuses the filtered page and never serves the unfiltered one',
+        compatUi.reenableRequests == 0 && JSON.stringify(compatUi.reenableNames) == JSON.stringify(['on-1.safetensors', 'on-2.safetensors']) && compatUi.storedAfterReenable == 'true',
+        `${compatUi.reenableRequests} requests, ${compatUi.reenableNames.join(',')}`);
+    check('a different model asks again with its own class, not the cached page',
+        compatUi.secondCompat == 'fam-b', `compat ${compatUi.secondCompat}`);
+    check('a truncated and filtered listing shows both the window row and the hidden row',
+        compatUi.bothRows.length == 2 && compatUi.bothRows[0].includes('Showing') && compatUi.bothRows[1].includes('3') && compatUi.bothRows[1].includes('fam-b'),
+        compatUi.bothRows.join(' | '));
+    check('Load more keeps the filter its first page used even if the model moved',
+        compatUi.moreCompat == 'fam-b' && compatUi.moreOffset == 500 && compatUi.afterMoreCount == 1000,
+        `compat ${compatUi.moreCompat}, offset ${compatUi.moreOffset}, ${compatUi.afterMoreCount} rows`);
+    check('refreshLoraCompatIfChanged re-lists when the classes changed and not when they did not',
+        compatUi.refreshedCompat == 'fam-c' && compatUi.unchangedRequests == 0,
+        `refreshed ${compatUi.refreshedCompat}, unchanged requests ${compatUi.unchangedRequests}`);
+    check('a server search carries the compat filter too',
+        compatUi.searchArgs && compatUi.searchArgs.search == 'zeta' && compatUi.searchArgs.compat == 'fam-c', JSON.stringify(compatUi.searchArgs));
+    check('other subtypes never send compat', compatUi.vaeCompat == undefined, `vae compat ${compatUi.vaeCompat}`);
+    check('compat filter produced no page errors', pageErrors.length == 0, pageErrors.join('\n'));
+
     const simplePage = await browser.newPage();
     const simpleErrors = [];
     simplePage.on('pageerror', error => simpleErrors.push(error.message));

@@ -463,6 +463,7 @@ function updatePresetList() {
     setTimeout(() => {
         genTabLayout.reapplyPositions();
     }, 1);
+    refreshLoraCompatIfChanged();
 }
 
 function selectInitialPresetList() {

@@ -1143,6 +1143,136 @@ check('checkpoint compat: the class comes from the picked checkpoint',
 check('checkpoint compat: no checkpoint picked means no filtering at all',
     compat.unpicked == 6, JSON.stringify(compat));
 
+// Genpage `isModelArchCorrect` accepts a LoRA that fits ANY enabled Stable-Diffusion model parameter, not
+// only the main checkpoint: an SDXL main checkpoint with a Qwen refiner keeps Qwen LoRAs. /simple mirrors
+// that through activeModelCompats(), while activeModelCompat() stays main-only for the Prompt Coach.
+const anyModel = await page.evaluate(() => {
+    mState.archFilter = '';
+    mState.loadParamMeta({
+        list: [
+            { id: 'model', type: 'model', subtype: 'Stable-Diffusion' },
+            { id: 'refinermodel', type: 'model', subtype: 'Stable-Diffusion' },
+            { id: 'vae', type: 'model', subtype: 'VAE' }
+        ],
+        models: {
+            'Stable-Diffusion': [
+                ['ill/ckpt.safetensors', 'sdxl-base'],
+                ['ill/ckpt-two.safetensors', 'sdxl-base'],
+                ['qwen/ckpt.safetensors', 'qwen-image'],
+                ['flux/ckpt.safetensors', 'flux']
+            ],
+            'LoRA': [
+                ['qwen/style-a.safetensors', 'qwen-image/lora'],
+                ['ill/style-b.safetensors', 'sdxl-base/lora'],
+                ['flux/style-c.safetensors', 'flux/lora'],
+                ['misc/unknown.safetensors', null],
+                ['qwen/unknown-d.safetensors', null],
+                ['flux/unknown-e.safetensors', null]
+            ]
+        },
+        model_classes: {
+            'qwen-image': { compat_class: 'qwen-image' },
+            'qwen-image/lora': { compat_class: 'qwen-image' },
+            'sdxl-base': { compat_class: 'stable-diffusion-xl-v1' },
+            'sdxl-base/lora': { compat_class: 'stable-diffusion-xl-v1' },
+            'flux': { compat_class: 'flux' },
+            'flux/lora': { compat_class: 'flux' }
+        }
+    });
+    mState.starredModels = {};
+    mState.activePresets = [];
+    // Only an 'ill' group, so qwen/ and flux/ are judged from disk evidence (the checkpoints in them).
+    mState.presets = [
+        { title: 'ill/refine', param_map: { refinermodel: 'qwen/ckpt.safetensors' } }
+    ];
+    let list = [
+        { name: 'qwen/style-a.safetensors' },
+        { name: 'ill/style-b.safetensors' },
+        { name: 'flux/style-c.safetensors' },
+        { name: 'misc/unknown.safetensors' },
+        { name: 'qwen/unknown-d.safetensors' },
+        { name: 'flux/unknown-e.safetensors' }
+    ];
+    let names = (rows) => rows.map(m => m.name).join(',');
+    let out = {};
+    // (a) SDXL main + Qwen refiner as a raw parameter.
+    mState.params['model'] = 'ill/ckpt.safetensors';
+    mState.params['refinermodel'] = 'qwen/ckpt.safetensors';
+    out.refinerParam = names(mState.filterByModelCompat(list, 'LoRA'));
+    out.refinerOrder = names(mState.compatFirst(list, 'LoRA'));
+    out.compats = mState.activeModelCompats();
+    out.singular = mState.activeModelCompat();
+    out.rowArray = mState.rowMatchesActive(list[0], 'LoRA', ['stable-diffusion-xl-v1', 'qwen-image']);
+    out.rowString = mState.rowMatchesActive(list[0], 'LoRA', 'stable-diffusion-xl-v1');
+    out.rowEmpty = mState.rowMatchesActive(list[0], 'LoRA', []);
+    out.rowNull = mState.rowMatchesActive(list[0], 'LoRA', null);
+    out.rowDefault = mState.rowMatchesActive(list[0], 'LoRA');
+    out.rowOther = mState.rowMatchesActive(list[2], 'LoRA');
+    out.rowCheckpoint = mState.rowMatchesActive({ name: 'flux/ckpt.safetensors' }, 'Stable-Diffusion');
+    out.label = mCreate.applyModelFilter(list, 'LoRA', { showAll: false }, () => { }).row.textContent;
+    // The same refiner arriving from an active preset (applied after the raw params).
+    delete mState.params['refinermodel'];
+    mState.activePresets = ['ill/refine'];
+    out.refinerPreset = names(mState.filterByModelCompat(list, 'LoRA'));
+    mState.activePresets = [];
+    // (d2) A preset-group folder is judged by its own checkpoints too: a flux refiner keeps an unclassed
+    // LoRA in flux/ via the group's classes, while qwen/ (no longer an active class) is hidden.
+    mState.presets = [
+        { title: 'ill/pose', param_map: { model: 'ill/ckpt.safetensors' } },
+        { title: 'flux/portrait', param_map: { model: 'flux/ckpt.safetensors' } }
+    ];
+    mState.params['refinermodel'] = 'flux/ckpt.safetensors';
+    out.groupFallback = names(mState.filterByModelCompat([
+        { name: 'flux/unknown-e.safetensors' },
+        { name: 'qwen/unknown-d.safetensors' },
+        { name: 'misc/unknown.safetensors' }
+    ], 'LoRA'));
+    // (b) '(Use Base)' has no compat class and adds nothing; a non-checkpoint model param does not count
+    // even when its value happens to name a checkpoint.
+    mState.params['refinermodel'] = '(Use Base)';
+    mState.params['vae'] = 'qwen/ckpt.safetensors';
+    out.useBase = names(mState.filterByModelCompat(list, 'LoRA'));
+    out.useBaseCompats = mState.activeModelCompats();
+    delete mState.params['vae'];
+    // Two parameters with the same class collapse to one entry.
+    mState.params['refinermodel'] = 'ill/ckpt-two.safetensors';
+    out.deduped = mState.activeModelCompats();
+    // No main checkpoint, but a refiner: the refiner alone still decides.
+    delete mState.params['model'];
+    mState.params['refinermodel'] = 'qwen/ckpt.safetensors';
+    out.refinerOnly = mState.activeModelCompats();
+    delete mState.params['refinermodel'];
+    out.none = mState.activeModelCompats();
+    out.noneFilter = mState.filterByModelCompat(list, 'LoRA').length;
+    return out;
+});
+check('any-model compat: an SDXL main with a Qwen refiner keeps Qwen LoRAs (and unclassed Qwen-folder LoRAs)',
+    anyModel.refinerParam == 'qwen/style-a.safetensors,ill/style-b.safetensors,misc/unknown.safetensors,qwen/unknown-d.safetensors',
+    JSON.stringify(anyModel));
+check('any-model compat: the refiner arriving from an active preset counts too',
+    anyModel.refinerPreset == 'qwen/style-a.safetensors,ill/style-b.safetensors,misc/unknown.safetensors,qwen/unknown-d.safetensors',
+    JSON.stringify(anyModel));
+check('any-model compat: compatFirst ranks the refiner-compatible LoRA with the main-compatible ones',
+    anyModel.refinerOrder == 'qwen/style-a.safetensors,ill/style-b.safetensors,misc/unknown.safetensors,qwen/unknown-d.safetensors,flux/unknown-e.safetensors,flux/style-c.safetensors',
+    JSON.stringify(anyModel));
+check('any-model compat: rowMatchesActive takes an array, a single class string, empty, null, or the default',
+    anyModel.rowArray && !anyModel.rowString && anyModel.rowEmpty && anyModel.rowNull && anyModel.rowDefault
+    && !anyModel.rowOther && anyModel.rowCheckpoint, JSON.stringify(anyModel));
+check('any-model compat: an unclassed LoRA in a group folder is kept when a refiner class is seen there',
+    anyModel.groupFallback == 'flux/unknown-e.safetensors,misc/unknown.safetensors', JSON.stringify(anyModel));
+check('any-model compat: (Use Base) and a non-checkpoint model param add nothing',
+    anyModel.useBase == 'ill/style-b.safetensors,misc/unknown.safetensors'
+    && JSON.stringify(anyModel.useBaseCompats) == '["stable-diffusion-xl-v1"]', JSON.stringify(anyModel));
+check('any-model compat: activeModelCompat() stays the main checkpoint only (the Prompt Coach relies on it)',
+    anyModel.singular == 'stable-diffusion-xl-v1'
+    && JSON.stringify(anyModel.compats) == '["stable-diffusion-xl-v1","qwen-image"]', JSON.stringify(anyModel));
+check('any-model compat: classes are deduped, a refiner alone counts, and none means no filtering',
+    JSON.stringify(anyModel.deduped) == '["stable-diffusion-xl-v1"]'
+    && JSON.stringify(anyModel.refinerOnly) == '["qwen-image"]'
+    && anyModel.none.length == 0 && anyModel.noneFilter == 6, JSON.stringify(anyModel));
+check('any-model compat: the Limited label names every class the filter used',
+    anyModel.label == 'Limited to stable-diffusion-xl-v1 + qwen-image, 2 hidden - tap to show all', anyModel.label);
+
 // A model's own known compat class outranks folder and preset-group inference. Anima variants share folders,
 // so treating the folder's aggregate classes as decisive lets incompatible 2.9B, 3.8B and base LoRAs mix.
 const animaVariantCompat = await page.evaluate(() => {

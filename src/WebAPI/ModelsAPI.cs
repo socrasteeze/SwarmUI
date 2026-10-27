@@ -605,7 +605,8 @@ public static class ModelsAPI
             "scan_succeeded": true,
             "total": 1,
             "returned": 1,
-            "truncated": false
+            "truncated": false,
+            "compat_hidden": 0
         """
         )]
     public static async Task<JObject> ListModels(Session session,
@@ -618,7 +619,8 @@ public static class ModelsAPI
         [API.APIParameter("If true, provide model images in raw data format. If false, use URLs.")] bool dataImages = false,
         [API.APIParameter("If non-empty, only files whose name, title, or trigger phrase contain every whitespace-separated word, case-insensitively. Applied before total and before the cap, so total is the match count. Wildcards match on name and title only.")] string search = "",
         [API.APIParameter("If greater than 0, return at most this many files after sorting, and never more than ModelListSanityCap. 0 uses ModelListSanityCap alone.")] int limit = 0,
-        [API.APIParameter("How many sorted matches to skip before taking limit. 0 starts at the first match.")] int offset = 0)
+        [API.APIParameter("How many sorted matches to skip before taking limit. 0 starts at the first match.")] int offset = 0,
+        [API.APIParameter("If non-empty, a comma-separated list of compat class IDs. Only models that can load under at least one of them are kept. A model with no compat class is judged by the classed models in its top-level folder, and kept when that is unknown. Applied after search and before total and the cap, so total is the post-filter count and compat_hidden counts the search matches removed. Ignored for Wildcards and Stable-Diffusion.")] string compat = "")
     {
         if (!Enum.TryParse(sortBy, true, out ModelHistorySortMode sortMode))
         {
@@ -642,9 +644,26 @@ public static class ModelsAPI
         HashSet<string> folders = [];
         List<ModelListCandidate> matched = [];
         HashSet<string> dedup = [];
+        List<string> activeCompat = ModelListWindow.ParseCompatList(compat);
+        bool compatFilter = ModelListWindow.CompatFilterApplies(subtype, activeCompat);
+        List<ModelListCandidate> deepMatched = [];
         // Folders are recorded for matches only, including matches deeper than `depth`, so a search can still be browsed into.
         // An empty search matches everything, which keeps the previous folder list.
-        void consider(string name, string title, string trigger, long created, long modified, Func<JObject> materialize)
+        void addFolders(string name)
+        {
+            string part = name[path.Length..];
+            if (part.CountCharacter('/') > 0)
+            {
+                string folderPart = part.BeforeLast('/');
+                string[] subfolders = folderPart.Split('/');
+                for (int i = 1; i <= depth && i <= subfolders.Length; i++)
+                {
+                    folders.Add(string.Join('/', subfolders[..i]));
+                }
+            }
+        }
+        // With a compat filter, folders are recorded after it runs so the tree never offers a folder whose models are all hidden.
+        void consider(string name, string title, string trigger, long created, long modified, Func<JObject> materialize, string modelCompat = null, string architecture = null)
         {
             if (!name.StartsWith(path) || name.Length <= path.Length || !session.User.IsAllowedModel(name))
             {
@@ -654,28 +673,32 @@ public static class ModelsAPI
             {
                 return;
             }
-            string part = name[path.Length..];
-            int slashes = part.CountCharacter('/');
-            if (slashes > 0)
+            bool inWindow = name[path.Length..].CountCharacter('/') < depth;
+            if (!compatFilter)
             {
-                string folderPart = part.BeforeLast('/');
-                string[] subfolders = folderPart.Split('/');
-                for (int i = 1; i <= depth && i <= subfolders.Length; i++)
-                {
-                    folders.Add(string.Join('/', subfolders[..i]));
-                }
+                addFolders(name);
             }
-            if (slashes < depth && dedup.Add(name))
+            if (inWindow ? dedup.Add(name) : compatFilter)
             {
-                matched.Add(new ModelListCandidate()
+                ModelListCandidate candidate = new()
                 {
                     Name = name,
                     Title = title ?? "",
                     TriggerPhrase = trigger ?? "",
                     TimeCreated = created,
                     TimeModified = modified,
+                    CompatClass = modelCompat ?? "",
+                    Architecture = architecture ?? "",
                     Materialize = materialize
-                });
+                };
+                if (inWindow)
+                {
+                    matched.Add(candidate);
+                }
+                else
+                {
+                    deepMatched.Add(candidate);
+                }
             }
         }
         int sanityCap = Math.Max(0, Program.ServerSettings.Performance.ModelListSanityCap);
@@ -697,7 +720,7 @@ public static class ModelsAPI
         {
             foreach (T2IModel possible in handler.Models.Values)
             {
-                consider(possible.Name, possible.Title, possible.Metadata?.TriggerPhrase, possible.Metadata?.TimeCreated ?? long.MaxValue, possible.Metadata?.TimeModified ?? long.MaxValue, () => possible.ToNetObject(dataImgs: dataImages));
+                consider(possible.Name, possible.Title, possible.Metadata?.TriggerPhrase, possible.Metadata?.TimeCreated ?? long.MaxValue, possible.Metadata?.TimeModified ?? long.MaxValue, () => possible.ToNetObject(dataImgs: dataImages), possible.ModelClass?.CompatClass?.ID, possible.ModelClass?.ID);
             }
         }
         if (allowRemote)
@@ -719,7 +742,24 @@ public static class ModelsAPI
                         toAdd["preview_image"] = $"/ViewSpecial/{subtype}/{name}";
                     }
                     return toAdd;
-                });
+                }, possible["compat_class"]?.ToString(), possible["architecture"]?.ToString());
+            }
+        }
+        int compatHidden = 0;
+        if (compatFilter)
+        {
+            Dictionary<string, HashSet<string>> folderEvidence = null;
+            if (matched.Exists(c => c.CompatClass.Length == 0) || deepMatched.Exists(c => c.CompatClass.Length == 0))
+            {
+                folderEvidence = BuildCompatFolderEvidence(session);
+            }
+            ModelListCompatResult kept = ModelListWindow.FilterByCompat(matched, activeCompat, subtype, folderEvidence);
+            ModelListCompatResult keptDeep = ModelListWindow.FilterByCompat(deepMatched, activeCompat, subtype, folderEvidence);
+            matched = kept.Kept;
+            compatHidden = kept.Hidden;
+            foreach (ModelListCandidate candidate in kept.Kept.Concat(keptDeep.Kept))
+            {
+                addFolders(candidate.Name);
             }
         }
         ModelListPage window = ModelListWindow.Page(matched, sortMode, sortReverse, offset, limit, sanityCap);
@@ -738,8 +778,31 @@ public static class ModelsAPI
             ["scan_succeeded"] = scanSucceeded,
             ["total"] = window.Total,
             ["returned"] = window.Returned,
-            ["truncated"] = window.Truncated
+            ["truncated"] = window.Truncated,
+            ["compat_hidden"] = compatHidden
         };
+    }
+
+    /// <summary>Maps each lowercase top-level model folder to the compat classes of the classed Stable-Diffusion and LoRA models in it that the session may see.
+    /// Evidence for models that report no compat class of their own. Call while holding the refresh lock.</summary>
+    private static Dictionary<string, HashSet<string>> BuildCompatFolderEvidence(Session session)
+    {
+        Dictionary<string, HashSet<string>> evidence = [];
+        foreach (string type in new string[] { "Stable-Diffusion", "LoRA" })
+        {
+            if (!Program.T2IModelSets.TryGetValue(type, out T2IModelHandler set))
+            {
+                continue;
+            }
+            foreach (T2IModel model in set.Models.Values)
+            {
+                if (session.User.IsAllowedModel(model.Name))
+                {
+                    ModelListWindow.AddFolderEvidence(evidence, model.Name, model.ModelClass?.CompatClass?.ID);
+                }
+            }
+        }
+        return evidence;
     }
 
     [API.APIDescription("Returns a list of currently loaded Stable-Diffusion models (ie at least one backend has it loaded).",

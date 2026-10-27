@@ -1157,7 +1157,7 @@ class MCreate {
             return { 'list': list, 'row': null };
         }
         let row = mUI.el('button', 'm-arch-note');
-        let compat = mState.activeModelCompat();
+        let compat = mState.activeModelCompats().join(' + ');
         row.textContent = state.showAll
             ? `Showing all - tap to limit to what ${compat} can load`
             : `Limited to ${compat}, ${list.length - narrowed.length} hidden - tap to show all`;

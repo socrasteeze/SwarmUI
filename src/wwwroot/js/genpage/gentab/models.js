@@ -441,15 +441,71 @@ function save_edit_model() {
     complete();
 }
 
+/** Fork-owned cache behind {@link getActiveModelCompatClasses}. A microtask clears it, so one synchronous sort or render pass computes the list once. */
+let activeModelCompatCache = null;
+
+/**
+ * Fork-owned. The distinct compat class IDs of the Stable-Diffusion model params in use: every enabled one that has a value (Model, Refiner Model, Video Model, ...),
+ * plus the value an active Classic preset sets for any of them. Presets apply after raw params at generate time, so a preset that sets the model decides which LoRAs load.
+ * Cached until the current task ends, because sorting and rendering a model page asks this once per comparison and per row.
+ */
+function getActiveModelCompatClasses() {
+    if (activeModelCompatCache) {
+        return activeModelCompatCache;
+    }
+    let found = [];
+    let addCompat = (modelName) => {
+        let compat = modelName ? modelsHelpers.getDataFor('Stable-Diffusion', modelName)?.modelClass?.compatClass?.id : null;
+        if (compat && !found.includes(compat)) {
+            found.push(compat);
+        }
+    };
+    let paramTypes = typeof gen_param_types != 'undefined' ? gen_param_types : null;
+    let presets = typeof currentPresets != 'undefined' ? currentPresets : null;
+    for (let param of paramTypes || []) {
+        if (param.type != 'model' || param.subtype != 'Stable-Diffusion') {
+            continue;
+        }
+        let input = document.getElementById(`input_${param.id}`);
+        if (input && input.value && isParamEnabled(param)) {
+            addCompat(input.value);
+        }
+        for (let preset of presets || []) {
+            let presetValue = preset.param_map ? preset.param_map[param.id] : null;
+            if (typeof presetValue == 'string') {
+                addCompat(presetValue);
+            }
+        }
+    }
+    activeModelCompatCache = found;
+    queueMicrotask(() => {
+        activeModelCompatCache = null;
+    });
+    return found;
+}
+
+/** Fork-owned. Every compat class a LoRA, VAE, or ControlNet may match right now: {@link getActiveModelCompatClasses} plus the current model's own. This is the set {@link isModelArchCorrect} accepts. */
+function getAcceptedModelCompatClasses() {
+    let accepted = getActiveModelCompatClasses().slice();
+    let current = currentModelHelper.curCompatClass;
+    if (current && !accepted.includes(current)) {
+        accepted.push(current);
+    }
+    return accepted;
+}
+
+/** Fork-owned. The compat class set {@link getAcceptedModelCompatClasses} returns, sorted and comma-joined, so two sets compare equal regardless of order. */
+function acceptedCompatKey() {
+    return getAcceptedModelCompatClasses().slice().sort().join(',');
+}
+
+/** Fork-owned. The {@link acceptedCompatKey} of the last sub-model listing that was sorted. {@link refreshLoraCompatIfChanged} compares against it. */
+let lastAcceptedCompatKey = '';
+
 function isModelArchCorrect(model, curCompat = null) {
     if (curCompat == null) {
-        for (let param of gen_param_types || []) {
-            if (param.type != 'model' || param.subtype != 'Stable-Diffusion' || !isParamEnabled(param)) {
-                continue;
-            }
-            let input = document.getElementById(`input_${param.id}`);
-            let compat = input?.value ? modelsHelpers.getDataFor('Stable-Diffusion', input.value)?.modelClass?.compatClass?.id : null;
-            if (compat && isModelArchCorrect(model, compat)) {
+        for (let compat of getActiveModelCompatClasses()) {
+            if (isModelArchCorrect(model, compat)) {
                 return true;
             }
         }
@@ -496,6 +552,9 @@ class ModelBrowserWrapper {
         this.selectOne = selectOne;
         let format = subType == 'Wildcards' ? 'Small Cards' : 'Cards';
         extraHeader += `<label for="models_${subType}_sort_by">Sort:</label> <select id="models_${subType}_sort_by"><option>Name</option><option>Title</option><option>DateCreated</option><option>DateModified</option></select> <input type="checkbox" id="models_${subType}_sort_reverse"> <label for="models_${subType}_sort_reverse">Reverse</label>`;
+        if (subType == 'LoRA') {
+            extraHeader += ` <input type="checkbox" id="models_${subType}_compat_only" title="Hide LoRAs that do not match the model, refiner, video model, or preset in use"> <label for="models_${subType}_compat_only" title="Hide LoRAs that do not match the model, refiner, video model, or preset in use">Compatible only</label>`;
+        }
         this.browser = new GenPageBrowserClass(container, this.listModelFolderAndFiles.bind(this), id, format, this.describeModel.bind(this), this.selectModel.bind(this), extraHeader);
         this.browser.deferInitialRefresh = true;
         this.browser.maxPreBuild = 50;
@@ -508,6 +567,8 @@ class ModelBrowserWrapper {
         this.pageMoreBusy = false;
         this.pageShown = 0;
         this.pageTotal = 0;
+        this.pageCompat = '';
+        this.pageCompatHidden = 0;
         this.unfilteredTruncated = false;
         this.browser.afterBuildContent = container => this.appendListMore(container);
         this.browser.resolveMissingFile = name => this.resolveMissingModel(name);
@@ -592,14 +653,57 @@ class ModelBrowserWrapper {
                     localStorage.setItem(`models_${this.subType}_sort_reverse`, sortReverseElem.checked);
                     this.browser.lightRefresh();
                 });
+                this.wireCompatToggle();
             }
         }
         return { 'sortBy': sortBy, 'reverse': reverse, 'fix': fix };
     }
 
-    /** Cache key for one folder page. Offset is not part of the key: the entry stores every page loaded so far. */
-    listCacheKey(path, depth, sortBy, reverse, search) {
-        return `${path}\n${Math.round(depth)}\n${sortBy}\n${reverse ? '1' : '0'}\n${search || ''}`;
+    /** Whether the LoRA "Compatible only" filter is on: the header checkbox once it exists, else the stored choice. On when never set. */
+    isCompatOnly() {
+        if (this.subType != 'LoRA') {
+            return false;
+        }
+        let elem = document.getElementById('models_LoRA_compat_only');
+        if (elem) {
+            return elem.checked;
+        }
+        return localStorage.getItem('models_LoRA_compat_only') != 'false';
+    }
+
+    /** Stores the "Compatible only" choice, mirrors it into the header checkbox if that exists, and re-lists. */
+    setCompatOnly(value) {
+        localStorage.setItem('models_LoRA_compat_only', value);
+        let elem = document.getElementById('models_LoRA_compat_only');
+        if (elem) {
+            elem.checked = value;
+        }
+        this.browser.lightRefresh();
+    }
+
+    /** Sets the "Compatible only" checkbox from storage and listens for changes. Runs once the header exists, like the sort controls. */
+    wireCompatToggle() {
+        let elem = document.getElementById('models_LoRA_compat_only');
+        if (!elem) {
+            return;
+        }
+        elem.checked = localStorage.getItem('models_LoRA_compat_only') != 'false';
+        elem.addEventListener('change', () => {
+            this.setCompatOnly(elem.checked);
+        });
+    }
+
+    /** The comma-joined compat classes to send as the ListModels `compat` filter, or '' when this listing is not filtered. */
+    compatFilterValue() {
+        if (!this.isCompatOnly()) {
+            return '';
+        }
+        return getAcceptedModelCompatClasses().join(',');
+    }
+
+    /** Cache key for one folder page. Offset is not part of the key: the entry stores every page loaded so far. The compat filter is part of it, so toggling it or changing the model does not serve a stale page. */
+    listCacheKey(path, depth, sortBy, reverse, search, compat = '') {
+        return `${path}\n${Math.round(depth)}\n${sortBy}\n${reverse ? '1' : '0'}\n${search || ''}\n${compat}`;
     }
 
     /**
@@ -611,7 +715,9 @@ class ModelBrowserWrapper {
             this.listCache = new Map();
             this.unfilteredTruncated = false;
         }
-        let key = this.listCacheKey(path, depth, sortBy, reverse, search);
+        // Load more keeps the filter its first page used, even if the inputs moved since.
+        let compat = append ? this.pageCompat : this.compatFilterValue();
+        let key = this.listCacheKey(path, depth, sortBy, reverse, search, compat);
         if (!append && offset == 0 && !isRefresh) {
             let cached = this.listCache.get(key);
             if (cached) {
@@ -632,6 +738,9 @@ class ModelBrowserWrapper {
             request.limit = ModelBrowserWrapper.ClientModelListLimit;
             request.offset = offset;
             request.search = search || '';
+            if (compat != '') {
+                request.compat = compat;
+            }
         }
         genericRequest('ListModels', request, data => {
             if (token != this.listToken) {
@@ -659,7 +768,9 @@ class ModelBrowserWrapper {
             let cached = {
                 'folders': prior && prior.folders ? prior.folders : (data.folders || []),
                 'files': files,
-                'total': total
+                'total': total,
+                'compat': compat,
+                'compatHidden': data.compat_hidden || 0
             };
             this.listCache.set(key, cached);
             if (search == '' && this.subType == 'LoRA' && files.length < total && this.browser.filter) {
@@ -708,6 +819,8 @@ class ModelBrowserWrapper {
         this.pageSearch = search || '';
         this.pageShown = cached.files.length;
         this.pageTotal = cached.total;
+        this.pageCompat = cached.compat || '';
+        this.pageCompatHidden = cached.compatHidden || 0;
         this.pageMore = this.subType == 'LoRA' && this.pageShown < this.pageTotal;
         this.browser.serverFilter = (this.subType == 'LoRA' && this.unfilteredTruncated) ? text => this.onServerFilter(text) : null;
         this.browser.skipClientFilter = this.pageSearch != '';
@@ -731,6 +844,9 @@ class ModelBrowserWrapper {
         let prefix = path == '' ? '' : (path.endsWith('/') ? path : `${path}/`);
         let ordered = (serverFiles || []).slice();
         ordered.sort((a, b) => this.sortModelLocal(a, b, ordered));
+        if (this.subType != 'Stable-Diffusion' && this.subType != 'Wildcards') {
+            lastAcceptedCompatKey = acceptedCompatKey();
+        }
         let files = ordered.map(f => { return { 'name': f.name, 'data': f }; });
         for (let file of files) {
             file.data.display = cleanModelName(file.data.name.substring(prefix.length));
@@ -784,7 +900,7 @@ class ModelBrowserWrapper {
         let depth = this.browser.depth;
         if (!text) {
             this.browser.skipClientFilter = false;
-            let key = this.listCacheKey(path, depth, sort.sortBy, sort.reverse, '');
+            let key = this.listCacheKey(path, depth, sort.sortBy, sort.reverse, '', this.compatFilterValue());
             let cached = this.listCache.get(key);
             if (cached) {
                 this.publishListing(path, depth, sort.sortBy, sort.reverse, '', cached, null, null);
@@ -802,28 +918,46 @@ class ModelBrowserWrapper {
         this.fetchModels(this.pagePath, this.pageDepth, this.pageSortBy, this.pageReverse, this.pageSearch, this.pageShown, false, null, null, true);
     }
 
-    /** The row under a truncated LoRA listing. */
+    /** The rows under a LoRA listing: the window row when it is truncated, then the row naming what the compat filter hid. */
     appendListMore(container) {
-        if (!this.pageMore || !container) {
+        if (!container) {
             return;
         }
-        let row = createDiv(null, 'browser-list-more');
-        let label = createSpan(null, 'browser-list-more-label');
-        let shown = this.pageShown.toLocaleString();
-        let total = this.pageTotal.toLocaleString();
-        label.innerText = `Showing ${shown} of ${total} - search or open a subfolder to see more`;
-        row.appendChild(label);
-        let button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'basic-button browser-list-more-button';
-        button.innerText = 'Load more';
-        button.disabled = this.pageMoreBusy == true;
-        button.addEventListener('click', () => {
-            button.disabled = true;
-            this.loadMoreModels();
-        });
-        row.appendChild(button);
-        container.appendChild(row);
+        if (this.pageMore) {
+            let row = createDiv(null, 'browser-list-more');
+            let label = createSpan(null, 'browser-list-more-label');
+            let shown = this.pageShown.toLocaleString();
+            let total = this.pageTotal.toLocaleString();
+            label.innerText = `Showing ${shown} of ${total} - search or open a subfolder to see more`;
+            row.appendChild(label);
+            let button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'basic-button browser-list-more-button';
+            button.innerText = 'Load more';
+            button.disabled = this.pageMoreBusy == true;
+            button.addEventListener('click', () => {
+                button.disabled = true;
+                this.loadMoreModels();
+            });
+            row.appendChild(button);
+            container.appendChild(row);
+        }
+        if (this.pageCompatHidden > 0) {
+            let row = createDiv(null, 'browser-list-more browser-list-compat-hidden');
+            let label = createSpan(null, 'browser-list-more-label');
+            label.innerText = `${this.pageCompatHidden.toLocaleString()} LoRAs hidden as incompatible with ${this.pageCompat.split(',').join(', ')}`;
+            row.appendChild(label);
+            let button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'basic-button browser-list-more-button';
+            button.innerText = 'Show all';
+            button.addEventListener('click', () => {
+                button.disabled = true;
+                this.setCompatOnly(false);
+            });
+            row.appendChild(button);
+            container.appendChild(row);
+        }
     }
 
     /** One model that was not in the loaded page. DescribeModel fills the browser cache for later lookups. */
@@ -1193,6 +1327,23 @@ let wildcardsBrowser = new ModelBrowserWrapper('Wildcards', [], 'wildcard_list',
 
 let allModelBrowsers = [sdModelBrowser, sdVAEBrowser, sdLoraBrowser, sdEmbedBrowser, sdControlnetBrowser, wildcardsBrowser];
 let subModelBrowsers = [sdVAEBrowser, sdLoraBrowser, sdEmbedBrowser, sdControlnetBrowser];
+
+/**
+ * Fork-owned. Re-lists the sub-model browsers when the accepted compat classes differ from the ones their last listing used.
+ * Applying or removing a Classic preset can change which checkpoint decides the LoRAs, and the LoRA listing filters on that server-side.
+ * A browser that was never opened skips the re-list.
+ */
+function refreshLoraCompatIfChanged() {
+    activeModelCompatCache = null;
+    let key = acceptedCompatKey();
+    if (key == lastAcceptedCompatKey) {
+        return;
+    }
+    lastAcceptedCompatKey = key;
+    for (let browser of subModelBrowsers) {
+        browser.browser.lightRefresh();
+    }
+}
 
 function embedClearFromPrompt(model, element) {
     let box = getRequiredElementById(element);
