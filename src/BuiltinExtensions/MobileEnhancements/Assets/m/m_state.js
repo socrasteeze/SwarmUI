@@ -761,10 +761,11 @@ class MState {
         return map ? (map.get(MState.starKey(modelName)) || '') : '';
     }
 
-    /** Same rule as genpage `isModelArchCorrect`: exact `compat_class` on a sub-model (architecture
+    /** The per-class half of genpage `isModelArchCorrect`: exact `compat_class` on a sub-model (architecture
      * contains '/'), plus the same VAE and Chroma allowances. A base model, or a row with no class,
      * counts as compatible. `anima`, `anima-2.9b`, and `anima-3.8b` stay distinct because the compare
-     * is equality, not a prefix. */
+     * is equality, not a prefix. This compares against ONE active class; the any-enabled-model union that
+     * `isModelArchCorrect` applies across its model parameters lives in `rowMatchesActive`. */
     static compatMatches(architecture, modelCompat, curCompat) {
         if (!modelCompat || !curCompat) {
             return true;
@@ -785,7 +786,11 @@ class MState {
         return modelCompat == curCompat;
     }
 
-    /** Whether one picker row fits the checkpoint the next generation will use.
+    /** Whether one picker row fits the models the next generation will use - the same any-enabled-model
+     * rule as genpage `isModelArchCorrect`: compatible if it matches the compat class of ANY Stable-Diffusion
+     * model parameter in play (Model, Refiner Model, Video Model, ...), not only the main checkpoint.
+     * `curCompat` is an array of classes (or one class string); omitted, it is `activeModelCompats()`.
+     * Null/empty means nothing to go on, so every row is compatible.
      * Checkpoints are always kept, matching the main Models tab (it does not dim Stable-Diffusion).
      * A LoRA/ControlNet/VAE whose class id has no '/' is still a sub-model: the id is only a label,
      * and treating it as a base model would mark every Anima variant compatible with the others. */
@@ -793,8 +798,9 @@ class MState {
         if (subtype == 'Stable-Diffusion') {
             return true;
         }
-        let cur = curCompat == undefined ? this.activeModelCompat() : curCompat;
-        if (!cur) {
+        let cur = curCompat == undefined ? this.activeModelCompats() : curCompat;
+        let classes = Array.isArray(cur) ? cur : (cur ? [cur] : []);
+        if (classes.length == 0) {
             return true;
         }
         let compat = (model && model.compat_class) || this.compatClassOf(subtype, model && model.name);
@@ -805,17 +811,22 @@ class MState {
         if (arch.indexOf('/') == -1) {
             arch = subtype == 'VAE' ? 'x/vae' : (subtype == 'ControlNet' ? 'x/controlnet' : 'x/lora');
         }
-        return MState.compatMatches(arch, compat, cur);
+        for (let c of classes) {
+            if (MState.compatMatches(arch, compat, c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    /** Stable sort: rows the active checkpoint can load come first. Star order inside each group is kept,
+    /** Stable sort: rows the active models can load come first. Star order inside each group is kept,
      * so call this after starredFirst. Copies, so a cached ListModels array is not reordered in place. */
     compatFirst(list, subtype) {
         if (!list || subtype == 'Stable-Diffusion') {
             return list;
         }
-        let cur = this.activeModelCompat();
-        if (!cur) {
+        let cur = this.activeModelCompats();
+        if (cur.length == 0) {
             return list;
         }
         let rank = (model) => this.rowMatchesActive(model, subtype, cur) ? 0 : 1;
@@ -947,17 +958,68 @@ class MState {
      *
      * Read through buildGenInput rather than off params['model'] for the same reason renderModelButton does:
      * an active preset applies AFTER the manual pick, so a preset that sets its own checkpoint is the one
-     * that decides which LoRAs will load. */
+     * that decides which LoRAs will load.
+     *
+     * Deliberately singular and main-checkpoint-only: the Prompt Coach picks ONE doctrine profile from it.
+     * Compatibility filtering uses `activeModelCompats()` instead. */
     activeModelCompat() {
         return this.compatClassOf('Stable-Diffusion', this.buildGenInput()['model']);
     }
 
-    /** Filters a model list down to what the active checkpoint can actually load.
+    /** Deduped compat classes of every Stable-Diffusion model parameter the next generation will send: the
+     * main `model` plus Refiner Model, Video Model, Video Swap Model, Segment Model, ... Empty when none
+     * resolves. This is the set genpage `isModelArchCorrect` checks a LoRA/VAE against, so a LoRA for the
+     * refiner's architecture is not hidden just because the main checkpoint is something else.
+     *
+     * Read through buildGenInput for the reason activeModelCompat does: a preset that sets `refinermodel` is
+     * applied after the manual picks and counts. A sentinel like '(Use Base)' has no compat class and adds
+     * nothing. `model` is always examined, even before `paramMeta` has landed or when it lacks the entry. */
+    activeModelCompats() {
+        let input = this.buildGenInput();
+        let classes = [];
+        // Main checkpoint first, so the label that names these classes reads the same on every render.
+        let keys = Object.keys(input).filter(k => k != 'model');
+        if ('model' in input) {
+            keys.unshift('model');
+        }
+        for (let key of keys) {
+            if (key != 'model') {
+                let meta = this.paramMeta[key];
+                if (!meta || meta.type != 'model' || meta.subtype != 'Stable-Diffusion') {
+                    continue;
+                }
+            }
+            let value = input[key];
+            if (typeof value != 'string') {
+                continue;
+            }
+            let compat = this.compatClassOf('Stable-Diffusion', value);
+            if (compat && !classes.includes(compat)) {
+                classes.push(compat);
+            }
+        }
+        return classes;
+    }
+
+    /** Whether any of `classes` is in `set`. Plain loop: `set` is a Set of compat classes, `classes` an array. */
+    static setHasAny(set, classes) {
+        for (let c of classes) {
+            if (set.has(c)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Filters a model list down to what the active models can actually load.
      *
      * This is the same compat-class rule SwarmUI itself uses to decide whether a LoRA applies, so an SDXL
      * LoRA against a Qwen checkpoint is not a near miss to be sorted lower - it simply does not load. It is a
      * narrower gate than the architecture picker and independent of it: the picker is a manual folder/class
-     * filter the user chooses, this follows whatever checkpoint is selected without being asked.
+     * filter the user chooses, this follows whatever checkpoints are selected without being asked. "Active
+     * models" is the any-enabled-model union from `activeModelCompats()` (main plus refiner, video, ...), the
+     * same as genpage `isModelArchCorrect`; the folder fallbacks below keep a row when ANY of those classes
+     * is seen in its folder.
      *
      * A model's own known compat class is authoritative. Folder and preset-group evidence is only a fallback
      * for models with unknown class metadata. This matters when several incompatible variants share one
@@ -965,8 +1027,8 @@ class MState {
      * models are NOT exempt: Limited means Limited (same rule as filterByArch). Favourites still sort first
      * among survivors; "tap to show all" reveals the rest. */
     filterByModelCompat(models, subtype) {
-        let compat = this.activeModelCompat();
-        if (!compat) {
+        let compats = this.activeModelCompats();
+        if (compats.length == 0) {
             return models;
         }
         let groupClasses = new Map();
@@ -977,16 +1039,17 @@ class MState {
         return models.filter(model => {
             let modelCompat = (model && model.compat_class) || this.compatClassOf(subtype, model.name);
             if (modelCompat) {
-                return this.rowMatchesActive(model, subtype, compat);
+                return this.rowMatchesActive(model, subtype, compats);
             }
             let folder = MState.modelFolder(model.name).toLowerCase();
-            // Preset-group folder whose checkpoints never use this compat: hard-hide untagged models.
+            // Preset-group folder whose checkpoints never use any of these compats: hard-hide untagged models.
             if (folder && groupClasses.has(folder)) {
                 let classes = groupClasses.get(folder);
-                if (classes.size > 0 && !classes.has(compat)) {
+                let overlap = MState.setHasAny(classes, compats);
+                if (classes.size > 0 && !overlap) {
                     return false;
                 }
-                if (classes.has(compat)) {
+                if (overlap) {
                     return true;
                 }
             }
@@ -994,10 +1057,11 @@ class MState {
             // SDXL checkpoint when every classed model in that folder is a different architecture.
             if (folder && folderClasses.has(folder)) {
                 let observed = folderClasses.get(folder);
-                if (observed.size > 0 && !observed.has(compat)) {
+                let overlap = MState.setHasAny(observed, compats);
+                if (observed.size > 0 && !overlap) {
                     return false;
                 }
-                if (observed.has(compat)) {
+                if (overlap) {
                     return true;
                 }
             }

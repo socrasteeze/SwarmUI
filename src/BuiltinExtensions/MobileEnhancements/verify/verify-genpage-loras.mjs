@@ -44,6 +44,7 @@ const SITE_JS = `${REPO}/src/wwwroot/js/site.js`;
 const PARAMS_JS = `${REPO}/src/wwwroot/js/genpage/gentab/params.js`;
 const LORAS_JS = `${REPO}/src/wwwroot/js/genpage/gentab/loras.js`;
 const PRESETS_JS = `${REPO}/src/wwwroot/js/genpage/gentab/presets.js`;
+const MODELS_JS = `${REPO}/src/wwwroot/js/genpage/gentab/models.js`;
 const UTIL_JS = `${REPO}/src/wwwroot/js/util.js`;
 const JQUERY_JS = `${REPO}/src/wwwroot/js/lib/jquery.min.js`;
 const SELECT2_JS = `${REPO}/src/wwwroot/js/lib/select2.min.js`;
@@ -92,6 +93,7 @@ const siteSrc = readFileSync(SITE_JS, 'utf8');
 const paramsSrc = readFileSync(PARAMS_JS, 'utf8');
 const lorasSrc = readFileSync(LORAS_JS, 'utf8');
 const presetsSrc = readFileSync(PRESETS_JS, 'utf8');
+const modelsSrc = readFileSync(MODELS_JS, 'utf8');
 const utilSrc = readFileSync(UTIL_JS, 'utf8');
 
 // The real page size buildLazyMultiselectAjaxSource paginates by - read out of the source rather than
@@ -296,6 +298,7 @@ await presetPage.setContent(`<!doctype html><html><body>
     <input type="checkbox" id="preset_advanced_options_checkbox">
     <input id="new_preset_name" value="">
     <input id="preset_description" value="">
+    <input id="preset_output_root" value="">
     <input id="new_preset_modal_error" value="">
     <select id="input_loras" multiple>
         <option value="folder/liveLoraA" selected>a</option>
@@ -385,6 +388,188 @@ const refreshOut = await refreshPage.evaluate(async ({ refreshSrc }) => {
 check('refreshParameterValues() actually ran its callback (check is non-vacuous)', refreshOut.calledback, `calledback=${refreshOut.calledback}`);
 check('the lazy select is untouched by the refresh - no bulk append of the whole list', refreshOut.optionsAfter === refreshOut.optionsBefore, `${refreshOut.optionsBefore} -> ${refreshOut.optionsAfter} options (list had 4 values)`);
 check('the lazy flag survives the refresh (still deferred, not silently filled)', refreshOut.stillLazy, `lazyOptions=${refreshOut.stillLazy}`);
+
+// ====================================================================================================
+// Part 8: models.js compat scan. isModelArchCorrect(model) with no second argument is called from a sort
+// comparator (twice per comparison), from describeModel(), and from every lazily built row, so scanning the
+// Stable-Diffusion model params inside it ran that scan 10^5+ times per render. getActiveModelCompatClasses()
+// hoists the scan: one pass per synchronous task, cleared by a microtask, and it also unions in the model an
+// active Classic preset sets (presets apply after raw params at generate time).
+//
+// The real functions are extracted from models.js/params.js/util.js. The helpers are extracted tolerantly so
+// that against a tree with the hoist reverted these checks report FAIL instead of crashing the harness.
+// ====================================================================================================
+
+/** A top-level function from a source file, or '' when that tree does not define it. */
+function tryExtractFunction(src, name) {
+    try {
+        return extractFunction(src, name);
+    }
+    catch (e) {
+        return '';
+    }
+}
+
+const cacheDeclMatch = modelsSrc.match(/\nlet activeModelCompatCache = null;/);
+const compatSrcs = {
+    cacheDecl: cacheDeclMatch ? cacheDeclMatch[0] : '',
+    active: tryExtractFunction(modelsSrc, 'getActiveModelCompatClasses'),
+    accepted: tryExtractFunction(modelsSrc, 'getAcceptedModelCompatClasses'),
+    arch: extractFunction(modelsSrc, 'isModelArchCorrect'),
+    isParamEnabled: extractFunction(paramsSrc, 'isParamEnabled'),
+    getReq: extractFunction(utilSrc, 'getRequiredElementById'),
+    findParent: extractFunction(utilSrc, 'findParentOfClass')
+};
+
+const compatPage = await browser.newPage();
+await compatPage.setContent(`<!doctype html><html><body>
+    <div class="auto-input"><input id="input_model" value="sdxl/base-a"></div>
+    <div class="auto-input"><input id="input_refinermodel" value="sdxl/refiner-b"></div>
+    <div class="auto-input"><input id="input_refinermodel_toggle" type="checkbox" checked></div>
+    <div class="auto-input"><input id="input_presetonly" value=""></div>
+</body></html>`);
+
+const compatOut = await compatPage.evaluate(async (srcs) => {
+    // Page globals models.js reads. videomodel has NO element on the page on purpose (an unrendered param).
+    let gen_param_types = [
+        { id: 'model', type: 'model', subtype: 'Stable-Diffusion' },
+        { id: 'refinermodel', type: 'model', subtype: 'Stable-Diffusion', toggleable: true },
+        { id: 'videomodel', type: 'model', subtype: 'Stable-Diffusion', toggleable: true },
+        { id: 'presetonly', type: 'model', subtype: 'Stable-Diffusion' },
+        { id: 'vae', type: 'model', subtype: 'VAE' },
+        { id: 'prompt', type: 'text' }
+    ];
+    let compatByModel = { 'sdxl/base-a': 'fam-a', 'sdxl/refiner-b': 'fam-b', 'sdxl/preset-p': 'fam-p' };
+    let getDataForCalls = 0;
+    let modelsHelpers = {
+        getDataFor(subType, name) {
+            getDataForCalls++;
+            let id = compatByModel[name];
+            return id ? { modelClass: { compatClass: { id } } } : null;
+        }
+    };
+    let currentModelHelper = { curCompatClass: 'fam-a' };
+    let currentPresets = [];
+    eval(srcs.getReq);
+    eval(srcs.findParent);
+    eval(srcs.isParamEnabled);
+    eval(srcs.cacheDecl + '\n' + srcs.active + '\n' + srcs.accepted + '\n' + srcs.arch);
+    let hasHoist = typeof getActiveModelCompatClasses == 'function';
+
+    let lora = (compat, i) => ({ name: `lora/${compat}-${i}`, compat_class: compat, architecture: `${compat}/lora` });
+    let out = { hasHoist };
+    /** A throw becomes a value, so a reverted tree reports FAIL on the check that tripped instead of aborting the harness. */
+    let safe = (fn) => {
+        try {
+            return fn();
+        }
+        catch (e) {
+            return `threw: ${e}`;
+        }
+    };
+
+    // ---- One synchronous sort pass: the model-param scan must run once, not once per comparison ----
+    let rows = Array.from({ length: 200 }, (_, i) => lora(['fam-a', 'fam-b', 'fam-c', 'fam-p'][i % 4], i));
+    let comparisons = 0;
+    getDataForCalls = 0;
+    try {
+        rows.sort((a, b) => {
+            comparisons++;
+            let aCorrect = isModelArchCorrect(a);
+            let bCorrect = isModelArchCorrect(b);
+            return aCorrect == bCorrect ? 0 : (aCorrect ? -1 : 1);
+        });
+        out.sortThrew = null;
+    }
+    catch (e) {
+        out.sortThrew = `${e}`;
+    }
+    out.comparisons = comparisons;
+    out.getDataForCalls = getDataForCalls;
+    out.correctFirst = rows.slice(0, 100).every(r => r.compat_class == 'fam-a' || r.compat_class == 'fam-b');
+    out.sameWithinTask = hasHoist ? safe(() => getActiveModelCompatClasses() === getActiveModelCompatClasses()) : null;
+    out.firstScan = hasHoist ? safe(() => getActiveModelCompatClasses().slice()) : null;
+
+    // ---- A param whose element is absent must be skipped, not throw (real isParamEnabled throws on it) ----
+    try {
+        isParamEnabled({ id: 'videomodel', type: 'model', subtype: 'Stable-Diffusion', toggleable: true });
+        out.unguardedThrows = false;
+    }
+    catch (e) {
+        out.unguardedThrows = true;
+    }
+
+    // ---- Microtask clears the cache: the next task sees the changed input ----
+    await null;
+    document.getElementById('input_refinermodel').value = 'sdxl/preset-p';
+    out.afterEdit = hasHoist ? safe(() => getActiveModelCompatClasses().slice()) : null;
+    document.getElementById('input_refinermodel').value = 'sdxl/refiner-b';
+    await null;
+
+    // ---- A refiner model's compat makes a matching LoRA correct; a disabled refiner does not ----
+    out.refinerMatch = safe(() => isModelArchCorrect(lora('fam-b', 1)));
+    out.currentMatch = safe(() => isModelArchCorrect(lora('fam-a', 1)));
+    out.otherNoMatch = safe(() => isModelArchCorrect(lora('fam-c', 1)));
+    document.getElementById('input_refinermodel_toggle').checked = false;
+    await null;
+    out.refinerOffMatch = safe(() => isModelArchCorrect(lora('fam-b', 1)));
+    document.getElementById('input_refinermodel_toggle').checked = true;
+    await null;
+
+    // ---- An active preset's model is unioned in, including for a param whose own input is empty ----
+    currentPresets = [{ title: 'preset-one', param_map: { presetonly: 'sdxl/preset-p', prompt: 'text {value}' } }];
+    await null;
+    out.presetMatch = safe(() => isModelArchCorrect(lora('fam-p', 1)));
+    out.presetKeepsInputs = safe(() => isModelArchCorrect(lora('fam-a', 2)) && isModelArchCorrect(lora('fam-b', 2)));
+    out.presetStillRejects = safe(() => isModelArchCorrect(lora('fam-c', 2)));
+    out.withPreset = hasHoist ? safe(() => getActiveModelCompatClasses().slice()) : null;
+    currentPresets = [];
+    await null;
+    out.presetGone = safe(() => isModelArchCorrect(lora('fam-p', 3)));
+
+    // ---- The list for the server filter adds the current model's class once, deduped ----
+    currentModelHelper.curCompatClass = 'fam-z';
+    await null;
+    out.accepted = hasHoist ? safe(() => getAcceptedModelCompatClasses().slice()) : null;
+    currentModelHelper.curCompatClass = 'fam-a';
+    await null;
+    out.acceptedDedupe = hasHoist ? safe(() => getAcceptedModelCompatClasses().slice()) : null;
+    return out;
+}, compatSrcs);
+
+check('(setup) the hoisted helper exists in models.js', compatOut.hasHoist, `hasHoist=${compatOut.hasHoist}`);
+check('(setup) a 200-row sort really made hundreds of comparisons', compatOut.comparisons > 500, `${compatOut.comparisons} comparisons`);
+check('the sort did not throw with an unrendered model param in gen_param_types', compatOut.sortThrew === null, `threw=${compatOut.sortThrew}`);
+check('(setup) calling isParamEnabled on the unrendered param WOULD throw - the skip guard is what saves it', compatOut.unguardedThrows, `unguardedThrows=${compatOut.unguardedThrows}`);
+check('the model-param scan ran once per sort pass, not once per comparison', compatOut.getDataForCalls <= 3, `${compatOut.getDataForCalls} getDataFor calls for ${compatOut.comparisons} comparisons`);
+check('the sort still put compatible LoRAs first', compatOut.correctFirst);
+check('two reads in one task return the same cached list', compatOut.sameWithinTask === true, `same=${compatOut.sameWithinTask}`);
+check('first scan found the model and refiner classes only', JSON.stringify([].concat(compatOut.firstScan || []).sort()) === JSON.stringify(['fam-a', 'fam-b']), JSON.stringify(compatOut.firstScan));
+check('after a microtask the cache is gone: a changed refiner shows up on the next read', JSON.stringify([].concat(compatOut.afterEdit || []).sort()) === JSON.stringify(['fam-a', 'fam-p']), JSON.stringify(compatOut.afterEdit));
+check('a refiner model\'s compat class makes a matching LoRA correct', compatOut.refinerMatch === true, `refinerMatch=${compatOut.refinerMatch}`);
+check('the main model\'s class still matches, and an unrelated class does not', compatOut.currentMatch === true && compatOut.otherNoMatch === false, `current=${compatOut.currentMatch} other=${compatOut.otherNoMatch}`);
+check('a disabled (toggled-off) refiner no longer counts', compatOut.refinerOffMatch === false, `refinerOffMatch=${compatOut.refinerOffMatch}`);
+check('an active preset\'s model is unioned in, even when that param\'s own input is empty', compatOut.presetMatch === true, `presetMatch=${compatOut.presetMatch}`);
+check('...and the union adds to the input classes rather than replacing them', compatOut.presetKeepsInputs === true && compatOut.presetStillRejects === false, `keeps=${compatOut.presetKeepsInputs} rejects=${compatOut.presetStillRejects}`);
+check('the preset class list is model + refiner + preset', JSON.stringify([].concat(compatOut.withPreset || []).sort()) === JSON.stringify(['fam-a', 'fam-b', 'fam-p']), JSON.stringify(compatOut.withPreset));
+check('removing the preset removes its class again', compatOut.presetGone === false, `presetGone=${compatOut.presetGone}`);
+check('the accepted list adds the current model\'s class', JSON.stringify([].concat(compatOut.accepted || []).sort()) === JSON.stringify(['fam-a', 'fam-b', 'fam-z']), JSON.stringify(compatOut.accepted));
+check('...without duplicating one already present', JSON.stringify([].concat(compatOut.acceptedDedupe || []).sort()) === JSON.stringify(['fam-a', 'fam-b']), JSON.stringify(compatOut.acceptedDedupe));
+
+// gen_param_types / currentPresets not declared at all (a page that has not built its params yet): fall back to the current model.
+const bareOut = await compatPage.evaluate((srcs) => {
+    let modelsHelpers = { getDataFor: () => null };
+    let currentModelHelper = { curCompatClass: 'fam-a' };
+    eval(srcs.cacheDecl + '\n' + srcs.active + '\n' + srcs.accepted + '\n' + srcs.arch);
+    let lora = (compat) => ({ name: `lora/${compat}`, compat_class: compat, architecture: `${compat}/lora` });
+    try {
+        return { threw: null, current: isModelArchCorrect(lora('fam-a')), other: isModelArchCorrect(lora('fam-b')) };
+    }
+    catch (e) {
+        return { threw: `${e}` };
+    }
+}, compatSrcs);
+check('with no gen_param_types or presets yet, it falls back to the current model instead of throwing', bareOut.threw === null && bareOut.current === true && bareOut.other === false, JSON.stringify(bareOut));
 
 await browser.close();
 
