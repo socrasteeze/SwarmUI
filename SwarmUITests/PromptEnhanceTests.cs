@@ -231,8 +231,8 @@ public class PromptEnhanceTests : SwarmUITest
     [TestCase("10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized", true)]
     [TestCase("10Eros_Max_h3_hybrid_beta5_w4a8_14gb_optimized", true)]
     [TestCase("DasiwaMinimaxH3_dasiwaHybridV4Turbo_3281858", true)]
-    [TestCase("h3ErosMax_beta5_3178732", false)]
-    [TestCase("h3ErosMax_beta6_3283276", false)]
+    [TestCase("h3ErosMax_beta5_3178732", true)]
+    [TestCase("h3ErosMax_beta6_3283276", true)]
     public void ReferenceCapability_MatchesModelMarkers(string modelName, bool expected)
     {
         Assert.That(PromptEnhanceClient.IsHybridCheckpoint(modelName), Is.EqualTo(expected));
@@ -249,6 +249,8 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, withoutReferences), Is.EqualTo("Task: FL2VA\nDuration: 5.13\n\n"));
         Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized", false)), Is.EqualTo("Task: FL2VA\nDuration: 5.13\n\n"));
         Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "MiniMax_H3_Ref2VA_nvfp4_mixed", true)), Is.EqualTo("Task: FL2VA\nDuration: 5.13\nWorkflow: Ref2VA\n\n"));
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "h3ErosMax_beta6_3283276", true), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "h3ErosMax_beta6_3283276", false), Is.Null);
         Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "minimax_h3_fl2va_pruned_int8_convrot", true), Is.Null);
         Assert.That(PromptEnhanceClient.IsHybridCheckpoint("redcraftHybridH3Krea2dual_40K2TDUAL_3196558"), Is.True);
         Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("krea-2", "redcraftHybridH3Krea2dual_40K2TDUAL_3196558", true), Is.Null);

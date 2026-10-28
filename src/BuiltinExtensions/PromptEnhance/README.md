@@ -49,7 +49,7 @@ owned here.
    `L2VA`), and duration is the last frame's timestamp on H3's 17n+5 frame grid. Image profiles never get it.
    The optional `video_has_references` request flag defaults to false. The frontend sets it when prompt image,
    audio, or video reference slots are populated. Init Image and Video End Image do not set it. When true, a MiniMax H3 model name
-   containing `ref2va` or `hybrid` (case-insensitive) adds `Workflow: Ref2VA`. Without references, the
+   containing `ref2va`, `hybrid`, or `erosmax` (case-insensitive) adds `Workflow: Ref2VA`. Without references, the
    task header remains unchanged. The header is included in the cache-keyed text. Known video profiles always
    use T2I writer mode, even when edit is requested.
 3. **Transport.** `PromptEnhanceClient.ChatStream` posts to `/api/chat` (Ollama) or `/v1/chat/completions`
