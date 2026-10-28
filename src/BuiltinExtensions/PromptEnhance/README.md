@@ -47,6 +47,11 @@ owned here.
    request's `video_task` and `video_duration`. The frontend derives those from the current params: Init Image
    or an Image To Video model means a start frame, Video End Image means an end frame (`T2VA`, `I2VA`, `FL2VA`,
    `L2VA`), and duration is the last frame's timestamp on H3's 17n+5 frame grid. Image profiles never get it.
+   The optional `video_has_references` request flag defaults to false. The frontend sets it when prompt image,
+   audio, or video reference slots are populated. Init Image and Video End Image do not set it. When true, a MiniMax H3 model name
+   containing `ref2va` or `hybrid` (case-insensitive) adds `Workflow: Ref2VA`. Without references, the
+   task header remains unchanged. The header is included in the cache-keyed text. Known video profiles always
+   use T2I writer mode, even when edit is requested.
 3. **Transport.** `PromptEnhanceClient.ChatStream` posts to `/api/chat` (Ollama) or `/v1/chat/completions`
    (OpenAI-compatible), streamed, and reads it back with `StreamReader.ReadLineAsync` against a linked
    cancellation token that carries both the per-request timeout and the session's own interrupt/shutdown
@@ -183,13 +188,16 @@ Generate menu and in the result panel on the desktop, and in the `/simple` sheet
 
 | Choice | What is sent |
 |---|---|
-| **Auto** | Edit when the current generation has an init image or any prompt image. Otherwise text-to-image. The closed control reads `Auto (Edit)` or `Auto (T2I)`. |
+| **Auto** | For image profiles, Edit when the current generation has an init image, video end image, or prompt image. Otherwise T2I. Known video profiles always use T2I. The closed control reads `Auto (Edit)` or `Auto (T2I)`. |
 | **T2I** | The base profile for the loaded model. Reference images are not sent. |
 | **Edit** | The edit profile for that base, when one exists. |
 
 The request sends both `mode` (`auto`, `t2i`, or `edit`) and `resolved_mode` (`t2i` or `edit`). The server
 resolves `auto` again: images on the request force edit, and a client `resolved_mode` of `edit` is kept when
-the status call has no image bytes. An explicit `t2i` or `edit` is left as chosen.
+the status call has no image bytes. An explicit `t2i` or `edit` is left as chosen for image profiles. Known
+video profiles always use `t2i`. `ListPromptEnhanceStatus` returns `resolved.is_video` to identify a known
+video profile; it is false when no profile resolves. This field describes the profile, not the model's
+reference capability.
 
 Edit mode looks up a dedicated profile file for the base profile:
 
@@ -199,11 +207,11 @@ Edit mode looks up a dedicated profile file for the base profile:
 | `qwen-image-2.1` | `qwen-image-2.1.edit` — one concise instruction. The edit is add, remove, replace, text, style, or pose. Unmentioned elements stay. Text to render stays in its original language, in quotes. |
 | `krea-2` | `krea-2.reference` — Krea 2 is not a true edit model, so this is a full descriptive scene that names each reference image's role. |
 
-`qwen-image-edit-2511` is already an edit profile and is used as-is. Any other base profile is sent with a
+`qwen-image-edit-2511` is already an edit profile and is used as-is. Any other image base profile is sent with a
 short generic edit appendix appended, and is treated as an edit profile for the strength cap. The registered
 base text is not modified.
 
-In edit mode the init image, then the prompt images, are attached to the writer request. At most 4 are used.
+In edit mode the init image, video end image, then prompt images are attached to the writer request. At most 4 are used.
 Each is downscaled on the server to a JPEG whose longest side is 768 pixels. Ollama receives them on the user
 message's `images` field. The digest of those JPEG bytes is part of the cache key. Swarm's receive limit
 (`Network.MaxReceiveBytes`, default 200 MB) already covers the payloads the browser sends before that

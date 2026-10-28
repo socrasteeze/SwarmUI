@@ -89,6 +89,10 @@ class PromptEnhanceHelperClass {
         this.trackedModel = null;
         /** Display name of the profile automatic resolution last chose, or ''. */
         this.resolvedDisplay = '';
+        /** Video profile status and the model and override it applies to. */
+        this.statusProfileKey = null;
+        this.statusIsVideo = null;
+        this.statusResolvedMode = null;
         /** Idle label of the Enhance button, captured the first time a request marks it busy. */
         this.buttonIdleText = null;
         /** The profile-override <select> inside the panel. */
@@ -803,7 +807,16 @@ class PromptEnhanceHelperClass {
         return hasImages ? 'edit' : 't2i';
     }
 
-    /** Init image, then prompt images, capped at 4. Values are whatever the generation request would send. */
+    /** Uses the resolved profile status to suppress image uploads for video profiles. */
+    effectiveWriteMode(hasImages) {
+        let key = JSON.stringify([this.effectiveModel(), this.profileOverride]);
+        if (this.statusProfileKey != key || this.statusIsVideo == null) {
+            return null;
+        }
+        return this.statusIsVideo ? this.statusResolvedMode : this.resolvedWriteMode(hasImages);
+    }
+
+    /** Init image, end image, then prompt images, capped at 4. Values are whatever the generation request would send. */
     referenceImageValues() {
         let images = [];
         let add = value => {
@@ -824,6 +837,7 @@ class PromptEnhanceHelperClass {
                 return images;
             }
             add(input['initimage']);
+            add(input['videoendimage']);
             let prompts = input['promptimages'];
             if (Array.isArray(prompts)) {
                 for (let i = 0; i < prompts.length; i++) {
@@ -844,7 +858,9 @@ class PromptEnhanceHelperClass {
     enhanceRequestFields() {
         let images = this.referenceImageValues();
         let mode = this.normalizeWriteMode(this.writeMode);
-        let resolved = this.resolvedWriteMode(images.length > 0);
+        // Until status arrives, fall back to the local resolution. The server never prepares images for a
+        // video profile, so a pending status costs at most one unused upload.
+        let resolved = this.effectiveWriteMode(images.length > 0) || this.resolvedWriteMode(images.length > 0);
         let fields = { 'mode': mode, 'resolved_mode': resolved };
         if (resolved == 'edit' && images.length > 0) {
             fields['images'] = images;
@@ -854,7 +870,8 @@ class PromptEnhanceHelperClass {
 
     /** Sets the Auto option text to "Auto (Edit)" or "Auto (T2I)" from the images attached right now. */
     syncWriteModeLabel() {
-        let resolved = this.resolvedWriteMode(this.referenceImageValues().length > 0);
+        let hasImages = this.referenceImageValues().length > 0;
+        let resolved = this.effectiveWriteMode(hasImages) || this.resolvedWriteMode(hasImages);
         let text = resolved == 'edit' ? 'Auto (Edit)' : 'Auto (T2I)';
         let selects = [this.writeModeSelect, this.panelWriteModeSelect];
         for (let i = 0; i < selects.length; i++) {
@@ -870,33 +887,51 @@ class PromptEnhanceHelperClass {
         }
     }
 
-    /** Reads the current video settings into the EnhancePrompt 'video_task' / 'video_duration' fields. The server
-     * only forwards them to video profiles (eg MiniMax H3), so this is harmless for image models.
-     * <p>A start frame is an enabled Init Image with data, or an enabled Image To Video model (its source frame is
-     * generated first). An end frame is an enabled Video End Image with data. Duration uses MiniMax H3's 17n+5 frame
-     * grid and the timestamp of the last frame.</p>
-     */
+    /** Reads video task, duration, and reference presence from the next generation input. */
     videoRequestFields() {
-        let enabled = id => {
-            let param = getParamById(id);
-            return param && document.getElementById(`input_${id}`) && isParamEnabled(param);
-        };
-        let hasImage = id => enabled(id) && !!getInputVal(document.getElementById(`input_${id}`));
-        let viaVideoModel = enabled('videomodel') && getInputVal(document.getElementById('input_videomodel'));
-        let hasStart = hasImage('initimage') || !!viaVideoModel;
-        let hasEnd = hasImage('videoendimage');
+        let input = typeof getGenInput == 'function' ? (getGenInput() || {}) : {};
+        let keys = ['videomodel', 'videoframes', 'text2videoframes', 'videofps'];
+        let presets = (typeof currentPresets == 'undefined' ? null : currentPresets) || [];
+        for (let i = 0; i < presets.length; i++) {
+            let map = presets[i] && presets[i].param_map;
+            if (!map) {
+                continue;
+            }
+            for (let j = 0; j < keys.length; j++) {
+                let key = keys[j];
+                if (key in map) {
+                    let value = map[key];
+                    input[key] = typeof value == 'string' && value.includes('{value}')
+                        ? value.replaceAll('{value}', String(input[key] ?? '')) : value;
+                }
+            }
+        }
+        let hasStart = !!input['initimage'] || !!input['videomodel'];
+        let hasEnd = !!input['videoendimage'];
         let task = hasStart && hasEnd ? 'FL2VA' : hasEnd ? 'L2VA' : hasStart ? 'I2VA' : 'T2VA';
-        let framesId = viaVideoModel ? 'videoframes' : 'text2videoframes';
-        let frames = enabled(framesId) ? parseInt(getInputVal(document.getElementById(`input_${framesId}`))) : 124;
+        let frames = parseInt(input[input['videomodel'] ? 'videoframes' : 'text2videoframes']);
         if (!(frames > 0)) {
             frames = 124;
         }
         frames = 5 + Math.ceil(Math.max(0, frames - 5) / 17) * 17;
-        let fps = enabled('videofps') ? parseInt(getInputVal(document.getElementById('input_videofps'))) : 24;
+        let fps = parseInt(input['videofps']);
         if (!(fps > 0)) {
             fps = 24;
         }
-        return { 'video_task': task, 'video_duration': (frames - 1) / fps };
+        let hasReferences = false;
+        let referenceKeys = ['promptimages', 'promptaudios', 'promptvideos'];
+        for (let j = 0; j < referenceKeys.length; j++) {
+            let value = input[referenceKeys[j]];
+            if (Array.isArray(value)) {
+                for (let i = 0; i < value.length; i++) {
+                    hasReferences = hasReferences || !!value[i];
+                }
+            }
+            else {
+                hasReferences = hasReferences || !!value;
+            }
+        }
+        return { 'video_task': task, 'video_duration': (frames - 1) / fps, 'video_has_references': hasReferences };
     }
 
     /** Fetches current status for the selected model and updates the button's enabled state.
@@ -911,12 +946,18 @@ class PromptEnhanceHelperClass {
         this.syncWriteModeLabel();
         this.statusRequestSeq += 1;
         let requestSeq = this.statusRequestSeq;
-        let writeFields = this.enhanceRequestFields();
-        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': writeFields.mode, 'resolved_mode': writeFields.resolved_mode }, data => {
+        let mode = this.normalizeWriteMode(this.writeMode);
+        let local = this.resolvedWriteMode(this.referenceImageValues().length > 0);
+        let statusKey = JSON.stringify([model, this.profileOverride]);
+        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': mode, 'resolved_mode': local }, data => {
             if (requestSeq != this.statusRequestSeq) {
                 return;
             }
+            this.statusProfileKey = statusKey;
+            this.statusIsVideo = data.resolved && typeof data.resolved.is_video == 'boolean' ? data.resolved.is_video : null;
+            this.statusResolvedMode = data.resolved && data.resolved.resolved_mode;
             this.applyStatusToButton(data);
+            this.syncWriteModeLabel();
             this.populateProfileOptions(data.profiles || []);
             this.applyStrengthOptions((data.resolved && data.resolved.strengths) || ['faithful', 'expand', 'full']);
         }, 0, error => {

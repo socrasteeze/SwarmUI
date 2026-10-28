@@ -38,6 +38,8 @@ import { dirname, resolve } from 'path';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const SOURCE_PATH = `${REPO}/src/BuiltinExtensions/PromptEnhance/Assets/promptenhance.js`;
 const source = readFileSync(SOURCE_PATH, 'utf8');
+let simpleSource = readFileSync(`${REPO}/src/BuiltinExtensions/MobileEnhancements/Assets/m/m_enhance.js`, 'utf8');
+let mState = null;
 
 // `buildHost`'s `eval` runs lexically inside this module, so any free variable an extracted method reads
 // (recordProvenance reads `document` and `triggerChangeFor` as globals, exactly like the real page does) must
@@ -111,7 +113,7 @@ function extractMethod(src, name) {
 /** Builds an object out of a set of extracted methods, so they can call each other via `this.otherMethod()`
  * exactly as they do in the real class - eval runs in this function's scope, so the assembled methods still
  * close over whatever fake globals (document, triggerChangeFor) this file has declared at the point of call. */
-function buildHost(methodNames, extraProps) {
+function buildHost(methodNames, extraProps, methodSource = source) {
     methodNames = [...methodNames];
     if (methodNames.some(name => name == 'handleFrame' || name == 'applyResult' || name == 'runAutoEnhance')
         && !methodNames.includes('unwrapEnhanceResult')) {
@@ -121,7 +123,7 @@ function buildHost(methodNames, extraProps) {
         methodNames.push('videoRequestFields');
     }
     if (methodNames.some(name => name == 'open' || name == 'refreshStatus' || name == 'runAutoEnhance' || name == 'enhanceRequestFields' || name == 'syncWriteModeLabel')) {
-        for (let extra of ['enhanceRequestFields', 'referenceImageValues', 'resolvedWriteMode', 'normalizeWriteMode', 'syncWriteModeLabel']) {
+        for (let extra of ['enhanceRequestFields', 'referenceImageValues', 'resolvedWriteMode', 'normalizeWriteMode', 'syncWriteModeLabel', 'effectiveWriteMode', 'effectiveModel']) {
             if (!methodNames.includes(extra)) {
                 methodNames.push(extra);
             }
@@ -140,7 +142,7 @@ function buildHost(methodNames, extraProps) {
     }
     let pieces = [];
     for (let i = 0; i < methodNames.length; i++) {
-        pieces.push(extractMethod(source, methodNames[i]));
+        pieces.push(extractMethod(methodSource, methodNames[i]));
     }
     let host = Object.assign({}, extraProps);
     eval(`Object.assign(host, {${pieces.join(',')}});`);
@@ -844,7 +846,8 @@ function check(name, pass, detail) {
 // ====================================================================================================
 {
     getGenInput = () => ({ initimage: 'init-bytes', promptimages: ['p1', 'p2', 'p3', 'p4'] });
-    let host = buildHost(['enhanceRequestFields'], { writeMode: 'auto' });
+    let host = buildHost(['enhanceRequestFields'], { writeMode: 'auto', profileOverride: '', statusIsVideo: false });
+    host.statusProfileKey = JSON.stringify([host.effectiveModel(), host.profileOverride]);
     let fields = host.enhanceRequestFields();
     check('auto with an init image resolves to edit', fields.mode == 'auto' && fields.resolved_mode == 'edit', JSON.stringify(fields));
     check('init image is first and the list is capped at 4', fields.images && fields.images.length == 4 && fields.images[0] == 'init-bytes' && fields.images[3] == 'p3', JSON.stringify(fields.images));
@@ -884,7 +887,7 @@ function check(name, pass, detail) {
     check('qwen image 2.1 maps to its edit profile', profiles.includes('["qwen-image-2.1"] = "qwen-image-2.1.edit"'), '');
     check('krea 2 maps to its reference profile', profiles.includes('["krea-2"] = "krea-2.reference"'), '');
     check('the three edit profiles are registered as edit profiles', profiles.includes('"flux2-klein-9b.edit"') && profiles.includes('"qwen-image-2.1.edit"') && profiles.includes('"krea-2.reference"'), '');
-    check('a base profile without an edit file gets the generic edit appendix', profiles.includes('GenericEditAppendix'), '');
+    check('a non-video base profile without an edit file gets the generic edit appendix', profiles.includes('profile.Text + GenericEditAppendix'), '');
     check('enhance requests keep keep_alive at 5m', client.includes('EnhanceKeepAlive = "5m"'), '');
     check('reference images are capped at 4 and 768px', client.includes('MaxReferenceImages = 4') && client.includes('MaxReferenceSide = 768'), '');
     check('ollama messages carry an images field', client.includes('user["images"] = images'), '');
@@ -897,6 +900,150 @@ function check(name, pass, detail) {
     check('klein edit profile exists and speaks in natural sentences about image 1', existsSync(`${root}/Assets/profiles/flux2-klein-9b.edit.system.md`) && klein.includes('natural sentences') && klein.includes('image 1'), '');
     check('qwen edit profile names add, remove, replace and keeps quoted original-language text', qwen.includes('add, remove, replace') && qwen.includes('original language'), '');
     check('krea reference profile describes the first reference image because krea is not a true edit model', krea.includes('not a true edit model') && krea.includes('first reference image'), '');
+}
+
+
+// ====================================================================================================
+// Part 22: H3 uses server profile metadata, while clients report frame and reference facts only.
+// ====================================================================================================
+{
+    getRequiredElementById = () => ({ value: 'minimax_h3_fl2va_pruned_int8_convrot' });
+    currentPresets = [];
+    let input = { initimage: 'first-frame', videoendimage: 'last-frame' };
+    getGenInput = () => ({ ...input });
+    let option = { value: 'auto', innerText: '' };
+    let host = buildHost(['enhanceRequestFields', 'videoRequestFields', 'syncWriteModeLabel'], {
+        writeMode: 'auto', profileOverride: '', statusIsVideo: true, statusResolvedMode: 't2i',
+        writeModeSelect: { options: [option] }, panelWriteModeSelect: null
+    });
+    host.statusProfileKey = JSON.stringify([host.effectiveModel(), host.profileOverride]);
+    let fields = host.enhanceRequestFields();
+    check('H3 Auto with an init image uses t2i and attaches no images', fields.resolved_mode == 't2i' && fields.images == null, JSON.stringify(fields));
+    host.syncWriteModeLabel();
+    check('H3 Auto label follows the server T2I mode', option.innerText == 'Auto (T2I)', option.innerText);
+    host.writeMode = 'edit';
+    check('H3 explicit edit also attaches no images', host.enhanceRequestFields().resolved_mode == 't2i' && host.enhanceRequestFields().images == null, '');
+    host.statusIsVideo = false;
+    check('a known image profile immediately honors an edit mode change', host.enhanceRequestFields().images.length == 2, '');
+    host.writeMode = 'auto';
+    input = {};
+    check('a known image profile with no images uses t2i', host.enhanceRequestFields().resolved_mode == 't2i', '');
+    input = { initimage: 'first-frame' };
+    check('adding an image to a known image profile immediately attaches it', host.enhanceRequestFields().images[0] == 'first-frame', '');
+    host.statusProfileKey = null;
+    check('pending profile status falls back to the local mode and still attaches images', host.enhanceRequestFields().images[0] == 'first-frame', '');
+
+    currentPresets = [{ param_map: { videomodel: 'minimax_h3_fl2va_pruned_int8_convrot', videoframes: '125', videofps: '25' } }];
+    input = { initimage: 'first-frame', videoendimage: 'last-frame', videoframes: '22', videofps: '12' };
+    let video = host.videoRequestFields();
+    check('Classic start and end frames use FL2VA with merged preset duration', video.video_task == 'FL2VA' && video.video_duration == 140 / 25, JSON.stringify(video));
+    check('Classic frames do not count as prompt references', video.video_has_references == false, '');
+    delete input.videoendimage;
+    check('Classic start only uses I2VA', host.videoRequestFields().video_task == 'I2VA', '');
+    for (let key of ['promptimages', 'promptaudios', 'promptvideos']) {
+        input[key] = ['reference'];
+        check('Classic detects populated ' + key, host.videoRequestFields().video_has_references == true, '');
+        delete input[key];
+    }
+    input = { initimage: 'first-frame', videoendimage: 'last-frame', promptimages: ['p1', 'p2', 'p3'] };
+    check('Classic end image follows init image before prompt images, capped at four', JSON.stringify(host.referenceImageValues()) == JSON.stringify(['first-frame', 'last-frame', 'p1', 'p2']), '');
+    currentPresets = [];
+    input = { videoendimage: 'last-frame' };
+    check('Classic end only uses L2VA', host.videoRequestFields().video_task == 'L2VA', '');
+    input = {};
+    video = host.videoRequestFields();
+    check('Classic no frames uses T2VA and default duration', video.video_task == 'T2VA' && video.video_duration == 123 / 24, JSON.stringify(video));
+    currentPresets = null;
+    getGenInput = null;
+}
+
+// ====================================================================================================
+// Part 23: Simple reads merged generation params rather than raw state, including frame attachments.
+// ====================================================================================================
+{
+    let input = {
+        model: 'minimax_h3_fl2va_pruned_int8_convrot', videomodel: 'minimax_h3_fl2va_pruned_int8_convrot',
+        videoframes: '125', videofps: '25', initimage: 'first-frame', videoendimage: 'last-frame'
+    };
+    mState = {
+        params: { videoframes: '22', videofps: '12' },
+        initImage: { kind: 'path', value: 'first-frame' },
+        videoEndImage: { kind: 'path', value: 'last-frame' }, promptImages: [],
+        buildGenInput: () => ({ ...input })
+    };
+    let host = buildHost(['enhanceRequestFields', 'videoRequestFields', 'syncWriteModeLabel'], {
+        writeMode: 'auto', profileOverride: '', statusIsVideo: true, statusResolvedMode: 't2i'
+    }, simpleSource);
+    host.statusProfileKey = JSON.stringify([host.effectiveModel(), host.profileOverride]);
+    let video = host.videoRequestFields();
+    check('Simple start and end frames use FL2VA', video.video_task == 'FL2VA', JSON.stringify(video));
+    check('Simple duration uses merged preset frames/fps and snaps to the H3 grid', video.video_duration == 140 / 25, JSON.stringify(video));
+    check('Simple frame attachments do not count as references', video.video_has_references == false, '');
+    delete input.videoendimage;
+    mState.videoEndImage = null;
+    check('Simple start only uses I2VA', host.videoRequestFields().video_task == 'I2VA', '');
+    let fields = host.enhanceRequestFields();
+    check('Simple H3 Auto with an init image is t2i with no images attached', fields.resolved_mode == 't2i' && fields.images == null, JSON.stringify(fields));
+    let option = { value: 'auto', textContent: '' };
+    host.syncWriteModeLabel({ options: [option] });
+    check('Simple H3 Auto label follows the server T2I mode', option.textContent == 'Auto (T2I)', option.textContent);
+    host.writeMode = 'edit';
+    check('Simple H3 explicit edit still attaches no images', host.enhanceRequestFields().images == null && host.enhanceRequestFields().resolved_mode == 't2i', '');
+    mState.promptImages = [{ kind: 'path', value: 'prompt-reference' }];
+    input.promptimages = ['prompt-reference'];
+    check('Simple prompt images signal video references', host.videoRequestFields().video_has_references == true, '');
+    input.videoendimage = 'last-frame';
+    input.promptimages = ['p1', 'p2', 'p3'];
+    check('Simple end image follows init before prompt images, capped at four', JSON.stringify(host.referenceImageValues()) == JSON.stringify(['first-frame', 'last-frame', 'p1', 'p2']), '');
+    mState.buildGenInput = () => { throw new Error('form unavailable'); };
+    mState.videoEndImage = { kind: 'path', value: 'last-frame' };
+    check('Simple fallback preserves init/end/prompt image order', JSON.stringify(host.referenceImageValues()) == JSON.stringify(['first-frame', 'last-frame', 'prompt-reference']), '');
+    mState = null;
+}
+
+// ====================================================================================================
+// Part 24: server source contracts, paired with the executable capability/header NUnit cases.
+// ====================================================================================================
+{
+    let root = REPO + '/src/BuiltinExtensions/PromptEnhance';
+    let api = readFileSync(root + '/PromptEnhanceAPI.cs', 'utf8');
+    let client = readFileSync(root + '/PromptEnhanceClient.cs', 'utf8');
+    let profiles = readFileSync(root + '/PromptEnhanceProfiles.cs', 'utf8');
+    check('the API threads optional video_has_references into the header decision', api.includes('bool video_has_references = false') && api.includes('bool VideoHasReferences') && api.includes('WorkflowForVideoProfile(profile.ID, model, videoHasReferences)'), '');
+    check('hybrid or Ref2VA names select Ref2VA only when references are present', client.includes('hasReferences && string.Equals(profileId, "minimax-h3", StringComparison.OrdinalIgnoreCase)') && client.includes('? WorkflowForModel(modelName) : null') && client.includes('Contains("ref2va", StringComparison.OrdinalIgnoreCase)') && client.includes('Contains("hybrid", StringComparison.OrdinalIgnoreCase)'), '');
+    check('hybrid FL2VA without references keeps the task path and no Workflow line', client.includes('if (!string.IsNullOrWhiteSpace(workflow))') && client.includes('Task: {(VideoTasks.Contains(normalized) ? normalized : "T2VA")}'), '');
+    check('video headers remain gated by KnownVideoProfileIDs', api.includes('if (PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID))'), '');
+    check('both API paths resolve profile mode before applying edit mode', (api.match(/ResolveWriteModeForProfile\(profile,/g) || []).length == 2 && profiles.includes('return "t2i";'), '');
+    check('status exposes video metadata without a client profile list', api.includes('["is_video"] = profile is not null && PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID)') && !source.includes('KnownVideoProfileIDs') && !simpleSource.includes('KnownVideoProfileIDs'), '');
+}
+
+
+// ====================================================================================================
+// Part 25: real status callbacks carry authoritative video metadata into each client's request fields.
+// ====================================================================================================
+{
+    let input = { model: 'minimax_h3_fl2va_pruned_int8_convrot', initimage: 'first-frame' };
+    getRequiredElementById = () => ({ value: input.model });
+    getGenInput = () => ({ ...input });
+    mState = { params: {}, buildGenInput: () => ({ ...input }) };
+    currentPresets = [];
+    let requestedMode = null;
+    genericRequest = (route, data, callback) => {
+        requestedMode = data.resolved_mode;
+        callback({ profiles: [], resolved: { profile: 'minimax-h3', resolved_mode: 't2i', is_video: true } });
+    };
+    for (let methodSource of [source, simpleSource]) {
+        let host = buildHost(['refreshStatus'], {
+            writeMode: 'auto', profileOverride: '', trackedModel: input.model, statusRequestSeq: 0,
+            applyStatusToButton: () => {}, populateProfileOptions: () => {}, applyStrengthOptions: () => {}
+        }, methodSource);
+        host.refreshStatus();
+        let fields = host.enhanceRequestFields();
+        check((methodSource == source ? 'Classic' : 'Simple') + ' status overrides local Auto edit without uploading frames', requestedMode == 'edit' && fields.resolved_mode == 't2i' && fields.images == null, JSON.stringify(fields));
+    }
+    currentPresets = null;
+    getGenInput = null;
+    mState = null;
 }
 
 const failed = results.filter(r => !r.pass);

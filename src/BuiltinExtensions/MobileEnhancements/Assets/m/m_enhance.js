@@ -20,6 +20,10 @@ class MEnhance {
         this.trackedModel = null;
         /** Display name of the profile automatic resolution last chose. */
         this.resolvedDisplay = '';
+        /** Video profile status and the model and override it applies to. */
+        this.statusProfileKey = null;
+        this.statusIsVideo = null;
+        this.statusResolvedMode = null;
         try {
             localStorage.removeItem('promptenhance_profile_override');
         }
@@ -93,7 +97,16 @@ class MEnhance {
         return hasImages ? 'edit' : 't2i';
     }
 
-    /** Init image, then prompt images, capped at 4. Values match what Generate would send. */
+    /** Uses the resolved profile status to suppress image uploads for video profiles. */
+    effectiveWriteMode(hasImages) {
+        let key = JSON.stringify([this.effectiveModel(), this.profileOverride]);
+        if (this.statusProfileKey != key || this.statusIsVideo == null) {
+            return null;
+        }
+        return this.statusIsVideo ? this.statusResolvedMode : this.resolvedWriteMode(hasImages);
+    }
+
+    /** Init image, end image, then prompt images, capped at 4. Values match what Generate would send. */
     referenceImageValues() {
         let images = [];
         let add = value => {
@@ -109,6 +122,7 @@ class MEnhance {
             let input = mState.buildGenInput();
             if (input) {
                 add(input['initimage']);
+                add(input['videoendimage']);
                 let prompts = input['promptimages'];
                 if (Array.isArray(prompts)) {
                     for (let i = 0; i < prompts.length; i++) {
@@ -128,6 +142,9 @@ class MEnhance {
             if (mState.initImage) {
                 add(mState.initImage.value);
             }
+            if (mState.videoEndImage) {
+                add(mState.videoEndImage.value);
+            }
             let list = mState.promptImages || [];
             for (let i = 0; i < list.length; i++) {
                 if (list[i]) {
@@ -145,12 +162,45 @@ class MEnhance {
     enhanceRequestFields() {
         let images = this.referenceImageValues();
         let mode = this.normalizeWriteMode(this.writeMode);
-        let resolved = this.resolvedWriteMode(images.length > 0);
+        // Until status arrives, fall back to the local resolution. The server never prepares images for a
+        // video profile, so a pending status costs at most one unused upload.
+        let resolved = this.effectiveWriteMode(images.length > 0) || this.resolvedWriteMode(images.length > 0);
         let fields = { 'mode': mode, 'resolved_mode': resolved };
         if (resolved == 'edit' && images.length > 0) {
             fields['images'] = images;
         }
         return fields;
+    }
+
+    /** Reads video task, duration, and reference presence from the next generation input. */
+    videoRequestFields() {
+        let input = mState.buildGenInput();
+        let hasStart = !!input['initimage'] || !!input['videomodel'];
+        let hasEnd = !!input['videoendimage'];
+        let task = hasStart && hasEnd ? 'FL2VA' : hasEnd ? 'L2VA' : hasStart ? 'I2VA' : 'T2VA';
+        let frames = parseInt(input[input['videomodel'] ? 'videoframes' : 'text2videoframes']);
+        if (!(frames > 0)) {
+            frames = 124;
+        }
+        frames = 5 + Math.ceil(Math.max(0, frames - 5) / 17) * 17;
+        let fps = parseInt(input['videofps']);
+        if (!(fps > 0)) {
+            fps = 24;
+        }
+        let hasReferences = false;
+        let referenceKeys = ['promptimages', 'promptaudios', 'promptvideos'];
+        for (let j = 0; j < referenceKeys.length; j++) {
+            let value = input[referenceKeys[j]];
+            if (Array.isArray(value)) {
+                for (let i = 0; i < value.length; i++) {
+                    hasReferences = hasReferences || !!value[i];
+                }
+            }
+            else {
+                hasReferences = hasReferences || !!value;
+            }
+        }
+        return { 'video_task': task, 'video_duration': (frames - 1) / fps, 'video_has_references': hasReferences };
     }
 
     /** Fills a writer-mode select. The Auto option shows the resolved mode. */
@@ -174,7 +224,8 @@ class MEnhance {
         if (!select || !select.options) {
             return;
         }
-        let resolved = this.resolvedWriteMode(this.referenceImageValues().length > 0);
+        let hasImages = this.referenceImageValues().length > 0;
+        let resolved = this.effectiveWriteMode(hasImages) || this.resolvedWriteMode(hasImages);
         let text = resolved == 'edit' ? 'Auto (Edit)' : 'Auto (T2I)';
         for (let i = 0; i < select.options.length; i++) {
             if (select.options[i].value == 'auto') {
@@ -260,11 +311,16 @@ class MEnhance {
         this.syncProfileOverride(model);
         this.statusRequestSeq += 1;
         let requestSeq = this.statusRequestSeq;
-        let writeFields = this.enhanceRequestFields();
-        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': writeFields.mode, 'resolved_mode': writeFields.resolved_mode }, data => {
+        let mode = this.normalizeWriteMode(this.writeMode);
+        let local = this.resolvedWriteMode(this.referenceImageValues().length > 0);
+        let statusKey = JSON.stringify([model, this.profileOverride]);
+        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': mode, 'resolved_mode': local }, data => {
             if (requestSeq != this.statusRequestSeq) {
                 return;
             }
+            this.statusProfileKey = statusKey;
+            this.statusIsVideo = data.resolved && typeof data.resolved.is_video == 'boolean' ? data.resolved.is_video : null;
+            this.statusResolvedMode = data.resolved && data.resolved.resolved_mode;
             this.applyStatusToButton(data);
             if (this.sheet && this.sheet.writeSelect) {
                 this.syncWriteModeLabel(this.sheet.writeSelect);
@@ -521,8 +577,7 @@ class MEnhance {
             'profile_override': this.profileOverride,
             'endpoint_override': '',
             'strength': this.strength,
-            'video_task': '',
-            'video_duration': 0,
+            ...this.videoRequestFields(),
             'mode': writeFields.mode,
             'resolved_mode': writeFields.resolved_mode
         };
