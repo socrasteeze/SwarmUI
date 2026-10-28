@@ -521,12 +521,14 @@ public static class PromptEnhanceClient
     /// <summary>Video tasks a video profile's <c>Task:</c> header accepts (see <c>minimax-h3.system.md</c>).</summary>
     private static readonly HashSet<string> VideoTasks = ["T2VA", "I2VA", "FL2VA", "L2VA"];
 
-    /// <summary>True when the model name has a case-insensitive <c>hybrid</c> or <c>ref2va</c> marker.
+    /// <summary>True when the model name has a case-insensitive <c>hybrid</c>, <c>ref2va</c>, or <c>erosmax</c> marker.
+    /// <c>h3ErosMax</c> checkpoints are hybrids whose names carry no other marker.
     /// Callers must also check the resolved profile before using this capability.</summary>
     public static bool IsHybridCheckpoint(string modelName)
     {
         return (modelName ?? "").Contains("hybrid", StringComparison.OrdinalIgnoreCase)
-            || (modelName ?? "").Contains("ref2va", StringComparison.OrdinalIgnoreCase);
+            || (modelName ?? "").Contains("ref2va", StringComparison.OrdinalIgnoreCase)
+            || (modelName ?? "").Contains("erosmax", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Writer workflow tag for a name with reference capability, or null otherwise.
