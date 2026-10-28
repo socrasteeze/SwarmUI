@@ -36,17 +36,17 @@ public static class PromptEnhanceAPI
         "pack_version": "1.1.0+7ff564b9",
         "profiles": [{"id": "anima", "display": "Anima", "target_model": "Anima"}],
         "endpoints": [{"id": "writer", "kind": "ollama", "model": "some-writer-model", "enabled": true, "healthy": true}],
-        "resolved": {"profile": "anima", "reason": null, "strengths": ["faithful", "expand", "full"], "mode": "auto", "resolved_mode": "t2i"}
+        "resolved": {"profile": "anima", "reason": null, "strengths": ["faithful", "expand", "full"], "mode": "auto", "resolved_mode": "t2i", "is_video": false}
         """)]
     public static async Task<JObject> ListPromptEnhanceStatus(Session session,
         [API.APIParameter("Name of the currently loaded model, used to resolve a writer profile.")] string model,
         [API.APIParameter("Optional profile ID to force, overriding automatic resolution - same semantics as EnhancePrompt's own profile_override.")] string profile_override = "",
-        [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto resolves from resolved_mode on this call, because status does not carry image bytes.")] string mode = "auto",
+        [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto resolves from resolved_mode on this call, because status does not carry image bytes. Known video profiles always use t2i.")] string mode = "auto",
         [API.APIParameter("Client-resolved writer mode, 't2i' or 'edit', used when mode is auto.")] string resolved_mode = "")
     {
         T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
         PromptEnhanceProfile profile = PromptEnhanceProfiles.Resolve(t2iModel, profile_override, out string reason);
-        string resolvedMode = PromptEnhanceProfiles.ResolveWriteMode(mode, resolved_mode, false);
+        string resolvedMode = PromptEnhanceProfiles.ResolveWriteModeForProfile(profile, mode, resolved_mode, false);
         if (profile is not null)
         {
             profile = PromptEnhanceProfiles.ApplyWriteMode(profile, resolvedMode);
@@ -89,7 +89,8 @@ public static class PromptEnhanceAPI
                 ["reason"] = reason,
                 ["strengths"] = new JArray(strengths),
                 ["mode"] = PromptEnhanceProfiles.NormalizeWriteMode(mode),
-                ["resolved_mode"] = resolvedMode
+                ["resolved_mode"] = resolvedMode,
+                ["is_video"] = profile is not null && PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID)
             }
         };
     }
@@ -106,9 +107,10 @@ public static class PromptEnhanceAPI
         [API.APIParameter("Enhance Strength: 'faithful' (send unchanged), 'expand' (permit restrained additions), or 'full' (build a complete scene) - default 'full'. Blank/unrecognized falls back to 'full'; capped to 'expand' on an edit profile.")] string strength = "full",
         [API.APIParameter("Optional video task for video profiles: 'T2VA', 'I2VA', 'FL2VA' or 'L2VA'. Ignored for image profiles.")] string video_task = "",
         [API.APIParameter("Optional clip length in seconds for video profiles. Ignored for image profiles, or when 0.")] double video_duration = 0,
-        [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto is edit when reference images are present, otherwise t2i. The server resolves auto again from the images on this request.")] string mode = "auto",
+        [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto is edit when reference images are present, otherwise t2i. The server resolves auto again from the images on this request. Known video profiles always use t2i.")] string mode = "auto",
         [API.APIParameter("Client-resolved writer mode, 't2i' or 'edit'. Used when mode is auto and this request carries no image bytes.")] string resolved_mode = "",
-        [API.APIParameter("Reference images for edit mode, init image first, then prompt images. Data URIs, raw base64, or output-relative paths. At most 4 are used, each downscaled to a 768px JPEG before the writer call.")] string[] images = null)
+        [API.APIParameter("Reference images for edit mode, init image first, then video end image, then prompt images. Data URIs, raw base64, or output-relative paths. At most 4 are used, each downscaled to a 768px JPEG before the writer call.")] string[] images = null,
+        [API.APIParameter("True when prompt image, audio, or video reference slots are populated; init and end frames do not count. For reference-capable MiniMax H3 models, selects the Ref2VA workflow; ignored for other profiles and models.")] bool video_has_references = false)
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -120,21 +122,21 @@ public static class PromptEnhanceAPI
             await socket.SendAndReportError($"EnhancePrompt request from {session.User.UserID}", $"The prompt is too long (over {MaxPromptLength} characters).", API.WebsocketTimeout);
             return null;
         }
-        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration, mode, resolved_mode, images), socket);
+        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration, mode, resolved_mode, images, video_has_references), socket);
         return null;
     }
 
     /// <summary>Internal handler: resolves a profile and endpoint, dispatches (or reuses a cached reply from)
     /// the writer LLM, and reports status/chunks/the terminal frame back over the websocket.</summary>
-    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration, string Mode, string ResolvedMode, string[] Images) input, Action<JObject> output, bool isWS)
+    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration, string Mode, string ResolvedMode, string[] Images, bool VideoHasReferences) input, Action<JObject> output, bool isWS)
     {
-        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration, string mode, string resolvedModeHint, string[] images) = input;
+        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration, string mode, string resolvedModeHint, string[] images, bool videoHasReferences) = input;
         try
         {
             T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
             PromptEnhanceProfile profile = PromptEnhanceProfiles.Resolve(t2iModel, profileOverride, out string reason);
             bool hasImages = HasAnyImage(images);
-            string resolvedMode = PromptEnhanceProfiles.ResolveWriteMode(mode, resolvedModeHint, hasImages);
+            string resolvedMode = PromptEnhanceProfiles.ResolveWriteModeForProfile(profile, mode, resolvedModeHint, hasImages);
             if (profile is not null)
             {
                 profile = PromptEnhanceProfiles.ApplyWriteMode(profile, resolvedMode);
@@ -163,11 +165,7 @@ public static class PromptEnhanceAPI
             string shielded = PromptEnhanceClient.Shield(prompt, out List<string> extracted);
             if (PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID))
             {
-                // Hybrid H3 filenames require the Ref2VA layout. The task itself is unchanged, so a
-                // non-hybrid FL2VA checkpoint keeps the FL2VA rewrite.
-                string workflow = profile.ID.Equals("minimax-h3", StringComparison.OrdinalIgnoreCase)
-                    ? PromptEnhanceClient.WorkflowForModel(model)
-                    : null;
+                string workflow = PromptEnhanceClient.WorkflowForVideoProfile(profile.ID, model, videoHasReferences);
                 shielded = $"{PromptEnhanceClient.BuildVideoHeader(videoTask, videoDuration, workflow)}{shielded}";
             }
             // Strength is applied after Shield, on the already-shielded prompt, so the directive text can never

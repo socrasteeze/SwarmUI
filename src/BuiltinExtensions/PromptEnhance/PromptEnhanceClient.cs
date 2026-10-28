@@ -521,25 +521,32 @@ public static class PromptEnhanceClient
     /// <summary>Video tasks a video profile's <c>Task:</c> header accepts (see <c>minimax-h3.system.md</c>).</summary>
     private static readonly HashSet<string> VideoTasks = ["T2VA", "I2VA", "FL2VA", "L2VA"];
 
-    /// <summary>True when <paramref name="modelName"/> is a MiniMax H3 hybrid checkpoint.
-    /// Match is a case-insensitive substring <c>hybrid</c>, which covers <c>TURBO-hybrid</c> and names
-    /// such as <c>10Eros_Max_h3_TURBO-hybrid</c>. Non-hybrid FL2VA checkpoints return false.</summary>
+    /// <summary>True when the model name has a case-insensitive <c>hybrid</c> or <c>ref2va</c> marker.
+    /// Callers must also check the resolved profile before using this capability.</summary>
     public static bool IsHybridCheckpoint(string modelName)
     {
-        return (modelName ?? "").Contains("hybrid", StringComparison.OrdinalIgnoreCase);
+        return (modelName ?? "").Contains("hybrid", StringComparison.OrdinalIgnoreCase)
+            || (modelName ?? "").Contains("ref2va", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Writer workflow tag for a hybrid H3 checkpoint (<c>Ref2VA</c>), or null so a non-hybrid
-    /// checkpoint keeps the task rewrite (FL2VA and the rest).</summary>
+    /// <summary>Writer workflow tag for a name with reference capability, or null otherwise.
+    /// Callers must check the resolved profile and whether references are present.</summary>
     public static string WorkflowForModel(string modelName)
     {
         return IsHybridCheckpoint(modelName) ? "Ref2VA" : null;
     }
 
+    /// <summary>Returns the H3 reference workflow only when the profile, model capability, and request agree.</summary>
+    public static string WorkflowForVideoProfile(string profileId, string modelName, bool hasReferences)
+    {
+        return hasReferences && string.Equals(profileId, "minimax-h3", StringComparison.OrdinalIgnoreCase)
+            ? WorkflowForModel(modelName) : null;
+    }
+
     /// <summary>Builds the <c>Task:</c> / <c>Duration:</c> header prepended to a video profile's shielded prompt, from
     /// the frontend's current video settings. An unrecognized task falls back to <c>T2VA</c>; a non-positive duration
     /// is left out so the profile applies its own default. A non-empty <paramref name="workflow"/> adds
-    /// <c>Workflow:</c> (hybrid H3 checkpoints pass <c>Ref2VA</c>). Always ends with a blank line.</summary>
+    /// <c>Workflow:</c> (reference-capable H3 requests with references pass <c>Ref2VA</c>). Always ends with a blank line.</summary>
     public static string BuildVideoHeader(string task, double durationSeconds, string workflow = null)
     {
         string normalized = (task ?? "").Trim().ToUpperInvariant();

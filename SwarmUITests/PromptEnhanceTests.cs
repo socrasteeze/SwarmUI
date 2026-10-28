@@ -204,8 +204,7 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceClient.WorkflowForModel(model.Name), Is.Null);
     }
 
-    /// <summary>A hybrid H3 filename (case-insensitive, including TURBO-hybrid) gets the Ref2VA workflow
-    /// tag. A plain FL2VA checkpoint does not, so its header stays the FL2VA rewrite.</summary>
+    /// <summary>A hybrid H3 filename signals reference capability; a plain FL2VA filename does not.</summary>
     [Test]
     public void HybridCheckpoint_SetsRef2VAWorkflow()
     {
@@ -220,6 +219,39 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(
             PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForModel("minimax_h3_fl2va_pruned_int8_convrot.safetensors")),
             Is.EqualTo("Task: FL2VA\nDuration: 5.13\n\n"));
+    }
+
+    /// <summary>Installed H3 names identify reference capability by either supported marker.</summary>
+    [TestCase("minimax_h3_fl2va_pruned_int8_convrot", false)]
+    [TestCase("minimax_h3_ref2va_int8_convrot", true)]
+    [TestCase("minimax_h3_ref2va_pruned_int8_convrot", true)]
+    [TestCase("MiniMax_H3_Ref2VA_nvfp4_mixed", true)]
+    [TestCase("minimaxH3INT8INT4_flREF2VAPruned_3089623", true)]
+    [TestCase("minimax_h3_hybrid_fl2va_ref2va_b20-49-int8", true)]
+    [TestCase("10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized", true)]
+    [TestCase("10Eros_Max_h3_hybrid_beta5_w4a8_14gb_optimized", true)]
+    [TestCase("DasiwaMinimaxH3_dasiwaHybridV4Turbo_3281858", true)]
+    [TestCase("h3ErosMax_beta5_3178732", false)]
+    [TestCase("h3ErosMax_beta6_3283276", false)]
+    public void ReferenceCapability_MatchesModelMarkers(string modelName, bool expected)
+    {
+        Assert.That(PromptEnhanceClient.IsHybridCheckpoint(modelName), Is.EqualTo(expected));
+    }
+
+    /// <summary>Workflow requires references, a capable model, and the H3 profile.</summary>
+    [Test]
+    public void VideoWorkflow_RequiresProfileCapabilityAndReferences()
+    {
+        string model = "minimax_h3_ref2va_int8_convrot";
+        string withReferences = PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", model, true);
+        string withoutReferences = PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", model, false);
+        Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, withReferences), Is.EqualTo("Task: FL2VA\nDuration: 5.13\nWorkflow: Ref2VA\n\n"));
+        Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, withoutReferences), Is.EqualTo("Task: FL2VA\nDuration: 5.13\n\n"));
+        Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "10Eros_Max_h3_TURBO-hybrid_beta5_w4a8_14gb_optimized", false)), Is.EqualTo("Task: FL2VA\nDuration: 5.13\n\n"));
+        Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "MiniMax_H3_Ref2VA_nvfp4_mixed", true)), Is.EqualTo("Task: FL2VA\nDuration: 5.13\nWorkflow: Ref2VA\n\n"));
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "minimax_h3_fl2va_pruned_int8_convrot", true), Is.Null);
+        Assert.That(PromptEnhanceClient.IsHybridCheckpoint("redcraftHybridH3Krea2dual_40K2TDUAL_3196558"), Is.True);
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("krea-2", "redcraftHybridH3Krea2dual_40K2TDUAL_3196558", true), Is.Null);
     }
 
     /// <summary>A model that matches no filename override, class, or compat class resolves to null with a
@@ -364,6 +396,20 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceProfiles.ResolveWriteMode("edit", "", false), Is.EqualTo("edit"));
         Assert.That(PromptEnhanceProfiles.ResolveWriteMode("t2i", "edit", true), Is.EqualTo("t2i"));
         Assert.That(PromptEnhanceProfiles.ResolveWriteMode("nope", "", false), Is.EqualTo("t2i"));
+    }
+
+    /// <summary>Video profiles bypass edit mode before profile selection and image preparation.</summary>
+    [Test]
+    public void ResolveWriteModeForProfile_VideoForcesT2I()
+    {
+        PromptEnhanceProfile video = new("minimax-h3", "H3", "H3", "video text");
+        PromptEnhanceProfile image = new("krea-2", "Krea", "Krea", "image text");
+        Assert.That(PromptEnhanceProfiles.ResolveWriteModeForProfile(video, "edit", "edit", true), Is.EqualTo("t2i"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteModeForProfile(video, "auto", "edit", false), Is.EqualTo("t2i"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteModeForProfile(video, "auto", "", true), Is.EqualTo("t2i"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteModeForProfile(image, "edit", "", false), Is.EqualTo("edit"));
+        Assert.That(PromptEnhanceProfiles.ResolveWriteModeForProfile(null, "auto", "", true), Is.EqualTo("edit"));
+        Assert.That(PromptEnhanceProfiles.ApplyWriteMode(video, PromptEnhanceProfiles.ResolveWriteModeForProfile(video, "edit", "", true)), Is.SameAs(video));
     }
 
     /// <summary>Edit mode uses the dedicated edit asset when one is registered for the base profile, and

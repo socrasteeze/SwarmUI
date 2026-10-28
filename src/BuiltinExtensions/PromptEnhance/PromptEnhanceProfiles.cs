@@ -67,9 +67,9 @@ public static class PromptEnhanceProfiles
     /// exists. The base profile stays registered unchanged; callers receive a copy.</summary>
     public const string GenericEditAppendix = "\n\n## Edit mode\n\nThe user is editing existing images, not requesting a new scene from scratch. Output only a short imperative edit instruction, with no preamble. State exactly what changes. Explicitly state what stays the same: identity, face, pose, composition, lighting, and style, unless the user asked to change that thing. When reference images are attached, refer to each by its role, for example \"image 1 is the subject, image 2 provides the outfit\". Never invent new content, objects, or details the user did not ask for. Expand and clarify only. Quote any text that must be rendered, exactly. If the request is unclear, keep the original meaning.\n";
 
-    /// <summary>Profile IDs that target a video model and understand the <c>Task:</c> / <c>Duration:</c> header the
-    /// frontend builds from the current video parameters (see <c>PromptEnhanceAPI.EnhancePrompt_Internal</c>). Any
-    /// other profile never receives that header, so image profiles and their cache keys are unaffected.</summary>
+    /// <summary>Profile IDs that target a video model and receive a <c>Task:</c> / <c>Duration:</c> header
+    /// built from the request video parameters (see <c>PromptEnhanceAPI.EnhancePrompt_Internal</c>). Known video
+    /// profiles always use T2I writer mode. Other profiles never receive that header.</summary>
     public static readonly HashSet<string> KnownVideoProfileIDs = new(StringComparer.OrdinalIgnoreCase)
     {
         "minimax-h3"
@@ -370,6 +370,17 @@ public static class PromptEnhanceProfiles
             return "edit";
         }
         return "t2i";
+    }
+
+    /// <summary>Resolves the writer mode for a profile. Known video profiles always use T2I so frame
+    /// inputs do not select an image-edit profile or send images to the writer.</summary>
+    public static string ResolveWriteModeForProfile(PromptEnhanceProfile profile, string mode, string clientResolved, bool hasImages)
+    {
+        if (profile is not null && KnownVideoProfileIDs.Contains(profile.ID))
+        {
+            return "t2i";
+        }
+        return ResolveWriteMode(mode, clientResolved, hasImages);
     }
 
     /// <summary>Returns the profile to send for <paramref name="resolvedMode"/>.
