@@ -2185,6 +2185,144 @@ check('the sorted LoRA base list is reused until metadata changes',
     loraSearchBurst.sortsCached == loraSearchBurst.sortsAfterOpen,
     `${loraSearchBurst.sortsAfterOpen} -> ${loraSearchBurst.sortsCached}`);
 
+// Post-preset edits win. The model label is the name only. Copy Prompt loads the original positive prompt.
+const precedence = await page.evaluate(async () => {
+    let settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    mState.paramMeta['model'] = { id: 'model', name: 'Model' };
+    mState.archFilter = '';
+    mState.clearUserTouched();
+    mState.clearPinnedUpscale();
+    mState.params['model'] = 'ill/manual-model.safetensors';
+    mState.params['prompt'] = 'typed before';
+    mState.params['steps'] = '12';
+    mState.params['loras'] = ['ill/mine'];
+    mState.params['loraweights'] = ['0.5'];
+    delete mState.params['lorasectionconfinement'];
+    mState.presets = [{ title: 'ill/pose', is_starred: false, param_map: {
+        model: 'ill/preset-model', prompt: 'preset prompt', steps: '28', loras: 'ill/preset-lora', loraweights: '1' } }];
+    mState.activePresets = [];
+    mCreate.renderPresets();
+    let preset = document.querySelector('.m-preset-select');
+    preset.value = 'ill/pose';
+    preset.dispatchEvent(new Event('change'));
+    await settle();
+    let beforeTouch = {
+        model: mState.buildGenInput()['model'],
+        label: mCreate.modelButton.textContent,
+        title: mCreate.modelButton.title,
+        red: mCreate.modelButton.classList.contains('m-overridden'),
+        steps: `${mState.buildGenInput()['steps']}`,
+        loras: MState.toList(mState.buildGenInput()['loras']).join(',')
+    };
+    mState.setParam('model', 'ill/after-model.safetensors');
+    mCreate.renderModelButton();
+    let afterTouch = {
+        model: mState.buildGenInput()['model'],
+        label: mCreate.modelButton.textContent,
+        title: mCreate.modelButton.title,
+        red: mCreate.modelButton.classList.contains('m-overridden')
+    };
+    mState.setLoras([{ name: 'ill/edited', weight: 0.4 }]);
+    let lorasAfterEdit = MState.toList(mState.buildGenInput()['loras']).join(',');
+    preset.value = 'ill/pose';
+    preset.dispatchEvent(new Event('change'));
+    await settle();
+    let afterReselect = {
+        model: mState.buildGenInput()['model'],
+        touched: mState.userTouched.has('model'),
+        label: mCreate.modelButton.textContent,
+        steps: `${mState.buildGenInput()['steps']}`
+    };
+    mState.params['cfgscale'] = '4';
+    mState.params['seed'] = '7';
+    mState.activePresets = ['ill/pose'];
+    let beforeCopy = {
+        cfg: mState.params['cfgscale'],
+        seed: mState.params['seed'],
+        presets: mState.activePresets.slice(),
+        loras: MState.toList(mState.params['loras']).join(',')
+    };
+    let copied = [];
+    let clip = navigator.clipboard;
+    let restoreWrite = null;
+    if (clip && clip.writeText) {
+        let originalWrite = clip.writeText.bind(clip);
+        clip.writeText = (text) => {
+            copied.push(text);
+            return Promise.resolve();
+        };
+        restoreWrite = () => { clip.writeText = originalWrite; };
+    }
+    mImages.openViewer({
+        url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+        fullsrc: 'raw/copy.png',
+        metadata: {
+            sui_image_params: { prompt: 'resolved cats', negativeprompt: 'blur', steps: 30 },
+            sui_extra_data: { original_prompt: 'a cat', original_negativeprompt: 'blurry' }
+        }
+    }, null);
+    [...document.querySelectorAll('.m-viewer-action')].find(button => button.textContent == 'Copy Prompt').click();
+    await settle();
+    let afterCopy = {
+        prompt: mState.params['prompt'],
+        negative: mState.params['negativeprompt'],
+        cfg: mState.params['cfgscale'],
+        seed: mState.params['seed'],
+        presets: mState.activePresets.slice(),
+        loras: MState.toList(mState.params['loras']).join(','),
+        steps: mState.params['steps'],
+        box: mCreate.promptBox.value,
+        copied: copied.slice(),
+        viewer: document.querySelectorAll('.m-viewer').length,
+        hash: location.hash
+    };
+    if (restoreWrite) {
+        restoreWrite();
+    }
+    for (let overlay of document.querySelectorAll('.m-viewer')) {
+        overlay.remove();
+    }
+    return { beforeTouch, afterTouch, lorasAfterEdit, afterReselect, beforeCopy, afterCopy };
+});
+check('a preset model replaces the earlier pick and the label is the name only',
+    precedence.beforeTouch.model == 'ill/preset-model'
+    && precedence.beforeTouch.label == 'preset-model'
+    && !precedence.beforeTouch.label.includes('(')
+    && !precedence.beforeTouch.label.includes(')')
+    && precedence.beforeTouch.red
+    && precedence.beforeTouch.title == 'Preset overrides your pick'
+    && precedence.beforeTouch.steps == '12',
+    JSON.stringify(precedence.beforeTouch));
+check('a model picked after the preset wins in mergedParams',
+    precedence.afterTouch.model == 'ill/after-model.safetensors'
+    && precedence.afterTouch.label == 'after-model'
+    && !precedence.afterTouch.label.includes('(')
+    && precedence.afterTouch.red
+    && precedence.afterTouch.title == 'Your pick overrides the preset',
+    JSON.stringify(precedence.afterTouch));
+check('editing LoRAs after the preset keeps the preset LoRAs in the merge',
+    precedence.lorasAfterEdit == 'ill/edited,ill/preset-lora', precedence.lorasAfterEdit);
+check('selecting the preset again clears the model override',
+    precedence.afterReselect.model == 'ill/preset-model'
+    && precedence.afterReselect.touched == false
+    && precedence.afterReselect.label == 'preset-model'
+    && !precedence.afterReselect.label.includes('(')
+    && precedence.afterReselect.steps == '12',
+    JSON.stringify(precedence.afterReselect));
+check('Copy Prompt loads original_prompt and leaves the other params alone',
+    precedence.afterCopy.prompt == 'a cat'
+    && precedence.afterCopy.negative != 'blurry'
+    && precedence.afterCopy.cfg == precedence.beforeCopy.cfg
+    && precedence.afterCopy.seed == precedence.beforeCopy.seed
+    && precedence.afterCopy.presets.join(',') == precedence.beforeCopy.presets.join(',')
+    && precedence.afterCopy.loras == precedence.beforeCopy.loras
+    && `${precedence.afterCopy.steps}` == '12'
+    && precedence.afterCopy.box == 'a cat'
+    && precedence.afterCopy.copied.join('|') == 'a cat'
+    && precedence.afterCopy.viewer == 0
+    && precedence.afterCopy.hash == '#create',
+    JSON.stringify(precedence.afterCopy));
+
 await browser.close();
 
 

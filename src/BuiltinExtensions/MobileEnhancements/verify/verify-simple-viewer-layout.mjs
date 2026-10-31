@@ -52,12 +52,20 @@ for (let size of [[360, 800], [390, 844], [768, 900], [1440, 900], [680, 420]]) 
         return { viewer, image, promptBox, footer, buttons, lines: (promptBox.height - padding) / lineHeight,
             overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
     });
-    let widths = geometry.buttons.map(box => box.width);
-    check(`${size[0]}x${size[1]} actions fill one uniform row`, geometry.buttons.length == 5
+    let labels = await page.evaluate(() => [...document.querySelectorAll('.m-viewer-action')].map(button => button.textContent));
+    let widths = geometry.buttons.slice(0, 5).map(box => box.width);
+    let closeBox = geometry.buttons[geometry.buttons.length - 1];
+    check(`${size[0]}x${size[1]} actions are a 3-column grid with Close across the last row`, geometry.buttons.length == 6
+        && labels.join('|') == 'Reuse Params|Copy Prompt|Prompt Img|Star|Delete|Close'
         && Math.abs(geometry.buttons[0].left - geometry.footer.left) <= 1
-        && Math.abs(geometry.buttons[4].right - geometry.footer.right) <= 1
+        && Math.abs(geometry.buttons[2].top - geometry.buttons[0].top) <= 1
+        && Math.abs(geometry.buttons[3].top - geometry.buttons[4].top) <= 1
+        && geometry.buttons[3].top > geometry.buttons[0].bottom - 1
+        && Math.abs(closeBox.left - geometry.footer.left) <= 1
+        && Math.abs(closeBox.right - geometry.footer.right) <= 1
+        && closeBox.top > geometry.buttons[3].bottom - 1
         && Math.max(...widths) - Math.min(...widths) <= 1
-        && geometry.buttons.every(box => box.height >= 44 && Math.abs(box.height - geometry.buttons[0].height) <= 1), JSON.stringify({ footer: geometry.footer, buttons: geometry.buttons }));
+        && geometry.buttons.every(box => box.height >= 44), JSON.stringify({ labels, footer: geometry.footer, buttons: geometry.buttons }));
     check(`${size[0]}x${size[1]} prompt and image remain contained`, geometry.lines <= 5.05
         && geometry.image.bottom <= geometry.promptBox.top + 1 && geometry.promptBox.bottom <= geometry.footer.top + 1
         && geometry.footer.bottom <= geometry.viewer.bottom + 1 && geometry.overflow <= 1, JSON.stringify(geometry));
