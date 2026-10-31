@@ -11,7 +11,7 @@ using ISImage = SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgb
 
 namespace SwarmUITests;
 
-/// <summary>Tests the server filesystem image browser's bounded, non-recursive behavior.</summary>
+/// <summary>Tests the server filesystem image browser's bounded listing and recursive Drives filename search.</summary>
 [TestFixture]
 public class SimpleImageBrowserTests : SwarmUITest
 {
@@ -143,6 +143,100 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(Names(SimpleImageBrowserAPI.ListFolder(TempRoot, 2, 3, "", true, "Date", true)).Take(1), Is.EqualTo(new[] { "gamma.png" }));
         Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "", true, "Bogus", false)["error_id"], Is.EqualTo("bad_sort"));
         Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "", true, "42", false)["error_id"], Is.EqualTo("bad_sort"));
+    }
+
+    /// <summary>Recursive search finds image file names at every depth, ignores folder names, and sorts before paging.</summary>
+    [Test]
+    public void ListFolder_RecursiveSearchMatchesNestedFileNames()
+    {
+        string levelOne = Path.Combine(TempRoot, "level-one");
+        string levelTwo = Path.Combine(levelOne, "level-two");
+        string levelThree = Path.Combine(levelTwo, "level-three");
+        string folderNamedNeedle = Path.Combine(TempRoot, "needle-folder");
+        Directory.CreateDirectory(levelThree);
+        Directory.CreateDirectory(folderNamedNeedle);
+        string direct = Path.Combine(TempRoot, "also-needle.png");
+        string mid = Path.Combine(levelOne, "CaseNeedle.JPG");
+        string deep = Path.Combine(levelTwo, "deep-needle.png");
+        string buried = Path.Combine(levelThree, "buried-needle.png");
+        WriteValidPng(direct);
+        WriteValidPng(mid);
+        WriteValidPng(deep);
+        WriteValidPng(buried);
+        WriteValidPng(Path.Combine(folderNamedNeedle, "plain.png"));
+        WriteValidPng(Path.Combine(levelOne, "other.png"));
+        File.WriteAllText(Path.Combine(levelTwo, "notes-needle.txt"), "not an image");
+        File.SetLastWriteTimeUtc(direct, DateTime.UnixEpoch.AddMinutes(1));
+        File.SetLastWriteTimeUtc(mid, DateTime.UnixEpoch.AddMinutes(2));
+        File.SetLastWriteTimeUtc(deep, DateTime.UnixEpoch.AddMinutes(3));
+        File.SetLastWriteTimeUtc(buried, DateTime.UnixEpoch.AddMinutes(4));
+
+        string[] Names(Newtonsoft.Json.Linq.JObject result) => result["files"].Select(row => (string)row["name"]).ToArray();
+        string[] Folders(Newtonsoft.Json.Linq.JObject result) => result["files"].Select(row => (string)row["rel_dir"]).ToArray();
+        Newtonsoft.Json.Linq.JObject matches = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "needle", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject upper = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "NEEDLE", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject nameDesc = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "needle", true, "Name", false, true);
+        Newtonsoft.Json.Linq.JObject newest = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "needle", true, "Date", false, true);
+        Newtonsoft.Json.Linq.JObject oldest = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "needle", true, "Date", true, true);
+        Newtonsoft.Json.Linq.JObject directOnly = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "needle", true);
+        Newtonsoft.Json.Linq.JObject folderName = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "needle-folder", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject page = SimpleImageBrowserAPI.ListFolder(TempRoot, 2, 1, "needle", true, "Name", true, true);
+
+        Assert.That(Names(matches), Is.EqualTo(new[] { "also-needle.png", "buried-needle.png", "CaseNeedle.JPG", "deep-needle.png" }));
+        Assert.That(Folders(matches), Is.EqualTo(new[] { "", "level-one/level-two/level-three", "level-one", "level-one/level-two" }));
+        Assert.That(Names(upper), Is.EqualTo(Names(matches)));
+        Assert.That(Names(nameDesc), Is.EqualTo(new[] { "deep-needle.png", "CaseNeedle.JPG", "buried-needle.png", "also-needle.png" }));
+        Assert.That(Names(newest), Is.EqualTo(new[] { "buried-needle.png", "deep-needle.png", "CaseNeedle.JPG", "also-needle.png" }));
+        Assert.That(Names(oldest), Is.EqualTo(new[] { "also-needle.png", "CaseNeedle.JPG", "deep-needle.png", "buried-needle.png" }));
+        Assert.That((int)matches["total"], Is.EqualTo(4));
+        Assert.That(matches["truncated"], Is.Null);
+        Assert.That(matches["folders"].Select(row => (string)row["name"]), Is.EqualTo(new[] { "level-one", "needle-folder" }));
+        Assert.That(Names(directOnly), Is.EqualTo(new[] { "also-needle.png" }));
+        Assert.That(directOnly["files"][0]["rel_dir"], Is.Null);
+        Assert.That(directOnly["truncated"], Is.Null);
+        Assert.That(folderName["files"].Count(), Is.EqualTo(0));
+        Assert.That((int)folderName["total"], Is.EqualTo(0));
+        Assert.That(Names(page), Is.EqualTo(new[] { "CaseNeedle.JPG" }));
+        Assert.That((int)page["next_offset"], Is.EqualTo(3));
+    }
+
+    /// <summary>Recursive search sorts the whole match set, then keeps 500 and marks the page truncated.</summary>
+    [Test]
+    public void ListFolder_RecursiveSearchCapsSortedMatches()
+    {
+        string batchA = Path.Combine(TempRoot, "batch-a");
+        string batchB = Path.Combine(batchA, "batch-b");
+        Directory.CreateDirectory(batchB);
+        int count = SimpleImageBrowserAPI.RecursiveMatchCap + 1;
+        for (int i = 0; i < count; i++)
+        {
+            string directory = i < 200 ? TempRoot : i < 400 ? batchA : batchB;
+            File.WriteAllBytes(Path.Combine(directory, $"match-{i:0000}.png"), new byte[] { 1 });
+        }
+        File.WriteAllText(Path.Combine(batchB, "match-notes.txt"), "not an image");
+
+        Newtonsoft.Json.Linq.JObject first = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "match", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject nested = SimpleImageBrowserAPI.ListFolder(TempRoot, 200, 1, "match", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject deeper = SimpleImageBrowserAPI.ListFolder(TempRoot, 400, 1, "match", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject tail = SimpleImageBrowserAPI.ListFolder(TempRoot, 480, 48, "match", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject direct = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 250, "match", true);
+
+        Assert.That((int)first["total"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
+        Assert.That((bool)first["truncated"], Is.True);
+        Assert.That((string)first["files"][0]["name"], Is.EqualTo("match-0000.png"));
+        Assert.That((string)first["files"][0]["rel_dir"], Is.EqualTo(""));
+        Assert.That(first["folders"].Select(row => (string)row["name"]), Is.EqualTo(new[] { "batch-a" }));
+        Assert.That((string)nested["files"][0]["name"], Is.EqualTo("match-0200.png"));
+        Assert.That((string)nested["files"][0]["rel_dir"], Is.EqualTo("batch-a"));
+        Assert.That((string)deeper["files"][0]["name"], Is.EqualTo("match-0400.png"));
+        Assert.That((string)deeper["files"][0]["rel_dir"], Is.EqualTo("batch-a/batch-b"));
+        Assert.That(tail["files"].Count(), Is.EqualTo(20));
+        Assert.That((string)tail["files"].Last()["name"], Is.EqualTo("match-0499.png"));
+        Assert.That(tail["files"].Select(row => (string)row["name"]), Does.Not.Contain("match-0500.png"));
+        Assert.That(tail["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
+        Assert.That((int)direct["total"], Is.EqualTo(200));
+        Assert.That(direct["truncated"], Is.Null);
+        Assert.That(direct["files"][0]["rel_dir"], Is.Null);
     }
 
     /// <summary>Output paging filters media before paging and keeps direct virtual folders visible.</summary>

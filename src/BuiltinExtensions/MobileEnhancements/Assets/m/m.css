@@ -3464,6 +3464,17 @@ button.m-header-link {
     white-space: nowrap;
     pointer-events: none;
 }
+.m-imgbrowser-tile-dir,
+.m-imgbrowser-tile-file {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-imgbrowser-tile-dir {
+    font-size: 9px;
+    opacity: 0.85;
+}
 .m-imgbrowser-roots-edit .m-imgbrowser-title-row {
     margin-bottom: 0.35rem;
 }

@@ -1,6 +1,7 @@
 /** MobileEnhancements standalone client - server-backed image folder browser for /simple.
  * Output lists Swarm output folders through ListImages and returns relative path entries. Drives, when the
  * user has browse_server_images, lists machine folders through ListSimpleImageFolder and returns image data.
+ * A Drives filename search walks subfolders, keeps the server's capped sorted set, and shows each match's folder.
  * Favorites hold Output-relative paths, or full host paths (D:\Pictures, \\server\share) that open in Drives.
  * An optional phone picker remains available for device images. */
 class MImageBrowser {
@@ -477,7 +478,17 @@ class MImageBrowser {
                 let img = document.createElement('img');
                 img.alt = file.name;
                 tile.appendChild(img);
-                tile.appendChild(mUI.el('div', 'm-imgbrowser-tile-name', file.name));
+                let name = mUI.el('div', 'm-imgbrowser-tile-name');
+                if (file.rel_dir) {
+                    let full = `${file.rel_dir}/${file.name}`;
+                    name.title = full;
+                    name.appendChild(mUI.el('span', 'm-imgbrowser-tile-dir', `${file.rel_dir}/`));
+                    name.appendChild(mUI.el('span', 'm-imgbrowser-tile-file', file.name));
+                }
+                else {
+                    name.textContent = file.name;
+                }
+                tile.appendChild(name);
                 tile.addEventListener('click', () => {
                     if (selectionInFlight || tile.disabled || closed || !content.isConnected || version != requestVersion) {
                         return;
@@ -574,8 +585,13 @@ class MImageBrowser {
                 pageLabel.textContent = `${page} / ${pages}`;
                 pageLabel.setAttribute('aria-label', `Page ${page} of ${pages}`);
                 let shown = grid.querySelectorAll('.m-imgbrowser-tile').length;
-                status.textContent = shown ? `${offset + 1}\u2013${offset + shown} of ${total}`
-                    : (search ? 'No matching images.' : 'No images in this folder.');
+                if (shown && this.source == 'machine' && search && (data.truncated || total >= 500)) {
+                    status.textContent = 'First 500 matches - refine the search';
+                }
+                else {
+                    status.textContent = shown ? `${offset + 1}\u2013${offset + shown} of ${total}`
+                        : (search ? 'No matching images.' : 'No images in this folder.');
+                }
                 remember();
                 if (!restore) {
                     return;
@@ -603,10 +619,14 @@ class MImageBrowser {
                 pathLabel.textContent = this.machinePath || 'Drives';
                 renderRoots();
                 let requestedPath = this.machinePath;
-                genericRequest('ListSimpleImageFolder', {
+                let request = {
                     'path': this.machinePath, 'offset': offset, 'limit': MImageBrowser.PageSize,
                     'search': search, 'image_page': true, 'sortBy': sortBy, 'sortReverse': sortReverse
-                }, data => {
+                };
+                if (search) {
+                    request.recursive = true;
+                }
+                genericRequest('ListSimpleImageFolder', request, data => {
                     if (closed || !content.isConnected || version != requestVersion) {
                         return;
                     }

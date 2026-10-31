@@ -103,6 +103,16 @@ await page.addInitScript(pixel => {
                 return respond({ path, parent: '', folders: [{ name: 'Shots', path: 'E:\\Shots' }], files: [], total: 0, next_offset: null });
             }
             if (path == 'E:\\Shots') {
+                if (args.search == 'deep-match') {
+                    return respond({ path, parent: 'E:\\', folders: [{ name: 'Nested', path: 'E:\\Shots\\Nested' }],
+                        files: [{ name: 'deep.png', path: 'E:\\Shots\\album\\deep.png', rel_dir: 'album' }],
+                        total: 1, next_offset: null });
+                }
+                if (args.search == 'capped-search') {
+                    return respond({ path, parent: 'E:\\', folders: [{ name: 'Nested', path: 'E:\\Shots\\Nested' }],
+                        files: [{ name: 'cap.png', path: 'E:\\Shots\\wide\\cap.png', rel_dir: 'wide' }],
+                        total: 500, truncated: true, next_offset: null });
+                }
                 let files = Array.from({ length: 102 }, (_, i) => ({ name: `shot-${i}.png`, path: `E:\\Shots\\shot-${i}.png` }));
                 files = files.filter(file => file.name.toLowerCase().includes((args.search || '').toLowerCase()));
                 let data = { path, parent: 'E:\\', folders: [{ name: 'Nested', path: 'E:\\Shots\\Nested' }],
@@ -279,6 +289,8 @@ await search.fill('SHOT-100');
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-100.png');
 check('filename search reaches images beyond page one and resets the page', await page.locator('.m-imgbrowser-page').textContent() == '1 / 1'
     && await page.locator('.m-imgbrowser-tile').count() == 1 && await page.getByRole('button', { name: 'Previous Page' }).isDisabled());
+let recursiveCall = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder' && call.args.search == 'SHOT-100'));
+check('a Drives filename search requests recursive results', recursiveCall.args.recursive == true && recursiveCall.args.sortBy == 'Name', JSON.stringify(recursiveCall.args));
 check('search keeps folder navigation available', await page.getByRole('button', { name: 'Nested', exact: true }).count() == 1);
 let searchAfter = await page.locator('.m-imgbrowser-pager').boundingBox();
 check('pagination controls do not shift between full and filtered pages', Math.abs(fixedBefore.y - searchAfter.y) <= 1);
@@ -292,6 +304,39 @@ await search.fill('no-such-image');
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'No matching images.');
 check('empty search disables both paging buttons and retains navigation', await page.getByRole('button', { name: 'Previous Page' }).isDisabled()
     && await page.getByRole('button', { name: 'Next Page' }).isDisabled() && await page.getByRole('button', { name: 'Nested', exact: true }).count() == 1);
+await search.fill('');
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+let clearedSearch = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder'));
+check('an empty Drives search does not recurse', clearedSearch.args.search == '' && clearedSearch.args.recursive != true, JSON.stringify(clearedSearch.args));
+check('Drives search keeps the 250ms debounce', await page.evaluate(() => {
+    let before = window.__calls.length;
+    let box = document.querySelector('.m-imgbrowser-search');
+    box.value = 'deep-match';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    return window.__calls.length == before;
+}));
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-file')?.textContent == 'deep.png');
+let deepTile = await page.evaluate(() => {
+    let tile = document.querySelector('.m-imgbrowser-tile');
+    let name = tile.querySelector('.m-imgbrowser-tile-name');
+    return { path: tile.dataset.path, title: name.title, dir: name.querySelector('.m-imgbrowser-tile-dir')?.textContent, file: name.querySelector('.m-imgbrowser-tile-file')?.textContent };
+});
+check('a recursive Drives result shows its subfolder and keeps the real path', deepTile.dir == 'album/' && deepTile.file == 'deep.png'
+    && deepTile.title == 'album/deep.png' && deepTile.path == 'E:\\Shots\\album\\deep.png', JSON.stringify(deepTile));
+await picker().locator('.m-imgbrowser-sort').selectOption('Newest First');
+await page.waitForFunction(() => {
+    let call = [...window.__calls].reverse().find(item => item.route == 'ListSimpleImageFolder' && item.args.search == 'deep-match');
+    return call && call.args.sortBy == 'Date' && call.args.sortReverse == false && call.args.recursive == true;
+});
+check('Drives sort still applies across a recursive search', true);
+await picker().locator('.m-imgbrowser-sort').selectOption('Name A-Z');
+await page.waitForFunction(() => {
+    let call = [...window.__calls].reverse().find(item => item.route == 'ListSimpleImageFolder' && item.args.search == 'deep-match');
+    return call && call.args.sortBy == 'Name';
+});
+await search.fill('capped-search');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'First 500 matches - refine the search');
+check('a capped Drives search tells the user to refine it', await page.locator('.m-imgbrowser-status').textContent() == 'First 500 matches - refine the search');
 await search.fill('');
 await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
 
@@ -395,6 +440,8 @@ await page.getByRole('searchbox', { name: 'Search Filenames' }).fill('OUTPUT-120
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'output-120.png');
 check('Output filename search finds an image past the original page', await page.locator('.m-imgbrowser-tile').count() == 1
     && await page.locator('.m-imgbrowser-page').textContent() == '1 / 1');
+let outputSearch = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListImages' && call.args.search == 'OUTPUT-120'));
+check('Output search stays in the current folder', outputSearch.args.recursive != true && outputSearch.args.search == 'OUTPUT-120', JSON.stringify(outputSearch.args));
 await page.getByRole('searchbox', { name: 'Search Filenames' }).fill('');
 await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
 await page.evaluate(() => { window.__failNext = true; });
