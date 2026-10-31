@@ -86,7 +86,7 @@ await page.evaluate(source => {
         registerTab() {}, initRouter() {}, initKeyboardWatch() {}, moreItems: [],
     };
     window.mCreate = { openBackendSheet() {} };
-    window.mAutoComplete = { loadSettings() {}, enterAccepts: false, setEnterAccepts() {} };
+    window.mAutoComplete = { loadSettings() {} };
     window.permissions = { hasPermission: () => true };
     window.getSession = () => {};
     window.genericRequest = () => {};

@@ -37,10 +37,8 @@ class MAutoComplete {
         /** box -> its permanent suggestion-strip element (one per enableFor call, never removed - see
          * enableFor for why it has to be permanent rather than inserted/removed per keystroke). */
         this.slots = new Map();
-        /** Whether Enter/Tab take the top suggestion for a plain word, not just inside a `<tag:`. Off by
-         * default: the matcher returns hits for essentially any English word, so an always-on Enter silently
-         * rewrites natural-language prompts. See enterWouldAccept. */
-        this.enterAccepts = localStorage.getItem('m_client_enter_accepts') == 'yes';
+        // Enter accepts a suggestion only inside an unclosed `<` tag. Hard-coded: the matcher returns hits
+        // for essentially any English word, so Enter on prose would corrupt prompts. See enterWouldAccept.
         this.registerPrefixes();
     }
 
@@ -494,17 +492,12 @@ class MAutoComplete {
      * instruction. The genpage popover has the same hazard - it auto-selects its first row and Enter takes it
      * - so it is not a safe model to copy here.
      *
-     * Two situations are safe:
-     *  - Inside an unclosed `<` tag (`<wildcard:R`, `<lora:`, `<character:mik`). The user is unambiguously
-     *    completing a tag, and prose cannot wander in there by accident.
-     *  - When the user has explicitly opted in (More > Enter accepts suggestion), for tag-list prompting
-     *    where every word is meant to become a booru tag.
-     * Everything else leaves Enter alone, because a newline in a prompt box is a legitimate thing to want and
-     * a corrupted prompt is far worse than a missing shortcut. */
+     * Enter accepts a suggestion only inside an unclosed `<` tag (`<wildcard:R`, `<lora:`, `<character:mik>`).
+     * That is hard-coded. The matcher returns hits for essentially any English word, so Enter on prose would
+     * corrupt prompts. Prose cannot wander into an unclosed tag by accident. Everything else leaves Enter
+     * alone, because a newline in a prompt box is a legitimate thing to want and a corrupted prompt is far
+     * worse than a missing shortcut. */
     enterWouldAccept(box) {
-        if (this.enterAccepts) {
-            return true;
-        }
         // Mirrors the tag detection in getPossibleList: an unclosed '<' before the caret.
         let prompt = getTextContent(box).substring(0, getTextSelRange(box)[0]);
         let lastBrace = prompt.lastIndexOf('<');
@@ -542,12 +535,6 @@ class MAutoComplete {
             let selected = strip.querySelector('.m-ac-chip.m-ac-sel') || chips[0];
             selected.click();
         }
-    }
-
-    /** Turns Enter-accepts-anywhere on or off, and remembers it. */
-    setEnterAccepts(on) {
-        this.enterAccepts = on;
-        localStorage.setItem('m_client_enter_accepts', on ? 'yes' : 'no');
     }
 
     /** Scrolls a strip that just became visible into the panel. A strip already on screen stays put,
