@@ -322,6 +322,96 @@ await page.setInputFiles('.m-controlnet input[type="file"]', { name: 'fixture.pn
 await page.waitForFunction(() => mState.control.image?.kind == 'data');
 const upload = await page.evaluate(() => ({ control: mState.buildGenInput().controlnetimageinput?.startsWith('data:image/png'), start: mState.initImage, end: mState.videoEndImage }));
 check('the actual file input attaches control bytes without altering frame state', upload.control && !upload.start && !upload.end);
+await page.evaluate(() => {
+    mControlNet.wrap.open = true;
+    let canvas = document.createElement('canvas');
+    canvas.width = 200;
+    canvas.height = 50;
+    let ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0a0';
+    ctx.fillRect(0, 0, 200, 50);
+    mState.control.image = { kind: 'data', value: canvas.toDataURL('image/png') };
+    mCreate.render();
+});
+await page.waitForFunction(() => {
+    let img = document.querySelector('.m-controlnet .m-frame-tile img');
+    return img && img.complete && img.naturalWidth == 200 && img.naturalHeight == 50;
+});
+const controlPreview = await page.evaluate(() => {
+    let wrap = mControlNet.wrap;
+    let slot = wrap.querySelector('.m-frame-slot');
+    let tile = slot.querySelector('.m-frame-tile');
+    let img = tile.querySelector('img');
+    let paste = slot.querySelector('.m-frame-paste');
+    let remove = tile.querySelector('.m-frame-tile-remove');
+    let add = document.createElement('button');
+    add.className = 'm-frame-add';
+    add.textContent = '+';
+    slot.querySelector('.m-frame-slot-body').appendChild(add);
+    let slotBox = slot.getBoundingClientRect();
+    let wrapBox = wrap.getBoundingClientRect();
+    let tileBox = tile.getBoundingClientRect();
+    let imgBox = img.getBoundingClientRect();
+    let pasteBox = paste.getBoundingClientRect();
+    let addBox = add.getBoundingClientRect();
+    let removeBox = remove.getBoundingClientRect();
+    let imgStyle = getComputedStyle(img);
+    let removeStyle = getComputedStyle(remove);
+    let probe = document.createElement('div');
+    probe.className = 'm-frame-tile';
+    let probeImg = document.createElement('img');
+    probe.appendChild(probeImg);
+    document.querySelector('.m-frame-row').appendChild(probe);
+    let frameRatio = getComputedStyle(probe).aspectRatio;
+    let frameFit = getComputedStyle(probeImg).objectFit;
+    probe.remove();
+    add.remove();
+    let expectedHeight = imgBox.width * (img.naturalHeight / img.naturalWidth);
+    return {
+        slotWidth: Math.round(slotBox.width),
+        wrapWidth: Math.round(wrapBox.width),
+        tileWidth: Math.round(tileBox.width),
+        imgWidth: Math.round(imgBox.width),
+        imgHeight: Math.round(imgBox.height),
+        tileHeight: Math.round(tileBox.height),
+        expectedHeight: Math.round(expectedHeight),
+        pasteWidth: Math.round(pasteBox.width),
+        addWidth: Math.round(addBox.width),
+        aspectRatio: getComputedStyle(tile).aspectRatio,
+        objectFit: imgStyle.objectFit,
+        maxHeight: Math.round(parseFloat(imgStyle.maxHeight)),
+        cap: Math.round(innerHeight * 0.7),
+        pointerEvents: imgStyle.pointerEvents,
+        removePos: removeStyle.position,
+        removeMin: Math.min(parseFloat(removeStyle.minWidth), parseFloat(removeStyle.minHeight)),
+        removeTop: Math.round(removeBox.top - tileBox.top),
+        removeRight: Math.round(tileBox.right - removeBox.right),
+        frameRatio,
+        frameFit
+    };
+});
+const near = (a, b) => Math.abs(a - b) <= 4;
+check('control image slot is full width and shows the whole photo',
+    controlPreview.slotWidth > 256
+    && near(controlPreview.slotWidth, controlPreview.wrapWidth)
+    && near(controlPreview.tileWidth, controlPreview.slotWidth)
+    && near(controlPreview.imgWidth, controlPreview.tileWidth)
+    && near(controlPreview.imgHeight, controlPreview.expectedHeight)
+    && near(controlPreview.tileHeight, controlPreview.imgHeight)
+    && controlPreview.imgHeight < controlPreview.cap
+    && controlPreview.aspectRatio == 'auto'
+    && controlPreview.objectFit == 'contain'
+    && near(controlPreview.maxHeight, controlPreview.cap)
+    && near(controlPreview.pasteWidth, controlPreview.slotWidth)
+    && near(controlPreview.addWidth, controlPreview.slotWidth)
+    && controlPreview.pointerEvents == 'none'
+    && controlPreview.removePos == 'absolute'
+    && controlPreview.removeMin >= 44
+    && near(controlPreview.removeTop, 0)
+    && near(controlPreview.removeRight, 0)
+    && controlPreview.frameRatio == '1 / 1'
+    && controlPreview.frameFit == 'cover',
+    JSON.stringify(controlPreview));
 await page.evaluate(() => { mControlNet.prepared.checked = true; mControlNet.prepared.dispatchEvent(new Event('change')); });
 let enabledPrepared = await page.evaluate(() => mState.buildGenInput().controlnetpreprocessor);
 await page.evaluate(() => { mControlNet.prepared.checked = false; mControlNet.prepared.dispatchEvent(new Event('change')); });

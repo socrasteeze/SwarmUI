@@ -2733,8 +2733,36 @@ button.m-header-link {
     font-size: 13px;
     color: var(--text-soft);
 }
+/* Control Image is the only frame slot in this section, so it uses the section width and the
+   photo's own ratio. Start and End stay on the shared square rules inside .m-frame-row.
+   border-box keeps the 100% Paste / + / tile inside the section: those controls have padding
+   and a border, and content-box would stick out once the 16rem cap is gone. */
 .m-controlnet .m-frame-slot {
-    max-width: 16rem;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+}
+.m-controlnet .m-frame-slot-body {
+    display: block;
+}
+.m-controlnet .m-frame-add,
+.m-controlnet .m-frame-paste {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+.m-controlnet .m-frame-tile {
+    width: 100%;
+    height: auto;
+    aspect-ratio: auto;
+    box-sizing: border-box;
+}
+.m-controlnet .m-frame-tile img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 70vh;
+    object-fit: contain;
 }
 .m-control-prepared, .m-preset-capture-row {
     display: flex;
