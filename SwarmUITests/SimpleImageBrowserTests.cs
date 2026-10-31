@@ -11,7 +11,7 @@ using ISImage = SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgb
 
 namespace SwarmUITests;
 
-/// <summary>Tests the server filesystem image browser's bounded listing and recursive Drives filename search.</summary>
+/// <summary>Tests the server filesystem image browser's bounded listing and recursive Drives image listing.</summary>
 [TestFixture]
 public class SimpleImageBrowserTests : SwarmUITest
 {
@@ -233,6 +233,123 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(tail["files"].Count(), Is.EqualTo(20));
         Assert.That((string)tail["files"].Last()["name"], Is.EqualTo("match-0499.png"));
         Assert.That(tail["files"].Select(row => (string)row["name"]), Does.Not.Contain("match-0500.png"));
+        Assert.That(tail["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
+        Assert.That((int)direct["total"], Is.EqualTo(200));
+        Assert.That(direct["truncated"], Is.Null);
+        Assert.That(direct["files"][0]["rel_dir"], Is.Null);
+    }
+
+    /// <summary>An empty recursive listing returns images from every level, sorts across that set, and still leaves a non-recursive call on the current folder. An empty path stays the drive list.</summary>
+    [Test]
+    public void ListFolder_RecursiveEmptySearchListsNestedFiles()
+    {
+        string levelOne = Path.Combine(TempRoot, "level-one");
+        string levelTwo = Path.Combine(levelOne, "level-two");
+        string levelThree = Path.Combine(levelTwo, "level-three");
+        string folderNamedNeedle = Path.Combine(TempRoot, "needle-folder");
+        string dotFolder = Path.Combine(TempRoot, ".reference");
+        Directory.CreateDirectory(levelThree);
+        Directory.CreateDirectory(folderNamedNeedle);
+        Directory.CreateDirectory(dotFolder);
+        string direct = Path.Combine(TempRoot, "also-needle.png");
+        string mid = Path.Combine(levelOne, "CaseNeedle.JPG");
+        string deep = Path.Combine(levelTwo, "deep-needle.png");
+        string buried = Path.Combine(levelThree, "buried-needle.png");
+        string other = Path.Combine(levelOne, "other.png");
+        string plain = Path.Combine(folderNamedNeedle, "plain.png");
+        string reference = Path.Combine(dotFolder, "ref.png");
+        WriteValidPng(direct);
+        WriteValidPng(mid);
+        WriteValidPng(deep);
+        WriteValidPng(buried);
+        WriteValidPng(other);
+        WriteValidPng(plain);
+        WriteValidPng(reference);
+        File.WriteAllText(Path.Combine(levelTwo, "notes-needle.txt"), "not an image");
+        File.SetLastWriteTimeUtc(direct, DateTime.UnixEpoch.AddMinutes(1));
+        File.SetLastWriteTimeUtc(mid, DateTime.UnixEpoch.AddMinutes(2));
+        File.SetLastWriteTimeUtc(deep, DateTime.UnixEpoch.AddMinutes(3));
+        File.SetLastWriteTimeUtc(buried, DateTime.UnixEpoch.AddMinutes(4));
+        File.SetLastWriteTimeUtc(other, DateTime.UnixEpoch.AddMinutes(5));
+        File.SetLastWriteTimeUtc(plain, DateTime.UnixEpoch.AddMinutes(6));
+        File.SetLastWriteTimeUtc(reference, DateTime.UnixEpoch.AddMinutes(7));
+
+        string[] Names(Newtonsoft.Json.Linq.JObject result) => result["files"].Select(row => (string)row["name"]).ToArray();
+        string[] Folders(Newtonsoft.Json.Linq.JObject result) => result["files"].Select(row => (string)row["rel_dir"]).ToArray();
+        string[] expectedNames = new[] { "also-needle.png", "buried-needle.png", "CaseNeedle.JPG", "deep-needle.png", "other.png", "plain.png", "ref.png" };
+        string[] expectedDirs = new[] { "", "level-one/level-two/level-three", "level-one", "level-one/level-two", "level-one", "needle-folder", ".reference" };
+        Newtonsoft.Json.Linq.JObject all = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject whitespace = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "   ", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject nameDesc = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "", true, "Name", false, true);
+        Newtonsoft.Json.Linq.JObject newest = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "", true, "Date", false, true);
+        Newtonsoft.Json.Linq.JObject oldest = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "", true, "Date", true, true);
+        Newtonsoft.Json.Linq.JObject directOnly = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "", true);
+        Newtonsoft.Json.Linq.JObject drives = SimpleImageBrowserAPI.ListFolder("", 0, 5, "", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject drivesSearched = SimpleImageBrowserAPI.ListFolder("", 0, 5, "needle", true, "Name", false, true);
+
+        Assert.That(Names(all), Is.EqualTo(expectedNames));
+        Assert.That(Folders(all), Is.EqualTo(expectedDirs));
+        Assert.That(Names(whitespace), Is.EqualTo(expectedNames));
+        Assert.That(Folders(whitespace), Is.EqualTo(expectedDirs));
+        Assert.That((int)all["total"], Is.EqualTo(7));
+        Assert.That(all["truncated"], Is.Null);
+        Assert.That(all["folders"].Select(row => (string)row["name"]), Is.EqualTo(new[] { ".reference", "level-one", "needle-folder" }));
+        Assert.That(Names(nameDesc), Is.EqualTo(new[] { "ref.png", "plain.png", "other.png", "deep-needle.png", "CaseNeedle.JPG", "buried-needle.png", "also-needle.png" }));
+        Assert.That(Names(newest), Is.EqualTo(new[] { "ref.png", "plain.png", "other.png", "buried-needle.png", "deep-needle.png", "CaseNeedle.JPG", "also-needle.png" }));
+        Assert.That(Folders(newest), Is.EqualTo(new[] { ".reference", "needle-folder", "level-one", "level-one/level-two/level-three", "level-one/level-two", "level-one", "" }));
+        Assert.That(Names(oldest), Is.EqualTo(new[] { "also-needle.png", "CaseNeedle.JPG", "deep-needle.png", "buried-needle.png", "other.png", "plain.png", "ref.png" }));
+        Assert.That(Names(directOnly), Is.EqualTo(new[] { "also-needle.png" }));
+        Assert.That(directOnly["files"][0]["rel_dir"], Is.Null);
+        Assert.That(directOnly["truncated"], Is.Null);
+        Assert.That((int)directOnly["total"], Is.EqualTo(1));
+        Assert.That(drives["parent"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
+        Assert.That(drives["files"].Count(), Is.EqualTo(0));
+        Assert.That((int)drives["total"], Is.EqualTo(0));
+        Assert.That(drives["truncated"], Is.Null);
+        Assert.That(drives["folders"].Count(), Is.EqualTo(DriveInfo.GetDrives().Length));
+        Assert.That(drivesSearched["files"].Count(), Is.EqualTo(0));
+        Assert.That((int)drivesSearched["total"], Is.EqualTo(0));
+        Assert.That(drivesSearched["truncated"], Is.Null);
+        Assert.That(drivesSearched["folders"].Count(), Is.EqualTo(DriveInfo.GetDrives().Length));
+    }
+
+    /// <summary>An empty recursive listing sorts the whole tree, then keeps 500 and marks the page truncated. recursive false stays on the current folder.</summary>
+    [Test]
+    public void ListFolder_RecursiveEmptySearchCapsSortedFiles()
+    {
+        string batchA = Path.Combine(TempRoot, "batch-a");
+        string batchB = Path.Combine(batchA, "batch-b");
+        Directory.CreateDirectory(batchB);
+        int count = SimpleImageBrowserAPI.RecursiveMatchCap + 1;
+        for (int i = 0; i < count; i++)
+        {
+            string directory = i < 200 ? TempRoot : i < 400 ? batchA : batchB;
+            File.WriteAllBytes(Path.Combine(directory, $"img-{i:0000}.png"), new byte[] { 1 });
+        }
+        File.WriteAllText(Path.Combine(batchB, "notes.txt"), "not an image");
+
+        string[] NamesOf(Newtonsoft.Json.Linq.JObject result) => result["files"].Select(row => (string)row["name"]).ToArray();
+        Newtonsoft.Json.Linq.JObject first = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject whitespace = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, " ", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject nested = SimpleImageBrowserAPI.ListFolder(TempRoot, 200, 1, "", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject deeper = SimpleImageBrowserAPI.ListFolder(TempRoot, 400, 1, "", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject tail = SimpleImageBrowserAPI.ListFolder(TempRoot, 480, 48, "", true, "Name", true, true);
+        Newtonsoft.Json.Linq.JObject direct = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 250, "", true);
+
+        Assert.That((int)first["total"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
+        Assert.That((bool)first["truncated"], Is.True);
+        Assert.That((string)first["files"][0]["name"], Is.EqualTo("img-0000.png"));
+        Assert.That((string)first["files"][0]["rel_dir"], Is.EqualTo(""));
+        Assert.That(NamesOf(whitespace), Is.EqualTo(NamesOf(first)));
+        Assert.That((bool)whitespace["truncated"], Is.True);
+        Assert.That(first["folders"].Select(row => (string)row["name"]), Is.EqualTo(new[] { "batch-a" }));
+        Assert.That((string)nested["files"][0]["name"], Is.EqualTo("img-0200.png"));
+        Assert.That((string)nested["files"][0]["rel_dir"], Is.EqualTo("batch-a"));
+        Assert.That((string)deeper["files"][0]["name"], Is.EqualTo("img-0400.png"));
+        Assert.That((string)deeper["files"][0]["rel_dir"], Is.EqualTo("batch-a/batch-b"));
+        Assert.That(tail["files"].Count(), Is.EqualTo(20));
+        Assert.That((string)tail["files"].Last()["name"], Is.EqualTo("img-0499.png"));
+        Assert.That(tail["files"].Select(row => (string)row["name"]), Does.Not.Contain("img-0500.png"));
         Assert.That(tail["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
         Assert.That((int)direct["total"], Is.EqualTo(200));
         Assert.That(direct["truncated"], Is.Null);

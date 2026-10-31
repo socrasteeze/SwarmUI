@@ -74,6 +74,9 @@ await page.addInitScript(pixel => {
             if (window.__failNext && args.offset == 48) {
                 return reject('temporary page error');
             }
+            if (args.path == 'empty-output') {
+                return respond({ folders: [], files: [], total: 0, next_offset: null });
+            }
             let images = args.path == 'paged-output'
                 ? Array.from({ length: 130 }, (_, i) => ({ src: `output-${i}.png`, metadata: '' }))
                 : [{ src: 'output.png', metadata: '' }];
@@ -126,6 +129,14 @@ await page.addInitScript(pixel => {
             }
             if (path == 'E:\\Shots\\Nested') {
                 return respond({ path, parent: 'E:\\Shots', folders: [], files: [{ name: 'pick.png', path: 'E:\\Shots\\Nested\\pick.png' }], total: 1, next_offset: null });
+            }
+            if (path == 'empty-folder') {
+                return respond({ path, parent: '', folders: [], files: [], total: 0, next_offset: null });
+            }
+            if (path == 'wide-tree') {
+                return respond({ path, parent: '', folders: [{ name: 'Nested', path: 'wide-tree\\Nested' }],
+                    files: [{ name: 'cap.png', path: 'wide-tree\\wide\\cap.png', rel_dir: 'wide' }],
+                    total: 500, truncated: true, next_offset: null });
             }
             if (path == 'folder-pages') {
                 let folders = Array.from({ length: 102 }, (_, i) => ({ name: `folder-${i}`, path: `folder-pages\\folder-${i}` }));
@@ -230,6 +241,7 @@ check('Output sort sends corrected Newest parameters and resets page', sortCall.
 await drives();
 sortCall = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder'));
 check('Drives uses the same persisted sort parameters', sortCall.args.sortBy == 'Date' && sortCall.args.sortReverse == false, JSON.stringify(sortCall.args));
+check('the drive list does not recurse', sortCall.args.path == '' && sortCall.args.recursive != true, JSON.stringify(sortCall.args));
 await picker().locator('.m-imgbrowser-sort').selectOption('Name A-Z');
 check('Drives starts at the drive root', await page.locator('.m-imgbrowser-path').textContent() == 'Drives');
 await page.evaluate(() => { window.__delayRoot = true; });
@@ -248,6 +260,9 @@ await page.getByRole('button', { name: 'E:', exact: true }).click();
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-path')?.textContent == 'E:\\');
 await page.getByRole('button', { name: 'Shots', exact: true }).click();
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-path')?.textContent == 'E:\\Shots');
+await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+let openedFolder = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder' && call.args.path == 'E:\\Shots'));
+check('an open Drives folder lists images recursively with an empty search', openedFolder.args.recursive == true && openedFolder.args.search == '' && openedFolder.args.limit == 48, JSON.stringify(openedFolder.args));
 await page.getByRole('button', { name: 'Nested', exact: true }).click();
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-path')?.textContent == 'E:\\Shots\\Nested');
 await page.locator('.m-imgbrowser-up').click();
@@ -284,6 +299,8 @@ let fixedAfter = await page.locator('.m-imgbrowser-pager').boundingBox();
 check('Prev and Next remain fixed while the image grid scrolls', Math.abs(fixedBefore.y - fixedAfter.y) <= 1 && Math.abs(fixedBefore.x - fixedAfter.x) <= 1);
 await page.getByRole('button', { name: 'Next Page' }).click();
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-page')?.textContent == '2 / 3');
+let placeBeforeSearch = await page.evaluate(() => mImageBrowser.sessionPlaces['machine\nE:\\Shots\nName A-Z']);
+check('Drives page memory is the folder and sort, not the search', placeBeforeSearch?.offset == 48, JSON.stringify(placeBeforeSearch));
 let search = page.getByRole('searchbox', { name: 'Search Filenames' });
 await search.fill('SHOT-100');
 await page.waitForFunction(() => document.querySelector('.m-imgbrowser-tile-name')?.textContent == 'shot-100.png');
@@ -291,6 +308,8 @@ check('filename search reaches images beyond page one and resets the page', awai
     && await page.locator('.m-imgbrowser-tile').count() == 1 && await page.getByRole('button', { name: 'Previous Page' }).isDisabled());
 let recursiveCall = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder' && call.args.search == 'SHOT-100'));
 check('a Drives filename search requests recursive results', recursiveCall.args.recursive == true && recursiveCall.args.sortBy == 'Name', JSON.stringify(recursiveCall.args));
+let searchPlaces = await page.evaluate(() => Object.keys(mImageBrowser.sessionPlaces).filter(key => key.split('\n')[1] == 'E:\\Shots'));
+check('a Drives search keeps one page memory for the folder', searchPlaces.length == 1 && searchPlaces[0] == 'machine\nE:\\Shots\nName A-Z', JSON.stringify(searchPlaces));
 check('search keeps folder navigation available', await page.getByRole('button', { name: 'Nested', exact: true }).count() == 1);
 let searchAfter = await page.locator('.m-imgbrowser-pager').boundingBox();
 check('pagination controls do not shift between full and filtered pages', Math.abs(fixedBefore.y - searchAfter.y) <= 1);
@@ -307,7 +326,7 @@ check('empty search disables both paging buttons and retains navigation', await 
 await search.fill('');
 await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
 let clearedSearch = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder'));
-check('an empty Drives search does not recurse', clearedSearch.args.search == '' && clearedSearch.args.recursive != true, JSON.stringify(clearedSearch.args));
+check('an empty Drives search still lists the folder recursively', clearedSearch.args.path == 'E:\\Shots' && clearedSearch.args.search == '' && clearedSearch.args.recursive == true, JSON.stringify(clearedSearch.args));
 check('Drives search keeps the 250ms debounce', await page.evaluate(() => {
     let before = window.__calls.length;
     let box = document.querySelector('.m-imgbrowser-search');
@@ -339,6 +358,14 @@ await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?
 check('a capped Drives search tells the user to refine it', await page.locator('.m-imgbrowser-status').textContent() == 'First 500 matches - refine the search');
 await search.fill('');
 await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
+await go('empty-folder');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'No images in this folder or its subfolders.');
+check('an empty Drives folder says images include subfolders', await page.locator('.m-imgbrowser-status').textContent() == 'No images in this folder or its subfolders.');
+let emptyFolder = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder' && call.args.path == 'empty-folder'));
+check('an empty Drives folder still requests the recursive listing', emptyFolder.args.recursive == true && emptyFolder.args.search == '', JSON.stringify(emptyFolder.args));
+await go('wide-tree');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'First 500 images - open a folder or search to narrow it');
+check('a capped Drives folder tells the user to open a folder or search', await page.locator('.m-imgbrowser-status').textContent() == 'First 500 images - open a folder or search to narrow it');
 
 await go('folder-pages');
 await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-folder-row').length == 102);
@@ -457,6 +484,15 @@ await page.locator('.m-imgbrowser-close').click();
 await page.waitForTimeout(300);
 check('closing cancels a pending search debounce', requestsBeforeClose == await page.evaluate(() => window.__calls.filter(call => call.route == 'ListImages').length));
 await page.evaluate(() => { mImageBrowser.path = ''; mImageBrowser.sessionPlaces = {}; });
+
+await page.evaluate(() => { mImageBrowser.path = 'empty-output'; mImageBrowser.source = 'output'; mImageBrowser.sessionPlaces = {}; });
+await openBrowser();
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'No images in this folder.');
+check('Output keeps its empty-folder text', await page.locator('.m-imgbrowser-status').textContent() == 'No images in this folder.');
+let outputEmpty = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListImages' && call.args.path == 'empty-output'));
+check('Output does not request a recursive listing', outputEmpty && outputEmpty.args.recursive != true && outputEmpty.args.search == '', JSON.stringify(outputEmpty && outputEmpty.args));
+await page.locator('.m-imgbrowser-close').click();
+await page.waitForTimeout(320);
 
 await page.evaluate(() => { mImageBrowser.path = 'paged-output'; mImageBrowser.source = 'output'; });
 await openBrowser();

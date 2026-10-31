@@ -1,7 +1,8 @@
 /** MobileEnhancements standalone client - server-backed image folder browser for /simple.
  * Output lists Swarm output folders through ListImages and returns relative path entries. Drives, when the
  * user has browse_server_images, lists machine folders through ListSimpleImageFolder and returns image data.
- * A Drives filename search walks subfolders, keeps the server's capped sorted set, and shows each match's folder.
+ * A Drives folder lists images under that folder and its subfolders, keeps the server's capped sorted set, and shows each image's folder.
+ * Search filters that set by filename. The drive list itself is not recursive.
  * Favorites hold Output-relative paths, or full host paths (D:\Pictures, \\server\share) that open in Drives.
  * An optional phone picker remains available for device images. */
 class MImageBrowser {
@@ -585,12 +586,13 @@ class MImageBrowser {
                 pageLabel.textContent = `${page} / ${pages}`;
                 pageLabel.setAttribute('aria-label', `Page ${page} of ${pages}`);
                 let shown = grid.querySelectorAll('.m-imgbrowser-tile').length;
-                if (shown && this.source == 'machine' && search && (data.truncated || total >= 500)) {
-                    status.textContent = 'First 500 matches - refine the search';
+                let machineFolder = this.source == 'machine' && this.machinePath;
+                if (shown && machineFolder && (data.truncated || total >= 500)) {
+                    status.textContent = search ? 'First 500 matches - refine the search' : 'First 500 images - open a folder or search to narrow it';
                 }
                 else {
                     status.textContent = shown ? `${offset + 1}\u2013${offset + shown} of ${total}`
-                        : (search ? 'No matching images.' : 'No images in this folder.');
+                        : (search ? 'No matching images.' : (machineFolder ? 'No images in this folder or its subfolders.' : 'No images in this folder.'));
                 }
                 remember();
                 if (!restore) {
@@ -623,7 +625,7 @@ class MImageBrowser {
                     'path': this.machinePath, 'offset': offset, 'limit': MImageBrowser.PageSize,
                     'search': search, 'image_page': true, 'sortBy': sortBy, 'sortReverse': sortReverse
                 };
-                if (search) {
+                if (this.machinePath) {
                     request.recursive = true;
                 }
                 genericRequest('ListSimpleImageFolder', request, data => {
