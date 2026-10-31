@@ -362,7 +362,9 @@ class MCreate {
             mState.aspectPinned = false;
             // Upscale Off deletes its key, so the pin set — not the key — is what remembers an explicit
             // pick. Clear it with the selection, or a previous Off would keep stripping the new preset.
+            // userTouched is the same idea for every other control edited after the previous preset.
             mState.clearPinnedUpscale();
+            mState.clearUserTouched();
             let picked = title ? mState.presets.find(preset => preset.title == title) : null;
             let presetAspect = picked && picked.param_map && picked.param_map['aspectratio'];
             if (presetAspect) {
@@ -437,7 +439,7 @@ class MCreate {
         this.promptBox.placeholder = 'Type your prompt, or paste an image...';
         this.promptBox.rows = 3;
         this.promptBox.addEventListener('input', () => {
-            mState.params['prompt'] = this.promptBox.value;
+            mState.setParam('prompt', this.promptBox.value);
             this.schedulePromptSave();
             this.autoGrow(this.promptBox);
         });
@@ -484,7 +486,7 @@ class MCreate {
         this.negBox = mUI.el('textarea', 'm-neg-box');
         this.negBox.rows = 2;
         this.negBox.addEventListener('input', () => {
-            mState.params['negativeprompt'] = this.negBox.value;
+            mState.setParam('negativeprompt', this.negBox.value);
             this.schedulePromptSave();
         });
         this.negBox.addEventListener('blur', () => this.flushPromptSave());
@@ -871,7 +873,9 @@ class MCreate {
     }
 
     /** Model button label. Hidden entirely when the user lacks the model parameter permission, since
-     * ListT2IParams only reports parameters the session is allowed to set. */
+     * ListT2IParams only reports parameters the session is allowed to set. The label is only the model
+     * name. Red means the sent checkpoint is not the one the other side of the preset merge would use;
+     * the reason is the title, so a long parenthetical cannot clip the name. */
     renderModelButton() {
         if (!mState.paramMeta['model']) {
             this.modelButton.style.display = 'none';
@@ -879,30 +883,45 @@ class MCreate {
         }
         this.modelButton.style.display = '';
         this.modelButton.classList.remove('m-selected', 'm-overridden');
+        this.modelButton.title = '';
         let manual = mState.params['model'];
-        // The value that will actually be sent: buildGenInput() applies active presets AFTER the manual
-        // pick (matching the server, which applies `presets:[]` after raw params - T2IAPI.cs), so a preset
-        // that also sets 'model' wins on every generate for as long as its chip stays selected, not just
-        // once. Showing `manual` here without checking this is what made the button say "Klein" while every
-        // image still came out as the preset's "Anima" - the button must show what will actually be used.
+        // buildGenInput() is what the next generation sends. A model edited after the preset was selected
+        // is in userTouched and wins. A model picked earlier is not, so the preset's checkpoint wins.
         let effective = mState.buildGenInput()['model'];
+        let presetModel = mState.presetParam('model');
+        let same = (a, b) => MState.stripModelExt(`${a || ''}`) == MState.stripModelExt(`${b || ''}`);
         if (!effective) {
             this.modelButton.textContent = 'Checkpoint';
+            if (presetModel && mState.userTouched.has('model')) {
+                this.modelButton.classList.add('m-overridden');
+                this.modelButton.title = 'Cleared over the preset';
+            }
             return;
         }
+        this.modelButton.textContent = mUI.modelName(effective);
         // Normalised, because a preset stores 'qwen/Foo' where the picker stores 'qwen/Foo.safetensors'.
-        // Compared raw, picking the very model a preset already sets would report it as an override.
-        if (manual && MState.stripModelExt(effective) != MState.stripModelExt(manual)) {
-            this.modelButton.textContent = `${mUI.modelName(effective)} (preset overrides your pick)`;
+        if (mState.userTouched.has('model') && presetModel && !same(effective, presetModel)) {
             this.modelButton.classList.add('m-overridden');
+            this.modelButton.title = 'Your pick overrides the preset';
+            return;
+        }
+        if (manual && !same(effective, manual)) {
+            this.modelButton.classList.add('m-overridden');
+            this.modelButton.title = 'Preset overrides your pick';
             return;
         }
         if (manual) {
-            this.modelButton.textContent = mUI.modelName(manual);
             this.modelButton.classList.add('m-selected');
             return;
         }
-        this.modelButton.textContent = `${mUI.modelName(effective)} (preset)`;
+        if (presetModel) {
+            this.modelButton.title = 'Set by the active preset';
+        }
+    }
+
+    /** Paints one control red when its explicit value differs from the active preset's value. */
+    markOverridden(el, key, shown) {
+        el.classList.toggle('m-overridden', mState.overrideDiffers(key, shown));
     }
 
     /** Rebuilds a `<select>`'s options only when the list it should show actually changed.
@@ -1187,7 +1206,7 @@ class MCreate {
             results.innerHTML = '';
             let clear = mUI.el('button', 'm-model-plain-row', 'Use server default');
             clear.addEventListener('click', () => {
-                delete mState.params['model'];
+                mState.unsetParam('model');
                 mState.changed();
                 close();
             });
@@ -1223,7 +1242,7 @@ class MCreate {
                     item.classList.add('m-selected');
                 }
                 item.addEventListener('click', () => {
-                    mState.params['model'] = model.name;
+                    mState.setParam('model', model.name);
                     mState.changed();
                     close();
                 });
@@ -1842,11 +1861,11 @@ class MCreate {
             return;
         }
         let aspect = MState.closestAspect(box.ratio);
-        mState.params['aspectratio'] = aspect;
+        mState.setParam('aspectratio', aspect);
         mState.customRatio = 0;
         if (typeof MFramePrep != 'undefined' && MFramePrep.isLowResAspectContext()) {
             let side = MFramePrep.sideLengthForClosest(aspect, box.w, box.h, MState.AspectReferences, MState.ExtraAspects);
-            mState.params['sidelength'] = `${side}`;
+            mState.setParam('sidelength', `${side}`);
         }
         mState.aspectPinned = true;
         mState.changed();
@@ -1892,7 +1911,7 @@ class MCreate {
                 return;
             }
             if (exact) {
-                mState.params['aspectratio'] = 'Custom';
+                mState.setParam('aspectratio', 'Custom');
                 mState.customRatio = box.ratio;
                 mState.aspectPinned = true;
                 mState.changed();
@@ -2064,7 +2083,10 @@ class MCreate {
         this.seedRandom.addEventListener('click', () => {
             mState.seedLocked = true;
             if (!mState.params['seed'] || `${mState.params['seed']}` == '-1') {
-                mState.params['seed'] = `${Math.floor(Math.random() * 2147483647)}`;
+                mState.setParam('seed', `${Math.floor(Math.random() * 2147483647)}`);
+            }
+            else {
+                mState.touchParam('seed');
             }
             mState.changed();
             requestAnimationFrame(() => {
@@ -2079,7 +2101,7 @@ class MCreate {
         this.seedInput.className = 'm-seed-input';
         this.seedInput.setAttribute('aria-label', 'Seed');
         this.seedInput.addEventListener('input', () => {
-            mState.params['seed'] = this.seedInput.value;
+            mState.setParam('seed', this.seedInput.value);
             mState.save();
         });
         seedWrap.appendChild(this.seedInput);
@@ -2087,7 +2109,7 @@ class MCreate {
         this.seedClear.setAttribute('aria-label', 'Use random seed');
         this.seedClear.addEventListener('click', () => {
             mState.seedLocked = false;
-            mState.params['seed'] = '-1';
+            mState.setParam('seed', '-1');
             mState.changed();
         });
         seedWrap.appendChild(this.seedClear);
@@ -2110,10 +2132,10 @@ class MCreate {
             let val = this.prefixInput.value.trim();
             // Deleting rather than storing '' keeps m_client_state clean and avoids sending a no-op key.
             if (val == '') {
-                delete mState.params['filenameprefix'];
+                mState.unsetParam('filenameprefix');
             }
             else {
-                mState.params['filenameprefix'] = val;
+                mState.setParam('filenameprefix', val);
             }
             // save(), not changed(): a full re-render per keystroke would fight the user's typing.
             mState.save();
@@ -2220,7 +2242,7 @@ class MCreate {
         if (next == current) {
             return;
         }
-        mState.params['aspectratio'] = next;
+        mState.setParam('aspectratio', next);
         mState.customRatio = 0;
         mState.aspectPinned = true;
         mState.changed();
@@ -2261,7 +2283,7 @@ class MCreate {
         if (at < 0) {
             at = Math.max(0, rungs.indexOf('1024'));
         }
-        mState.params['sidelength'] = rungs[Math.min(rungs.length - 1, Math.max(0, at + direction))];
+        mState.setParam('sidelength', rungs[Math.min(rungs.length - 1, Math.max(0, at + direction))]);
         mState.changed();
     }
 
@@ -2334,10 +2356,10 @@ class MCreate {
             // "1" is Off. Deleting the key matches the server IgnoreIf, so metadata does not record an upscale.
             // The pin is what makes that Off beat a preset that still has a scale.
             if (val == '' || val == '1') {
-                delete mState.params['refinerupscale'];
+                mState.unsetParam('refinerupscale');
             }
             else {
-                mState.params['refinerupscale'] = val;
+                mState.setParam('refinerupscale', val);
             }
             mState.pinUpscale('refinerupscale');
             mState.changed();
@@ -2364,6 +2386,7 @@ class MCreate {
         let scales = MCreate.upscaleScaleOptions(meta, current);
         let entries = scales.map(scale => [scale, scale == '1' ? 'Upscale: Off' : `Upscale: ${scale}x`]);
         MCreate.syncOptions(select, entries, current);
+        this.markOverridden(select, 'refinerupscale', current);
         return true;
     }
 
@@ -2375,13 +2398,13 @@ class MCreate {
         select.setAttribute('aria-label', label);
         select.addEventListener('change', () => {
             if (select.value == '') {
-                delete mState.params[paramId];
+                mState.unsetParam(paramId);
             }
             else {
-                mState.params[paramId] = select.value;
+                mState.setParam(paramId, select.value);
             }
-            // Sampler and scheduler stay preset-owned. Only the Upscale row's method (and any later
-            // upscale choice wired through this helper) pins over the preset, including the blank default.
+            // Upscale Off is a deleted key, so it still needs the pin set. Sampler and scheduler are
+            // covered by userTouched from setParam/unsetParam above, including the blank default.
             mState.pinUpscale(paramId);
             mState.changed();
         });
@@ -2411,6 +2434,7 @@ class MCreate {
             entries.push([current, current]);
         }
         MCreate.syncOptions(control.select, entries, current);
+        this.markOverridden(control.select, paramId, current);
         return true;
     }
 
@@ -2430,7 +2454,7 @@ class MCreate {
         let min = Number.isFinite(parseFloat(meta.min)) ? parseFloat(meta.min) : control.fallback.min;
         let max = Number.isFinite(parseFloat(meta.max)) ? parseFloat(meta.max) : control.fallback.max;
         let next = Math.min(max, Math.max(min, current + step * direction));
-        mState.params[paramId] = `${parseFloat(next.toFixed(6))}`;
+        mState.setParam(paramId, `${parseFloat(next.toFixed(6))}`);
         mState.changed();
     }
 
@@ -2460,6 +2484,7 @@ class MCreate {
                 shown = meta && meta.default != null ? meta.default : control.fallback.default;
             }
             control.value.textContent = `${shown}`;
+            this.markOverridden(control.value, paramId, shown);
         }
         let anySampler = false;
         for (let paramId of ['sampler', 'scheduler']) {
@@ -2500,8 +2525,10 @@ class MCreate {
         // has to say which - one sends matched pixels, the other defers to the full UI.
         this.aspectValue.textContent = mState.params['aspectratio'] != 'Custom' ? mState.params['aspectratio']
             : (mState.customRatio ? 'Matched' : 'Custom');
+        this.markOverridden(this.aspectValue, 'aspectratio', mState.params['aspectratio']);
         let side = `${mState.params['sidelength'] ?? ''}`;
         this.sizeValue.textContent = side == '' ? 'Auto' : side;
+        this.markOverridden(this.sizeValue, 'sidelength', side);
         // Read from previewResolution, not from a local recomputation: it derives from a real buildGenInput,
         // so the pixels on screen cannot drift from the ones that get sent.
         let dims = mState.previewResolution();
@@ -2537,7 +2564,7 @@ class MCreate {
             let chip = mUI.el('span', 'm-adv-chip', labels[i]);
             let x = mUI.el('span', 'm-adv-chip-x', '\u00d7');
             x.addEventListener('click', () => {
-                delete mState.params[key];
+                mState.unsetParam(key);
                 mState.changed();
             });
             chip.appendChild(x);
@@ -2591,7 +2618,7 @@ class MCreate {
         if (after.length > 0 && !/^\s/.test(after)) {
             insert = `${insert} `;
         }
-        mState.params['prompt'] = before + insert + after;
+        mState.setParam('prompt', before + insert + after);
         this.promptCaret = (before + insert).length;
         mState.changed();
     }

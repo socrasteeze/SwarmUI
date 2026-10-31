@@ -629,7 +629,12 @@ class MModels {
         }
         let activate = () => {
             if (this.subtype == 'Stable-Diffusion') {
-                mState.params['model'] = model.name;
+                if (mState.setParam) {
+                    mState.setParam('model', model.name);
+                }
+                else {
+                    mState.params['model'] = model.name;
+                }
                 mState.changed();
                 mUI.note(`Model set: ${mUI.modelName(model.name)}`);
                 for (let other of this.grid.querySelectorAll('.m-model-card')) {

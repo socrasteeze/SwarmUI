@@ -1066,10 +1066,10 @@ button.m-header-link {
 .m-model-button.m-selected {
     border-color: var(--emphasis);
 }
-/* An active preset's param_map also sets 'model' and wins over the manual pick on every generate (presets
-   apply after raw params) - this needs to read as distinctly different from a normal selection, not just a
-   different accent color, or it repeats the exact confusion it exists to prevent. */
-.m-model-button.m-overridden {
+/* The sent value differs from the preset. The label stays the value itself; red is the indicator. */
+.m-model-button.m-overridden,
+.m-stepper-value.m-overridden,
+.m-choice-select.m-overridden {
     border-color: var(--red);
     color: var(--red);
 }
@@ -2423,9 +2423,12 @@ button.m-header-link {
 .m-viewer-actions {
     flex: 0 0 auto;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.35rem;
     padding: 0.6rem var(--m-safe-right) calc(0.6rem + var(--m-safe-bottom)) var(--m-safe-left);
+}
+.m-viewer-close {
+    grid-column: 1 / -1;
 }
 .m-viewer-action {
     background: var(--background-panel);
@@ -3503,7 +3506,8 @@ button.m-header-link {
 /* Vertical scrollers never scroll sideways. overflow-y: auto alone computes overflow-x to auto, so one
    child even 1px too wide (iOS sizes selects and long labels differently) lets the whole sheet or list be
    dragged sideways - the same fix .m-panel carries. Strips that are meant to scroll horizontally
-   (.m-image-strip, .m-ac-strip, .m-viewer-actions) are separate elements and are not listed here. */
+   (.m-image-strip, .m-ac-strip) are separate elements and are not listed here.
+   .m-viewer-actions is a 3-column grid, not a sideways strip. */
 .m-header-error-detail,
 .m-preview-grid,
 .m-model-results,

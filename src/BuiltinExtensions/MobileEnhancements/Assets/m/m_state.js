@@ -1,9 +1,10 @@
 /** MobileEnhancements standalone client - state.
  * Holds the flat parameter dict that goes to GenerateText2ImageWS, the active preset list, prompt images,
  * and the two mapping algorithms ported (DOM-free) from the genpage: preset merge (presets.js applyOnePreset)
- * and reuse-params (currentimagehandler.js copy_current_image_params). Presets are merged CLIENT-SIDE at send
- * time and the base state is never mutated by them: the server applies `presets:[...]` AFTER raw params, which
- * would let a preset clobber reused-history params and prompt edits, and server-side has no {value} support. */
+ * and reuse-params (currentimagehandler.js copy_current_image_params). Simple builds the request itself in
+ * mergedParams(), so a value the user sets after the preset is selected can be written back over that merge.
+ * The server would apply `presets:[...]` after raw params and has no {value} support; this client does not
+ * send the preset list as a second pass. The base params object is still not mutated by the merge. */
 class MState {
 
     constructor() {
@@ -31,6 +32,11 @@ class MState {
          * own marker. Cleared when the preset selection changes and on reset, so the new preset's value
          * shows and applies again. Persisted: otherwise a reload would send the preset's upscale again. */
         this.pinnedUpscale = new Set();
+        /** Param ids the user changed after the current preset was selected. Reapplied over the preset
+         * merge, including a clear (the key is then absent from params). Not persisted: a reload starts
+         * clean, the same way a new preset selection does. LoRA list keys are never added; those stay
+         * additive in applyPresetMap. */
+        this.userTouched = new Set();
         /** True once a save() has failed, so the "not being saved" warning fires once and not per keystroke. */
         this.saveFailed = false;
         /** Param metadata map (id -> param object) from ListT2IParams. */
@@ -438,7 +444,80 @@ class MState {
                 }
             }
         }
+        // Anything edited after the preset was selected wins, including a clear. A {value} prompt preset
+        // therefore stops wrapping once the prompt box is edited; reselecting the preset clears the set
+        // and the wrap applies again. LoRA keys are skipped so a weight edit does not drop the preset's LoRAs.
+        for (let key of this.userTouched) {
+            if (MState.PresetAdditiveKeys.includes(key)) {
+                continue;
+            }
+            if (key in this.params) {
+                let val = this.params[key];
+                input[key] = Array.isArray(val) ? [...val] : val;
+            }
+            else {
+                delete input[key];
+            }
+        }
         return input;
+    }
+
+    /** The value the active presets would write for one key, or undefined when none of them set it.
+     * Later presets win. LoRA lists are concatenated by applyPresetMap and are not returned here. */
+    presetParam(key) {
+        let found = undefined;
+        let seen = false;
+        for (let i = 0; i < this.activePresets.length; i++) {
+            let preset = this.presets.find(p => p.title == this.activePresets[i]);
+            if (!preset || !preset.param_map || (typeof MControlNet != 'undefined' && MControlNet.isPreset(preset))) {
+                continue;
+            }
+            if (Object.prototype.hasOwnProperty.call(preset.param_map, key)) {
+                found = preset.param_map[key];
+                seen = true;
+            }
+        }
+        return seen ? found : undefined;
+    }
+
+    /** True when an explicit post-preset value is what generation will use and it differs from the preset. */
+    overrideDiffers(key, shown) {
+        let explicit = this.userTouched.has(key)
+            || ((key == 'steps' || key == 'cfgscale') && (key in this.params))
+            || this.pinnedUpscale.has(key);
+        if (!explicit) {
+            return false;
+        }
+        let presetVal = this.presetParam(key);
+        if (typeof presetVal == 'undefined') {
+            return false;
+        }
+        return `${shown ?? ''}` != `${presetVal}`;
+    }
+
+    /** Marks one param as edited after the current preset. LoRA list keys are ignored. */
+    touchParam(key) {
+        if (!key || MState.PresetAdditiveKeys.includes(key)) {
+            return;
+        }
+        this.userTouched.add(key);
+    }
+
+    /** Writes one param and marks that edit. Does not render or save. */
+    setParam(key, value) {
+        this.params[key] = value;
+        this.touchParam(key);
+    }
+
+    /** Removes one param and marks the clear, so the preset's value is not put back at generate time. */
+    unsetParam(key) {
+        delete this.params[key];
+        this.touchParam(key);
+    }
+
+    /** Drops post-preset overrides. The next generate uses the preset again until the user edits. */
+    clearUserTouched() {
+        this.userTouched.clear();
     }
 
     /** Builds a request from reusable settings, resolved dimensions, and the current image attachments. */
@@ -619,6 +698,7 @@ class MState {
             this.params = clean;
             this.control = { selection: 'inherit', values: {}, prepared: false, image: null };
             this.activePresets = [];
+            this.clearUserTouched();
             this.changed();
             return true;
         }
@@ -649,6 +729,7 @@ class MState {
         this.seedLocked = false;
         this.aspectPinned = false;
         this.clearPinnedUpscale();
+        this.clearUserTouched();
         this.customRatio = 0;
         this.changed();
     }
@@ -1228,6 +1309,7 @@ class MState {
                     image: image?.kind == 'path' && typeof image.value == 'string' && !image.value.startsWith('data:') ? image : null };
             }
             this.seedLocked = !!data.seedLocked;
+            this.clearUserTouched();
             this.aspectPinned = !!data.aspectPinned;
             this.pinnedUpscale = new Set(
                 (Array.isArray(data.pinnedUpscale) ? data.pinnedUpscale : [])
@@ -1271,6 +1353,9 @@ class MState {
  * refinerupscale and refinerupscalemethod are the Create row. seedvrupscale is the other numeric
  * upscale (same IgnoreIf "1"); the row does not write it, but a pin recorded for it is honored. */
 MState.UpscalePinParams = ['refinerupscale', 'refinerupscalemethod', 'seedvrupscale'];
+
+/** LoRA list params. applyPresetMap concatenates them. A later edit must not replace that merge. */
+MState.PresetAdditiveKeys = ['loras', 'loraweights', 'lorasectionconfinement'];
 
 /** Reference width/height per aspect ratio at a 512 side length. UPSTREAM COUPLING: this table and the
  * scaling math in resolutionFor must stay identical to T2IParamInput.ResolutionAspectReferences (C#) and

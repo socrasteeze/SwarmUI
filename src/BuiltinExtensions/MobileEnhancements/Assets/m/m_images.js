@@ -328,6 +328,65 @@ class MImages {
         return typeof params.prompt == 'string' ? params.prompt : '';
     }
 
+    /** The positive prompt the user typed. Prefers the pre-merge original, then the stored prompt. */
+    userPrompt(metadata) {
+        if (!metadata) {
+            return '';
+        }
+        let full = metadata;
+        if (typeof full == 'string') {
+            try {
+                full = JSON.parse(full);
+            }
+            catch (e) {
+                return '';
+            }
+        }
+        if (!full || typeof full != 'object') {
+            return '';
+        }
+        let meta = full.sui_image_params || full;
+        let extra = full.sui_extra_data || {};
+        if (typeof extra.original_prompt == 'string' && extra.original_prompt) {
+            return extra.original_prompt;
+        }
+        return typeof meta.prompt == 'string' ? meta.prompt : '';
+    }
+
+    /** Copies text. Resolves false when the async API and the textarea fallback both fail. */
+    copyText(text) {
+        let fallback = () => {
+            try {
+                let temp = document.createElement('textarea');
+                temp.value = text;
+                temp.setAttribute('readonly', 'readonly');
+                temp.style.position = 'absolute';
+                temp.style.left = '-9999px';
+                document.body.appendChild(temp);
+                temp.select();
+                let ok = document.execCommand('copy');
+                temp.remove();
+                return !!ok;
+            }
+            catch (e) {
+                return false;
+            }
+        };
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                let pending = navigator.clipboard.writeText(text);
+                if (pending && pending.then) {
+                    return pending.then(() => true, () => fallback());
+                }
+                return Promise.resolve(true);
+            }
+        }
+        catch (e) {
+            return Promise.resolve(fallback());
+        }
+        return Promise.resolve(fallback());
+    }
+
     /** Fullscreen viewer overlay: swipe left/right = prev/next history entry, action row below. */
     openViewer(entry, index, viewerState = null) {
         let state = viewerState || {
@@ -426,6 +485,34 @@ class MImages {
                 mUI.warn('No readable parameters on this image.');
             }
         });
+        addAction('Copy Prompt', () => {
+            let text = this.userPrompt(entry.metadata);
+            if (!text) {
+                mUI.warn('No prompt on this image.');
+                return;
+            }
+            if (typeof mAutoComplete != 'undefined') {
+                mAutoComplete.hide();
+            }
+            if (mState.setParam) {
+                mState.setParam('prompt', text);
+            }
+            else {
+                mState.params['prompt'] = text;
+            }
+            mState.changed();
+            let finish = (copied) => {
+                if (copied) {
+                    mUI.note('Prompt copied and loaded');
+                }
+                else {
+                    mUI.warn('Prompt loaded (clipboard blocked)');
+                }
+                close();
+                location.hash = 'create';
+            };
+            this.copyText(text).then(finish, () => finish(false));
+        });
         addAction('Prompt Img', () => {
             let attached = this.promptPathEntry(entry.fullsrc || entry.url);
             if (attached) {
@@ -482,7 +569,8 @@ class MImages {
                 });
             });
         });
-        addAction('Close', close);
+        let closeButton = addAction('Close', close);
+        closeButton.classList.add('m-viewer-close');
         overlay.appendChild(actions);
         overlay.addEventListener('keydown', e => {
             if (e.key == 'Escape') {
