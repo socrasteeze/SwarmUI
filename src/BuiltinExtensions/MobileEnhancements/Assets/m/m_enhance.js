@@ -749,9 +749,6 @@ class MEnhance {
     applyResult(data) {
         let promptText = this.unwrapEnhanceResult(data.result);
         mState.params['prompt'] = promptText;
-        if (mState.touchParam) {
-            mState.touchParam('prompt');
-        }
         if (typeof mCreate != 'undefined' && mCreate.promptBox) {
             mCreate.promptBox.value = promptText;
             if (typeof mCreate.autoGrow == 'function') {

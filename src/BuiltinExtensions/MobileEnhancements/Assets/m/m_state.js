@@ -34,8 +34,8 @@ class MState {
         this.pinnedUpscale = new Set();
         /** Param ids the user changed after the current preset was selected. Reapplied over the preset
          * merge, including a clear (the key is then absent from params). Not persisted: a reload starts
-         * clean, the same way a new preset selection does. LoRA list keys are never added; those stay
-         * additive in applyPresetMap. */
+         * clean, the same way a new preset selection does. Prompt text and LoRA list keys are never
+         * added; applyPresetMap merges those. */
         this.userTouched = new Set();
         /** True once a save() has failed, so the "not being saved" warning fires once and not per keystroke. */
         this.saveFailed = false;
@@ -444,11 +444,11 @@ class MState {
                 }
             }
         }
-        // Anything edited after the preset was selected wins, including a clear. A {value} prompt preset
-        // therefore stops wrapping once the prompt box is edited; reselecting the preset clears the set
-        // and the wrap applies again. LoRA keys are skipped so a weight edit does not drop the preset's LoRAs.
+        // Anything edited after the preset was selected wins, including a clear.
+        // Prompt text merges via applyPresetMap {value} wrapping and must not be replaced.
+        // LoRA keys stay additive, so a weight edit does not drop the preset's LoRAs.
         for (let key of this.userTouched) {
-            if (MState.PresetAdditiveKeys.includes(key)) {
+            if (MState.PresetMergedKeys.includes(key)) {
                 continue;
             }
             if (key in this.params) {
@@ -495,9 +495,10 @@ class MState {
         return `${shown ?? ''}` != `${presetVal}`;
     }
 
-    /** Marks one param as edited after the current preset. LoRA list keys are ignored. */
+    /** Marks one param as edited after the current preset.
+     * Prompt text and LoRA list keys are ignored; applyPresetMap merges those. */
     touchParam(key) {
-        if (!key || MState.PresetAdditiveKeys.includes(key)) {
+        if (!key || MState.PresetMergedKeys.includes(key)) {
             return;
         }
         this.userTouched.add(key);
@@ -1354,8 +1355,9 @@ class MState {
  * upscale (same IgnoreIf "1"); the row does not write it, but a pin recorded for it is honored. */
 MState.UpscalePinParams = ['refinerupscale', 'refinerupscalemethod', 'seedvrupscale'];
 
-/** LoRA list params. applyPresetMap concatenates them. A later edit must not replace that merge. */
-MState.PresetAdditiveKeys = ['loras', 'loraweights', 'lorasectionconfinement'];
+/** Params whose preset apply is a merge, so a later edit must not replace it.
+ * LoRA lists are concatenated. Prompt text merges via applyPresetMap {value} wrapping and must not be replaced. */
+MState.PresetMergedKeys = ['loras', 'loraweights', 'lorasectionconfinement', 'prompt', 'negativeprompt'];
 
 /** Reference width/height per aspect ratio at a 512 side length. UPSTREAM COUPLING: this table and the
  * scaling math in resolutionFor must stay identical to T2IParamInput.ResolutionAspectReferences (C#) and

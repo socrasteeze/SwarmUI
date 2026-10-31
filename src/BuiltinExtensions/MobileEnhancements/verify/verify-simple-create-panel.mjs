@@ -2323,6 +2323,45 @@ check('Copy Prompt loads original_prompt and leaves the other params alone',
     && precedence.afterCopy.hash == '#create',
     JSON.stringify(precedence.afterCopy));
 
+// Typing updates the base prompt. applyPresetMap still wraps {value}. A later model pick still wins.
+const promptWrap = await page.evaluate(() => {
+    mState.clearUserTouched();
+    mState.params['prompt'] = '';
+    mState.params['negativeprompt'] = '';
+    mState.params['model'] = 'ill/manual-model.safetensors';
+    mState.presets = [{ title: 'ill/wrap', is_starred: false, param_map: {
+        model: 'ill/preset-model',
+        prompt: '<lora:x:0.5> {value}',
+        negativeprompt: 'blurry, {value}'
+    } }];
+    mState.activePresets = [];
+    mState.archFilter = '';
+    mCreate.renderPresets();
+    let preset = document.querySelector('.m-preset-select');
+    preset.value = 'ill/wrap';
+    preset.dispatchEvent(new Event('change'));
+    mCreate.promptBox.value = 'a cat';
+    mCreate.promptBox.dispatchEvent(new Event('input'));
+    mCreate.negBox.value = 'hands';
+    mCreate.negBox.dispatchEvent(new Event('input'));
+    mState.setParam('model', 'ill/after-model.safetensors');
+    let merged = mState.mergedParams();
+    return {
+        prompt: merged['prompt'],
+        negative: merged['negativeprompt'],
+        touchedPrompt: mState.userTouched.has('prompt'),
+        touchedNegative: mState.userTouched.has('negativeprompt'),
+        model: mState.buildGenInput()['model']
+    };
+});
+check('typing a prompt still wraps through the preset and a later model wins',
+    promptWrap.prompt == '<lora:x:0.5> a cat'
+    && promptWrap.negative == 'blurry, hands'
+    && promptWrap.touchedPrompt == false
+    && promptWrap.touchedNegative == false
+    && promptWrap.model == 'ill/after-model.safetensors',
+    JSON.stringify(promptWrap));
+
 await browser.close();
 
 
