@@ -1112,8 +1112,9 @@ class MCreate {
         return wrap;
     }
 
-    /** Search filter shared by both pickers: matches the file name, the folder path, the metadata title,
-     * and the trigger phrase, so a LoRA can be found by the word you actually type into prompts. */
+    /** Search filter shared by the checkpoint picker, the LoRA sheet, and the Models tab.
+     * Matches the file name without its folder or weight-file extension, and the metadata title.
+     * Trigger phrases and folder names are not searched. */
     static filterModels(list, term) {
         // Every word must appear somewhere, in any order: "aria zen" finds "Aria 4 Outfits - Zenless Zone
         // Zero". Separators in file names (_ - / . () [] ,) count as spaces on both sides.
@@ -1124,7 +1125,8 @@ class MCreate {
         return list.filter(model => {
             // A phone should normalize each 18K-LoRA search corpus once, not once per model per keystroke.
             if (model._mSearchText == null) {
-                model._mSearchText = ` ${MCreate.searchWords(`${model.name || ''} ${model.title || ''} ${model.trigger_phrase || ''}`).join(' ')} `;
+                let stem = MCreate.modelSearchStem(model.name);
+                model._mSearchText = ` ${MCreate.searchWords(`${stem} ${model.title || ''}`).join(' ')} `;
             }
             for (let word of words) {
                 if (!model._mSearchText.includes(word)) {
@@ -1138,6 +1140,43 @@ class MCreate {
     /** Lowercased search words, split on whitespace and file-name punctuation. */
     static searchWords(text) {
         return `${text || ''}`.toLowerCase().split(/[\s_\-\/\\.,;:()\[\]{}|'"]+/).filter(word => word.length > 0);
+    }
+
+    /** File name with the folder and the weight-file extension removed.
+     * loraFileStem drops the folder and the extensions MState.stripModelExt knows. .pth is one more. */
+    static modelSearchStem(name) {
+        return MCreate.loraFileStem(name).replace(/\.pth$/i, '');
+    }
+
+    /** True when search ranking is allowed. Name A-Z is the only sort ranking does not override. */
+    static ranksNameSort(setting) {
+        return !!setting && setting.mode == 'Name' && !setting.reverse;
+    }
+
+    /** Exact file-name matches, then file names that start with the query, then the rest.
+     * Both sides are searchWords joined by one space. Order inside a tier stays as it arrived.
+     * An empty query returns the same list. */
+    static rankSearchMatches(list, term) {
+        let query = MCreate.searchWords(term).join(' ');
+        if (!query || !list) {
+            return list;
+        }
+        let exact = [];
+        let prefix = [];
+        let rest = [];
+        for (let model of list) {
+            let stem = MCreate.searchWords(MCreate.modelSearchStem(model && model.name)).join(' ');
+            if (stem == query) {
+                exact.push(model);
+            }
+            else if (stem.startsWith(query)) {
+                prefix.push(model);
+            }
+            else {
+                rest.push(model);
+            }
+        }
+        return exact.concat(prefix, rest);
     }
 
     /** Narrows a picker list to the selected architecture and builds the row that explains what happened.
@@ -1221,6 +1260,7 @@ class MCreate {
             if (arch.row) {
                 results.appendChild(arch.row);
             }
+            // This sheet has no sort control, so results stay in list order. Name-sort ranking is on the LoRA sheet and the Models tab.
             let matches = mState.starredFirst(MCreate.filterModels(arch.list, search.value), 'Stable-Diffusion');
             let pages = Math.max(1, Math.ceil(matches.length / MCreate.PickerPageSize));
             page = Math.min(page, pages - 1);
@@ -2688,7 +2728,7 @@ class MCreate {
                 for (let prop in model) {
                     existing[prop] = model[prop];
                 }
-                // Search corpus cached the old title-less text; drop it so the next keystroke reindexes.
+                // Cached search text is the file stem plus the title. A merge can change the title.
                 existing._mSearchText = null;
                 existing._mListed = true;
                 existing._mMetaRev = (existing._mMetaRev || 0) + 1;
@@ -2995,7 +3035,7 @@ class MCreate {
             }
             let sort = item.job.sort || { 'mode': 'Name', 'reverse': false };
             this.loraFetchInFlight++;
-            genericRequest('ListModels', {
+            let request = {
                 'path': item.job.path,
                 'depth': item.job.depth,
                 'subtype': 'LoRA',
@@ -3006,7 +3046,11 @@ class MCreate {
                 'limit': item.job.limit,
                 'offset': item.job.offset || 0,
                 'search': item.job.search || ''
-            }, data => {
+            };
+            if (item.job.searchFields) {
+                request['search_fields'] = item.job.searchFields;
+            }
+            genericRequest('ListModels', request, data => {
                 this.loraFetchInFlight--;
                 item.done(false, '', data || {});
                 this.pumpLoraFetch();
@@ -3084,7 +3128,8 @@ class MCreate {
         });
     }
 
-    /** Server search for LoRAs whose title or trigger matches, merged into the name corpus.
+    /** Server search for LoRAs whose file name or title matches, merged into the name corpus.
+     * search_fields is name_title, so folders and trigger phrases stay out, the same rule as filterModels.
      * Repeated terms share one request. A response for an older term still fills the cache and does not call that term's waiters. */
     searchLoraMetadata(term, onDone) {
         let key = `${term || ''}`.trim().toLowerCase();
@@ -3120,6 +3165,7 @@ class MCreate {
             'path': '',
             'depth': MCreate.ListDepth,
             'search': `${term || ''}`.trim(),
+            'searchFields': 'name_title',
             'offset': 0,
             'limit': MCreate.LoraCacheLimit,
             'sort': sort
@@ -3362,7 +3408,11 @@ class MCreate {
             for (let i = 0; i < curLoras.length; i++) {
                 active.add(MState.stripModelExt(curLoras[i].name));
             }
-            let matches = mState.compatFirst(mState.starredFirst(MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name))), 'LoRA'), 'LoRA');
+            let filtered = MCreate.filterModels(compat.list, search.value).filter(m => !active.has(MState.stripModelExt(m.name)));
+            if (MCreate.ranksNameSort(MCreate.loraSortSetting())) {
+                filtered = MCreate.rankSearchMatches(filtered, search.value);
+            }
+            let matches = mState.compatFirst(mState.starredFirst(filtered, 'LoRA'), 'LoRA');
             let pages = Math.max(1, Math.ceil(matches.length / MCreate.PickerPageSize));
             page = Math.min(page, pages - 1);
             let start = page * MCreate.PickerPageSize;

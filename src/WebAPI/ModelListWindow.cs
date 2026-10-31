@@ -203,15 +203,22 @@ public static class ModelListWindow
         return result;
     }
 
-    /// <summary>True when every whitespace-separated word of <paramref name="search"/> appears in the name, title, or trigger phrase.
-    /// An empty or whitespace search matches everything. Comparison is case-insensitive and is a contains check, not a word-boundary check.</summary>
-    public static bool Matches(string name, string title, string triggerPhrase, string search)
+    /// <summary>Weight-file extensions removed from a <c>name_title</c> search. Longer suffixes are listed first.</summary>
+    static readonly string[] SearchWeightExtensions = [".safetensors", ".engine", ".gguf", ".ckpt", ".pth", ".sft", ".bin", ".pt"];
+
+    /// <summary>True when every whitespace-separated word of <paramref name="search"/> appears in the searched text.
+    /// An empty or whitespace search matches everything. Comparison is case-insensitive and is a contains check, not a word-boundary check.
+    /// <paramref name="searchFields"/> empty, null, or anything other than <c>name_title</c> searches the full name, the title, and the trigger phrase.
+    /// <c>name_title</c> searches the file name without its folder or weight-file extension, plus the title.</summary>
+    public static bool Matches(string name, string title, string triggerPhrase, string search, string searchFields = null)
     {
         if (string.IsNullOrWhiteSpace(search))
         {
             return true;
         }
-        string haystack = $"{name}\n{title}\n{triggerPhrase}".ToLowerFast();
+        bool nameTitle = string.Equals(searchFields, "name_title", StringComparison.OrdinalIgnoreCase);
+        string haystack = nameTitle ? $"{SearchFileStem(name)}\n{title}" : $"{name}\n{title}\n{triggerPhrase}";
+        haystack = haystack.ToLowerFast();
         string[] words = search.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
         foreach (string word in words)
         {
@@ -221,6 +228,30 @@ public static class ModelListWindow
             }
         }
         return true;
+    }
+
+    /// <summary>File name with folders and a trailing weight-file extension removed.</summary>
+    public static string SearchFileStem(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return "";
+        }
+        string file = name.Replace('\\', '/');
+        int slash = file.LastIndexOf('/');
+        if (slash >= 0)
+        {
+            file = slash + 1 < file.Length ? file[(slash + 1)..] : "";
+        }
+        string lower = file.ToLowerFast();
+        foreach (string extension in SearchWeightExtensions)
+        {
+            if (lower.EndsWith(extension) && file.Length > extension.Length)
+            {
+                return file[..^extension.Length];
+            }
+        }
+        return file;
     }
 
     /// <summary>Sorts <paramref name="matches"/>, skips <paramref name="offset"/>, then keeps at most the effective cap.

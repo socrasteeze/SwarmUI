@@ -463,11 +463,16 @@ class MModels {
             return;
         }
         let architecture = this.architectureFilters[this.subtype];
+        let sort = this.sortSetting();
         let matches = MCreate.filterModels(list, this.search.value);
         if (architecture) {
             matches = matches.filter(model => this.architectureOf(model) == architecture);
         }
-        matches = mState.compatFirst(mState.starredFirst(MCreate.sortModels(matches, this.sortSetting()), this.subtype), this.subtype);
+        matches = MCreate.sortModels(matches, sort);
+        if (MCreate.ranksNameSort(sort)) {
+            matches = MCreate.rankSearchMatches(matches, this.search.value);
+        }
+        matches = mState.compatFirst(mState.starredFirst(matches, this.subtype), this.subtype);
         this.renderPage(matches);
         let count = mCreate.buildCountRow(matches.length, matches.length, isLora ? 'LoRAs' : 'checkpoints');
         count.classList.add('m-models-search-count');

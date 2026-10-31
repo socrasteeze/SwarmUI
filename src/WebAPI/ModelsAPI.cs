@@ -617,10 +617,11 @@ public static class ModelsAPI
         [API.APIParameter("If true, allow remote models. If false, only local models.")] bool allowRemote = true,
         [API.APIParameter("If true, the sorting should be done in reverse.")] bool sortReverse = false,
         [API.APIParameter("If true, provide model images in raw data format. If false, use URLs.")] bool dataImages = false,
-        [API.APIParameter("If non-empty, only files whose name, title, or trigger phrase contain every whitespace-separated word, case-insensitively. Applied before total and before the cap, so total is the match count. Wildcards match on name and title only.")] string search = "",
+        [API.APIParameter("If non-empty, only files whose searched text contains every whitespace-separated word, case-insensitively. By default that text is the full name, the title, and the trigger phrase. search_fields can narrow it. Applied before total and before the cap, so total is the match count. Wildcards have no trigger phrase.")] string search = "",
         [API.APIParameter("If greater than 0, return at most this many files after sorting, and never more than ModelListSanityCap. 0 uses ModelListSanityCap alone.")] int limit = 0,
         [API.APIParameter("How many sorted matches to skip before taking limit. 0 starts at the first match.")] int offset = 0,
-        [API.APIParameter("If non-empty, a comma-separated list of compat class IDs. Only models that can load under at least one of them are kept. A model with no compat class is judged by the classed models in its top-level folder, and kept when that is unknown. Applied after search and before total and the cap, so total is the post-filter count and compat_hidden counts the search matches removed. Ignored for Wildcards and Stable-Diffusion.")] string compat = "")
+        [API.APIParameter("If non-empty, a comma-separated list of compat class IDs. Only models that can load under at least one of them are kept. A model with no compat class is judged by the classed models in its top-level folder, and kept when that is unknown. Applied after search and before total and the cap, so total is the post-filter count and compat_hidden counts the search matches removed. Ignored for Wildcards and Stable-Diffusion.")] string compat = "",
+        [API.APIParameter("Empty keeps the default search of the full name, the title, and the trigger phrase. name_title matches the file name without its folder or weight-file extension, plus the title, and ignores trigger phrases. Any other value keeps the default. Wildcards have no trigger phrase in either mode.")] string search_fields = "")
     {
         if (!Enum.TryParse(sortBy, true, out ModelHistorySortMode sortMode))
         {
@@ -669,7 +670,7 @@ public static class ModelsAPI
             {
                 return;
             }
-            if (!ModelListWindow.Matches(name, title, trigger, search))
+            if (!ModelListWindow.Matches(name, title, trigger, search, search_fields))
             {
                 return;
             }
@@ -705,7 +706,9 @@ public static class ModelsAPI
         using ManyReadOneWriteLock.ReadClaim claim = Program.RefreshLock.LockRead();
         if (subtype == "Wildcards")
         {
-            // Wildcards have no trigger phrase. Search uses the file name and the leaf title, and limit/offset use the same window as other subtypes.
+            // Wildcards have no trigger phrase. The default search uses the file path and the leaf title.
+            // name_title uses the same stem-plus-title rule as other subtypes, still with no trigger phrase.
+            // limit and offset use the same window as other subtypes.
             foreach (string file in WildcardsHelper.ListFiles)
             {
                 if (!file.StartsWith(path) || file.Length <= path.Length || !session.User.IsAllowedModel(file))

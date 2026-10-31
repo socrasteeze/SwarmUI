@@ -1481,7 +1481,14 @@ const wordSearch = await page.evaluate(async () => {
         { name: 'anima/Other.safetensors', title: 'Zenless style', trigger_phrase: 'xyzhumzzz' }
     ];
     let names = term => MCreate.filterModels(list, term).map(m => m.name.split('/')[1].slice(0, 12));
-    let out = { ariaZen: names('Aria zen'), zenAria: names('zen aria'), nikke: names('aria_nikke'), trigger: names('xyzhum') };
+    let lone = [{ name: 'secretfolder/blue_heron.safetensors', title: 'Crimson Kite', trigger_phrase: 'onlytriggerzz' }];
+    let loneNames = term => MCreate.filterModels(lone, term).map(m => m.name);
+    let out = {
+        ariaZen: names('Aria zen'), zenAria: names('zen aria'), nikke: names('aria_nikke'), trigger: names('xyzhum'),
+        folderOnly: loneNames('secretfolder'), triggerOnly: loneNames('onlytriggerzz'),
+        fileOnly: loneNames('heron'), titleOnly: loneNames('crimson'), extOnly: loneNames('safetensors'),
+        caseFile: loneNames('HERON')
+    };
     // The ill filter from the checks above is still active; a flux-folder match must surface as a hint.
     mCreate.loraList = [{ name: 'ill/keep.safetensors' }, { name: 'flux/Aria_Zenless.safetensors' }];
     mCreate.loraMap = new Map();
@@ -1507,9 +1514,161 @@ const wordSearch = await page.evaluate(async () => {
 });
 await page.waitForTimeout(300);
 check('LoRA search matches every word in any order', wordSearch.ariaZen.length == 1 && wordSearch.zenAria.length == 1
-    && wordSearch.nikke.length == 1 && wordSearch.trigger.length == 1, JSON.stringify(wordSearch));
+    && wordSearch.nikke.length == 1, JSON.stringify(wordSearch));
+check('a trigger-only term does not match', wordSearch.trigger.length == 0 && wordSearch.triggerOnly.length == 0, JSON.stringify(wordSearch));
+check('a folder-only term does not match', wordSearch.folderOnly.length == 0, JSON.stringify(wordSearch.folderOnly));
+check('filename and title match, and an extension word does not', wordSearch.fileOnly.length == 1 && wordSearch.titleOnly.length == 1
+    && wordSearch.caseFile.length == 1 && wordSearch.extOnly.length == 0, JSON.stringify(wordSearch));
 check('a search the filters hide says so and can reveal it', wordSearch.hint == '1 more match outside the filters - tap to show all'
     && wordSearch.afterReveal == 1, JSON.stringify(wordSearch));
+
+const searchRank = await page.evaluate(async () => {
+    let saved = {
+        arch: mState.archFilter,
+        starred: mState.starredModels,
+        model: mState.params['model'],
+        presets: mState.activePresets,
+        loras: mState.params['loras'],
+        weights: mState.params['loraweights'],
+        list: mCreate.loraList,
+        models: mCreate.modelList,
+        catalog: mState.models,
+        map: mCreate.loraMap,
+        version: mCreate.loraSortVersion,
+        cache: mCreate.loraSortCache,
+        sortBy: localStorage.getItem('models_LoRA_sort_by'),
+        sortReverse: localStorage.getItem('models_LoRA_sort_reverse')
+    };
+    let rows = [
+        { name: 'b_other.safetensors', title: 'Exact', time_created: 5, time_modified: 5 },
+        { name: 'exact.safetensors', title: 'Zulu', time_created: 1, time_modified: 1 },
+        { name: 'exact_extra.safetensors', title: 'Middle', time_created: 9, time_modified: 9 },
+        { name: 'pack/exact.safetensors', title: 'Alpha', time_created: 3, time_modified: 3, trigger_phrase: 'folderwordpack' }
+    ];
+    let ids = list => list.map(model => model.name);
+    let nameSort = { 'mode': 'Name', 'reverse': false };
+    let filtered = MCreate.filterModels(rows, 'exact');
+    let ranked = ids(MCreate.rankSearchMatches(MCreate.sortModels(filtered, nameSort), 'exact'));
+    let titled = ids(MCreate.sortModels(filtered, { 'mode': 'Title', 'reverse': false }));
+    let dated = ids(MCreate.sortModels(filtered, { 'mode': 'DateCreated', 'reverse': false }));
+    let reversed = ids(MCreate.sortModels(filtered, { 'mode': 'Name', 'reverse': true }));
+    let emptySame = MCreate.rankSearchMatches(rows, '') == rows && MCreate.rankSearchMatches(rows, '   ') == rows;
+    mState.archFilter = '';
+    mState.starredModels = {};
+    mState.activePresets = [];
+    delete mState.params['model'];
+    delete mState.params['loras'];
+    delete mState.params['loraweights'];
+    localStorage.setItem('models_LoRA_sort_by', 'Name');
+    localStorage.setItem('models_LoRA_sort_reverse', 'false');
+    mState.models = { 'LoRA': [], 'Stable-Diffusion': (saved.catalog && saved.catalog['Stable-Diffusion']) || [] };
+    mCreate.indexLoras(rows);
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mCreate.openLoraSheet();
+    let sheet = () => [...document.querySelectorAll('.m-sheet')].pop();
+    let shown = () => [...sheet().querySelectorAll('.m-lora-results .m-model-result')].map(row => row.dataset.loraName);
+    let search = sheet().querySelector('.m-lora-search');
+    search.value = 'exact';
+    search.dispatchEvent(new Event('input'));
+    await new Promise(resolve => setTimeout(resolve, MCreate.SearchDebounceMs + 100));
+    let nameOrder = shown();
+    mState.starredModels = { 'LoRA': ['pack/exact.safetensors'] };
+    search.dispatchEvent(new Event('input'));
+    await new Promise(resolve => setTimeout(resolve, MCreate.SearchDebounceMs + 100));
+    let starredOrder = shown();
+    mState.starredModels = {};
+    let pick = mode => {
+        let select = sheet().querySelector('.m-sort-select');
+        select.value = mode;
+        select.dispatchEvent(new Event('change'));
+        return shown();
+    };
+    let titleOrder = pick('Title');
+    let dateOrder = pick('DateCreated');
+    pick('Name');
+    sheet().querySelector('.m-lora-sort-reverse').click();
+    let reverseOrder = shown();
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
+    }
+    mCreate.modelList = [
+        { name: 'exact_extra.safetensors', title: 'Middle' },
+        { name: 'b_other.safetensors', title: 'Exact' },
+        { name: 'pack/exact.safetensors', title: 'Alpha' },
+        { name: 'exact.safetensors', title: 'Zulu' }
+    ];
+    mCreate.openModelSheet();
+    let modelSheet = sheet();
+    let modelSearch = modelSheet.querySelector('.m-lora-search');
+    modelSearch.value = 'exact';
+    modelSearch.dispatchEvent(new Event('input'));
+    let pickerOrder = [...modelSheet.querySelectorAll('.m-model-result')].map(row => {
+        let primary = row.querySelector('.m-model-name').textContent;
+        let sub = row.querySelector('.m-model-sub');
+        return `${primary}|${sub ? sub.textContent : ''}`;
+    });
+    for (let elem of [...document.querySelectorAll('.m-sheet-backdrop')].reverse()) {
+        elem.click();
+    }
+    mState.archFilter = saved.arch;
+    mState.starredModels = saved.starred;
+    mState.activePresets = saved.presets;
+    if (saved.model == null) {
+        delete mState.params['model'];
+    }
+    else {
+        mState.params['model'] = saved.model;
+    }
+    if (saved.loras == null) {
+        delete mState.params['loras'];
+        delete mState.params['loraweights'];
+    }
+    else {
+        mState.params['loras'] = saved.loras;
+        mState.params['loraweights'] = saved.weights;
+    }
+    mCreate.loraList = saved.list;
+    mCreate.modelList = saved.models;
+    mState.models = saved.catalog;
+    mCreate.loraMap = saved.map;
+    mCreate.loraSortVersion = saved.version;
+    mCreate.loraSortCache = saved.cache;
+    if (saved.sortBy == null) {
+        localStorage.removeItem('models_LoRA_sort_by');
+    }
+    else {
+        localStorage.setItem('models_LoRA_sort_by', saved.sortBy);
+    }
+    if (saved.sortReverse == null) {
+        localStorage.removeItem('models_LoRA_sort_reverse');
+    }
+    else {
+        localStorage.setItem('models_LoRA_sort_reverse', saved.sortReverse);
+    }
+    return { emptySame, ranked, titled, dated, reversed, nameOrder, starredOrder, titleOrder, dateOrder, reverseOrder, pickerOrder };
+});
+check('exact file name ranks first and a prefix ranks second under Name sort',
+    searchRank.emptySame
+    && searchRank.ranked.join(',') == 'exact.safetensors,pack/exact.safetensors,exact_extra.safetensors,b_other.safetensors'
+    && searchRank.nameOrder.join(',') == searchRank.ranked.join(','),
+    JSON.stringify(searchRank));
+check('a starred exact match stays ahead of the rank order',
+    searchRank.starredOrder.join(',') == 'pack/exact.safetensors,exact.safetensors,exact_extra.safetensors,b_other.safetensors',
+    JSON.stringify(searchRank.starredOrder));
+check('Title, Date, and Reverse keep their sort and skip ranking',
+    searchRank.titleOrder.join(',') == searchRank.titled.join(',')
+    && searchRank.dateOrder.join(',') == searchRank.dated.join(',')
+    && searchRank.reverseOrder.join(',') == searchRank.reversed.join(',')
+    && searchRank.titled.join(',') == 'pack/exact.safetensors,b_other.safetensors,exact_extra.safetensors,exact.safetensors'
+    && searchRank.dated.join(',') == 'exact_extra.safetensors,b_other.safetensors,pack/exact.safetensors,exact.safetensors'
+    && searchRank.reversed[0] == 'pack/exact.safetensors'
+    && searchRank.reversed.join(',') != searchRank.ranked.join(','),
+    JSON.stringify(searchRank));
+check('the checkpoint picker does not rank search results',
+    searchRank.pickerOrder.join(',') == 'exact_extra|Middle,b_other|Exact,exact|Alpha,exact|Zulu',
+    JSON.stringify(searchRank.pickerOrder));
 
 await page.evaluate(() => {
     mState.starredModels = {};
@@ -1785,6 +1944,103 @@ check('Models search follows the LoRA toggle and matches titles', modelSearch.lo
     && modelSearch.lora.names.every(n => /consistency/i.test(n)) && /LoRAs/.test(modelSearch.lora.placeholder),
     JSON.stringify(modelSearch.lora));
 check('clearing the Models search returns to folder browsing', modelSearch.chipsBack, JSON.stringify(modelSearch));
+
+const modelsRank = await page.evaluate(() => {
+    let rows = [
+        { name: 'b_other.safetensors', title: 'Exact', time_created: 5, time_modified: 5 },
+        { name: 'exact.safetensors', title: 'Zulu', time_created: 1, time_modified: 1 },
+        { name: 'exact_extra.safetensors', title: 'Middle', time_created: 9, time_modified: 9 },
+        { name: 'pack/exact.safetensors', title: 'Alpha', time_created: 3, time_modified: 3, trigger_phrase: 'folderwordpack' }
+    ];
+    let saved = {
+        lora: mCreate.loraList,
+        models: mCreate.modelList,
+        subtype: mModels.subtype,
+        search: mModels.search.value,
+        arch: Object.assign({}, mModels.architectureFilters),
+        loraSort: localStorage.getItem('models_LoRA_sort_by'),
+        loraReverse: localStorage.getItem('models_LoRA_sort_reverse'),
+        modelSort: localStorage.getItem('models_Stable-Diffusion_sort_by'),
+        modelReverse: localStorage.getItem('models_Stable-Diffusion_sort_reverse')
+    };
+    let cardNames = () => [...document.querySelectorAll('.m-model-card')].map(card => {
+        if (card.dataset.loraName) {
+            return card.dataset.loraName;
+        }
+        let lines = (card.getAttribute('title') || '').split('\n');
+        return lines.length > 1 ? lines[1] : lines[0];
+    });
+    let run = (subtype) => {
+        mModels.subtype = subtype;
+        mModels.architectureFilters[subtype] = '';
+        mCreate.loraList = rows;
+        mCreate.modelList = rows;
+        let modeKey = `models_${subtype}_sort_by`;
+        let reverseKey = `models_${subtype}_sort_reverse`;
+        let out = {};
+        localStorage.setItem(modeKey, 'Name');
+        localStorage.setItem(reverseKey, 'false');
+        mModels.search.value = '';
+        mModels.paintSearch();
+        out.empty = cardNames();
+        mModels.search.value = 'exact';
+        mModels.paintSearch();
+        out.name = cardNames();
+        localStorage.setItem(modeKey, 'Title');
+        mModels.paintSearch();
+        out.title = cardNames();
+        localStorage.setItem(modeKey, 'DateCreated');
+        mModels.paintSearch();
+        out.date = cardNames();
+        localStorage.setItem(modeKey, 'Name');
+        localStorage.setItem(reverseKey, 'true');
+        mModels.paintSearch();
+        out.reverse = cardNames();
+        return out;
+    };
+    let lora = run('LoRA');
+    let checkpoint = run('Stable-Diffusion');
+    mCreate.loraList = saved.lora;
+    mCreate.modelList = saved.models;
+    mModels.subtype = saved.subtype;
+    mModels.search.value = saved.search;
+    mModels.architectureFilters = saved.arch;
+    let put = (key, value) => {
+        if (value == null) {
+            localStorage.removeItem(key);
+        }
+        else {
+            localStorage.setItem(key, value);
+        }
+    };
+    put('models_LoRA_sort_by', saved.loraSort);
+    put('models_LoRA_sort_reverse', saved.loraReverse);
+    put('models_Stable-Diffusion_sort_by', saved.modelSort);
+    put('models_Stable-Diffusion_sort_reverse', saved.modelReverse);
+    return { lora, checkpoint };
+});
+let modelsRankExpected = {
+    name: 'exact.safetensors,pack/exact.safetensors,exact_extra.safetensors,b_other.safetensors',
+    title: 'pack/exact.safetensors,b_other.safetensors,exact_extra.safetensors,exact.safetensors',
+    date: 'exact_extra.safetensors,b_other.safetensors,pack/exact.safetensors,exact.safetensors'
+};
+check('Models tab Name sort ranks exact then prefix, and an empty search does not',
+    modelsRank.lora.name.join(',') == modelsRankExpected.name
+    && modelsRank.checkpoint.name.join(',') == modelsRankExpected.name
+    && modelsRank.lora.empty.join(',') == modelsRank.checkpoint.empty.join(',')
+    && modelsRank.lora.empty.join(',') != modelsRankExpected.name
+    && modelsRank.lora.empty[0] == 'b_other.safetensors'
+    && modelsRank.lora.empty[3] == 'pack/exact.safetensors',
+    JSON.stringify(modelsRank));
+check('Models tab Title, Date, and Reverse skip ranking for LoRAs and checkpoints',
+    modelsRank.lora.title.join(',') == modelsRankExpected.title
+    && modelsRank.lora.date.join(',') == modelsRankExpected.date
+    && modelsRank.lora.reverse.join(',') == modelsRank.checkpoint.reverse.join(',')
+    && modelsRank.lora.reverse[0] == 'pack/exact.safetensors'
+    && modelsRank.lora.reverse.join(',') != modelsRankExpected.name
+    && modelsRank.checkpoint.title.join(',') == modelsRankExpected.title
+    && modelsRank.checkpoint.date.join(',') == modelsRankExpected.date,
+    JSON.stringify(modelsRank));
 
 const bars = await page.evaluate(() => {
     let panel = getComputedStyle(document.querySelector('.m-panel'));
@@ -2144,7 +2400,11 @@ const loraSearchBurst = await page.evaluate(async () => {
     await new Promise(resolve => setTimeout(resolve, MCreate.SearchDebounceMs + 80));
     let after = calls;
     let shown = [...document.querySelectorAll('.m-lora-results .m-model-name')].map(elem => elem.textContent);
-    let expected = origFilter(mCreate.sortedLoraList(mCreate.loraList), 'hats').map(model => mUI.modelLines(model, true).primary);
+    let expectedList = origFilter(mCreate.sortedLoraList(mCreate.loraList), 'hats');
+    if (MCreate.ranksNameSort(MCreate.loraSortSetting())) {
+        expectedList = MCreate.rankSearchMatches(expectedList, 'hats');
+    }
+    let expected = expectedList.map(model => mUI.modelLines(model, true).primary);
     let sortsAfterOpen = sorts;
     mCreate.sortedLoraList(mCreate.loraList);
     let sortsCached = sorts;

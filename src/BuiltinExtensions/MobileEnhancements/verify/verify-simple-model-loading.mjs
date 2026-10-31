@@ -143,7 +143,10 @@ report = await page.evaluate(() => {
 });
 check('architecture alone finds nested LoRAs using the uncapped index and resets pagination', report.names.join(',') == 'nested/needle.safetensors' && report.page == 0 && report.folders == 'none' && report.selected == 'anima/lora', JSON.stringify(report));
 report = await page.evaluate(() => {
-    mModels.search.value = 'other';
+    let flux = mCreate.loraList.find(model => model.name == 'other/needle.safetensors');
+    flux.title = 'FluxOnly';
+    flux._mSearchText = null;
+    mModels.search.value = 'FluxOnly';
     mModels.refresh();
     return { cards: document.querySelectorAll('.m-model-card').length, pager: mModels.pager.hidden, count: document.querySelector('.m-models-search-count').textContent };
 });

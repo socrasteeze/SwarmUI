@@ -478,13 +478,15 @@ try {
     check('enrichLoraMetadata issues one capped request and keeps onDone',
         simple.enrichCount == 1 && simple.enrich.limit == 500 && simple.enrich.offset == 0 && simple.enrich.path == ''
         && simple.enrich.depth == 32 && simple.enrich.subtype == 'LoRA' && simple.enrich.search == ''
+        && simple.enrich.search_fields == null
         && simple.done.join('|') == 'false:|false:',
         JSON.stringify({ count: simple.enrichCount, args: simple.enrich, done: simple.done }));
     check('searchLoraMetadata merges a title-only match and dedupes the term',
         simple.localBefore.length == 0 && simple.searchArgs.search == 'miku' && simple.searchArgs.limit == 500
+        && simple.searchArgs.search_fields == 'name_title'
         && simple.localAfter.includes('epoch_1.safetensors') && simple.searchDone == 1
         && simple.afterRepeat == simple.beforeRepeat && simple.repeatDone == 1,
-        JSON.stringify({ before: simple.localBefore, after: simple.localAfter, repeat: simple.repeatDone }));
+        JSON.stringify({ before: simple.localBefore, after: simple.localAfter, repeat: simple.repeatDone, fields: simple.searchArgs.search_fields }));
     check('searchLoraMetadata caches a stale response without calling its waiters',
         simple.aaCalledAfterStale == 0 && simple.fetchedAa == true
         && simple.namesAfterStale.includes('aa-only.safetensors')

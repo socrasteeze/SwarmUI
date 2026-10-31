@@ -37,6 +37,27 @@ public class ModelListSearchLimitTests : SwarmUITest
         Assert.That(ModelListWindow.Matches("red.safetensors", "", "hat", "red hat"), Is.True);
     }
 
+    /// <summary><c>name_title</c> matches the file stem and the title. It ignores folders, trigger phrases, and the weight-file extension.
+    /// The default search still matches a folder and a trigger phrase.</summary>
+    [Test]
+    public static void TestMatches_NameTitleFields()
+    {
+        Assert.That(ModelListWindow.Matches("secret/miku.safetensors", "Other", "onlytrigger", "onlytrigger", "name_title"), Is.False);
+        Assert.That(ModelListWindow.Matches("secret/miku.safetensors", "Other", "", "secret", "name_title"), Is.False);
+        Assert.That(ModelListWindow.Matches("secret\\miku.safetensors", "Other", "", "secret", "name_title"), Is.False);
+        Assert.That(ModelListWindow.Matches("secret/miku.safetensors", "Other", "", "miku", "name_title"), Is.True);
+        Assert.That(ModelListWindow.Matches("secret\\miku.safetensors", "Other", "", "MIKU", "name_title"), Is.True);
+        Assert.That(ModelListWindow.Matches("ill/epoch_1.safetensors", "Hatsune Miku", "unrelated", "hatsune", "name_title"), Is.True);
+        Assert.That(ModelListWindow.Matches("ill/miku.safetensors", "Other", "", "safetensors", "name_title"), Is.False);
+        Assert.That(ModelListWindow.Matches("Folder/Blue.PTH", "Other", "onlytrigger", "pth", "NAME_TITLE"), Is.False);
+        Assert.That(ModelListWindow.Matches("Folder/Blue.PTH", "Other", "onlytrigger", "blue", "name_title"), Is.True);
+        Assert.That(ModelListWindow.Matches("pack/red_bow.safetensors", "Hair", "hat", "red hair", "name_title"), Is.True);
+        Assert.That(ModelListWindow.Matches("pack/red_bow.safetensors", "Hair", "hat", "red hat", "name_title"), Is.False);
+        Assert.That(ModelListWindow.Matches("secret/miku.safetensors", "", "onlytrigger", "secret"), Is.True);
+        Assert.That(ModelListWindow.Matches("secret/miku.safetensors", "", "onlytrigger", "onlytrigger", ""), Is.True);
+        Assert.That(ModelListWindow.Matches("a.safetensors", "", "onlytrigger", "onlytrigger", "bogus"), Is.True);
+    }
+
     /// <summary>The cap is applied after sorting, so the page is the first names, not the insertion prefix.</summary>
     [Test]
     public static void TestPage_SortThenCap()
