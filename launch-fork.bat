@@ -10,6 +10,9 @@ rem check already ran on the way in, so skip it on the way back through - otherw
 rem fetch and can stall five seconds on the banner. The variable survives because `call` stays in this process.
 if defined SWARM_FORK_CHECKED goto launch
 
+rem Every clone that launches refuses a push that fails the /clean scan (.githooks/pre-push).
+git config core.hooksPath .githooks 2>nul
+
 rem Fetch upstream quietly; never fail the launch if the remote/network is unavailable.
 git fetch upstream --quiet 2>nul
 

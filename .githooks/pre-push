@@ -1,0 +1,7 @@
+#!/bin/sh
+# Refuses a push that scripts/scan-sensitive.sh blocks. launch-fork.bat points core.hooksPath here.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [ "$local_sha" != 0000000000000000000000000000000000000000 ]; then
+        sh scripts/scan-sensitive.sh "$local_sha" "$remote_sha" </dev/null || exit 1
+    fi
+done
