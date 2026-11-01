@@ -95,6 +95,8 @@ class MApp {
         clear.addEventListener('click', () => {
             mUI.confirm('Clear saved prompt, presets selection, and params?', () => {
                 localStorage.removeItem('m_client_state');
+                localStorage.removeItem('m_client_grid_selected');
+                localStorage.removeItem('m_client_grid_mode');
                 location.reload();
             });
         });

@@ -549,7 +549,7 @@ class MCreate {
     /** How far a finger may travel and still count as a tap rather than a scroll, in CSS pixels. */
     static TapSlopPx = 10;
 
-    /** Generate on tap; long-press (600ms) opens the grid form.
+    /** Generate on tap (the saved grid, in Grid mode); long-press (600ms) opens the grid form.
      *
      * The finger's travel is tracked, not just the fact that it moved. Previously any touchmove cleared the
      * long-press timer but recorded nothing, so touchend still fired a generation - meaning a scroll that
@@ -617,6 +617,15 @@ class MCreate {
      * before the request is built so the phone does not have to pre-size frames by hand. */
     doGenerate() {
         this.flushPromptSave();
+        if (typeof mGrid != 'undefined' && mGrid.isOn()) {
+            mUI.clearError();
+            mAutoComplete.hide();
+            if (document.activeElement && document.activeElement.blur) {
+                document.activeElement.blur();
+            }
+            mGrid.runOrOpen();
+            return;
+        }
         let kick = (input) => {
             if (!`${input['prompt'] || ''}`.trim() && !input['promptimages'] && mState.activePresets.length == 0) {
                 mUI.warn('Type a prompt or pick a preset first.');
@@ -700,8 +709,12 @@ class MCreate {
             return;
         }
         let name = MCreate.genTargetName(mState.genTarget, mState.backendTargets);
-        this.genTargetLabel.textContent = name;
+        let grid = typeof mGrid != 'undefined' && mGrid.isOn();
+        this.genTargetLabel.textContent = grid ? `Grid ${name}` : name;
         this.genTargetButton.title = `Generating on: ${name}. Tap to change.`;
+        // The count is on the button because a tap now starts every image in the grid.
+        this.genButton.textContent = !grid ? 'Generate'
+            : mGrid.isReady() ? `Run Grid (${mGrid.totalImages()})` : 'Set Up Grid';
         let target = MState.normalizeGenTarget(mState.genTarget);
         let down = target.kind != 'auto' && mState.backendTargets.length > 0
             && !mState.backendTargets.some(row => row.usable && row.kind == target.kind
@@ -718,6 +731,21 @@ class MCreate {
     openGenTargetSheet() {
         let content = mUI.el('div', 'm-lora-sheet');
         content.appendChild(mUI.el('div', 'm-sheet-title', 'Generate on'));
+        if (typeof mGrid != 'undefined' && MGrid.permitted()) {
+            let modes = mUI.el('div', 'm-seg-group m-gen-mode');
+            for (let [active, label] of [[false, 'Single'], [true, 'Grid']]) {
+                let button = mUI.el('button', 'm-seg-button', label);
+                button.classList.toggle('m-selected', mGrid.active == active);
+                button.addEventListener('click', () => {
+                    mGrid.setActive(active);
+                    for (let other of modes.children) {
+                        other.classList.toggle('m-selected', other == button);
+                    }
+                });
+                modes.appendChild(button);
+            }
+            content.appendChild(modes);
+        }
         let results = mUI.el('div', 'm-model-results');
         content.appendChild(results);
         let close = null;

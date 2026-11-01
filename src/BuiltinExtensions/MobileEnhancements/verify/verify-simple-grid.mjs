@@ -10,7 +10,8 @@
  *    is dropped so the grid axis wins. Non-overlapping base LoRAs remain in the base params.
  * 3. The batch count never survives into the base, or every cell is multiplied by it.
  * 7. Row-count chooser (Auto/1/2/3/4) persists in localStorage and is forwarded as runGrid opts.rows.
- * 8. Picking a LoRA from the axis list blurs the search field so the on-screen keyboard dismisses.
+ * 8. Picking from the LoRA or Preset list keeps the search focused, so the on-screen keyboard stays up and
+ *    the sheet does not move. Scrolling the list dismisses it.
  * 4. LoRA axis values are extension-stripped, matching how a LoRA is named everywhere else in the client.
  * 5. The image count is the product of the live axes, and Run is unavailable below two images - a "grid" of
  *    one is a generation.
@@ -120,7 +121,9 @@ await page.evaluate(() => {
         steps: { name: 'Steps' }, cfgscale: { name: 'CFG Scale' },
         sampler: { name: 'Sampler', values: ['euler', 'dpmpp_2m', 'er_sde'],
             value_names: ['Euler', 'DPM++ 2M', 'ER-SDE'] },
-        scheduler: { name: 'Scheduler', values: ['normal', 'karras', 'beta'] }
+        scheduler: { name: 'Scheduler', values: ['normal', 'karras', 'beta'] },
+        aspectratio: { name: 'Aspect Ratio', values: ['1:1', '16:9', 'Custom'],
+            value_names: ['1:1 (Square)', '16:9 (Standard Widescreen)', 'Custom'] }
     };
     // The LoRA axis is built when the sheet opens, so the checkpoint has to be in place first.
     mState.models = { 'Stable-Diffusion': [['anima/checkpoint.safetensors', 'anima-29']] };
@@ -141,8 +144,8 @@ await page.evaluate(() => mGrid.open());
 await page.waitForFunction(() => document.querySelectorAll('.m-grid-card').length > 0);
 const axisNames = await page.evaluate(() =>
     [...__sheet().querySelectorAll('.m-grid-card-name')].map(e => e.textContent));
-check('the six requested axes are offered, and only those',
-    axisNames.join(',') == 'Preset,LoRAs,Steps,CFG Scale,Sampler,Scheduler', axisNames.join(','));
+check('the requested axes are offered, and only those',
+    axisNames.join(',') == 'Preset,LoRAs,LoRA Strength,LoRA Section,Prompt Replace,Aspect Ratio,Steps,CFG Scale,Sampler,Scheduler', axisNames.join(','));
 const startState = await page.evaluate(() => ({
     count: __sheet().querySelector('.m-grid-count').textContent,
     disabled: __sheet().querySelector('.m-grid-run').disabled,
@@ -355,32 +358,6 @@ const rowForward = await page.evaluate(() => {
 check('Run forwards the chosen row count into runGrid opts',
     rowForward && rowForward.rows == 3, JSON.stringify(rowForward));
 
-// ---- LoRA search keyboard dismiss ----
-const kbDismiss = await page.evaluate(() => {
-    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
-        elem.remove();
-    }
-    mGrid.selected = {};
-    mGrid.open();
-    let card = [...__sheet().querySelectorAll('.m-grid-card')]
-        .find(c => c.querySelector('.m-grid-card-name').textContent == 'LoRAs');
-    card.open = true;
-    let search = card.querySelector('.m-grid-search');
-    search.focus();
-    let focusedBefore = document.activeElement == search;
-    let option = [...card.querySelectorAll('.m-grid-lora-options .m-grid-option')]
-        .find(o => o.textContent.includes('style_a'));
-    option.click();
-    return {
-        focusedBefore,
-        focusedAfter: document.activeElement == search,
-        selected: mGrid.valuesFor('loras')
-    };
-});
-check('picking a LoRA blurs the search field (dismisses the keyboard)',
-    kbDismiss.focusedBefore && !kbDismiss.focusedAfter
-    && kbDismiss.selected.includes('ill/style_a'), JSON.stringify(kbDismiss));
-
 const cellCounts = await page.evaluate(() => ({
     presets: MGenSocket.cellCount('a||b||c||d'),
     loras: MGenSocket.cellCount('ill/style_a||ill/style_b'),
@@ -554,6 +531,350 @@ const fontSizes = await page.evaluate(() => {
         .map(e => getComputedStyle(e).fontSize);
 });
 check('every grid input is at least 16px', fontSizes.length > 0 && fontSizes.every(size => parseFloat(size) >= 16), fontSizes.join(','));
+
+// ---- LoRA Strength, LoRA Section, Aspect Ratio, Prompt Replace ----
+/** Reopens the sheet with this selection and reports what its Run button would do. */
+const gridState = selected => page.evaluate(selected => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.selected = selected;
+    window.__grid = null;
+    mGrid.open();
+    let run = __sheet().querySelector('.m-grid-run');
+    return { disabled: run.disabled, count: __sheet().querySelector('.m-grid-count').textContent };
+}, selected);
+/** Clicks Run and returns the sent axes as mode -> vals. */
+const gridSent = async () => {
+    await page.evaluate(() => __sheet().querySelector('.m-grid-run').click());
+    await page.waitForFunction(() => window.__grid);
+    return page.evaluate(() => Object.fromEntries(window.__grid.axes.map(a => [a.mode, a.vals])));
+};
+const cardOf = name => page.evaluate(name => {
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == name);
+    return [...card.querySelectorAll('.m-grid-option')].map(e => e.textContent);
+}, name);
+
+let state = await gridState({ loraweights: ['0.5', '1'] });
+check('LoRA Strength with no LoRA axis cannot run, and says why',
+    state.disabled && state.count == 'Pick a LoRA in the LoRAs axis first.', JSON.stringify(state));
+state = await gridState({ loraconfinement: ['5', '1'] });
+check('LoRA Section with no LoRA axis cannot run either', state.disabled, JSON.stringify(state));
+check('LoRA Section offers the Create tab sections', (await cardOf('LoRA Section')).join(',') == 'Full,Base,Refine',
+    (await cardOf('LoRA Section')).join(','));
+
+state = await gridState({ loras: ['ill/style_a'], loraweights: ['0.5', '1'], loraconfinement: ['5', '1'] });
+check('with a LoRA picked, the two LoRA axes multiply', !state.disabled && state.count == '4 images', JSON.stringify(state));
+const sectionSummary = await page.evaluate(() => [...__sheet().querySelectorAll('.m-grid-card')]
+    .find(c => c.querySelector('.m-grid-card-name').textContent == 'LoRA Section').querySelector('.m-grid-card-summary').textContent);
+check('the section summary uses names, not section IDs', sectionSummary == '2: Base, Refine', sectionSummary);
+let sent = await gridSent();
+check('strength and section go out under their server parameter IDs with raw values',
+    sent.loraweights == '0.5,1' && sent.lorasectionconfinement == '5,1' && sent.loras == 'ill/style_a', JSON.stringify(sent));
+
+await gridState({ aspectratio: ['1:1', '16:9'] });
+check('the Aspect Ratio axis lists the server values without Custom',
+    (await cardOf('Aspect Ratio')).join(',') == '1:1 (Square),16:9 (Standard Widescreen)', (await cardOf('Aspect Ratio')).join(','));
+sent = await gridSent();
+check('the Aspect Ratio axis sends raw ratios', sent.aspectratio == '1:1,16:9', JSON.stringify(sent));
+
+// Typed through the real field: a comma in prompt text must stay inside one value.
+await gridState({});
+await page.evaluate(() => {
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Prompt Replace');
+    let input = card.querySelector('.m-grid-custom-input');
+    let add = card.querySelector('.m-grid-add-button');
+    for (let value of ['red hair, tall', 'blue hair, short', 'score=9']) {
+        input.value = value;
+        add.click();
+    }
+});
+const replaceValues = await page.evaluate(() => mGrid.valuesFor('promptreplace'));
+check('a Prompt Replace value keeps its commas',
+    replaceValues.join('|') == 'red hair, tall|blue hair, short|score=9', replaceValues.join('|'));
+sent = await gridSent();
+check('Prompt Replace sends every cell as find=value, split on ||',
+    sent.gridgenpromptreplace == 'red hair, tall=red hair, tall||red hair, tall=blue hair, short||red hair, tall=score=9',
+    sent.gridgenpromptreplace);
+
+state = await gridState({ promptreplace: ['cat'], steps: ['20', '30'] });
+sent = await gridSent();
+check('a lone Prompt Replace value replaces nothing, so no axis is sent',
+    !('gridgenpromptreplace' in sent) && sent.steps == '20,30', JSON.stringify(sent));
+
+await gridState({ promptreplace: ['a=b', 'c'] });
+await page.evaluate(() => __sheet().querySelector('.m-grid-run').click());
+const blockedFind = await page.evaluate(() => ({
+    grid: window.__grid, toast: document.querySelector('.m-toast') ? document.querySelector('.m-toast').textContent : ''
+}));
+check('find text with "=" is refused with a reason, not sent wrong',
+    blockedFind.grid == null && blockedFind.toast.includes('cannot contain'), JSON.stringify(blockedFind));
+
+// ---- Picking a value must not move what is under the finger ----
+// Long names, so the chips would wrap onto new rows if the strip allowed it.
+const layoutShifts = await page.evaluate(async () => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    let rows = [];
+    for (let i = 0; i < 40; i++) {
+        rows.push({ name: `ill/a_rather_long_lora_name_for_wrapping_${`${i}`.padStart(2, '0')}.safetensors`,
+            title: '', compat_class: 'anima-2.9b', architecture: 'anima-2.9b/lora' });
+    }
+    mCreate.loraList = rows;
+    mGrid.selected = {};
+    mGrid.open();
+    let sheet = __sheet();
+    let card = [...sheet.querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'LoRAs');
+    card.open = true;
+    let cards = sheet.querySelector('.m-grid-cards');
+    let list = card.querySelector('.m-grid-lora-options');
+    let frames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await frames();
+    await new Promise(resolve => setTimeout(resolve, 350));
+    cards.scrollTop = 40;
+    list.scrollTop = 300;
+    await frames();
+    let shifts = [];
+    for (let i = 20; i < 26; i++) {
+        let label = `a_rather_long_lora_name_for_wrapping_${i}`;
+        let row = () => [...list.querySelectorAll('.m-grid-option')].find(o => o.textContent == label);
+        list.scrollTop = row().offsetTop - list.offsetTop - 60;
+        await frames();
+        let before = { top: row().getBoundingClientRect().top, list: list.scrollTop, cards: cards.scrollTop, sheet: sheet.getBoundingClientRect().top };
+        row().click();
+        await frames();
+        shifts.push({ row: row().getBoundingClientRect().top - before.top, list: list.scrollTop - before.list,
+            cards: cards.scrollTop - before.cards, sheet: sheet.getBoundingClientRect().top - before.sheet });
+    }
+    return { shifts, picked: mGrid.valuesFor('loras').length };
+});
+check('six LoRA picks are all recorded', layoutShifts.picked == 6, `${layoutShifts.picked}`);
+check('picking a LoRA leaves the tapped row, both scrollers and the sheet where they were',
+    layoutShifts.shifts.every(s => Math.abs(s.row) < 1 && s.list == 0 && s.cards == 0 && Math.abs(s.sheet) < 1),
+    JSON.stringify(layoutShifts.shifts));
+
+// A Prompt Replace value has no option row to untoggle it, so its x has to stay reachable however long it is.
+await gridState({ promptreplace: ['a very long prompt phrase '.repeat(6), 'b'] });
+const longChip = await page.evaluate(() => {
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Prompt Replace');
+    card.open = true;
+    let strip = card.querySelector('.m-grid-chosen');
+    let chip = strip.querySelector('.m-grid-chip');
+    let x = chip.querySelector('.m-grid-chip-x');
+    let sheetWidth = __sheet().getBoundingClientRect().width;
+    let clipped = x.getBoundingClientRect().right > chip.getBoundingClientRect().right;
+    strip.scrollLeft = strip.scrollWidth;
+    return { clipped, scrolls: strip.scrollWidth > strip.clientWidth, sheetWidth, viewport: innerWidth,
+        pageOverflow: document.documentElement.scrollWidth > innerWidth, height: strip.getBoundingClientRect().height };
+});
+check('a long chip scrolls inside its strip with its x unclipped, and the page does not scroll sideways',
+    !longChip.clipped && longChip.scrolls && !longChip.pageOverflow && longChip.sheetWidth <= longChip.viewport && longChip.height == 32,
+    JSON.stringify(longChip));
+
+// ---- A long LoRA name is cut from the start, so its version stays readable ----
+const tailNames = await page.evaluate(async () => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    let longName = 'a_really_long_lora_name_(style)_with_many_words_that_will_not_fit_on_one_row-v1.5';
+    let savedLoras = mCreate.loraList;
+    mCreate.loraList = [{ name: `ill/${longName}.safetensors`, title: '', compat_class: 'anima-2.9b' },
+        { name: 'ill/short_v2.safetensors', title: '', compat_class: 'anima-2.9b' }];
+    mGrid.selected = { loras: [`ill/${longName}`] };
+    mGrid.open();
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'LoRAs');
+    card.open = true;
+    await new Promise(resolve => setTimeout(resolve, 350));
+    let measure = label => {
+        let text = label.querySelector('bdi').firstChild;
+        let range = document.createRange();
+        range.setStart(text, 0);
+        range.setEnd(text, 1);
+        let first = range.getBoundingClientRect();
+        range.setStart(text, text.length - 1);
+        range.setEnd(text, text.length);
+        let last = range.getBoundingClientRect();
+        let box = label.getBoundingClientRect();
+        return { firstCut: first.left < box.left - 1, firstAtLeft: Math.abs(first.left - box.left) < 2, lastShown: last.right <= box.right + 1 && last.left >= box.left, firstBeforeLast: first.left < last.left };
+    };
+    let rows = [...card.querySelectorAll('.m-grid-lora-options .m-grid-tail')];
+    let row = rows.find(r => r.textContent == longName);
+    let shortRow = rows.find(r => r.textContent == 'short_v2');
+    let chip = card.querySelector('.m-grid-chosen .m-grid-chip');
+    let x = chip.querySelector('.m-grid-chip-x').getBoundingClientRect();
+    let chipBox = chip.getBoundingClientRect();
+    let strip = card.querySelector('.m-grid-chosen').getBoundingClientRect();
+    mCreate.loraList = savedLoras;
+    return { row: measure(row), short: measure(shortRow), chip: measure(chip.querySelector('.m-grid-tail')),
+        xInChip: x.right <= chipBox.right + 1, chipFits: chipBox.right <= strip.right + 1, rowText: row.textContent };
+});
+check('a long LoRA row shows the end of its name, cut at the start, in reading order',
+    tailNames.row.firstCut && tailNames.row.lastShown && tailNames.row.firstBeforeLast, JSON.stringify(tailNames.row));
+check('a short LoRA row is whole and sits on the left', !tailNames.short.firstCut && tailNames.short.firstAtLeft && tailNames.short.lastShown, JSON.stringify(tailNames.short));
+check('a long LoRA chip shows the end of its name and keeps its x on screen',
+    tailNames.chip.firstCut && tailNames.chip.lastShown && tailNames.xInChip && tailNames.chipFits, JSON.stringify(tailNames));
+
+// ---- Grid mode: Generate runs the saved axes ----
+const modeState = () => page.evaluate(() => ({
+    button: mCreate.genButton.textContent,
+    target: mCreate.genTargetLabel.textContent,
+    sheet: !!document.querySelector('.m-grid-sheet'),
+    grid: window.__grid,
+    single: window.__single,
+    toast: document.querySelector('.m-toast') ? document.querySelector('.m-toast').textContent : ''
+}));
+/** Clears sheets and spies, applies a selection and repaints. */
+const modeSetup = (selected, prompt = 'a cat') => page.evaluate(({ selected, prompt }) => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    window.__grid = null;
+    window.__single = 0;
+    mGen.generate = () => { window.__single++; };
+    mState.params['prompt'] = prompt;
+    mGrid.starting = false;
+    mGrid.selected = selected;
+    mCreate.renderGenTarget();
+}, { selected, prompt });
+
+await modeSetup({ steps: ['20', '30'] });
+await page.evaluate(() => mCreate.openGenTargetSheet());
+const sheetModes = await page.evaluate(() => {
+    let sheet = __sheet();
+    let buttons = [...sheet.querySelectorAll('.m-gen-mode .m-seg-button')];
+    let labels = buttons.map(b => b.textContent);
+    let selectedBefore = buttons.find(b => b.classList.contains('m-selected')).textContent;
+    let beforeGen = mCreate.genButton.textContent;
+    buttons[1].click();
+    return { labels, selectedBefore, beforeGen, active: mGrid.active, stored: localStorage.getItem('m_client_grid_mode'),
+        selectedAfter: buttons.find(b => b.classList.contains('m-selected')).textContent, stillOpen: document.contains(sheet) };
+});
+check('the Generate on sheet offers Single and Grid, starting on Single',
+    sheetModes.labels.join(',') == 'Single,Grid' && sheetModes.selectedBefore == 'Single' && sheetModes.beforeGen == 'Generate', JSON.stringify(sheetModes));
+check('choosing Grid is saved and leaves the sheet open to pick a backend',
+    sheetModes.active && sheetModes.stored == 'grid' && sheetModes.selectedAfter == 'Grid' && sheetModes.stillOpen, JSON.stringify(sheetModes));
+let mode = await modeState();
+check('Grid mode renames both halves of the button, with the image count', mode.button == 'Run Grid (2)' && mode.target == 'Grid Hub', JSON.stringify(mode));
+
+await modeSetup({ steps: ['20', '30'] });
+await page.evaluate(() => mCreate.doGenerate());
+await page.waitForFunction(() => window.__grid);
+mode = await modeState();
+check('a Generate tap runs the saved grid, with no sheet and no single batch',
+    !mode.sheet && mode.single == 0 && mode.grid.axes[0].mode == 'steps' && mode.grid.axes[0].vals == '20,30', JSON.stringify(mode.grid.axes));
+
+await modeSetup({});
+await page.evaluate(() => mCreate.doGenerate());
+mode = await modeState();
+check('with nothing saved the button says so, and a tap opens the sheet', mode.button == 'Set Up Grid' && mode.sheet && !mode.grid, JSON.stringify(mode));
+
+await modeSetup({ loraweights: ['0.5', '1'] });
+await page.evaluate(() => mCreate.doGenerate());
+mode = await modeState();
+check('an axis that cannot run opens the sheet rather than starting', mode.button == 'Set Up Grid' && mode.sheet && !mode.grid, JSON.stringify(mode));
+
+await modeSetup({ steps: ['20', '30'] }, '');
+await page.evaluate(() => mCreate.doGenerate());
+mode = await modeState();
+check('an empty prompt is refused with a reason', !mode.grid && mode.toast.includes('Type a prompt'), JSON.stringify(mode));
+
+// The grid must run where the button says. Each cell carries the pin, so a slow reply must not double-start.
+await modeSetup({ steps: ['20', '30'] });
+const pinned = await page.evaluate(async () => {
+    let real = window.genericRequest;
+    let calls = 0;
+    window.genericRequest = (route, args, callback, depth, onError) => {
+        if (route != 'ListBackends') {
+            return real(route, args, callback, depth, onError);
+        }
+        calls++;
+        setTimeout(() => callback({ a: { id: 7, type: 'comfyui', status: 'running', title: 'Hub GPU', can_load_models: true },
+            b: { id: 9, type: 'swarmswarmbackend', status: 'running', title: 'Spoke', can_load_models: true } }), 20);
+    };
+    let runs = 0;
+    let runGrid = mGen.runGrid;
+    mGen.runGrid = (base, axes, opts) => { runs++; runGrid(base, axes, opts); };
+    mCreate.doGenerate();
+    mCreate.doGenerate();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    window.genericRequest = real;
+    mGen.runGrid = runGrid;
+    return { calls, runs, pin: window.__grid && window.__grid.base.exactbackendid };
+});
+check('a double tap starts one grid, pinned to the chosen backend', pinned.calls == 1 && pinned.runs == 1 && `${pinned.pin}` == '7', JSON.stringify(pinned));
+
+// Saved values come back after a reload, and a damaged entry cannot break the page.
+const saved = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.selected = {};
+    mGrid.open();
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Steps');
+    card.open = true;
+    let quick = card.querySelector('.m-grid-quick-button');
+    quick.click();
+    let stored = JSON.parse(localStorage.getItem('m_client_grid_selected'));
+    let loaded = MGrid.loadSelected();
+    localStorage.setItem('m_client_grid_selected', '{not json');
+    let damaged = MGrid.loadSelected();
+    localStorage.setItem('m_client_grid_selected', JSON.stringify({ steps: ['8', 5], unknown: ['x'], cfgscale: 'no' }));
+    let filtered = MGrid.loadSelected();
+    return { stored, loaded, damaged, filtered, activeLoaded: MGrid.loadActive() };
+});
+check('axis picks are saved and reload, and Grid mode survives a reload',
+    saved.stored.steps[0] == '4' && saved.loaded.steps[0] == '4' && saved.activeLoaded, JSON.stringify(saved));
+check('a damaged or foreign saved entry is dropped safely',
+    Object.keys(saved.damaged).length == 0 && JSON.stringify(saved.filtered) == '{"steps":["8"]}', JSON.stringify(saved));
+
+await page.evaluate(() => {
+    mGrid.setActive(false);
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+});
+await modeSetup({ steps: ['20', '30'] });
+await page.evaluate(() => mCreate.doGenerate());
+await page.waitForFunction(() => window.__single > 0);
+mode = await modeState();
+check('Single mode still generates one batch', mode.button == 'Generate' && mode.target == 'Hub' && mode.single == 1 && !mode.grid, JSON.stringify(mode));
+
+// ---- The search keyboard stays up through a pick, and goes when the list is scrolled ----
+// A real mouse click, not element.click(): only a real press moves focus to the tapped button.
+for (const [name, listClass, key] of [['LoRAs', '.m-grid-lora-options', 'loras'], ['Preset', '.m-grid-preset-options', 'preset']]) {
+    await gridState({});
+    const target = await page.evaluate(async ({ name, listClass }) => {
+        let card = [...__sheet().querySelectorAll('.m-grid-card')]
+            .find(c => c.querySelector('.m-grid-card-name').textContent == name);
+        card.open = true;
+        await new Promise(resolve => setTimeout(resolve, 350));
+        let list = card.querySelector(listClass);
+        list.style.maxHeight = '120px';
+        card.scrollIntoView();
+        let rect = list.querySelector('.m-grid-option').getBoundingClientRect();
+        window.__search = card.querySelector('.m-grid-search');
+        window.__list = list;
+        window.__search.focus();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }, { name, listClass });
+    await page.mouse.click(target.x, target.y);
+    const afterPick = await page.evaluate(key => ({ focused: document.activeElement == window.__search, picked: mGrid.valuesFor(key).length }), key);
+    check(`picking from ${name} keeps the search field focused`, afterPick.focused && afterPick.picked == 1, JSON.stringify(afterPick));
+    const afterScroll = await page.evaluate(async () => {
+        let focusedBefore = document.activeElement == window.__search;
+        window.__list.scrollTop = 30;
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return { focusedBefore, focused: document.activeElement == window.__search, top: window.__list.scrollTop };
+    });
+    check(`scrolling the ${name} list closes the keyboard`, afterScroll.focusedBefore && afterScroll.top > 0 && !afterScroll.focused, JSON.stringify(afterScroll));
+}
 
 await browser.close();
 const failed = results.filter(result => !result.pass).length;

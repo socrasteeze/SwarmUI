@@ -109,7 +109,10 @@ class MUI {
         let lines = this.modelLines(model, preferTitle);
         text.appendChild(this.el('div', 'm-model-name', lines.primary));
         if (lines.subtitle) {
-            text.appendChild(this.el('div', 'm-model-sub', lines.subtitle));
+            // The bdi keeps the name in order inside a Models card's right-to-left subtitle box.
+            let sub = this.el('div', 'm-model-sub');
+            sub.appendChild(this.el('bdi', '', lines.subtitle));
+            text.appendChild(sub);
         }
         let trigger = `${model.trigger_phrase || ''}`.trim();
         if (trigger) {

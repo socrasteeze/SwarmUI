@@ -477,17 +477,50 @@ const triggers = await page.evaluate(async () => {
         moreVisible: !more.hidden && getComputedStyle(more).display != 'none',
         shortMoreHidden: shortMore.hidden || getComputedStyle(shortMore).display == 'none',
         longButton: !!longCard.querySelector('.m-model-civitai-btn'),
-        shortButton: !!shortCard.querySelector('.m-model-civitai-btn'),
-        nameClamp: getComputedStyle(name).webkitLineClamp,
-        subClamp: getComputedStyle(sub).webkitLineClamp
+        shortButton: !!shortCard.querySelector('.m-model-civitai-btn')
     };
 });
 check('trigger clamp is two whole lines', triggers.triggerLines.ok && triggers.triggerLines.lines == 2
     && triggers.triggerLines.scroll > triggers.triggerLines.h + 1, JSON.stringify(triggers.triggerLines));
-check('title clamps to two whole lines', triggers.nameLines.ok && triggers.nameLines.lines == 2
-    && triggers.nameClamp == '2', JSON.stringify(triggers.nameLines));
-check('subtitle clamps to one whole line', triggers.subLines.ok && triggers.subLines.lines == 1
-    && triggers.subClamp == '1', JSON.stringify(triggers.subLines));
+check('title clamps to two whole lines', triggers.nameLines.ok && triggers.nameLines.lines == 2, JSON.stringify(triggers.nameLines));
+check('subtitle clamps to one whole line', triggers.subLines.ok && triggers.subLines.lines == 1, JSON.stringify(triggers.subLines));
+// A long name is cut from the start, so the version at its end stays readable.
+const cardTails = await page.evaluate(async () => {
+    mModels.grid.innerHTML = '';
+    let stem = 'a_really_long_lora_file_name_(style)_with_many_words_that_will_not_fit-v1.5';
+    let card = mModels.buildCard({ name: `local/${stem}.safetensors`, title: 'A Very Long Title With Many Words That Cannot Fit On Two Card Lines Here At All v2.5', trigger_phrase: '', local: true, preview_image: '', description: '' });
+    let shortCard = mModels.buildCard({ name: 'local/Tiny_v3.safetensors', title: 'Tiny v3', trigger_phrase: '', local: true, preview_image: '', description: '' });
+    mModels.grid.appendChild(card);
+    mModels.grid.appendChild(shortCard);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    let charRects = (elem) => {
+        let walker = document.createTreeWalker(elem, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        let range = document.createRange();
+        range.setStart(node, 0);
+        range.setEnd(node, 1);
+        let first = range.getBoundingClientRect();
+        range.setStart(node, node.length - 1);
+        range.setEnd(node, node.length);
+        return { first, last: range.getBoundingClientRect(), box: elem.getBoundingClientRect() };
+    };
+    let name = charRects(card.querySelector('.m-model-name'));
+    let sub = charRects(card.querySelector('.m-model-sub'));
+    let shortName = charRects(shortCard.querySelector('.m-model-name'));
+    return {
+        nameCut: name.first.top < name.box.top - 1,
+        nameEndShown: name.last.bottom <= name.box.bottom + 1 && name.last.top >= name.box.top,
+        subCut: sub.first.left < sub.box.left - 1,
+        subEndShown: sub.last.right <= sub.box.right + 1 && sub.last.left >= sub.box.left,
+        subOrdered: sub.first.left < sub.last.left,
+        subText: card.querySelector('.m-model-sub').textContent == stem,
+        shortWhole: shortName.first.top >= shortName.box.top - 1 && shortName.last.bottom <= shortName.box.bottom + 1
+    };
+});
+check('a long card name shows its end, cut from the start', cardTails.nameCut && cardTails.nameEndShown, JSON.stringify(cardTails));
+check('a long card subtitle shows its end, cut from the start, in reading order',
+    cardTails.subCut && cardTails.subEndShown && cardTails.subOrdered && cardTails.subText, JSON.stringify(cardTails));
+check('a short card name stays whole', cardTails.shortWhole, JSON.stringify(cardTails));
 check('card text block does not cut its children', triggers.blockOverflow != 'hidden' && !triggers.blockClips,
     JSON.stringify({ overflow: triggers.blockOverflow, clips: triggers.blockClips }));
 check('more reveals the full trigger and does not add the LoRA', triggers.moreVisible && triggers.before.inserted == 0
