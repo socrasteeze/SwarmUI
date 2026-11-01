@@ -4,6 +4,7 @@ using SwarmUI.Accounts;
 using SwarmUI.Builtin_MobileEnhancementsExtension;
 using SwarmUI.WebAPI;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -200,7 +201,7 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That((int)page["next_offset"], Is.EqualTo(3));
     }
 
-    /// <summary>Recursive search sorts the whole match set, then keeps 500 and marks the page truncated.</summary>
+    /// <summary>Recursive search sorts the whole match set, then keeps 5000 and marks the page truncated.</summary>
     [Test]
     public void ListFolder_RecursiveSearchCapsSortedMatches()
     {
@@ -218,10 +219,12 @@ public class SimpleImageBrowserTests : SwarmUITest
         Newtonsoft.Json.Linq.JObject first = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, "match", true, "Name", true, true);
         Newtonsoft.Json.Linq.JObject nested = SimpleImageBrowserAPI.ListFolder(TempRoot, 200, 1, "match", true, "Name", true, true);
         Newtonsoft.Json.Linq.JObject deeper = SimpleImageBrowserAPI.ListFolder(TempRoot, 400, 1, "match", true, "Name", true, true);
-        Newtonsoft.Json.Linq.JObject tail = SimpleImageBrowserAPI.ListFolder(TempRoot, 480, 48, "match", true, "Name", true, true);
+        int tailOffset = SimpleImageBrowserAPI.RecursiveMatchCap - 20;
+        Newtonsoft.Json.Linq.JObject tail = SimpleImageBrowserAPI.ListFolder(TempRoot, tailOffset, 48, "match", true, "Name", true, true);
         Newtonsoft.Json.Linq.JObject direct = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 250, "match", true);
 
         Assert.That((int)first["total"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
+        Assert.That((int)first["match_cap"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
         Assert.That((bool)first["truncated"], Is.True);
         Assert.That((string)first["files"][0]["name"], Is.EqualTo("match-0000.png"));
         Assert.That((string)first["files"][0]["rel_dir"], Is.EqualTo(""));
@@ -231,11 +234,12 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That((string)deeper["files"][0]["name"], Is.EqualTo("match-0400.png"));
         Assert.That((string)deeper["files"][0]["rel_dir"], Is.EqualTo("batch-a/batch-b"));
         Assert.That(tail["files"].Count(), Is.EqualTo(20));
-        Assert.That((string)tail["files"].Last()["name"], Is.EqualTo("match-0499.png"));
-        Assert.That(tail["files"].Select(row => (string)row["name"]), Does.Not.Contain("match-0500.png"));
+        Assert.That((string)tail["files"].Last()["name"], Is.EqualTo($"match-{SimpleImageBrowserAPI.RecursiveMatchCap - 1:0000}.png"));
+        Assert.That(tail["files"].Select(row => (string)row["name"]), Does.Not.Contain($"match-{SimpleImageBrowserAPI.RecursiveMatchCap:0000}.png"));
         Assert.That(tail["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
         Assert.That((int)direct["total"], Is.EqualTo(200));
         Assert.That(direct["truncated"], Is.Null);
+        Assert.That(direct["match_cap"], Is.Null);
         Assert.That(direct["files"][0]["rel_dir"], Is.Null);
     }
 
@@ -292,6 +296,7 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(Names(whitespace), Is.EqualTo(expectedNames));
         Assert.That(Folders(whitespace), Is.EqualTo(expectedDirs));
         Assert.That((int)all["total"], Is.EqualTo(7));
+        Assert.That((int)all["match_cap"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
         Assert.That(all["truncated"], Is.Null);
         Assert.That(all["folders"].Select(row => (string)row["name"]), Is.EqualTo(new[] { ".reference", "level-one", "needle-folder" }));
         Assert.That(Names(nameDesc), Is.EqualTo(new[] { "ref.png", "plain.png", "other.png", "deep-needle.png", "CaseNeedle.JPG", "buried-needle.png", "also-needle.png" }));
@@ -301,6 +306,7 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(Names(directOnly), Is.EqualTo(new[] { "also-needle.png" }));
         Assert.That(directOnly["files"][0]["rel_dir"], Is.Null);
         Assert.That(directOnly["truncated"], Is.Null);
+        Assert.That(directOnly["match_cap"], Is.Null);
         Assert.That((int)directOnly["total"], Is.EqualTo(1));
         Assert.That(drives["parent"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
         Assert.That(drives["files"].Count(), Is.EqualTo(0));
@@ -313,7 +319,7 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(drivesSearched["folders"].Count(), Is.EqualTo(DriveInfo.GetDrives().Length));
     }
 
-    /// <summary>An empty recursive listing sorts the whole tree, then keeps 500 and marks the page truncated. recursive false stays on the current folder.</summary>
+    /// <summary>An empty recursive listing sorts the whole tree, then keeps 5000 and marks the page truncated. recursive false stays on the current folder.</summary>
     [Test]
     public void ListFolder_RecursiveEmptySearchCapsSortedFiles()
     {
@@ -333,10 +339,12 @@ public class SimpleImageBrowserTests : SwarmUITest
         Newtonsoft.Json.Linq.JObject whitespace = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 48, " ", true, "Name", true, true);
         Newtonsoft.Json.Linq.JObject nested = SimpleImageBrowserAPI.ListFolder(TempRoot, 200, 1, "", true, "Name", true, true);
         Newtonsoft.Json.Linq.JObject deeper = SimpleImageBrowserAPI.ListFolder(TempRoot, 400, 1, "", true, "Name", true, true);
-        Newtonsoft.Json.Linq.JObject tail = SimpleImageBrowserAPI.ListFolder(TempRoot, 480, 48, "", true, "Name", true, true);
+        int tailOffset = SimpleImageBrowserAPI.RecursiveMatchCap - 20;
+        Newtonsoft.Json.Linq.JObject tail = SimpleImageBrowserAPI.ListFolder(TempRoot, tailOffset, 48, "", true, "Name", true, true);
         Newtonsoft.Json.Linq.JObject direct = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 250, "", true);
 
         Assert.That((int)first["total"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
+        Assert.That((int)first["match_cap"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
         Assert.That((bool)first["truncated"], Is.True);
         Assert.That((string)first["files"][0]["name"], Is.EqualTo("img-0000.png"));
         Assert.That((string)first["files"][0]["rel_dir"], Is.EqualTo(""));
@@ -348,8 +356,8 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That((string)deeper["files"][0]["name"], Is.EqualTo("img-0400.png"));
         Assert.That((string)deeper["files"][0]["rel_dir"], Is.EqualTo("batch-a/batch-b"));
         Assert.That(tail["files"].Count(), Is.EqualTo(20));
-        Assert.That((string)tail["files"].Last()["name"], Is.EqualTo("img-0499.png"));
-        Assert.That(tail["files"].Select(row => (string)row["name"]), Does.Not.Contain("img-0500.png"));
+        Assert.That((string)tail["files"].Last()["name"], Is.EqualTo($"img-{SimpleImageBrowserAPI.RecursiveMatchCap - 1:0000}.png"));
+        Assert.That(tail["files"].Select(row => (string)row["name"]), Does.Not.Contain($"img-{SimpleImageBrowserAPI.RecursiveMatchCap:0000}.png"));
         Assert.That(tail["next_offset"].Type, Is.EqualTo(Newtonsoft.Json.Linq.JTokenType.Null));
         Assert.That((int)direct["total"], Is.EqualTo(200));
         Assert.That(direct["truncated"], Is.Null);
@@ -507,5 +515,182 @@ public class SimpleImageBrowserTests : SwarmUITest
         Newtonsoft.Json.Linq.JObject result = await T2IAPI.ListImages(session, "", 1, limit: -1);
 
         Assert.That((string)result["error_id"], Is.EqualTo("bad_page"));
+    }
+
+    /// <summary>The recursive listing cache reuses a fresh page, expires on its clock, and evicts the least recently used entry.</summary>
+    [Test]
+    public void RecursiveListingCache_ExpiresAndEvictsLeastRecentlyUsed()
+    {
+        long now = 0;
+        RecursiveListingCache cache = new(2, RecursiveListingCache.DefaultTtlMilliseconds, () => now);
+        T2IAPI.ImageHistorySortMode name = T2IAPI.ImageHistorySortMode.Name;
+        RecursiveListingCache.Key Key(string user, string path, string search, bool reverse = true)
+        {
+            return RecursiveListingCache.CreateKey(user, path, search, name, reverse);
+        }
+        string folder = OperatingSystem.IsWindows() ? @"C:\Photos" : "/photos";
+        string folderSlash = OperatingSystem.IsWindows() ? @"C:\Photos\" : "/photos/";
+        string otherCase = OperatingSystem.IsWindows() ? @"c:\photos" : "/Photos";
+        string otherFolder = OperatingSystem.IsWindows() ? @"C:\Elsewhere" : "/elsewhere";
+        List<string> alpha = new() { "a.png" };
+        List<string> beta = new() { "b.png" };
+        List<string> gamma = new() { "c.png" };
+
+        cache.Store(Key("user-a", folderSlash, "Needle"), alpha, false);
+        Assert.That(cache.TryGet(Key("user-a", folder, "needle"), out List<string> same, out bool truncated), Is.True);
+        Assert.That(same, Is.EqualTo(alpha));
+        Assert.That(truncated, Is.False);
+        Assert.That(cache.TryGet(Key("user-a", folder, " needle "), out _, out _), Is.False);
+        Assert.That(cache.TryGet(Key("user-a", folder, "   "), out _, out _), Is.False);
+        Assert.That(cache.TryGet(Key("user-b", folder, "needle"), out _, out _), Is.False);
+        Assert.That(cache.TryGet(Key("user-a", otherCase, "NEEDLE"), out _, out _), Is.EqualTo(OperatingSystem.IsWindows()));
+        Assert.That(cache.CountEntries(), Is.EqualTo(1));
+
+        now = RecursiveListingCache.DefaultTtlMilliseconds - 1;
+        Assert.That(cache.TryGet(Key("user-a", folder, "needle"), out _, out _), Is.True);
+        now = RecursiveListingCache.DefaultTtlMilliseconds;
+        Assert.That(cache.TryGet(Key("user-a", folder, "needle"), out _, out _), Is.False);
+        Assert.That(cache.CountEntries(), Is.EqualTo(0));
+
+        now = 0;
+        cache.Store(Key("user-a", folder, ""), alpha, true);
+        now = 50_000;
+        cache.Store(Key("user-a", folder, ""), beta, false);
+        now = 100_000;
+        Assert.That(cache.TryGet(Key("user-a", folder, ""), out List<string> refreshed, out truncated), Is.True);
+        Assert.That(refreshed, Is.EqualTo(beta));
+        Assert.That(truncated, Is.False);
+        now = 110_000;
+        Assert.That(cache.TryGet(Key("user-a", folder, ""), out _, out _), Is.False);
+
+        now = 200_000;
+        cache.Store(Key("user-a", folder, ""), alpha, false);
+        cache.Store(Key("user-a", otherFolder, ""), beta, false);
+        Assert.That(cache.TryGet(Key("user-a", folder, ""), out _, out _), Is.True);
+        cache.Store(Key("user-a", folder + "-c", ""), gamma, true);
+        Assert.That(cache.TryGet(Key("user-a", otherFolder, ""), out _, out _), Is.False);
+        Assert.That(cache.TryGet(Key("user-a", folder, ""), out _, out _), Is.True);
+        Assert.That(cache.TryGet(Key("user-a", folder + "-c", ""), out List<string> kept, out truncated), Is.True);
+        Assert.That(kept, Is.EqualTo(gamma));
+        Assert.That(truncated, Is.True);
+
+        cache.Clear();
+        now = 300_000;
+        cache.Store(Key("user-a", folder, ""), alpha, false);
+        cache.Store(Key("user-b", folder, ""), beta, false);
+        Assert.That(cache.CountEntries(), Is.EqualTo(2));
+        cache.Invalidate(null, folder);
+        Assert.That(cache.CountEntries(), Is.EqualTo(0));
+        Assert.That(cache.TryGet(Key("user-a", folder, ""), out _, out _), Is.False);
+        Assert.That(cache.TryGet(Key("user-b", folder, ""), out _, out _), Is.False);
+        cache.Store(Key("user-a", folder, ""), alpha, false);
+        cache.Store(Key("user-a", otherFolder, ""), beta, false);
+        cache.Invalidate("user-a", null);
+        Assert.That(cache.CountEntries(), Is.EqualTo(0));
+        cache.Store(Key("user-a", folder, ""), alpha, false);
+        cache.Invalidate(null, null);
+        Assert.That(cache.CountEntries(), Is.EqualTo(1));
+        cache.Clear();
+        Assert.That(cache.CountEntries(), Is.EqualTo(0));
+
+        RecursiveListingCache concurrent = new(16, RecursiveListingCache.DefaultTtlMilliseconds, () => Environment.TickCount64);
+        System.Threading.Tasks.Parallel.For(0, 64, i =>
+        {
+            RecursiveListingCache.Key key = RecursiveListingCache.CreateKey("user-" + (i % 4), folder + "/" + (i % 8), i % 2 == 0 ? "a" : "A", name, true);
+            concurrent.Store(key, new List<string>() { "f" + i }, false);
+            concurrent.TryGet(key, out List<string> files, out bool hitTruncated);
+            Assert.That(hitTruncated, Is.False);
+            if (files is not null)
+            {
+                Assert.That(files.Count, Is.EqualTo(1));
+            }
+            if (i % 5 == 0)
+            {
+                concurrent.Invalidate("user-" + (i % 4), folder + "/" + (i % 8));
+            }
+        });
+    }
+
+    /// <summary>A later Drives page reuses the cached scan. The first page, another user, another sort, expiry, and invalidation scan again. A missing or invalid path never reads the cache.</summary>
+    [Test]
+    public void ListFolder_RecursiveLaterPageReusesCachedListing()
+    {
+        RecursiveListingCache previous = SimpleImageBrowserAPI.RecursiveListings;
+        long now = 1_000_000;
+        SimpleImageBrowserAPI.RecursiveListings = new RecursiveListingCache(clock: () => now);
+        try
+        {
+            WriteValidPng(Path.Combine(TempRoot, "a.png"));
+            WriteValidPng(Path.Combine(TempRoot, "b.png"));
+            Assert.That(SimpleImageBrowserAPI.RecursiveListings.CountEntries(), Is.EqualTo(0));
+            Newtonsoft.Json.Linq.JObject direct = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "", true, "Name", true, false, "user-a");
+            Assert.That((int)direct["total"], Is.EqualTo(2));
+            Assert.That(direct["match_cap"], Is.Null);
+            Assert.That(SimpleImageBrowserAPI.RecursiveListings.CountEntries(), Is.EqualTo(0));
+
+            Newtonsoft.Json.Linq.JObject first = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 1, "", true, "Name", true, true, "user-a");
+            Assert.That((int)first["total"], Is.EqualTo(2));
+            Assert.That((int)first["match_cap"], Is.EqualTo(SimpleImageBrowserAPI.RecursiveMatchCap));
+            Assert.That((string)first["files"][0]["name"], Is.EqualTo("a.png"));
+            WriteValidPng(Path.Combine(TempRoot, "c.png"));
+            Newtonsoft.Json.Linq.JObject reused = SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 1, "", true, "Name", true, true, "user-a");
+            Assert.That((int)reused["total"], Is.EqualTo(2));
+            Assert.That((string)reused["files"][0]["name"], Is.EqualTo("b.png"));
+            if (OperatingSystem.IsWindows())
+            {
+                Newtonsoft.Json.Linq.JObject cased = SimpleImageBrowserAPI.ListFolder(FlipPathCase(TempRoot), 1, 1, "", true, "Name", true, true, "user-a");
+                Assert.That((int)cased["total"], Is.EqualTo(2));
+                Assert.That((string)cased["files"][0]["name"], Is.EqualTo("b.png"));
+            }
+            Newtonsoft.Json.Linq.JObject otherUser = SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 1, "", true, "Name", true, true, "user-b");
+            Assert.That((int)otherUser["total"], Is.EqualTo(3));
+            Newtonsoft.Json.Linq.JObject refreshed = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 1, "", true, "Name", true, true, "user-a");
+            Assert.That((int)refreshed["total"], Is.EqualTo(3));
+            Assert.That((string)refreshed["files"][0]["name"], Is.EqualTo("a.png"));
+
+            WriteValidPng(Path.Combine(TempRoot, "d.png"));
+            Newtonsoft.Json.Linq.JObject otherSort = SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 1, "", true, "Date", false, true, "user-a");
+            Assert.That((int)otherSort["total"], Is.EqualTo(4));
+            Newtonsoft.Json.Linq.JObject stillCached = SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 1, "", true, "Name", true, true, "user-a");
+            Assert.That((int)stillCached["total"], Is.EqualTo(3));
+
+            WriteValidPng(Path.Combine(TempRoot, "only-a.png"));
+            Newtonsoft.Json.Linq.JObject search = SimpleImageBrowserAPI.ListFolder(TempRoot, 0, 10, "only-a", true, "Name", true, true, "user-a");
+            Assert.That((int)search["total"], Is.EqualTo(1));
+            WriteValidPng(Path.Combine(TempRoot, "only-a-2.png"));
+            Newtonsoft.Json.Linq.JObject searchReuse = SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 10, "ONLY-A", true, "Name", true, true, "user-a");
+            Assert.That((int)searchReuse["total"], Is.EqualTo(1));
+            Assert.That(searchReuse["files"].Count(), Is.EqualTo(0));
+            now += RecursiveListingCache.DefaultTtlMilliseconds;
+            Newtonsoft.Json.Linq.JObject expired = SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 10, "ONLY-A", true, "Name", true, true, "user-a");
+            Assert.That((int)expired["total"], Is.EqualTo(2));
+
+            WriteValidPng(Path.Combine(TempRoot, "only-a-3.png"));
+            SimpleImageBrowserAPI.RecursiveListings.Invalidate(null, TempRoot);
+            Newtonsoft.Json.Linq.JObject afterInvalidate = SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 10, "only-a", true, "Name", true, true, "user-a");
+            Assert.That((int)afterInvalidate["total"], Is.EqualTo(3));
+            Assert.That((string)SimpleImageBrowserAPI.ListFolder("not-absolute", 1, 10, "", true, "Name", true, true, "user-a")["error_id"], Is.EqualTo("bad_path"));
+            Directory.Delete(TempRoot, true);
+            Assert.That((string)SimpleImageBrowserAPI.ListFolder(TempRoot, 1, 10, "", true, "Name", true, true, "user-a")["error_id"], Is.EqualTo("missing_folder"));
+        }
+        finally
+        {
+            SimpleImageBrowserAPI.RecursiveListings = previous;
+        }
+    }
+
+    /// <summary>Flips the first letter so a Windows path differs only by case.</summary>
+    private static string FlipPathCase(string path)
+    {
+        char[] chars = path.ToCharArray();
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (char.IsLetter(chars[i]))
+            {
+                chars[i] = char.IsUpper(chars[i]) ? char.ToLowerInvariant(chars[i]) : char.ToUpperInvariant(chars[i]);
+                return new string(chars);
+            }
+        }
+        return path;
     }
 }

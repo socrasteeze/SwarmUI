@@ -114,7 +114,7 @@ await page.addInitScript(pixel => {
                 if (args.search == 'capped-search') {
                     return respond({ path, parent: 'E:\\', folders: [{ name: 'Nested', path: 'E:\\Shots\\Nested' }],
                         files: [{ name: 'cap.png', path: 'E:\\Shots\\wide\\cap.png', rel_dir: 'wide' }],
-                        total: 500, truncated: true, next_offset: null });
+                        total: 500, match_cap: 5000, truncated: true, next_offset: null });
                 }
                 let files = Array.from({ length: 102 }, (_, i) => ({ name: `shot-${i}.png`, path: `E:\\Shots\\shot-${i}.png` }));
                 files = files.filter(file => file.name.toLowerCase().includes((args.search || '').toLowerCase()));
@@ -136,7 +136,7 @@ await page.addInitScript(pixel => {
             if (path == 'wide-tree') {
                 return respond({ path, parent: '', folders: [{ name: 'Nested', path: 'wide-tree\\Nested' }],
                     files: [{ name: 'cap.png', path: 'wide-tree\\wide\\cap.png', rel_dir: 'wide' }],
-                    total: 500, truncated: true, next_offset: null });
+                    total: 500, match_cap: 5000, truncated: true, next_offset: null });
             }
             if (path == 'folder-pages') {
                 let folders = Array.from({ length: 102 }, (_, i) => ({ name: `folder-${i}`, path: `folder-pages\\folder-${i}` }));
@@ -354,8 +354,8 @@ await page.waitForFunction(() => {
     return call && call.args.sortBy == 'Name';
 });
 await search.fill('capped-search');
-await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'First 500 matches - refine the search');
-check('a capped Drives search tells the user to refine it', await page.locator('.m-imgbrowser-status').textContent() == 'First 500 matches - refine the search');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'First 5000 matches - refine the search');
+check('a capped Drives search tells the user to refine it', await page.locator('.m-imgbrowser-status').textContent() == 'First 5000 matches - refine the search');
 await search.fill('');
 await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-tile').length == 48);
 await go('empty-folder');
@@ -364,8 +364,8 @@ check('an empty Drives folder says images include subfolders', await page.locato
 let emptyFolder = await page.evaluate(() => [...window.__calls].reverse().find(call => call.route == 'ListSimpleImageFolder' && call.args.path == 'empty-folder'));
 check('an empty Drives folder still requests the recursive listing', emptyFolder.args.recursive == true && emptyFolder.args.search == '', JSON.stringify(emptyFolder.args));
 await go('wide-tree');
-await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'First 500 images - open a folder or search to narrow it');
-check('a capped Drives folder tells the user to open a folder or search', await page.locator('.m-imgbrowser-status').textContent() == 'First 500 images - open a folder or search to narrow it');
+await page.waitForFunction(() => document.querySelector('.m-imgbrowser-status')?.textContent == 'First 5000 images - open a folder or search to narrow it');
+check('a capped Drives folder tells the user to open a folder or search', await page.locator('.m-imgbrowser-status').textContent() == 'First 5000 images - open a folder or search to narrow it');
 
 await go('folder-pages');
 await page.waitForFunction(() => document.querySelectorAll('.m-imgbrowser-folder-row').length == 102);

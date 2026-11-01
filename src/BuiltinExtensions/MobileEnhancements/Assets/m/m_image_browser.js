@@ -587,8 +587,9 @@ class MImageBrowser {
                 pageLabel.setAttribute('aria-label', `Page ${page} of ${pages}`);
                 let shown = grid.querySelectorAll('.m-imgbrowser-tile').length;
                 let machineFolder = this.source == 'machine' && this.machinePath;
-                if (shown && machineFolder && (data.truncated || total >= 500)) {
-                    status.textContent = search ? 'First 500 matches - refine the search' : 'First 500 images - open a folder or search to narrow it';
+                let cap = Number(data.match_cap);
+                if (shown && machineFolder && cap > 0 && (data.truncated || total >= cap)) {
+                    status.textContent = search ? `First ${cap} matches - refine the search` : `First ${cap} images - open a folder or search to narrow it`;
                 }
                 else {
                     status.textContent = shown ? `${offset + 1}\u2013${offset + shown} of ${total}`

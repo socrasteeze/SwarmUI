@@ -28,7 +28,10 @@ public static class SimpleImageBrowserAPI
     public const long MaximumImagePixels = 100L * 1024 * 1024;
 
     /// <summary>Maximum recursive image files kept after sorting.</summary>
-    public const int RecursiveMatchCap = 500;
+    public const int RecursiveMatchCap = 5000;
+
+    /// <summary>Sorted recursive listings reused by later pages. The first page of a listing always replaces its entry.</summary>
+    public static RecursiveListingCache RecursiveListings = new();
 
     /// <summary>Maximum files visited by one recursive folder listing.</summary>
     public const int RecursiveScanCap = 100000;
@@ -43,7 +46,7 @@ public static class SimpleImageBrowserAPI
     public static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff" };
 
     /// <summary>Lists drives when <paramref name="path"/> is empty, or folders and accepted image files in a server folder.</summary>
-    [API.APIDescription("Lists available server drives or the contents of a server folder. Results are folders first, then image files, and are paged. When recursive is true, files include images in all subfolders even if search is empty, keep at most 500 after sorting, add rel_dir on each file, and set truncated when that cap or the scan bound is hit. Search is optional and filters file names only.", "{ \"path\": \"/images\", \"parent\": \"/\", \"folders\": [{ \"name\": \"Reference\", \"path\": \"/images/Reference\" }], \"files\": [{ \"name\": \"image.png\", \"path\": \"/images/Reference/image.png\", \"rel_dir\": \"Reference\" }], \"total\": 1, \"next_offset\": null, \"truncated\": false }")]
+    [API.APIDescription("Lists available server drives or the contents of a server folder. Results are folders first, then image files, and are paged. When recursive is true, files include images in all subfolders even if search is empty, keep at most 5000 after sorting, add rel_dir on each file, set match_cap, and set truncated when that cap or the scan bound is hit. An offset above zero reuses that sorted list for 60 seconds for the same user, path, search, and sort. Offset zero scans again. Search is optional and filters file names only.", "{ \"path\": \"/images\", \"parent\": \"/\", \"folders\": [{ \"name\": \"Reference\", \"path\": \"/images/Reference\" }], \"files\": [{ \"name\": \"image.png\", \"path\": \"/images/Reference/image.png\", \"rel_dir\": \"Reference\" }], \"total\": 1, \"next_offset\": null, \"truncated\": false, \"match_cap\": 5000 }")]
     public static Task<JObject> ListSimpleImageFolder(Session session,
         [API.APIParameter("Fully qualified server directory path. Leave empty to list available drives.")] string path = "",
         [API.APIParameter("Zero-based result offset.")] int offset = 0,
@@ -58,7 +61,7 @@ public static class SimpleImageBrowserAPI
         {
             return Task.FromResult(Error("You lack permission to browse server images.", "bad_permissions"));
         }
-        return Task.FromResult(ListFolder(path, offset, limit, search, image_page, sortBy, sortReverse, recursive));
+        return Task.FromResult(ListFolder(path, offset, limit, search, image_page, sortBy, sortReverse, recursive, session.User.UserID));
     }
 
     /// <summary>Reads one validated image as a data URI, converting TIFF to PNG or optionally producing a small JPEG preview.</summary>
@@ -74,8 +77,9 @@ public static class SimpleImageBrowserAPI
         return Task.FromResult(ReadImage(path, preview));
     }
 
-    /// <summary>Lists a folder without session handling so focused tests can cover path and paging behavior. A recursive listing includes subfolder images even when search is empty.</summary>
-    public static JObject ListFolder(string path, int offset, int limit, string search = "", bool imagePage = false, string sortBy = "Name", bool sortReverse = true, bool recursive = false)
+    /// <summary>Lists a folder without session handling so focused tests can cover path and paging behavior. A recursive listing includes subfolder images even when search is empty.
+    /// <paramref name="userId"/> is part of the recursive-list cache key. Path checks still run on every call. This API has no delete, move, or rename route.</summary>
+    public static JObject ListFolder(string path, int offset, int limit, string search = "", bool imagePage = false, string sortBy = "Name", bool sortReverse = true, bool recursive = false, string userId = null)
     {
         if (offset < 0 || limit < 1 || limit > MaximumPageSize)
         {
@@ -104,40 +108,37 @@ public static class SimpleImageBrowserAPI
             bool truncated = false;
             if (recursive)
             {
-                files = CollectRecursiveMatches(fullPath, search, out truncated);
+                RecursiveListingCache.Key listKey = RecursiveListingCache.CreateKey(userId, fullPath, search, sortMode, sortReverse);
+                List<string> cachedFiles;
+                bool cachedTruncated;
+                if (offset > 0 && RecursiveListings.TryGet(listKey, out cachedFiles, out cachedTruncated))
+                {
+                    files = cachedFiles;
+                    truncated = cachedTruncated;
+                }
+                else
+                {
+                    files = CollectRecursiveMatches(fullPath, search, out truncated);
+                    SortListedFiles(files, sortMode, sortReverse, true);
+                    if (files.Count > RecursiveMatchCap)
+                    {
+                        files.RemoveRange(RecursiveMatchCap, files.Count - RecursiveMatchCap);
+                        truncated = true;
+                    }
+                    RecursiveListings.Store(listKey, files, truncated);
+                }
             }
             else
             {
                 files = Directory.EnumerateFiles(fullPath).Where(IsAllowedImagePath).Where(file => string.IsNullOrWhiteSpace(search) || GetName(file).Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
-            }
-            Dictionary<string, long> fileTimes = null;
-            if (sortMode == T2IAPI.ImageHistorySortMode.Date)
-            {
-                fileTimes = new Dictionary<string, long>(files.Count);
-                foreach (string file in files)
-                {
-                    try
-                    {
-                        fileTimes[file] = File.GetLastWriteTimeUtc(file).Ticks;
-                    }
-                    catch (Exception ex) when (recursive && IsTraversalException(ex))
-                    {
-                        fileTimes[file] = 0;
-                    }
-                }
-            }
-            files.Sort((first, second) => CompareImagePaths(first, second, sortMode, sortReverse, fileTimes));
-            if (recursive && files.Count > RecursiveMatchCap)
-            {
-                files.RemoveRange(RecursiveMatchCap, files.Count - RecursiveMatchCap);
-                truncated = true;
+                SortListedFiles(files, sortMode, sortReverse, false);
             }
             if (imagePage)
             {
-                return BuildImagePage(fullPath, GetParentPath(fullPath), folders, files, offset, limit, recursive ? fullPath : null, truncated);
+                return BuildImagePage(fullPath, GetParentPath(fullPath), folders, files, offset, limit, recursive ? fullPath : null, truncated, recursive);
             }
             List<SimplePathRow> entries = folders.Select(p => new SimplePathRow(GetName(p), p, true)).Concat(files.Select(p => new SimplePathRow(GetName(p), p, false, true, recursive ? RelativeDirectory(fullPath, p) : null))).ToList();
-            return BuildPage(fullPath, GetParentPath(fullPath), entries, offset, limit, truncated);
+            return BuildPage(fullPath, GetParentPath(fullPath), entries, offset, limit, truncated, recursive);
         }
         catch (UnauthorizedAccessException)
         {
@@ -278,6 +279,28 @@ public static class SimpleImageBrowserAPI
             return "";
         }
         return relative.Replace('\\', '/');
+    }
+
+    /// <summary>Sorts image paths in place. Date order stats each file. A recursive listing treats a stat failure as time zero.</summary>
+    private static void SortListedFiles(List<string> files, T2IAPI.ImageHistorySortMode sortMode, bool sortReverse, bool tolerateStatErrors)
+    {
+        Dictionary<string, long> fileTimes = null;
+        if (sortMode == T2IAPI.ImageHistorySortMode.Date)
+        {
+            fileTimes = new Dictionary<string, long>(files.Count);
+            foreach (string file in files)
+            {
+                try
+                {
+                    fileTimes[file] = File.GetLastWriteTimeUtc(file).Ticks;
+                }
+                catch (Exception ex) when (tolerateStatErrors && IsTraversalException(ex))
+                {
+                    fileTimes[file] = 0;
+                }
+            }
+        }
+        files.Sort((first, second) => CompareImagePaths(first, second, sortMode, sortReverse, fileTimes));
     }
 
     /// <summary>Sorts machine images before paging, with the same descending base order as ListImages.</summary>
@@ -525,7 +548,7 @@ public static class SimpleImageBrowserAPI
     }
 
     /// <summary>Builds an image-only page while retaining every immediate folder for navigation.</summary>
-    private static JObject BuildImagePage(string path, string parent, List<string> folderPaths, List<string> filePaths, int offset, int limit, string relativeRoot = null, bool truncated = false)
+    private static JObject BuildImagePage(string path, string parent, List<string> folderPaths, List<string> filePaths, int offset, int limit, string relativeRoot = null, bool truncated = false, bool recursive = false)
     {
         JArray folders = new(folderPaths.Select(folder => new JObject() { ["name"] = GetName(folder), ["path"] = folder }));
         JArray files = new();
@@ -548,10 +571,7 @@ public static class SimpleImageBrowserAPI
             ["total"] = total,
             ["next_offset"] = (long)offset + limit < total ? offset + limit : null
         };
-        if (truncated)
-        {
-            result["truncated"] = true;
-        }
+        ApplyListingFlags(result, recursive, truncated);
         return result;
     }
 
@@ -652,7 +672,7 @@ public static class SimpleImageBrowserAPI
     }
 
     /// <summary>Builds the API response with folders and files split for the simple client.</summary>
-    private static JObject BuildPage(string path, string parent, List<SimplePathRow> entries, int offset, int limit, bool truncated = false)
+    private static JObject BuildPage(string path, string parent, List<SimplePathRow> entries, int offset, int limit, bool truncated = false, bool recursive = false)
     {
         int total = entries.Count;
         IEnumerable<SimplePathRow> page = entries.Skip(offset).Take(limit);
@@ -687,11 +707,21 @@ public static class SimpleImageBrowserAPI
             ["total"] = total,
             ["next_offset"] = (long)offset + limit < total ? offset + limit : null
         };
+        ApplyListingFlags(result, recursive, truncated);
+        return result;
+    }
+
+    /// <summary>Adds the recursive match cap, and the truncated flag when the listing stopped early.</summary>
+    private static void ApplyListingFlags(JObject result, bool recursive, bool truncated)
+    {
+        if (recursive)
+        {
+            result["match_cap"] = RecursiveMatchCap;
+        }
         if (truncated)
         {
             result["truncated"] = true;
         }
-        return result;
     }
 
     /// <summary>Checks and canonicalizes a directory path without allowing device namespaces or alternate data streams.</summary>
