@@ -1264,8 +1264,8 @@ function refreshParameterValues(strong = true, refreshType = null, callback = nu
                     // getHtmlForParam), so appending the whole refreshed list here would re-pay the
                     // multi-second DOM cost the lazy path exists to avoid - and would achieve nothing, because
                     // the ajax source re-reads the value list per query and already sees the refresh.
-                    let listOpts = [...elem.options].map(o => o.value);
-                    let newVals = values.filter(v => !listOpts.includes(v));
+                    let listOpts = new Set([...elem.options].map(o => o.value));
+                    let newVals = values.filter(v => !listOpts.has(v));
                     for (let val of newVals) {
                         $(elem).append(new Option(val, val, false, false));
                         if (presetElem) {
