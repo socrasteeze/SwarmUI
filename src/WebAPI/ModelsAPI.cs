@@ -1494,6 +1494,11 @@ public static class ModelsAPI
         {
             resp = await Utilities.UtilWebClient.GetStringAsync(url);
         }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            // CivitAI answers 404 for any model it does not know, which is routine during bulk hash lookups.
+            return new JObject() { ["error"] = "Not found on CivitAI.", ["quiet"] = true };
+        }
         catch (Exception ex)
         {
             Logs.Warning($"While making metadata request to '{url}', got exception: {ex.ReadableString()}");

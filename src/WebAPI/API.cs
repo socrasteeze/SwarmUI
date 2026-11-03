@@ -190,7 +190,7 @@ public class API
             JObject output = await handler.Call(context, session, socket, input);
             if (output is not null && output.TryGetValue("error", out JToken errorTok))
             {
-                await Error($"{errorTok}");
+                await Error($"{errorTok}", quiet: output.ContainsKey("quiet"));
             }
             if (socket is not null)
             {
