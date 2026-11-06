@@ -1,11 +1,10 @@
+using ImageMagick;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using SwarmUI.Backends;
 using SwarmUI.Core;
 using SwarmUI.Utils;
 using SwarmUI.WebAPI;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -201,10 +200,8 @@ public class SwarmSwarmBackendTests : SwarmUITest
     [Test]
     public static void TestRemoteModelPreviewValidation()
     {
-        using Image<Rgba32> image = new(1, 1);
-        using MemoryStream stream = new();
-        image.SaveAsPng(stream);
-        string encoded = Convert.ToBase64String(stream.ToArray());
+        using MagickImage image = new(MagickColors.Black, 1, 1);
+        string encoded = Convert.ToBase64String(image.ToByteArray(MagickFormat.Png));
         (byte[] data, string mimeType) = ModelsAPI.DecodeRemoteModelPreviewData($"data:image/png;base64,{encoded}");
         Assert.That(data, Is.Not.Empty);
         Assert.That(mimeType, Is.EqualTo("image/png"));

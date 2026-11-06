@@ -1,16 +1,15 @@
+using ImageMagick;
 using Newtonsoft.Json.Linq;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats;
-using SixLabors.ImageSharp.Formats.Jpeg;
 using SwarmUI.Accounts;
+using SwarmUI.Builtin_TiffDecodeGuardExtension;
 using SwarmUI.Core;
+using SwarmUI.Media;
 using SwarmUI.Utils;
 using SwarmUI.WebAPI;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using ISImage = SixLabors.ImageSharp.Image;
 
 namespace SwarmUI.Builtin_MobileEnhancementsExtension;
 
@@ -402,33 +401,61 @@ public static class SimpleImageBrowserAPI
                 return Error("The image is too large.", "image_too_large");
             }
             byte[] data = ReadBoundedFile(fullPath);
-            IImageFormat format = ISImage.DetectFormat(data);
+            IMagickFormatInfo format;
+            try
+            {
+                format = MagickFormatInfo.Create(data);
+            }
+            catch (MagickException)
+            {
+                return Error("The file is not a supported image.", "unsupported_image");
+            }
             if (!IsAllowedFormat(format))
             {
                 return Error("The file is not a supported image.", "unsupported_image");
             }
-            DecoderOptions validationOptions = new() { MaxFrames = 1 };
-            ImageInfo imageInfo = ISImage.Identify(validationOptions, data);
-            if (imageInfo is null || (long)imageInfo.Width * imageInfo.Height > MaximumImagePixels)
+            if (TiffDecodeGuardExtension.Blocks(data))
             {
-                return Error("The image dimensions are too large.", "image_too_large");
+                return Error("The file is not a supported image.", "unsupported_image");
             }
-            if (!preview)
+            try
             {
-                using ISImage image = ISImage.Load(validationOptions, data);
-                if (format.Name == "TIFF")
+                MagickImageInfo imageInfo = new();
+                imageInfo.Read(data);
+                if (imageInfo.Width == 0 || imageInfo.Height == 0 || (long)imageInfo.Width * imageInfo.Height > MaximumImagePixels)
                 {
-                    using MemoryStream png = new();
-                    image.SaveAsPng(png);
-                    return new JObject() { ["image"] = $"data:image/png;base64,{Convert.ToBase64String(png.ToArray())}" };
+                    return Error("The image dimensions are too large.", "image_too_large");
                 }
-                return new JObject() { ["image"] = $"data:{format.DefaultMimeType};base64,{Convert.ToBase64String(data)}" };
+                MagickReadSettings firstFrame = new() { FrameIndex = 0, FrameCount = 1 };
+                if (!preview)
+                {
+                    if (IsTiff(format, data))
+                    {
+                        using MagickImage image = new(data, firstFrame);
+                        byte[] png = ImageFile.MagickImageToPngBytes(image);
+                        return new JObject() { ["image"] = $"data:image/png;base64,{Convert.ToBase64String(png)}" };
+                    }
+                    return new JObject() { ["image"] = $"data:{RasterMimeType(format)};base64,{Convert.ToBase64String(data)}" };
+                }
+                using MagickImage previewImage = new(data, firstFrame);
+                previewImage.Resize(new MagickGeometry(256, 256) { Greater = true });
+                previewImage.ResetPage();
+                previewImage.Quality = 85;
+                byte[] jpeg = previewImage.ToByteArray(MagickFormat.Jpeg);
+                return new JObject() { ["image"] = $"data:image/jpeg;base64,{Convert.ToBase64String(jpeg)}" };
             }
-            DecoderOptions options = new() { MaxFrames = 1, TargetSize = new Size(256, 256) };
-            using ISImage previewImage = ISImage.Load(options, data);
-            using MemoryStream output = new();
-            previewImage.SaveAsJpeg(output, new JpegEncoder() { Quality = 85 });
-            return new JObject() { ["image"] = $"data:image/jpeg;base64,{Convert.ToBase64String(output.ToArray())}" };
+            catch (MagickMissingDelegateErrorException)
+            {
+                return Error("The file is not a supported image.", "unsupported_image");
+            }
+            catch (MagickResourceLimitErrorException)
+            {
+                return Error("The image requires too much memory.", "image_too_large");
+            }
+            catch (MagickException)
+            {
+                return Error("The image data is invalid.", "invalid_image");
+            }
         }
         catch (UnauthorizedAccessException)
         {
@@ -437,14 +464,6 @@ public static class SimpleImageBrowserAPI
         catch (IOException)
         {
             return Error("The image is unavailable.", "image_unavailable");
-        }
-        catch (UnknownImageFormatException)
-        {
-            return Error("The file is not a supported image.", "unsupported_image");
-        }
-        catch (InvalidImageContentException)
-        {
-            return Error("The image data is invalid.", "invalid_image");
         }
         catch (NotSupportedException)
         {
@@ -781,10 +800,40 @@ public static class SimpleImageBrowserAPI
         return Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
     }
 
-    /// <summary>Returns whether ImageSharp recognized an allowed bitmap format.</summary>
-    private static bool IsAllowedFormat(IImageFormat format)
+    /// <summary>Returns whether ImageMagick recognized an allowed bitmap format.</summary>
+    private static bool IsAllowedFormat(IMagickFormatInfo format)
     {
-        return format is not null && format.Name is "PNG" or "JPEG" or "WEBP" or "GIF" or "BMP" or "TIFF";
+        if (format is null || !format.SupportsReading)
+        {
+            return false;
+        }
+        string mimeType = RasterMimeType(format);
+        return mimeType is "image/png" or "image/jpeg" or "image/webp" or "image/gif" or "image/bmp" or "image/tiff";
+    }
+
+    /// <summary>Returns whether the recognized format is TIFF. The header check does not decode the file.</summary>
+    private static bool IsTiff(IMagickFormatInfo format, byte[] data)
+    {
+        return RasterMimeType(format) == "image/tiff" || TiffDecodeGuardExtension.HasTiffHeader(data);
+    }
+
+    /// <summary>Maps ImageMagick MIME aliases onto the types this browser returns.</summary>
+    private static string RasterMimeType(IMagickFormatInfo format)
+    {
+        string mimeType = format?.MimeType;
+        if (mimeType is "image/jpg" or "image/pjpeg")
+        {
+            return "image/jpeg";
+        }
+        if (mimeType == "image/x-png")
+        {
+            return "image/png";
+        }
+        if (mimeType == "image/x-tiff")
+        {
+            return "image/tiff";
+        }
+        return mimeType;
     }
 
     /// <summary>Builds a standard API error object.</summary>

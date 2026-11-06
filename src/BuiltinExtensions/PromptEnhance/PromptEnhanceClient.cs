@@ -1,6 +1,6 @@
 using FreneticUtilities.FreneticExtensions;
+using ImageMagick;
 using Newtonsoft.Json.Linq;
-using SixLabors.ImageSharp.Processing;
 using SwarmUI.Accounts;
 using SwarmUI.Media;
 using SwarmUI.Text2Image;
@@ -13,7 +13,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using ISImage = SixLabors.ImageSharp.Image;
 
 namespace SwarmUI.Builtin_PromptEnhanceExtension;
 
@@ -328,33 +327,26 @@ public static class PromptEnhanceClient
     /// <paramref name="maxSide"/>. A smaller image is re-encoded without being enlarged.</summary>
     private static byte[] DownscaleJpeg(ImageFile image, int maxSide)
     {
-        ISImage source = image.ToIS;
-        int width = source.Width;
-        int height = source.Height;
+        // ToMagick is cached on the file. Clone before a resize, and do not dispose the cached image.
+        IMagickImage<ushort> source = image.ToMagick;
+        uint width = source.Width;
+        uint height = source.Height;
         if (width < 1 || height < 1)
         {
             return null;
         }
-        int longest = Math.Max(width, height);
-        ISImage working = source;
-        if (longest > maxSide)
+        uint longest = Math.Max(width, height);
+        if (longest <= (uint)maxSide)
         {
-            double scale = maxSide / (double)longest;
-            int newWidth = Math.Max(1, (int)Math.Round(width * scale));
-            int newHeight = Math.Max(1, (int)Math.Round(height * scale));
-            working = source.Clone(operation => operation.Resize(newWidth, newHeight));
+            return ImageFile.MagickImageToJpgBytes(source);
         }
-        try
-        {
-            return ImageFile.ISImgToJpgBytes(working);
-        }
-        finally
-        {
-            if (!ReferenceEquals(working, source))
-            {
-                working.Dispose();
-            }
-        }
+        double scale = maxSide / (double)longest;
+        uint newWidth = (uint)Math.Max(1, (int)Math.Round(width * scale));
+        uint newHeight = (uint)Math.Max(1, (int)Math.Round(height * scale));
+        using IMagickImage<ushort> working = source.Clone();
+        working.Resize(new MagickGeometry(newWidth, newHeight) { IgnoreAspectRatio = true });
+        working.ResetPage();
+        return ImageFile.MagickImageToJpgBytes(working);
     }
 
     /// <summary>Pulls the content delta and done-flag out of one line of an Ollama NDJSON chat stream. Pure and

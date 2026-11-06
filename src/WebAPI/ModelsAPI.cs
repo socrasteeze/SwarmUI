@@ -1,6 +1,8 @@
 using FreneticUtilities.FreneticExtensions;
 using FreneticUtilities.FreneticToolkit;
+using ImageMagick;
 using Microsoft.AspNetCore.Http;
+using SwarmUI.Builtin_TiffDecodeGuardExtension;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Accounts;
 using SwarmUI.Backends;
@@ -246,12 +248,30 @@ public static class ModelsAPI
         {
             throw new SwarmReadableErrorException("Remote model preview MIME type is not an allowed raster format.");
         }
-        SixLabors.ImageSharp.Formats.IImageFormat format = SixLabors.ImageSharp.Image.DetectFormat(data);
-        SixLabors.ImageSharp.ImageInfo info = SixLabors.ImageSharp.Image.Identify(data);
-        string detectedMimeType = format?.DefaultMimeType;
-        if (info is null || string.IsNullOrWhiteSpace(detectedMimeType)
+        if (TiffDecodeGuardExtension.Blocks(data))
+        {
+            throw new SwarmReadableErrorException("Remote model preview content is not a valid bounded raster image.");
+        }
+        IMagickFormatInfo format = MagickFormatInfo.Create(data);
+        MagickImageInfo info = new();
+        info.Read(data);
+        string detectedMimeType = format?.MimeType;
+        if (detectedMimeType is "image/jpg" or "image/pjpeg")
+        {
+            detectedMimeType = "image/jpeg";
+        }
+        else if (detectedMimeType == "image/x-png")
+        {
+            detectedMimeType = "image/png";
+        }
+        else if (detectedMimeType == "image/x-tiff")
+        {
+            detectedMimeType = "image/tiff";
+        }
+        if (string.IsNullOrWhiteSpace(detectedMimeType)
             || !AllowedRemoteModelPreviewMimeTypes.Contains(detectedMimeType)
             || (claimedMimeType is not null && !claimedMimeType.Equals(detectedMimeType, StringComparison.OrdinalIgnoreCase))
+            || info.Width == 0 || info.Height == 0
             || (long)info.Width * info.Height > 16L * 1024 * 1024)
         {
             throw new SwarmReadableErrorException("Remote model preview content is not a valid bounded raster image.");

@@ -1,14 +1,14 @@
+using ImageMagick;
 using NUnit.Framework;
-using SixLabors.ImageSharp;
 using SwarmUI.Accounts;
 using SwarmUI.Builtin_MobileEnhancementsExtension;
+using SwarmUI.Builtin_TiffDecodeGuardExtension;
 using SwarmUI.WebAPI;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using ISImage = SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>;
 
 namespace SwarmUITests;
 
@@ -51,10 +51,8 @@ public class SimpleImageBrowserTests : SwarmUITest
     /// <summary>Creates a valid small PNG file.</summary>
     private static byte[] WriteValidPng(string path, int width = 8, int height = 4)
     {
-        using ISImage image = new(width, height);
-        using MemoryStream data = new();
-        image.SaveAsPng(data);
-        byte[] bytes = data.ToArray();
+        using MagickImage image = new(MagickColors.Black, (uint)width, (uint)height);
+        byte[] bytes = image.ToByteArray(MagickFormat.Png);
         File.WriteAllBytes(path, bytes);
         return bytes;
     }
@@ -455,7 +453,7 @@ public class SimpleImageBrowserTests : SwarmUITest
         Assert.That(original.StartsWith("data:image/png;base64,", StringComparison.Ordinal), Is.True);
         Assert.That(originalBytes, Is.EqualTo(expected));
         Assert.That(preview.StartsWith("data:image/jpeg;base64,", StringComparison.Ordinal), Is.True);
-        using SixLabors.ImageSharp.Image previewImage = SixLabors.ImageSharp.Image.Load(previewBytes);
+        using MagickImage previewImage = new(previewBytes);
         Assert.That(previewImage.Width, Is.LessThanOrEqualTo(256));
         Assert.That(previewImage.Height, Is.LessThanOrEqualTo(256));
         Assert.That(previewImage.Width, Is.EqualTo(256));
@@ -467,19 +465,53 @@ public class SimpleImageBrowserTests : SwarmUITest
     public void ReadImage_ConvertsTiffToPngWithoutChangingSource()
     {
         string path = Path.Combine(TempRoot, "valid.tiff");
-        using ISImage source = new(8, 4);
-        source[2, 1] = new SixLabors.ImageSharp.PixelFormats.Rgba32(12, 34, 56, 255);
-        source.SaveAsTiff(path);
+        using MagickImage source = new(MagickColors.Transparent, 8, 4);
+        using MagickImage dot = new(new MagickColor((ushort)(12 * 257), (ushort)(34 * 257), (ushort)(56 * 257), Quantum.Max), 1, 1);
+        source.Composite(dot, 2, 1, CompositeOperator.Over);
+        source.Write(path, MagickFormat.Tiff);
         byte[] originalBytes = File.ReadAllBytes(path);
 
         string selected = (string)SimpleImageBrowserAPI.ReadImage(path, false)["image"];
         Assert.That(selected.StartsWith("data:image/png;base64,", StringComparison.Ordinal), Is.True);
         byte[] selectedBytes = Convert.FromBase64String(selected.Split(',')[1]);
-        using ISImage decoded = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(selectedBytes);
+        using MagickImage decoded = new(selectedBytes);
         Assert.That(decoded.Width, Is.EqualTo(source.Width));
         Assert.That(decoded.Height, Is.EqualTo(source.Height));
-        Assert.That(decoded[2, 1], Is.EqualTo(source[2, 1]));
+        using IMagickImage<ushort> pixel = decoded.Clone();
+        pixel.Crop(new MagickGeometry(2, 1, 1, 1));
+        pixel.ResetPage();
+        pixel.Depth = 8;
+        byte[] rgba = pixel.ToByteArray(MagickFormat.Rgba);
+        Assert.That(rgba.Length, Is.GreaterThanOrEqualTo(4));
+        Assert.That(rgba[0], Is.EqualTo(12));
+        Assert.That(rgba[1], Is.EqualTo(34));
+        Assert.That(rgba[2], Is.EqualTo(56));
+        Assert.That(rgba[3], Is.EqualTo(255));
         Assert.That(File.ReadAllBytes(path), Is.EqualTo(originalBytes));
+    }
+
+    /// <summary>With the guard active, a listed TIFF is refused and the source file stays unchanged.</summary>
+    [Test]
+    public void ReadImage_RefusesTiffWhenGuardIsActive()
+    {
+        string path = Path.Combine(TempRoot, "guarded.tiff");
+        using (MagickImage source = new(MagickColors.Red, 8, 4))
+        {
+            source.Write(path, MagickFormat.Tiff);
+        }
+        byte[] originalBytes = File.ReadAllBytes(path);
+        bool prior = TiffDecodeGuardExtension.Active;
+        try
+        {
+            TiffDecodeGuardExtension.Active = true;
+            Newtonsoft.Json.Linq.JObject result = SimpleImageBrowserAPI.ReadImage(path, false);
+            Assert.That((string)result["error_id"], Is.EqualTo("unsupported_image"));
+            Assert.That(File.ReadAllBytes(path), Is.EqualTo(originalBytes));
+        }
+        finally
+        {
+            TiffDecodeGuardExtension.Active = prior;
+        }
     }
 
     /// <summary>Direct API entry points deny callers before they inspect a path.</summary>

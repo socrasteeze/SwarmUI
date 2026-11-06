@@ -1,13 +1,12 @@
+using ImageMagick;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
-using SixLabors.ImageSharp.PixelFormats;
 using SwarmUI.Builtin_TagDexExtension;
 using SwarmUI.Media;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using ISImage = SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>;
 using SwarmImage = SwarmUI.Utils.Image;
 
 namespace SwarmUITests;
@@ -220,7 +219,7 @@ public class TagDexCustomTests : SwarmUITest
         TagDexCustom.Save("", Make("Aria"));
         TagDexList list = TagDexData.EnsureLoaded(TagDexCustom.SourceId);
         TagDexEntry entry = list.Entries[0];
-        using ISImage img = new(4, 4);
+        using MagickImage img = new(MagickColors.Black, 4, 4);
         string written = TagDexExtension.WriteThumb(list, in entry, (ImageFile)new SwarmImage(img));
         Assert.That(written, Is.Not.Null);
         string thumbs = Path.Combine(TagDexData.ThumbsPath, TagDexCustom.SourceId);

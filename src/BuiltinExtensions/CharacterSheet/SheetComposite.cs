@@ -1,39 +1,20 @@
-using FreneticUtilities.FreneticExtensions;
-using SixLabors.Fonts;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Drawing.Processing;
-using SixLabors.ImageSharp.Processing;
+using ImageMagick;
+using ImageMagick.Drawing;
 using SwarmUI.Utils;
-using System.Collections.Concurrent;
 
 using Image = SwarmUI.Utils.Image;
-using ISImage = SixLabors.ImageSharp.Image;
-using ISImageRGBA = SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>;
 
 namespace SwarmUI.Builtin_CharacterSheetExtension;
 
 /// <summary>Lays generated panels out into one sheet image.
-/// <para>Compositing happens here in C# with ImageSharp rather than in a ComfyUI graph. Swarm already depends on
-/// ImageSharp.Drawing and already composites this way for grid images, and doing it locally means a failed panel
-/// does not cost the whole sheet.</para></summary>
+/// <para>Compositing happens here in C# with ImageMagick rather than in a ComfyUI graph. The grid generator
+/// composites the same way, and doing it locally means a failed panel does not cost the whole sheet.</para></summary>
 public static class SheetComposite
 {
-    /// <summary>Font collection for panel labels, loaded once.</summary>
-    public static FontCollection MainFontCollection;
-
-    /// <summary>Cache of label fonts by size multiplier.</summary>
-    public static ConcurrentDictionary<float, Font> Fonts = new();
-
-    /// <summary>Gets the label font at a given size multiplier. Mirrors the Grid Generator's font handling so both
-    /// features draw labels identically.</summary>
-    public static Font GetFont(float sizeMult)
+    /// <summary>Gets the label font at a given size multiplier. Matches the Grid Generator so both features draw labels the same way.</summary>
+    public static IDrawables<ushort> GetFont(float sizeMult)
     {
-        if (MainFontCollection is null)
-        {
-            MainFontCollection = new();
-            MainFontCollection.Add("src/wwwroot/fonts/unifont-12.0.01.woff2");
-        }
-        return Fonts.GetOrCreate(sizeMult, () => MainFontCollection.Families.First().CreateFont(16 * sizeMult, FontStyle.Bold));
+        return new Drawables().Font("src/wwwroot/fonts/unifont-12.0.01.woff2", FontStyleType.Normal, FontWeight.Bold, FontStretch.Normal).FontPointSize(16 * sizeMult);
     }
 
     /// <summary>One panel's placement in the layout grid, in cell units.</summary>
@@ -101,15 +82,15 @@ public static class SheetComposite
             }
         }
         Layout layout = Resolve(layoutName, live.Count);
-        int cellWidth = live.Max(p => p.ToIS.Width);
-        int cellHeight = live.Max(p => p.ToIS.Height);
+        int cellWidth = live.Max(p => (int)p.ToMagick.Width);
+        int cellHeight = live.Max(p => (int)p.ToMagick.Height);
         float sizeMult = cellWidth > 800 || cellHeight > 800 ? 2 : 1;
-        Font font = GetFont(sizeMult);
+        IDrawables<ushort> font = GetFont(sizeMult);
         int labelHeight = 0;
         if (labels is not null)
         {
-            FontRectangle measured = TextMeasurer.MeasureSize("ABCdefg", new TextOptions(font));
-            labelHeight = (int)Math.Ceiling(measured.Height * 1.6);
+            ITypeMetric measured = font.FontTypeMetrics("ABCdefg");
+            labelHeight = (int)Math.Ceiling(measured.TextHeight * 1.6);
         }
         int totalWidth = cellWidth * layout.Cols;
         int totalHeight = (cellHeight + labelHeight) * layout.Rows;
@@ -133,39 +114,73 @@ public static class SheetComposite
             }
         }
         Logs.Info($"[Character Sheet] Compositing {live.Count} panels into a {totalWidth}x{totalHeight} sheet.");
-        ISImageRGBA sheet = new(totalWidth, totalHeight);
-        sheet.Mutate(m =>
+        using MagickImage sheet = new(MagickColors.White, (uint)totalWidth, (uint)totalHeight) { Depth = 8 };
+        for (int i = 0; i < live.Count && i < layout.Cells.Length; i++)
         {
-            m.BackgroundColor(Color.White);
-            Brush brush = new SolidBrush(Color.Black);
-            for (int i = 0; i < live.Count && i < layout.Cells.Length; i++)
+            Cell cell = layout.Cells[i];
+            int boxX = offsetX + cell.Col * cellWidth;
+            int boxY = offsetY + cell.Row * (cellHeight + labelHeight);
+            int boxW = cell.ColSpan * cellWidth;
+            int boxH = cell.RowSpan * (cellHeight + labelHeight) - labelHeight;
+            IMagickImage<ushort> source = live[i].ToMagick;
+            // Fit rather than fill: a stretched turnaround panel is worse than a letterboxed one, because the
+            // whole point of the sheet is that proportions match across views.
+            double scale = Math.Min(boxW / (double)source.Width, boxH / (double)source.Height);
+            int drawW = Math.Max(1, (int)Math.Round(source.Width * scale));
+            int drawH = Math.Max(1, (int)Math.Round(source.Height * scale));
+            using IMagickImage<ushort> scaled = source.Clone();
+            scaled.Resize(new MagickGeometry((uint)drawW, (uint)drawH) { IgnoreAspectRatio = true });
+            scaled.ResetPage();
+            sheet.Composite(scaled, boxX + (boxW - drawW) / 2, boxY + (boxH - drawH) / 2, CompositeOperator.Over);
+            if (labelHeight > 0 && i < liveLabels.Count && !string.IsNullOrWhiteSpace(liveLabels[i]))
             {
-                Cell cell = layout.Cells[i];
-                int boxX = offsetX + cell.Col * cellWidth;
-                int boxY = offsetY + cell.Row * (cellHeight + labelHeight);
-                int boxW = cell.ColSpan * cellWidth;
-                int boxH = cell.RowSpan * (cellHeight + labelHeight) - labelHeight;
-                ISImage source = live[i].ToIS;
-                // Fit rather than fill: a stretched turnaround panel is worse than a letterboxed one, because the
-                // whole point of the sheet is that proportions match across views.
-                double scale = Math.Min(boxW / (double)source.Width, boxH / (double)source.Height);
-                int drawW = Math.Max(1, (int)Math.Round(source.Width * scale));
-                int drawH = Math.Max(1, (int)Math.Round(source.Height * scale));
-                using ISImageRGBA scaled = source.CloneAs<SixLabors.ImageSharp.PixelFormats.Rgba32>();
-                scaled.Mutate(c => c.Resize(drawW, drawH));
-                m.DrawImage(scaled, new Point(boxX + (boxW - drawW) / 2, boxY + (boxH - drawH) / 2), 1);
-                if (labelHeight > 0 && i < liveLabels.Count && !string.IsNullOrWhiteSpace(liveLabels[i]))
-                {
-                    RichTextOptions text = new(font)
-                    {
-                        WrappingLength = boxW,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        Origin = new(boxX + boxW / 2f, boxY + boxH + labelHeight * 0.15f)
-                    };
-                    m.DrawText(text, liveLabels[i], brush);
-                }
+                DrawCenteredLabel(sheet, sizeMult, liveLabels[i], boxX, boxY + boxH + labelHeight * 0.15, boxW);
             }
-        });
+        }
         return new Image(sheet);
+    }
+
+    /// <summary>Draws one centered, width-wrapped caption under a panel. The cached panel image is not modified.</summary>
+    private static void DrawCenteredLabel(MagickImage sheet, float sizeMult, string text, int boxX, double top, int boxW)
+    {
+        IDrawables<ushort> measure = GetFont(sizeMult);
+        List<string> lines = [];
+        string line = "";
+        foreach (Rune character in text.Replace("\r", "").EnumerateRunes())
+        {
+            if (character.Value == '\n')
+            {
+                lines.Add(line);
+                line = "";
+                continue;
+            }
+            string candidate = line + character.ToString();
+            if (line.Length > 0 && measure.FontTypeMetrics(candidate).TextWidth > boxW)
+            {
+                lines.Add(line);
+                line = character.ToString();
+            }
+            else
+            {
+                line = candidate;
+            }
+        }
+        if (line.Length > 0 || lines.Count == 0)
+        {
+            lines.Add(line);
+        }
+        ITypeMetric sample = measure.FontTypeMetrics("Ag");
+        double baseline = top + sample.Ascent;
+        IDrawables<ushort> draw = GetFont(sizeMult).FillColor(MagickColors.Black);
+        foreach (string row in lines)
+        {
+            if (row.Length > 0)
+            {
+                ITypeMetric rowMetric = measure.FontTypeMetrics(row);
+                draw.Text(boxX + (boxW - rowMetric.TextWidth) / 2.0, baseline, row);
+            }
+            baseline += sample.TextHeight;
+        }
+        draw.Draw(sheet);
     }
 }

@@ -1,10 +1,9 @@
+using ImageMagick;
 using NUnit.Framework;
-using SixLabors.ImageSharp.PixelFormats;
 using SwarmUI.Builtin_TagDexExtension;
 using SwarmUI.Media;
 using System;
 using System.IO;
-using ISImage = SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>;
 using SwarmImage = SwarmUI.Utils.Image;
 
 namespace SwarmUITests;
@@ -66,7 +65,7 @@ public class TagDexThumbsTests : SwarmUITest
     /// <summary>A tiny in-memory image, enough to round-trip through <see cref="TagDexExtension.WriteThumb(TagDexList, in TagDexEntry, ImageFile)"/>.</summary>
     private static ImageFile MakeTestImage()
     {
-        using ISImage img = new(4, 4);
+        using MagickImage img = new(MagickColors.Black, 4, 4);
         return new SwarmImage(img);
     }
 

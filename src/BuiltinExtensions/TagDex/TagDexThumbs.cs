@@ -5,14 +5,12 @@ using SwarmUI.Core;
 using SwarmUI.Media;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
+using ImageMagick;
+using ImageMagick.Formats;
 using SwarmUI.WebAPI;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Webp;
-using SixLabors.ImageSharp.Processing;
 using System.IO;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
-using ISImage = SixLabors.ImageSharp.Image;
 
 namespace SwarmUI.Builtin_TagDexExtension;
 
@@ -296,23 +294,21 @@ public partial class TagDexExtension
     /// both catalogues hold identically sized images.</para></summary>
     public static byte[] ToThumbWebp(ImageFile file, int height, int quality)
     {
-        // Never dispose ToIS - it is a cache held on the ImageFile itself, so disposing it here would
+        // Never dispose ToMagick - it is a cache held on the ImageFile itself, so disposing it here would
         // leave the same file unusable for the originals write and the AnimaDex push that follow.
         // Only the clone below is ours to dispose.
-        ISImage img = file.ToIS;
+        IMagickImage<ushort> img = file.ToMagick;
         // Never enlarge. Upscaling a small source produces a soft, blocky reference that looks worse
         // than simply storing what was given - and it is silent, because the file lands at the expected
         // dimensions. A source shorter than the target keeps its native size instead.
-        int targetHeight = Math.Min(height, img.Height);
+        int targetHeight = Math.Min(height, (int)img.Height);
         int width = Math.Max(1, (int)Math.Round(img.Width * (targetHeight / (double)img.Height)));
-        using ISImage resized = img.Clone(i => i.Resize(width, targetHeight));
-        using MemoryStream ms = new();
-        resized.SaveAsWebp(ms, new WebpEncoder()
-        {
-            FileFormat = WebpFileFormatType.Lossy,
-            Quality = quality
-        });
-        return ms.ToArray();
+        using IMagickImage<ushort> resized = img.Clone();
+        resized.Resize(new MagickGeometry((uint)width, (uint)targetHeight) { IgnoreAspectRatio = true });
+        resized.ResetPage();
+        resized.Quality = (uint)quality;
+        resized.Settings.SetDefines(new WebPWriteDefines() { Lossless = false });
+        return resized.ToByteArray(MagickFormat.WebP);
     }
 
     /// <summary>The full-resolution image as lossless PNG.
@@ -324,10 +320,8 @@ public partial class TagDexExtension
         {
             return file.RawData;
         }
-        // Same caveat as ToThumbWebp: ToIS is cached on the file, so it must not be disposed here.
-        using MemoryStream ms = new();
-        file.ToIS.SaveAsPng(ms);
-        return ms.ToArray();
+        // Same caveat as ToThumbWebp: ToMagick is cached on the file, so it must not be disposed here.
+        return ImageFile.MagickImageToPngBytes(file.ToMagick);
     }
 
     /// <summary>Derives a stable seed from a tag name, so regenerating the same entry reproduces the same image

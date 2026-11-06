@@ -15,7 +15,7 @@ namespace SwarmUITests;
 [NonParallelizable]
 public class ModelPreviewRefreshTests : SwarmUITest
 {
-    /// <summary>One-pixel PNG. ImageSharp sniffs the bytes, so the file extension does not have to match.</summary>
+    /// <summary>One-pixel PNG. The preview reader sniffs the bytes, so the file extension does not have to match.</summary>
     private static readonly byte[] OnePixelPng = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
     /// <summary>Initializes invariant culture the same way the other metadata tests do.</summary>
