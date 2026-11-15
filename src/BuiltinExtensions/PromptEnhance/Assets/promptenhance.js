@@ -329,6 +329,7 @@ class PromptEnhanceHelperClass {
                 <div class="prompt-enhance-passthrough" style="display:none"></div>
                 <div class="prompt-enhance-buttons">
                     <span class="basic-button prompt-enhance-apply prompt-enhance-disabled translate">Apply</span>
+                    <span class="basic-button prompt-enhance-reroll translate" title="Write it again with a new seed">Reroll</span>
                     <span class="basic-button prompt-enhance-keep translate">Keep original</span>
                     <span class="basic-button prompt-enhance-close translate">Close</span>
                 </div>
@@ -358,6 +359,11 @@ class PromptEnhanceHelperClass {
             this.close();
         });
         closeButton.addEventListener('click', () => this.close());
+        panel.querySelector('.prompt-enhance-reroll').addEventListener('click', () => {
+            // A non-zero seed makes the server skip its cache and write the prompt again.
+            this.close();
+            this.open(1 + Math.floor(Math.random() * 2147483646));
+        });
         this.passthroughBlock.addEventListener('click', () => this.close());
         this.profileSelect.addEventListener('change', () => {
             this.profileOverride = this.profileSelect.value;
@@ -612,8 +618,9 @@ class PromptEnhanceHelperClass {
         }
     }
 
-    /** Opens the panel and starts an EnhancePrompt request for the current prompt box and selected model. */
-    open() {
+    /** Opens the panel and starts an EnhancePrompt request for the current prompt box and selected model.
+     * A non-zero seed is a reroll. */
+    open(seed = 0) {
         if (this.running || this.autoRunning) {
             return;
         }
@@ -626,7 +633,7 @@ class PromptEnhanceHelperClass {
         this.setEnhanceBusy(true);
         this.setStatus('Enhancing...');
         this.settled = false;
-        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
+        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, 'seed': seed, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
                 this.settled = true;
             }

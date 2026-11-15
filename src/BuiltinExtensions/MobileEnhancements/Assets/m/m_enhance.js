@@ -412,8 +412,8 @@ class MEnhance {
     }
 
     /** Opens the enhance sheet and starts a request. Always reachable so a missing auto-profile can be fixed
-     * via the profile override dropdown inside the sheet (same contract as desktop). */
-    open() {
+     * via the profile override dropdown inside the sheet (same contract as desktop). A non-zero seed is a reroll. */
+    open(seed = 0) {
         // Backdrop / grip dismiss leaves this.sheet pointing at a detached tree with running still true.
         // Clear that before the re-entry guard so a second tap can open a fresh sheet.
         if (this.sheet && this.sheet.content && !this.sheet.content.isConnected) {
@@ -486,7 +486,10 @@ class MEnhance {
         keepBtn.type = 'button';
         let closeBtn = mUI.el('button', 'm-enhance-secondary', 'Close');
         closeBtn.type = 'button';
+        let rerollBtn = mUI.el('button', 'm-enhance-secondary', 'Reroll');
+        rerollBtn.type = 'button';
         actions.appendChild(applyBtn);
+        actions.appendChild(rerollBtn);
         actions.appendChild(keepBtn);
         actions.appendChild(closeBtn);
         content.appendChild(actions);
@@ -527,6 +530,12 @@ class MEnhance {
             disconnected();
             closeSheet();
             mUI.note('Prompt enhanced.');
+        });
+        rerollBtn.addEventListener('click', () => {
+            // A non-zero seed makes the server skip its cache and write the prompt again.
+            disconnected();
+            closeSheet();
+            this.open(1 + Math.floor(Math.random() * 2147483646));
         });
         profileSelect.addEventListener('change', () => {
             this.profileOverride = profileSelect.value;
@@ -577,6 +586,7 @@ class MEnhance {
             'profile_override': this.profileOverride,
             'endpoint_override': '',
             'strength': this.strength,
+            'seed': seed,
             ...this.videoRequestFields(),
             'mode': writeFields.mode,
             'resolved_mode': writeFields.resolved_mode

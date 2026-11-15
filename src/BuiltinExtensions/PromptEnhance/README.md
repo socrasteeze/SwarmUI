@@ -124,6 +124,18 @@ Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
    never interact with shielding - `Unshield` still re-appends the shield-extracted tokens exactly as before.
    The shortcut check in rule 1 looks at the user's raw, unshielded prompt.
 
+Krea 2 has its own Expand and Full scene directives (`KreaExpandDirective`, `KreaFullDirective`). The shared
+Full scene directive forbids naming a medium, which the Krea 2 profile asks for, and its mood and material
+wording drew sounds, smells and guesses from the 8B writer. The bare `Mode: expand` drew a comma tag list.
+The Krea 2 reference profile keeps the shared rules.
+
+## Reroll
+
+The panel and the `/simple` sheet have a **Reroll** button. It sends a random non-zero `seed` on
+`EnhancePrompt`. The server then skips the cache read, uses that seed for the writer, and stores the new
+reply over the cached one. `seed: 0` (the default, and what auto-enhance sends) keeps the fixed seed and the
+cache.
+
 The cache key (`PromptEnhanceCache.Key`) hashes the exact text the writer receives - directive included - plus
 the effective strength, the resolved writer mode (`t2i` or `edit`), and a digest of the downscaled reference
 images, so a `full` rewrite and a `faithful` pass-through of the same idea never collide, an edit and a

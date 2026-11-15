@@ -28,7 +28,8 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="Images">Base64 JPEG reference images for an edit request, longest side at most
 /// <see cref="PromptEnhanceClient.MaxReferenceSide"/>. Null or empty for a text-to-image rewrite.</param>
 /// <param name="NumCtx">Optional Ollama <c>num_ctx</c>. Null omits the option. The OpenAI transport ignores it.</param>
-public record class PromptEnhanceRequest(string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, string SystemPrompt, string UserPrompt, IReadOnlyList<string> Images = null, int? NumCtx = null);
+/// <param name="Seed">Writer sampling seed. A reroll sends a different one to get a different rewrite.</param>
+public record class PromptEnhanceRequest(string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, string SystemPrompt, string UserPrompt, IReadOnlyList<string> Images = null, int? NumCtx = null, int Seed = PromptEnhanceClient.DefaultSeed);
 
 /// <summary>Transport client for talking to a writer endpoint (Ollama or an OpenAI-compatible server), plus the
 /// pure text-shaping helpers (Swarm-syntax shielding and hard-stop detection) the caller needs around it.</summary>
@@ -58,6 +59,32 @@ public static class PromptEnhanceClient
     /// plus an explicit instruction to build out setting/lighting/framing/mood/material detail while preserving
     /// every detail the user gave, without naming an unrequested art style or echoing the instruction into the prompt. Not allowed on an edit profile - see <see cref="ApplyStrength"/>.</summary>
     public const string FullDirective = "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged. Do not name an art style or medium I did not ask for, and do not mention these instructions in the prompt.\n\n";
+
+    /// <summary>Full-scene directive for Krea 2. The shared <see cref="FullDirective"/> forbids naming a medium,
+    /// which contradicts the Krea 2 profile, and its mood and material wording drew sounds, smells and guesses
+    /// from the 8B writer. This one asks only for visible things, in a fixed order.</summary>
+    public const string KreaFullDirective = "Mode: expand\n\nExpand the request below into one paragraph of four to six plain sentences for Krea 2. The first words name the medium. If I named a medium or style, use my own words for it. If I named none, choose the one that fits the subject: a photograph for real-world scenes, a painting or illustration for fantasy or stylized ones. The first sentence gives the main subject and what it is doing. The next sentences give the setting, then the framing and camera angle, then the lighting and colors. Every sentence describes something visible in the picture, stated as plain fact. Keep every detail I gave and my exact quoted text. If my request is already detailed, only polish it.\n\nRequest: ";
+
+    /// <summary>Expand directive for Krea 2. A bare <see cref="ExpandDirective"/> drew a comma tag list
+    /// ("highly detailed, 8k") from the 8B writer, where Krea 2 wants sentences.</summary>
+    public const string KreaExpandDirective = "Mode: expand\n\nRewrite the request below as two or three plain sentences for Krea 2. Write full sentences, not a list of tags. Keep every detail I gave and my exact quoted text. Add only a fitting setting and lighting that are visible in the picture. If my request is already detailed, only polish it.\n\nRequest: ";
+
+    /// <summary>The expand directive for <paramref name="profileId"/>: Krea 2 has its own, every other
+    /// profile uses <see cref="ExpandDirective"/>.</summary>
+    public static string ExpandDirectiveFor(string profileId)
+    {
+        return string.Equals(profileId, "krea-2", StringComparison.OrdinalIgnoreCase) ? KreaExpandDirective : ExpandDirective;
+    }
+
+    /// <summary>Writer seed used when the caller does not ask for a reroll. Fixed so a repeat request is stable.</summary>
+    public const int DefaultSeed = 7;
+
+    /// <summary>The full-scene directive for <paramref name="profileId"/>: Krea 2 has its own, every other
+    /// profile uses <see cref="FullDirective"/>.</summary>
+    public static string FullDirectiveFor(string profileId)
+    {
+        return string.Equals(profileId, "krea-2", StringComparison.OrdinalIgnoreCase) ? KreaFullDirective : FullDirective;
+    }
 
     /// <summary>Shortcut tokens the profile pack itself recognizes at the start of a user message (see eg
     /// <c>anima.system.md</c>'s "Equivalent shortcuts") - a prompt already starting with one of these (or
@@ -199,7 +226,7 @@ public static class PromptEnhanceClient
         JObject options = new()
         {
             ["temperature"] = 0.7,
-            ["seed"] = 7,
+            ["seed"] = request.Seed,
             ["num_predict"] = 2048
         };
         if (request.NumCtx.HasValue)
@@ -252,7 +279,7 @@ public static class PromptEnhanceClient
                 new JObject() { ["role"] = "user", ["content"] = userContent }
             },
             ["temperature"] = 0.7,
-            ["seed"] = 7,
+            ["seed"] = request.Seed,
             ["max_tokens"] = 2048
         };
     }
@@ -578,7 +605,8 @@ public static class PromptEnhanceClient
     /// <param name="effectiveStrength">The strength actually applied: <c>faithful</c>, <c>expand</c>, <c>full</c>,
     /// or <c>user</c> when a shortcut/<c>Mode:</c> passthrough won.</param>
     /// <param name="note">A human-readable explanation when the requested strength was capped, else null.</param>
-    public static string ApplyStrength(string rawPrompt, string shieldedPrompt, string strength, bool isEditProfile, out string effectiveStrength, out string note)
+    /// <param name="profileId">Resolved profile ID. Selects the expand and full-scene directives (<see cref="ExpandDirectiveFor"/>, <see cref="FullDirectiveFor"/>).</param>
+    public static string ApplyStrength(string rawPrompt, string shieldedPrompt, string strength, bool isEditProfile, out string effectiveStrength, out string note, string profileId = null)
     {
         note = null;
         string trimmedStart = (rawPrompt ?? "").TrimStart();
@@ -603,8 +631,8 @@ public static class PromptEnhanceClient
         }
         return effectiveStrength switch
         {
-            "expand" => $"{ExpandDirective}{shieldedPrompt}",
-            "full" => $"{FullDirective}{shieldedPrompt}",
+            "expand" => $"{ExpandDirectiveFor(profileId)}{shieldedPrompt}",
+            "full" => $"{FullDirectiveFor(profileId)}{shieldedPrompt}",
             _ => shieldedPrompt
         };
     }

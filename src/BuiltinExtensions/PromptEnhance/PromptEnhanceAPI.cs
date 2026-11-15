@@ -110,7 +110,8 @@ public static class PromptEnhanceAPI
         [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto is edit when reference images are present, otherwise t2i. The server resolves auto again from the images on this request. Known video profiles always use t2i.")] string mode = "auto",
         [API.APIParameter("Client-resolved writer mode, 't2i' or 'edit'. Used when mode is auto and this request carries no image bytes.")] string resolved_mode = "",
         [API.APIParameter("Reference images for edit mode, init image first, then video end image, then prompt images. Data URIs, raw base64, or output-relative paths. At most 4 are used, each downscaled to a 768px JPEG before the writer call.")] string[] images = null,
-        [API.APIParameter("True when prompt image, audio, or video reference slots are populated; init and end frames do not count. For reference-capable MiniMax H3 models, selects the Ref2VA workflow; ignored for other profiles and models.")] bool video_has_references = false)
+        [API.APIParameter("True when prompt image, audio, or video reference slots are populated; init and end frames do not count. For reference-capable MiniMax H3 models, selects the Ref2VA workflow; ignored for other profiles and models.")] bool video_has_references = false,
+        [API.APIParameter("Writer seed. 0 uses the fixed default and the result cache. Any other value is a reroll: it skips the cache read, and its result replaces the cached one.")] int seed = 0)
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -122,15 +123,15 @@ public static class PromptEnhanceAPI
             await socket.SendAndReportError($"EnhancePrompt request from {session.User.UserID}", $"The prompt is too long (over {MaxPromptLength} characters).", API.WebsocketTimeout);
             return null;
         }
-        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration, mode, resolved_mode, images, video_has_references), socket);
+        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration, mode, resolved_mode, images, video_has_references, seed), socket);
         return null;
     }
 
     /// <summary>Internal handler: resolves a profile and endpoint, dispatches (or reuses a cached reply from)
     /// the writer LLM, and reports status/chunks/the terminal frame back over the websocket.</summary>
-    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration, string Mode, string ResolvedMode, string[] Images, bool VideoHasReferences) input, Action<JObject> output, bool isWS)
+    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration, string Mode, string ResolvedMode, string[] Images, bool VideoHasReferences, int Seed) input, Action<JObject> output, bool isWS)
     {
-        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration, string mode, string resolvedModeHint, string[] images, bool videoHasReferences) = input;
+        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration, string mode, string resolvedModeHint, string[] images, bool videoHasReferences, int seed) = input;
         try
         {
             T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
@@ -170,7 +171,7 @@ public static class PromptEnhanceAPI
             }
             // Strength is applied after Shield, on the already-shielded prompt, so the directive text can never
             // interact with shielding - Unshield below re-appends the extracted tokens exactly as it always did.
-            string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, strength, profile.IsEdit, out string effectiveStrength, out string strengthNote);
+            string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, strength, profile.IsEdit, out string effectiveStrength, out string strengthNote, profile.ID);
             List<string> preparedImages = [];
             string imageDigest = "";
             if (resolvedMode == "edit")
@@ -187,7 +188,7 @@ public static class PromptEnhanceAPI
             // words, or the same words over different reference pixels, from colliding with a text-to-image rewrite.
             string key = PromptEnhanceCache.Key(directed, profile.ID, PromptEnhanceProfiles.PackVersion, endpoint.Model, effectiveStrength, resolvedMode, imageDigest);
             // Cache lookup happens before health gating, so a cache hit still answers even with nothing healthy.
-            if (PromptEnhanceCache.TryGet(key, out string cachedPromptPart))
+            if (seed == 0 && PromptEnhanceCache.TryGet(key, out string cachedPromptPart))
             {
                 // Notes are not cached (only the prompt part is), so a cache hit never carries notes.
                 // Unwrap JSON positive_prompt here too: older cache entries may still hold a raw writer object.
@@ -204,7 +205,7 @@ public static class PromptEnhanceAPI
             async Task<string> RunChat(PromptEnhanceEndpoint target)
             {
                 output(new JObject() { ["status"] = "running", ["profile"] = profile.ID, ["writer_model"] = target.Model, ["endpoint"] = target.ID, ["strength"] = effectiveStrength });
-                PromptEnhanceRequest request = new(target.Url, target.Kind, target.Model, PromptEnhanceClient.EnhanceKeepAlive, target.TimeoutSeconds, profile.Text, directed, preparedImages, target.NumCtx);
+                PromptEnhanceRequest request = new(target.Url, target.Kind, target.Model, PromptEnhanceClient.EnhanceKeepAlive, target.TimeoutSeconds, profile.Text, directed, preparedImages, target.NumCtx, seed == 0 ? PromptEnhanceClient.DefaultSeed : seed);
                 using CancellationTokenSource requestCancel = CancellationTokenSource.CreateLinkedTokenSource(Program.GlobalProgramCancel, session.SessInterrupt.Token);
                 return await PromptEnhanceClient.ChatStream(request, chunk =>
                 {

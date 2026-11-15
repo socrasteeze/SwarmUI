@@ -1086,6 +1086,33 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(withoutBody["options"]?.Value<double>("temperature"), Is.EqualTo(0.7));
     }
 
+    /// <summary>The writer seed defaults to the fixed one, and a reroll seed reaches the request body.</summary>
+    [Test]
+    public void BuildOllamaBody_Seed_DefaultsAndOverrides()
+    {
+        PromptEnhanceRequest normal = new("http://127.0.0.1:11434", "ollama", "writer", "5m", 120, "system", "user");
+        Assert.That(PromptEnhanceClient.BuildOllamaBody(normal)["options"]?.Value<int>("seed"), Is.EqualTo(PromptEnhanceClient.DefaultSeed));
+        PromptEnhanceRequest reroll = new("http://127.0.0.1:11434", "ollama", "writer", "5m", 120, "system", "user", null, null, 4242);
+        Assert.That(PromptEnhanceClient.BuildOllamaBody(reroll)["options"]?.Value<int>("seed"), Is.EqualTo(4242));
+    }
+
+    /// <summary>Krea 2 gets its own full-scene directive, which never forbids naming a medium. Other profiles,
+    /// and the Krea 2 reference profile, keep the shared one.</summary>
+    [Test]
+    public void ApplyStrength_Full_Krea2UsesItsOwnDirective()
+    {
+        string krea = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "full", false, out string effective, out _, "krea-2");
+        Assert.That(krea, Is.EqualTo($"{PromptEnhanceClient.KreaFullDirective}a cat"));
+        Assert.That(krea, Does.Not.Contain("Do not name an art style"));
+        Assert.That(effective, Is.EqualTo("full"));
+        string other = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "full", false, out _, out _, "anima");
+        Assert.That(other, Is.EqualTo($"{PromptEnhanceClient.FullDirective}a cat"));
+        Assert.That(PromptEnhanceClient.FullDirectiveFor("krea-2.reference"), Is.EqualTo(PromptEnhanceClient.FullDirective));
+        string kreaExpand = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "expand", false, out _, out _, "krea-2");
+        Assert.That(kreaExpand, Is.EqualTo($"{PromptEnhanceClient.KreaExpandDirective}a cat"));
+        Assert.That(PromptEnhanceClient.ExpandDirectiveFor("krea-2.reference"), Is.EqualTo(PromptEnhanceClient.ExpandDirective));
+    }
+
     /// <summary>Endpoint config loads an optional integer <c>num_ctx</c>, and a missing key stays null.</summary>
     [Test]
     public void Init_LoadsOptionalNumCtx()
