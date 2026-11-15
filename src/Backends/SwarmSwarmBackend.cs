@@ -124,6 +124,15 @@ public class SwarmSwarmBackend : AbstractT2IBackend
     /// <summary>Serializes full remote inventory refreshes for this control backend.</summary>
     private readonly SemaphoreSlim RemoteInventoryRefreshSemaphore = new(1, 1);
 
+    /// <summary>Current delay for consecutive failed inventory refreshes.</summary>
+    private int InventoryRetryDelaySeconds;
+
+    /// <summary>Earliest monotonic time at which an idle inventory refresh may start.</summary>
+    private long InventoryRetryDeadline;
+
+    /// <summary>Remote versions already reported as having a different commit.</summary>
+    private readonly ConcurrentDictionary<string, byte> WarnedRemoteVersions = new();
+
     /// <summary>Tracks reentrant full refreshes caused by session renewal within the current async flow.</summary>
     private readonly AsyncLocal<bool> RemoteInventoryRefreshLockHeld = new();
 
@@ -164,6 +173,34 @@ public class SwarmSwarmBackend : AbstractT2IBackend
             RemoteInventoryRefreshLockHeld.Value = false;
             RemoteInventoryRefreshSemaphore.Release();
         }
+    }
+
+    /// <summary>Returns the next capped delay after an inventory refresh failure.</summary>
+    public static int NextInventoryRetryDelaySeconds(int currentDelaySeconds)
+    {
+        return currentDelaySeconds <= 0 ? 5 : (int)Math.Min((long)currentDelaySeconds * 2, 300);
+    }
+
+    /// <summary>Checks whether two builds share a nonempty release version.</summary>
+    public static bool SpokeBuildsCompatible(string remoteVersion, string localVersion)
+    {
+        if (string.IsNullOrEmpty(remoteVersion) || string.IsNullOrEmpty(localVersion))
+        {
+            return false;
+        }
+        static string release(string version)
+        {
+            int gitIndex = version.IndexOf(".GIT-", StringComparison.Ordinal);
+            int devIndex = version.IndexOf(".DEV", StringComparison.Ordinal);
+            int end = gitIndex < 0 ? version.Length : gitIndex;
+            if (devIndex >= 0 && devIndex < end)
+            {
+                end = devIndex;
+            }
+            return version[..end];
+        }
+        string remoteRelease = release(remoteVersion);
+        return remoteRelease.Length > 0 && remoteRelease == release(localVersion);
     }
 
     /// <summary>Gets a request adapter appropriate to this Swarm backend, including eg auth headers.</summary>
@@ -239,6 +276,10 @@ public class SwarmSwarmBackend : AbstractT2IBackend
                     requireActiveLifecycle();
                     await ValidateAndBuildInternal();
                     requireActiveLifecycle();
+                    if (RemoteInventoryReady)
+                    {
+                        ResetInventoryRetry();
+                    }
                 });
             }
             catch (Exception) when (ShutDownReserve || Status == BackendStatus.DISABLED)
@@ -289,9 +330,13 @@ public class SwarmSwarmBackend : AbstractT2IBackend
         }
         ValidateSpokeModeRequirement(Settings.RequireSpokeMode, RemoteIsSpokeMode);
         ValidateSpokeControllerAdvertisement(RemoteIsSpokeMode, sessData["spoke_controller"]);
-        if (RemoteIsSpokeMode && RemoteServerVersion != Utilities.VaryID)
+        if (RemoteIsSpokeMode && !SpokeBuildsCompatible(RemoteServerVersion, Utilities.VaryID))
         {
             throw new SwarmReadableErrorException($"Remote spoke version '{RemoteServerVersion}' does not match local version '{Utilities.VaryID}'. Deploy the same build.");
+        }
+        if (RemoteIsSpokeMode && RemoteServerVersion != Utilities.VaryID && WarnedRemoteVersions.TryAdd(RemoteServerVersion, 0))
+        {
+            Logs.Warning($"Remote spoke at {Address} runs a different commit ({RemoteServerVersion}); redeploy it when convenient.");
         }
         string id = sessData["server_id"]?.ToString();
         Logs.Verbose($"{HandlerTypeData.Name} {BackendData.ID} Connected to remote Swarm instance {Address} with server ID '{id}'.");
@@ -509,7 +554,7 @@ public class SwarmSwarmBackend : AbstractT2IBackend
             throw new SwarmReadableErrorException($"Remote model inventory protocol version {protocolVersion} is unsupported.");
         }
         string sourceVersion = RequireInventoryString(data, "source_version", "response");
-        if (sourceVersion != requiredSourceVersion)
+        if (!SpokeBuildsCompatible(sourceVersion, requiredSourceVersion))
         {
             throw new SwarmReadableErrorException($"Remote spoke version '{sourceVersion}' does not match local version '{requiredSourceVersion}'.");
         }
@@ -836,6 +881,14 @@ public class SwarmSwarmBackend : AbstractT2IBackend
         RemoteInventoryReady = true;
     }
 
+    /// <summary>Clears backoff after a complete successful inventory refresh.</summary>
+    private void ResetInventoryRetry()
+    {
+        InventoryRetryDelaySeconds = 0;
+        InventoryRetryDeadline = 0;
+    }
+
+    /// <summary>Refreshes remote inventory immediately and records the outcome for idle retries.</summary>
     public Task TriggerRefresh()
     {
         if (!IsAControlInstance)
@@ -852,6 +905,7 @@ public class SwarmSwarmBackend : AbstractT2IBackend
             HashSet<int> existingChildIDs = [.. ControlledNonrealBackends.Keys];
             SetRemoteInventoryStatus(BackendStatus.LOADING, existingChildIDs);
             InvalidateRemoteModelInventory(requiredSubtypes);
+            int previousRetryDelaySeconds = InventoryRetryDelaySeconds;
             try
             {
                 await RunWithSession(async () =>
@@ -883,11 +937,17 @@ public class SwarmSwarmBackend : AbstractT2IBackend
                     return;
                 }
                 SetRemoteInventoryStatus(BackendStatus.RUNNING, existingChildIDs);
+                if (RemoteInventoryReady)
+                {
+                    ResetInventoryRetry();
+                }
             }
             catch (Exception ex)
             {
                 InvalidateRemoteModelInventory(requiredSubtypes);
                 SetRemoteInventoryFailureStatus(ex);
+                InventoryRetryDelaySeconds = NextInventoryRetryDelaySeconds(previousRetryDelaySeconds);
+                InventoryRetryDeadline = Environment.TickCount64 + InventoryRetryDelaySeconds * 1000L;
                 throw;
             }
         });
@@ -907,6 +967,10 @@ public class SwarmSwarmBackend : AbstractT2IBackend
                 bool restoreRunning = Status == BackendStatus.RUNNING;
                 HashSet<int> existingChildIDs = restoreRunning ? [.. ControlledNonrealBackends.Keys] : null;
                 await ReviseRemoteDataListInternal(fullLoad);
+                if (RemoteInventoryReady)
+                {
+                    ResetInventoryRetry();
+                }
                 if (restoreRunning)
                 {
                     SetRemoteInventoryStatus(BackendStatus.RUNNING, existingChildIDs);
@@ -1079,12 +1143,27 @@ public class SwarmSwarmBackend : AbstractT2IBackend
         }
     }
 
-    /// <summary>Performs a cheap steady-state liveness probe and one full inventory refresh after any failed probe.</summary>
+    /// <summary>Probes the remote or retries an unavailable inventory after its backoff expires.</summary>
     private void ValidateIdleConnection()
     {
         if (!RemoteInventoryReady)
         {
-            TriggerRefresh().GetAwaiter().GetResult();
+            RunWithRemoteInventoryRefreshLock(async () =>
+            {
+                if (RemoteInventoryReady)
+                {
+                    return;
+                }
+                if (Environment.TickCount64 < InventoryRetryDeadline)
+                {
+                    throw new SwarmReadableErrorException("Remote inventory refresh is waiting to retry.");
+                }
+                await TriggerRefresh();
+                if (!RemoteInventoryReady)
+                {
+                    throw new SwarmReadableErrorException("Remote inventory is not ready.");
+                }
+            }).GetAwaiter().GetResult();
             return;
         }
         try

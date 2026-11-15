@@ -139,12 +139,65 @@ public class SwarmSwarmBackendTests : SwarmUITest
         Assert.Throws<SwarmReadableErrorException>(() => ParseInventory(ValidInventory(), allowRemote: false));
     }
 
-    /// <summary>Confirms a spoke running different code cannot be accepted for generation.</summary>
+    /// <summary>Confirms release mismatches fail while different commits of the same release pass.</summary>
     [Test]
     public static void TestCompactInventoryRejectsVersionMismatch()
     {
         Assert.Throws<SwarmReadableErrorException>(() => ParseInventory(
-            ValidInventory(), requiredSourceVersion: "0.9.8.3.GIT-different"));
+            ValidInventory(), requiredSourceVersion: "0.9.8.4.GIT-different"));
+        Assert.DoesNotThrow(() => ParseInventory(ValidInventory(), requiredSourceVersion: "0.9.8.3.GIT-different"));
+    }
+
+    /// <summary>Confirms build compatibility uses the release before commit and development suffixes.</summary>
+    [TestCase("1.2.GIT-a", "1.2.GIT-a", true)]
+    [TestCase("1.2.GIT-a", "1.2.GIT-b", true)]
+    [TestCase("1.2.GIT-a", "1.3.GIT-a", false)]
+    [TestCase("1.2.DEV-1", "1.2.GIT-a", true)]
+    [TestCase("1.2.GIT-a", "1.2.DEV-1", true)]
+    [TestCase("1.2.GIT-a.DEV-1", "1.2.GIT-b.DEV-2", true)]
+    [TestCase("1.2.GIT-a.DEV-1", "1.3.GIT-b.DEV-2", false)]
+    [TestCase(null, "1.2", false)]
+    [TestCase("", "1.2", false)]
+    public static void TestSpokeBuildCompatibility(string remote, string local, bool expected)
+    {
+        Assert.That(SwarmSwarmBackend.SpokeBuildsCompatible(remote, local), Is.EqualTo(expected));
+    }
+
+    /// <summary>Confirms retry delays start at five seconds and saturate at five minutes.</summary>
+    [Test]
+    public static void TestInventoryRetryDelay()
+    {
+        int delay = 0;
+        foreach (int expected in new[] { 5, 10, 20, 40, 80, 160, 300, 300 })
+        {
+            delay = SwarmSwarmBackend.NextInventoryRetryDelaySeconds(delay);
+            Assert.That(delay, Is.EqualTo(expected));
+        }
+        Assert.That(SwarmSwarmBackend.NextInventoryRetryDelaySeconds(int.MaxValue), Is.EqualTo(300));
+    }
+
+    /// <summary>Confirms publication alone does not reset failures and a pending retry does not contact the remote.</summary>
+    [Test]
+    public static void TestInventoryRetryWaitAndPublication()
+    {
+        SwarmSwarmBackend backend = new() { IsReal = true };
+        FieldInfo delay = typeof(SwarmSwarmBackend).GetField("InventoryRetryDelaySeconds", BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo deadline = typeof(SwarmSwarmBackend).GetField("InventoryRetryDeadline", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo publish = typeof(SwarmSwarmBackend).GetMethod("PublishRemoteModelInventory", BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo validate = typeof(SwarmSwarmBackend).GetMethod("ValidateIdleConnection", BindingFlags.Instance | BindingFlags.NonPublic);
+        delay.SetValue(backend, 10);
+        publish.Invoke(backend, [ParseInventory(ValidInventory())]);
+        Assert.That(delay.GetValue(backend), Is.EqualTo(10));
+        backend.RemoteInventoryReady = false;
+        backend.Status = BackendStatus.IDLE;
+        long retryDeadline = Environment.TickCount64 + 60000;
+        deadline.SetValue(backend, retryDeadline);
+        TargetInvocationException error = Assert.Throws<TargetInvocationException>(() => validate.Invoke(backend, null));
+        Assert.That(error.InnerException, Is.TypeOf<SwarmReadableErrorException>());
+        Assert.That(error.InnerException.Message, Is.EqualTo("Remote inventory refresh is waiting to retry."));
+        Assert.That(deadline.GetValue(backend), Is.EqualTo(retryDeadline));
+        Assert.That(backend.Status, Is.EqualTo(BackendStatus.IDLE));
+        Assert.That(delay.GetValue(backend), Is.EqualTo(10));
     }
 
     /// <summary>Confirms missing or extra registered generation parameters block spoke routing.</summary>

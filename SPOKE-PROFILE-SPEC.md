@@ -208,8 +208,12 @@ lists and is not used for spoke routing.
 The hub validates the entire snapshot before publication:
 
 1. Protocol version is exactly 1.
-2. `source_version` exactly matches the hub's `Utilities.VaryID`; hub and spoke therefore
-   run the same Swarm version and Git commit.
+2. `source_version` matches the release version in the hub's `Utilities.VaryID`, ignoring
+   the first `.GIT-` segment and any `.DEV` suffix. Different release versions are rejected.
+   Different full version strings with the same release version produce one warning per
+   distinct remote version per backend instance, recommending redeployment when convenient.
+   The inventory's full source version must still exactly match the session's advertised
+   version, so a spoke restart onto another build during inventory loading is rejected.
 3. The sorted generation parameter ID set is an exact match.
 4. The sorted model-subtype set is an exact match.
 5. Every hub-local model name is present in the matching spoke subtype. A spoke may have
@@ -252,6 +256,13 @@ refresh lock, then refresh initialized hub-side remote Swarm inventories. A succ
 spoke refresh must acknowledge that it actually ran before the hub requests a new compact
 snapshot. Concurrent refreshes cannot interleave partial publication.
 
+After an idle-monitor inventory attempt fails, the hub waits 5 seconds before retrying.
+Consecutive failures double the delay up to 300 seconds. A successful inventory resets
+the backoff. Deadlines use `Environment.TickCount64`. During the wait, the inventory path
+makes no spoke requests and leaves backend status unchanged; validation still throws so
+the idle monitor cannot mark an incomplete inventory as running. A public `TriggerRefresh`
+request bypasses this delay and updates the same retry state on success or failure.
+
 If a local hub mutation succeeds but a remote refresh fails, the API reports that the
 local mutation completed and remote generation remains blocked until inventory refresh
 succeeds. This is fail-closed behavior, not a rollback claim.
@@ -260,7 +271,8 @@ succeeds. This is fail-closed behavior, not a rollback claim.
 
 ### Repository gates
 
-Run on the exact commit intended for both machines:
+Run on each build intended for deployment. Hub and spoke must share a release version;
+different commits produce a warning rather than a version-parity failure:
 
 ```powershell
 dotnet build src/SwarmUI.csproj --configuration Release
@@ -273,7 +285,8 @@ The spoke suites cover central policy refusal, missing-folder scan failure, read
 settings metadata, blocked admin mutations, exact controller authorization, transient
 sessions, controller-only generation, normalized direct-Comfy routes, protocol type and
 ordering attacks, count/truncation/scan/version/parameter/subtype failures, hub-name
-coverage, serialized refreshes, `RequireSpokeMode`, direct-backend availability, and
+coverage, release-version compatibility, inventory retry backoff, serialized refreshes,
+`RequireSpokeMode`, direct-backend availability, and
 parent/child linkage.
 
 `src/BuiltinExtensions/MobileEnhancements/verify/verify-simple-restart.mjs` exercises the
@@ -304,7 +317,8 @@ These are external and remain unverified until run on the deployment:
 
 1. Prove the spoke SMB credential cannot create, alter, rename, or delete in the model
    share.
-2. Deploy the exact same commit to hub and spoke. Configure the hub backend with
+2. Deploy matching release versions to hub and spoke. A commit mismatch produces a warning;
+   redeploy matching commits when convenient. Configure the hub backend with
    `RequireSpokeMode=true` and the exact authorization header.
 3. Compare exact sorted generation parameter IDs and subtype names. Compare exact sorted
    hub-local model-name sets against the spoke inventory; counts alone are insufficient.
