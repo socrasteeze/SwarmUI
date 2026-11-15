@@ -198,6 +198,9 @@ public class SwarmSwarmBackendTests : SwarmUITest
         Assert.That(deadline.GetValue(backend), Is.EqualTo(retryDeadline));
         Assert.That(backend.Status, Is.EqualTo(BackendStatus.IDLE));
         Assert.That(delay.GetValue(backend), Is.EqualTo(10));
+        backend.ExpediteInventoryRetry();
+        Assert.That(deadline.GetValue(backend), Is.EqualTo(0L));
+        Assert.That(delay.GetValue(backend), Is.EqualTo(10));
     }
 
     /// <summary>Confirms missing or extra registered generation parameters block spoke routing.</summary>
@@ -226,6 +229,30 @@ public class SwarmSwarmBackendTests : SwarmUITest
             () => SwarmSwarmBackend.ValidateModelInventoryCoverage(snapshot, covered));
         Assert.That(exception.Message, Does.Contain("missing 1 hub-local model"));
         Assert.That(exception.Message, Does.Contain("missing/delta.safetensors"));
+    }
+
+    /// <summary>Confirms a hub model deleted after the hub's scan is not required of the spoke, while present or unknown-path models still are.</summary>
+    [Test]
+    public static void TestRequiredHubModelNamesDropsDeletedFiles()
+    {
+        string present = Path.GetTempFileName();
+        try
+        {
+            KeyValuePair<string, string>[] hubModels =
+            [
+                new("kept-missing.safetensors", present),
+                new("deleted.safetensors", present + ".gone"),
+                new("deleted-but-remote-has-it.safetensors", present + ".gone"),
+                new("alpha.safetensors", present),
+                new("no-path.safetensors", null)
+            ];
+            string[] required = SwarmSwarmBackend.RequiredHubModelNames(hubModels, ["alpha.safetensors", "deleted-but-remote-has-it.safetensors"]);
+            Assert.That(required, Is.EqualTo(new[] { "alpha.safetensors", "deleted-but-remote-has-it.safetensors", "kept-missing.safetensors", "no-path.safetensors" }));
+        }
+        finally
+        {
+            File.Delete(present);
+        }
     }
 
     /// <summary>Confirms remote preview proxy URLs stay hub-local and safely encode routing identities.</summary>

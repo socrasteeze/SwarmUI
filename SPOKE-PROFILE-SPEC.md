@@ -217,7 +217,10 @@ The hub validates the entire snapshot before publication:
 3. The sorted generation parameter ID set is an exact match.
 4. The sorted model-subtype set is an exact match.
 5. Every hub-local model name is present in the matching spoke subtype. A spoke may have
-   extra names, but they do not substitute for missing hub models.
+   extra names, but they do not substitute for missing hub models. A hub name the spoke
+   lacks is not required when its hub file no longer exists or is unreachable on the hub's
+   disk, as when a trainer prunes a checkpoint after the hub's last scan. The hub logs the
+   dropped count at debug level.
 6. Every scalar has the expected JSON type; counts match payload lengths; names are
    nonempty, unique, and ordinal-sorted; no subtype reports a failed scan or truncation.
 7. `allow_remote` matches the request. A negotiated spoke is always requested with
@@ -262,6 +265,8 @@ the backoff. Deadlines use `Environment.TickCount64`. During the wait, the inven
 makes no spoke requests and leaves backend status unchanged; validation still throws so
 the idle monitor cannot mark an incomplete inventory as running. A public `TriggerRefresh`
 request bypasses this delay and updates the same retry state on success or failure.
+A hub model refresh does not call an idle backend, which may be unreachable. It ends that
+backend's current wait instead, so the idle monitor retries within about 5 seconds.
 
 If a local hub mutation succeeds but a remote refresh fails, the API reports that the
 local mutation completed and remote generation remains blocked until inventory refresh

@@ -709,6 +709,14 @@ public class SwarmSwarmBackend : AbstractT2IBackend
         }
     }
 
+    /// <summary>Lists the hub model names a spoke must have, sorted. A name the spoke lacks is dropped when its hub file was deleted after the hub's last scan.</summary>
+    public static string[] RequiredHubModelNames(IEnumerable<KeyValuePair<string, string>> hubModelPaths, IEnumerable<string> remoteNames)
+    {
+        HashSet<string> remoteSet = new(remoteNames, StringComparer.Ordinal);
+        return [.. hubModelPaths.Where(pair => remoteSet.Contains(pair.Key) || pair.Value is null || File.Exists(pair.Value))
+            .Select(pair => pair.Key).Order(StringComparer.Ordinal)];
+    }
+
     /// <summary>Loads every required model subtype into a private snapshot that is safe to publish atomically.</summary>
     private async Task<RemoteModelInventorySnapshot> LoadRemoteModelInventory(string[] requiredSubtypes)
     {
@@ -729,7 +737,16 @@ public class SwarmSwarmBackend : AbstractT2IBackend
                 }
             }
             Dictionary<string, string[]> requiredModels = requiredSubtypes.ToDictionary(subtype => subtype,
-                subtype => Program.T2IModelSets[subtype].Models.Keys.Order(StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
+                subtype => RequiredHubModelNames(Program.T2IModelSets[subtype].Models.Select(pair => new KeyValuePair<string, string>(pair.Key, pair.Value.RawFilePath)),
+                    snapshot.Models.GetValueOrDefault(subtype) ?? []), StringComparer.Ordinal);
+            foreach (string subtype in requiredSubtypes)
+            {
+                int dropped = Program.T2IModelSets[subtype].Models.Count - requiredModels[subtype].Length;
+                if (dropped > 0)
+                {
+                    Logs.Debug($"{HandlerTypeData.Name} {BackendData.ID}: {dropped} hub-listed '{subtype}' model(s) are gone from the hub's disk and absent on the spoke; not required. Refresh the hub's model list.");
+                }
+            }
             ValidateModelInventoryCoverage(snapshot, requiredModels);
             if (!string.IsNullOrWhiteSpace(RemoteServerVersion) && snapshot.SourceVersion != RemoteServerVersion)
             {
@@ -879,6 +896,12 @@ public class SwarmSwarmBackend : AbstractT2IBackend
         RemoteInventorySourceVersion = snapshot.SourceVersion;
         RemoteInventoryModelEditID = snapshot.ModelEditID;
         RemoteInventoryReady = true;
+    }
+
+    /// <summary>Ends the current retry wait so the idle monitor retries on its next pass. The grown delay is kept for the next failure.</summary>
+    public void ExpediteInventoryRetry()
+    {
+        InventoryRetryDeadline = 0;
     }
 
     /// <summary>Clears backoff after a complete successful inventory refresh.</summary>
