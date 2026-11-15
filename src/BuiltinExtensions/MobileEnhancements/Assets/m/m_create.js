@@ -177,6 +177,14 @@ class MCreate {
             }
             let pct = Math.round((data.overall_percent || 0) * 100);
             tile.querySelector('.m-tile-progress').style.width = `${pct}%`;
+            // A worker reading a model for the first time sends no preview for minutes. Its note stays until sampling starts.
+            let note = tile.querySelector('.m-tile-note');
+            if (data.status_note && !note) {
+                tile.appendChild(mUI.el('div', 'm-tile-note', data.status_note));
+            }
+            else if (note && (data.preview || data.current_percent > 0)) {
+                note.remove();
+            }
         }
         else if (kind == 'image') {
             let tile = this.getLiveTile(`${data.request_id}_${data.batch_index}`);

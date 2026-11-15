@@ -716,8 +716,13 @@ check('queued: the label switches and the progress bar shows',
 check('queued: the preview still scrolls with the panel rather than pinning',
     await page.evaluate(() => getComputedStyle(document.querySelector('.m-create-preview')).position == 'static'));
 
+// ---- A worker reading a model for the first time says so on the tile ----
+await frame('progress', { request_id: 'r1', batch_index: 0, overall_percent: 0, current_percent: 0, status_note: 'Worker is fetching the model.' });
+check('fetching: the tile shows the worker note', (await page.textContent('.m-tile-note')) == 'Worker is fetching the model.');
+
 // ---- First frame: one live tile replaces the placeholder ----
 await frame('progress', { request_id: 'r1', batch_index: 0, overall_percent: 0.4, preview: PIXEL });
+check('generating: the worker note is gone once a preview arrives', (await page.$('.m-tile-note')) == null);
 const live = await geometry();
 check('generating: nothing below the preview moved',
     live.generateTop == idle.generateTop && live.promptTop == idle.promptTop,

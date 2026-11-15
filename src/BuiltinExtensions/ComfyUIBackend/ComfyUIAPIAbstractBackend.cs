@@ -245,6 +245,18 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
         metadataObj["preview_notice"] = "Image is not done generating";
         string previewMetadata = T2IParamInput.MetadataToString(new JObject() { ["sui_image_params"] = metadataObj, ["sui_extra_data"] = user_input.BuildExtraDataJObject() });
         int expectedNodes = workflowJson.Count;
+        if (SpokeModelCache.HasUncachedModels(workflowJson))
+        {
+            // First use of a model on a spoke reads it over the share, which can take minutes with no preview. The hub relays this frame to the client.
+            takeOutput(new JObject()
+            {
+                ["batch_index"] = batchId,
+                ["request_id"] = $"{user_input.UserRequestId}",
+                ["overall_percent"] = 0,
+                ["current_percent"] = 0,
+                ["status_note"] = "Worker is fetching the model from the shared drive. First use is slow."
+            });
+        }
         string id = null;
         ClientWebSocket socket = null;
         try

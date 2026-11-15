@@ -287,6 +287,23 @@ public static class SpokeModelCache
         }
     }
 
+    /// <summary>True when the workflow names a model this spoke has not cached yet, so ComfyUI will read it from the shared tree.</summary>
+    public static bool HasUncachedModels(JObject workflow)
+    {
+        if (!Enabled || workflow is null)
+        {
+            return false;
+        }
+        try
+        {
+            return CollectWorkflowModels(workflow).Any(model => CacheTargetFor(model) is string target && !File.Exists(target));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Pauses only background transfers while generation is queued or using a backend.</summary>
     private static async Task WaitForIdle(CancellationToken cancel)
     {

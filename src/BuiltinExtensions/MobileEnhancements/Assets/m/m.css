@@ -2409,6 +2409,20 @@ button.m-header-link {
     background: var(--emphasis);
     transition: width 0.3s linear;
 }
+.m-tile-note {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0.25rem;
+    padding: 0.4rem 0.5rem;
+    font-size: 13px;
+    text-align: center;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.65);
+}
+.m-tile-done .m-tile-note {
+    display: none;
+}
 .m-scroll-sentinel {
     height: 1px;
 }
