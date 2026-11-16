@@ -139,11 +139,21 @@ await page.evaluate(() => {
 });
 
 // ---- Interrupt ----
+// The cancel button never leaves the bar: its width must be the same idle and busy, or Generate moves.
+const cancelWidths = await page.evaluate(() => {
+    mGen.queueTotal = 0;
+    mCreate.onFrame('status', {});
+    let idle = mCreate.interruptButton.getBoundingClientRect().width;
+    mGen.queueTotal = 2;
+    mCreate.onFrame('status', {});
+    return { idle: idle, busy: mCreate.interruptButton.getBoundingClientRect().width };
+});
+check('the cancel button keeps one width, idle and busy',
+    cancelWidths.idle > 0 && cancelWidths.idle == cancelWidths.busy, JSON.stringify(cancelWidths));
 await page.evaluate(() => {
     window.__hold.add('InterruptAll');
     window.__clearToast();
     window.__calls = [];
-    // The button only exists on screen once the server reports a queue.
     mGen.queueTotal = 2;
     mCreate.onFrame('status', {});
     mCreate.interruptButton.click();
@@ -153,7 +163,7 @@ const interruptPending = await page.evaluate(() => ({
     disabled: mCreate.interruptButton.disabled,
     calls: window.__calls.filter(c => c == 'InterruptAll').length
 }));
-check('Interrupt changes in the press frame', interruptPending.label == 'Interrupting...' && interruptPending.disabled,
+check('Interrupt changes in the press frame', interruptPending.label == '…' && interruptPending.disabled,
     JSON.stringify(interruptPending));
 await page.evaluate(() => mCreate.interruptButton.click());
 check('a second Interrupt press while in flight sends nothing',
@@ -168,7 +178,7 @@ const interruptFailed = await page.evaluate(() => ({
     global: window.__globalError
 }));
 check('a refused Interrupt restores the button exactly',
-    interruptFailed.label == 'Interrupt' && !interruptFailed.disabled, JSON.stringify(interruptFailed));
+    interruptFailed.label == '✕' && !interruptFailed.disabled, JSON.stringify(interruptFailed));
 check('the user gets the server\'s own message, beside the control',
     interruptFailed.toast == 'Could not interrupt: Interrupt refused: backend is not accepting control commands.',
     interruptFailed.toast);
@@ -190,7 +200,7 @@ const interruptOk = await page.evaluate(() => ({
     disabled: mCreate.interruptButton.disabled
 }));
 check('a successful Interrupt restores the button too',
-    interruptOk.label == 'Interrupt' && !interruptOk.disabled, JSON.stringify(interruptOk));
+    interruptOk.label == '✕' && !interruptOk.disabled, JSON.stringify(interruptOk));
 
 // ---- History viewer: Star ----
 const openViewer = async () => page.evaluate(() => {

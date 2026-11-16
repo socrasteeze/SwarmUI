@@ -1496,6 +1496,15 @@ button.m-header-link {
     flex-direction: column;
     gap: 0.25rem;
 }
+.m-enhance-controls {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+}
+.m-enhance-controls .m-enhance-select {
+    width: 100%;
+    min-width: 0;
+}
 .m-enhance-label {
     color: var(--text-soft);
     font-size: 12px;
@@ -1548,6 +1557,13 @@ button.m-header-link {
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
+}
+/* The norm for Simple: the buttons in an action row share the full width equally. */
+.m-enhance-actions > *,
+.m-coach-lora-actions > *,
+.m-coach-draft-actions > * {
+    flex: 1 1 0;
+    min-width: 0;
 }
 .m-enhance-apply {
     background: var(--emphasis);
@@ -1658,7 +1674,12 @@ button.m-header-link {
     border: none;
     border-radius: 0.7rem;
     min-height: 50px;
-    padding: 0 1rem;
+    flex: 0 0 50px;
+    padding: 0;
+    font-size: 18px;
+}
+.m-interrupt-idle {
+    opacity: 0.45;
 }
 
 /* --- Sheets --- */

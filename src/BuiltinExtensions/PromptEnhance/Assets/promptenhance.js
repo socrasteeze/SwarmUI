@@ -330,7 +330,7 @@ class PromptEnhanceHelperClass {
                 <div class="prompt-enhance-buttons">
                     <span class="basic-button prompt-enhance-apply prompt-enhance-disabled translate">Apply</span>
                     <span class="basic-button prompt-enhance-reroll translate" title="Write it again with a new seed">Reroll</span>
-                    <span class="basic-button prompt-enhance-keep translate">Keep original</span>
+                    <span class="basic-button prompt-enhance-keep translate">Keep Original</span>
                     <span class="basic-button prompt-enhance-close translate">Close</span>
                 </div>
             </div>`;
@@ -392,7 +392,7 @@ class PromptEnhanceHelperClass {
     /** Fills the Strength <select> with the three fixed levels, once - unlike the profile list, these never
      * come from the server. Restores the persisted strength as the selected value. */
     buildStrengthOptions() {
-        for (let entry of [['faithful', 'Faithful'], ['expand', 'Expand'], ['full', 'Full scene']]) {
+        for (let entry of [['faithful', 'Faithful'], ['expand', 'Expand'], ['full', 'Full Scene']]) {
             let option = document.createElement('option');
             option.value = entry[0];
             option.innerText = entry[1];

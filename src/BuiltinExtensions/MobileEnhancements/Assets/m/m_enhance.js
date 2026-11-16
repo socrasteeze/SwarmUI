@@ -271,7 +271,7 @@ class MEnhance {
         this.pillEl.disabled = false;
         this.pillEl.classList.remove('m-enhance-pill-busy');
         this.pillEl.removeAttribute('aria-busy');
-        this.pillEl.textContent = this.buttonEnabled ? 'Enhance \u203A' : 'Enhance \u00B7 No profile \u203A';
+        this.pillEl.textContent = this.buttonEnabled ? 'Enhance \u203A' : 'Enhance \u00B7 No Profile \u203A';
         this.pillEl.title = this.buttonReason;
         this.pillEl.classList.toggle('m-enhance-pill-disabled', !this.buttonEnabled);
     }
@@ -432,13 +432,15 @@ class MEnhance {
         let status = mUI.el('div', 'm-enhance-status', 'Enhancing...');
         content.appendChild(status);
 
+        // Mode, Profile and Strength share one row, three equal columns.
+        let controls = mUI.el('div', 'm-enhance-controls');
         let modeRow = mUI.el('div', 'm-enhance-row');
         modeRow.appendChild(mUI.el('label', 'm-enhance-label', 'Mode'));
         let writeSelect = document.createElement('select');
         writeSelect.className = 'm-enhance-select';
         this.fillWriteModeSelect(writeSelect);
         modeRow.appendChild(writeSelect);
-        content.appendChild(modeRow);
+        controls.appendChild(modeRow);
 
         let profileRow = mUI.el('div', 'm-enhance-row');
         profileRow.appendChild(mUI.el('label', 'm-enhance-label', 'Profile'));
@@ -446,13 +448,13 @@ class MEnhance {
         profileSelect.className = 'm-enhance-select';
         this.fillProfileSelect(profileSelect);
         profileRow.appendChild(profileSelect);
-        content.appendChild(profileRow);
+        controls.appendChild(profileRow);
 
         let strengthRow = mUI.el('div', 'm-enhance-row');
         strengthRow.appendChild(mUI.el('label', 'm-enhance-label', 'Strength'));
         let strengthSelect = document.createElement('select');
         strengthSelect.className = 'm-enhance-select';
-        for (let entry of [['faithful', 'Faithful'], ['expand', 'Expand'], ['full', 'Full scene']]) {
+        for (let entry of [['faithful', 'Faithful'], ['expand', 'Expand'], ['full', 'Full Scene']]) {
             let option = document.createElement('option');
             option.value = entry[0];
             option.textContent = entry[1];
@@ -461,7 +463,8 @@ class MEnhance {
         strengthSelect.value = this.strength;
         this.applyStrengthOptions(strengthSelect);
         strengthRow.appendChild(strengthSelect);
-        content.appendChild(strengthRow);
+        controls.appendChild(strengthRow);
+        content.appendChild(controls);
 
         let preview = document.createElement('textarea');
         preview.className = 'm-enhance-preview';
@@ -482,7 +485,7 @@ class MEnhance {
         let actions = mUI.el('div', 'm-enhance-actions');
         let applyBtn = mUI.el('button', 'm-enhance-apply m-enhance-apply-disabled', 'Apply');
         applyBtn.type = 'button';
-        let keepBtn = mUI.el('button', 'm-enhance-secondary', 'Keep original');
+        let keepBtn = mUI.el('button', 'm-enhance-secondary', 'Keep Original');
         keepBtn.type = 'button';
         let closeBtn = mUI.el('button', 'm-enhance-secondary', 'Close');
         closeBtn.type = 'button';

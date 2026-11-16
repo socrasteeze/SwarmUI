@@ -214,7 +214,7 @@ class MCreate {
             this.renderPreviewState();
         }
         else if (kind == 'status' && this.interruptButton) {
-            this.interruptButton.style.display = mGen.queueTotal > 0 ? '' : 'none';
+            this.interruptButton.classList.toggle('m-interrupt-idle', mGen.queueTotal <= 0);
         }
         else if (kind == 'error') {
             // A failed batch is the same situation as a cancelled one: nothing more is coming for it.
@@ -399,8 +399,11 @@ class MCreate {
         // keyboard is - so the one moment you most want to tap Generate (having just finished typing) was
         // the one moment it was buried. Above the prompt it rides along with whatever iOS scrolls into view.
         let genBar = mUI.el('div', 'm-gen-bar');
-        this.interruptButton = mUI.el('button', 'm-interrupt-button', 'Interrupt');
-        this.interruptButton.style.display = 'none';
+        // Always on screen at a fixed width, only dimmed while idle. It used to appear and vanish with the
+        // queue, which resized Generate under the finger: a cancel tap that landed as the batch finished
+        // hit Generate instead and queued another batch. An idle tap sends a harmless InterruptAll.
+        this.interruptButton = mUI.el('button', 'm-interrupt-button m-interrupt-idle', '✕');
+        this.interruptButton.setAttribute('aria-label', 'Cancel generation');
         this.interruptButton.addEventListener('click', () => {
             // Disabled for the round trip, so a second tap cannot fire a second InterruptAll at a queue the
             // first one may already have emptied. Restored on both outcomes by the onSettled callback,
@@ -411,10 +414,10 @@ class MCreate {
                 return;
             }
             this.interruptButton.disabled = true;
-            this.interruptButton.textContent = 'Interrupting...';
+            this.interruptButton.textContent = '…';
             mGen.interrupt(() => {
                 this.interruptButton.disabled = false;
-                this.interruptButton.textContent = 'Interrupt';
+                this.interruptButton.textContent = '✕';
             });
             // Anything still in flight is never going to arrive, so drop it now rather than leaving it to
             // be swept when the next batch happens to start. This is optimistic: if the interrupt is

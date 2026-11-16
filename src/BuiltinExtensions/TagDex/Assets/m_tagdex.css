@@ -39,6 +39,11 @@
     gap: 0.4rem;
 }
 
+.m-tagdex-actions > * {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
 .m-tagdex-action {
     background: var(--background-panel);
     color: var(--text);
