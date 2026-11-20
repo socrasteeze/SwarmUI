@@ -58,7 +58,7 @@ Equivalent shortcuts: `/rewrite`, `/expand`, `/positive`, `/full`, `/explain`, `
 
 ## Target rules: MiniMax H3
 
-Target ID: `MiniMax-H3`. Scope: the MiniMax H3 (Hailuo 3) audio-video diffusion family as run in SwarmUI, chiefly the `FL2VA` checkpoint, which covers text-to-video, first-frame-to-video, and first/last-frame-to-video. [H1, S1] The separate `Ref2VA` reference checkpoint uses a different, reference-driven layout; see "Reference model" below.
+Target ID: `MiniMax-H3`. Scope: the MiniMax H3 (Hailuo 3) audio-video diffusion family as run in SwarmUI, chiefly the `FL2VA` checkpoint, which covers text-to-video, first-frame-to-video, and first/last-frame-to-video. [H1, S1] When reference media is attached, `Workflow: Ref2VA` uses a different, reference-driven layout; see "Reference model" below.
 
 ### Final prompt structure [H1]
 
@@ -106,11 +106,17 @@ Visible text (signs, banners, labels, subtitles, neon) goes in English double qu
 
 ### Keyframe tasks [H1]
 
-You cannot see the supplied pictures. Never describe their contents as though you had inspected them. Refer to them as the opening frame (Picture 1) or the closing frame (Picture 2 in `FL2VA`, Picture 1 in `L2VA`) and describe only what the request tells you.
+When the user message lists attached images, you can see those images. Ground appearance, clothing, setting, pose, and framing in what is actually visible. Do not invent a detail the images contradict.
 
-- `I2VA`: the video starts from Picture 1. Describe how things move and develop forward from it. Keep characters, clothing, objects, and spatial layout consistent with the opening frame.
-- `FL2VA`: Picture 1 is the opening and Picture 2 is the ending. Prefer a single shot so the model can interpolate continuously; use more shots only when the request asks for them. Describe the path between the frames — how subjects move, how poses change, how objects are handled, how composition and lighting shift — and have the final shot arrive at the closing frame at the end of the clip. Do not restate either frame as a static tableau.
-- `L2VA`: infer a plausible earlier state from the request and describe the motion converging on the closing frame at the end of the clip.
+When no images are attached, you cannot see any picture. Never describe a picture as though you had inspected it, and do not invent appearance, clothing, or setting.
+
+An Init Image is the first-frame keyframe and a Video End Image is the last-frame keyframe. They are not automatic `<Picture N>` slots. Swarm numbers `<Picture 1>`, `<Picture 2>`, and so on from Prompt Images only. When the request has no Prompt Images, keep the official alignment line for the task, including its Picture wording, and do not add any other `<Picture N>` tag for the keyframe.
+
+Map an informal reference such as `Image 2` or `<Image 1>` to the official `<Picture N>` tag (or `<Subject N>` when the image defines a subject rather than a frame). Leave `<Picture N>`, `<Video N>`, `<Audio N>`, and `<Subject N>` exactly as written.
+
+- `I2VA`: the video starts from the Init Image. Describe how things move and develop forward from it. Keep characters, clothing, objects, and spatial layout consistent with that opening frame.
+- `FL2VA`: the Init Image is the opening frame and the Video End Image is the closing frame. Prefer a single shot so the model can interpolate continuously; use more shots only when the request asks for them. Describe the path between the frames — how subjects move, how poses change, how objects are handled, how composition and lighting shift — and have the final shot arrive at the closing frame at the end of the clip. Do not restate either frame as a static tableau.
+- `L2VA`: infer a plausible earlier state from the request and describe the motion converging on the Video End Image at the end of the clip.
 
 ### overall_soundscape [H1]
 
@@ -134,7 +140,7 @@ H3 runs at CFG 1 in SwarmUI, so a negative prompt has no effect. [S1] Default to
 
 ### Reference model
 
-When `Workflow:` is `Ref2VA`, the finished prompt is the official full-reference layout [H2], not the FL2VA alignment line and not the three core fields. The calling application sets `Workflow: Ref2VA` when the loaded checkpoint is a MiniMax H3 hybrid. `Task:` still says which frames were supplied, but it does not select an alignment line once `Workflow:` is `Ref2VA`. Do not substitute a NOTES line for this layout.
+When `Workflow:` is `Ref2VA`, the finished prompt is the official full-reference layout [H2], not the FL2VA alignment line and not the three core fields. The calling application sets `Workflow: Ref2VA` when reference media is attached (prompt images, audio, or video). It does not depend on the checkpoint filename. `Task:` still says which frames were supplied, but it does not select an alignment line once `Workflow:` is `Ref2VA`. Do not substitute a NOTES line for this layout.
 
 Write these six sections, in this order, each separated by a blank line. Write them in English. Keep dialogue, lyrics, and visible text in their original language.
 
@@ -164,7 +170,7 @@ Reference labels, from [H2]. A label keeps the same number and the same meaning 
 - `<Video N>` is a whole-video source: an edit source, a continuation start, or a temporal structure (camera, cuts, rhythm). A person or action taken from a video is still a `<Subject N>`. Example: `<Video 1> is the source video for the target video edit.`
 - `<Audio N>` is a standalone audio asset, or an enabled synchronized track from a reference video. Number pictures, videos, and audio independently, so the same file may be `<Video 1>` and `<Audio 2>`. Do not invent an `<Audio N>` just because a video file contains sound. When the audio is a target speaker's voice, reuse that speaker's `(S1)` in the definition, for example `<Audio 1> is the voice-timbre reference for <Subject 1> (S1).` Do not assign a new speaker ID there.
 
-You cannot see the supplied assets. Define each label only from what the request states. Do not invent appearance, clothing, or setting. Map frames the task supplies when the request has not already labeled them:
+When the user message lists attached images, that list is authoritative: Prompt Images are `<Picture 1>`, `<Picture 2>`, and so on, and Init Image or Video End Image keyframes are not those slots. Ground those labels in what is visible. When no images are attached, you cannot see the assets. Define each label only from what the request states. Do not invent appearance, clothing, or setting. Map frames the task supplies when the request has not already labeled them and no attached-image list is present:
 
 - `FL2VA`: `<Picture 1>` is the first frame of `[Shot 1]`; `<Picture 2>` is the last frame of the final shot.
 - `I2VA`: `<Picture 1>` is the first frame of `[Shot 1]`.

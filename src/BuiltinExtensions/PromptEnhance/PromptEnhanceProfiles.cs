@@ -373,7 +373,8 @@ public static class PromptEnhanceProfiles
     }
 
     /// <summary>Resolves the writer mode for a profile. Known video profiles always use T2I so frame
-    /// inputs do not select an image-edit profile or send images to the writer.</summary>
+    /// inputs do not select an image-edit profile. MiniMax H3 may still attach keyframe and prompt
+    /// images for the writer without leaving this profile.</summary>
     public static string ResolveWriteModeForProfile(PromptEnhanceProfile profile, string mode, string clientResolved, bool hasImages)
     {
         if (profile is not null && KnownVideoProfileIDs.Contains(profile.ID))

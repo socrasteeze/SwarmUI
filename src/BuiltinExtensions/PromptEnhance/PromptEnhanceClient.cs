@@ -25,8 +25,9 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="TimeoutSeconds">Overall request timeout, enforced independently of the shared client's connect timeout.</param>
 /// <param name="SystemPrompt">The selected non-interactive profile text, verbatim.</param>
 /// <param name="UserPrompt">The user's raw idea (already shielded by the caller).</param>
-/// <param name="Images">Base64 JPEG reference images for an edit request, longest side at most
-/// <see cref="PromptEnhanceClient.MaxReferenceSide"/>. Null or empty for a text-to-image rewrite.</param>
+/// <param name="Images">Base64 JPEG reference images, longest side at most
+/// <see cref="PromptEnhanceClient.MaxReferenceSide"/>. Used for an edit request, and for MiniMax H3
+/// even though that profile stays in text-to-image writer mode. Null or empty when none were sent.</param>
 /// <param name="NumCtx">Optional Ollama <c>num_ctx</c>. Null omits the option. The OpenAI transport ignores it.</param>
 /// <param name="Seed">Writer sampling seed. A reroll sends a different one to get a different rewrite.</param>
 public record class PromptEnhanceRequest(string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, string SystemPrompt, string UserPrompt, IReadOnlyList<string> Images = null, int? NumCtx = null, int Seed = PromptEnhanceClient.DefaultSeed);
@@ -44,7 +45,7 @@ public static class PromptEnhanceClient
     /// drops on its own. Generation unload sends <c>0</c> separately and does not change this value.</summary>
     public const string EnhanceKeepAlive = "5m";
 
-    /// <summary>Most reference images attached to one edit request. Init image first, then prompt images.</summary>
+    /// <summary>Most reference images attached to one writer request. Init image, then video end image, then prompt images.</summary>
     public const int MaxReferenceImages = 4;
 
     /// <summary>Longest side, in pixels, of a reference image sent to the writer.</summary>
@@ -540,9 +541,14 @@ public static class PromptEnhanceClient
     /// <summary>Video tasks a video profile's <c>Task:</c> header accepts (see <c>minimax-h3.system.md</c>).</summary>
     private static readonly HashSet<string> VideoTasks = ["T2VA", "I2VA", "FL2VA", "L2VA"];
 
+    /// <summary>Matches a tagged informal image reference such as <c>&lt;Image 1&gt;</c>, <c>&lt;image_1&gt;</c>,
+    /// or <c>&lt;Image1&gt;</c>. Official <c>&lt;Picture&gt;</c>, <c>&lt;Video&gt;</c>, <c>&lt;Audio&gt;</c>,
+    /// and <c>&lt;Subject&gt;</c> tags do not match. Bare prose such as "image 1" does not match.</summary>
+    private static readonly Regex H3InformalImageTagRegex = new(@"<\s*image[\s_]*(\d+)\s*>", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     /// <summary>True when the model name has a case-insensitive <c>hybrid</c>, <c>ref2va</c>, or <c>erosmax</c> marker.
     /// <c>h3ErosMax</c> checkpoints are hybrids whose names carry no other marker.
-    /// Callers must also check the resolved profile before using this capability.</summary>
+    /// This is a filename helper only. <see cref="WorkflowForVideoProfile"/> does not use it.</summary>
     public static bool IsHybridCheckpoint(string modelName)
     {
         return (modelName ?? "").Contains("hybrid", StringComparison.OrdinalIgnoreCase)
@@ -550,24 +556,170 @@ public static class PromptEnhanceClient
             || (modelName ?? "").Contains("erosmax", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Writer workflow tag for a name with reference capability, or null otherwise.
-    /// Callers must check the resolved profile and whether references are present.</summary>
+    /// <summary>Writer workflow tag for a name with a filename reference marker, or null otherwise.
+    /// <see cref="WorkflowForVideoProfile"/> does not consult this.</summary>
     public static string WorkflowForModel(string modelName)
     {
         return IsHybridCheckpoint(modelName) ? "Ref2VA" : null;
     }
 
-    /// <summary>Returns the H3 reference workflow only when the profile, model capability, and request agree.</summary>
+    /// <summary>Returns <c>Ref2VA</c> when the profile is MiniMax H3 and the request has prompt references.
+    /// The checkpoint name is ignored, so a plain FL2VA file, <c>10Eros_Max</c>, omniref, or prism name
+    /// qualifies the same way a hybrid name does. Init and end frames do not count as references.
+    /// Any other profile returns null, even when the filename contains a hybrid marker.</summary>
     public static string WorkflowForVideoProfile(string profileId, string modelName, bool hasReferences)
     {
-        return hasReferences && string.Equals(profileId, "minimax-h3", StringComparison.OrdinalIgnoreCase)
-            ? WorkflowForModel(modelName) : null;
+        _ = modelName;
+        if (hasReferences && string.Equals(profileId, "minimax-h3", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Ref2VA";
+        }
+        return null;
+    }
+
+    /// <summary>Rewrites tagged informal image references to official <c>&lt;Picture N&gt;</c> tags,
+    /// keeping the slot number. Already-official picture, video, audio, and subject tags are unchanged.
+    /// Untagged prose is unchanged. Used only on the MiniMax H3 prompt path.</summary>
+    public static string NormalizeH3ImageTags(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text ?? "";
+        }
+        return H3InformalImageTagRegex.Replace(text, match => $"<Picture {match.Groups[1].Value}>");
+    }
+
+    /// <summary>One role per attached H3 image. <paramref name="roles"/> is a comma-separated
+    /// <c>init</c>, <c>end</c>, or <c>picture</c> list in image order. A blank or mismatched list is
+    /// inferred from <paramref name="task"/> and <paramref name="hasReferences"/>: keyframes follow the
+    /// task, and only a reference request (or <c>T2VA</c>) numbers the remaining images as pictures.</summary>
+    public static List<string> ResolveH3ImageRoles(string task, string roles, bool hasReferences, int imageCount)
+    {
+        List<string> parsed = [];
+        if (imageCount <= 0)
+        {
+            return parsed;
+        }
+        if (!string.IsNullOrWhiteSpace(roles))
+        {
+            string[] tokens = roles.Split(',');
+            if (tokens.Length == imageCount)
+            {
+                bool valid = true;
+                for (int i = 0; i < tokens.Length; i++)
+                {
+                    string token = tokens[i].Trim().ToLowerFast();
+                    if (token != "init" && token != "end" && token != "picture")
+                    {
+                        valid = false;
+                        break;
+                    }
+                    parsed.Add(token);
+                }
+                if (valid)
+                {
+                    return parsed;
+                }
+                parsed.Clear();
+            }
+        }
+        string normalized = (task ?? "").Trim().ToUpperInvariant();
+        string first = null;
+        string second = null;
+        if (normalized == "I2VA")
+        {
+            first = "init";
+        }
+        else if (normalized == "L2VA")
+        {
+            first = "end";
+        }
+        else if (normalized == "FL2VA")
+        {
+            if (imageCount >= 2)
+            {
+                first = "init";
+                second = "end";
+            }
+            else
+            {
+                first = "end";
+            }
+        }
+        bool pictures = hasReferences || normalized == "T2VA" || normalized.Length == 0;
+        for (int i = 0; i < imageCount; i++)
+        {
+            if (i == 0 && first is not null)
+            {
+                parsed.Add(first);
+            }
+            else if (i == 1 && second is not null)
+            {
+                parsed.Add(second);
+            }
+            else if (pictures)
+            {
+                parsed.Add("picture");
+            }
+            else
+            {
+                parsed.Add("frame");
+            }
+        }
+        return parsed;
+    }
+
+    /// <summary>Legend prepended to a MiniMax H3 writer prompt when images were prepared.
+    /// Keyframes are named from the task and are not <c>&lt;Picture N&gt;</c> slots.
+    /// Prompt Images are <c>&lt;Picture 1&gt;</c>, <c>&lt;Picture 2&gt;</c>, and so on.</summary>
+    public static string BuildH3ImageOrderNote(string task, string roles, bool hasReferences, int imageCount)
+    {
+        if (imageCount <= 0)
+        {
+            return "";
+        }
+        List<string> resolved = ResolveH3ImageRoles(task, roles, hasReferences, imageCount);
+        string taskName = (task ?? "").Trim().ToUpperInvariant();
+        if (taskName.Length == 0)
+        {
+            taskName = "T2VA";
+        }
+        StringBuilder note = new();
+        note.Append("Attached images, in order. Ground appearance, clothing, setting, pose, and framing in what is visible.");
+        int picture = 0;
+        for (int i = 0; i < imageCount; i++)
+        {
+            string role = i < resolved.Count ? resolved[i] : "picture";
+            note.Append('\n');
+            if (role == "init")
+            {
+                note.Append($"Image {i + 1} is the Init Image, the first-frame keyframe for Task: {taskName}. It is not a <Picture N> slot.");
+            }
+            else if (role == "end")
+            {
+                note.Append($"Image {i + 1} is the Video End Image, the last-frame keyframe for Task: {taskName}. It is not a <Picture N> slot.");
+            }
+            else if (role == "picture")
+            {
+                picture++;
+                note.Append($"Image {i + 1} is Prompt Image <Picture {picture}>.");
+            }
+            else
+            {
+                note.Append($"Image {i + 1} is an extra keyframe attachment for Task: {taskName}. It is not a <Picture N> slot.");
+            }
+        }
+        if (picture == 0)
+        {
+            note.Append("\nNo Prompt Images are attached. Do not invent <Picture N> tags for these keyframes. Keep the official alignment line for this task.");
+        }
+        return note.ToString();
     }
 
     /// <summary>Builds the <c>Task:</c> / <c>Duration:</c> header prepended to a video profile's shielded prompt, from
     /// the frontend's current video settings. An unrecognized task falls back to <c>T2VA</c>; a non-positive duration
     /// is left out so the profile applies its own default. A non-empty <paramref name="workflow"/> adds
-    /// <c>Workflow:</c> (reference-capable H3 requests with references pass <c>Ref2VA</c>). Always ends with a blank line.</summary>
+    /// <c>Workflow:</c> (a MiniMax H3 request with prompt references passes <c>Ref2VA</c>). Always ends with a blank line.</summary>
     public static string BuildVideoHeader(string task, double durationSeconds, string workflow = null)
     {
         string normalized = (task ?? "").Trim().ToUpperInvariant();

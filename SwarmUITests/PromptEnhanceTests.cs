@@ -238,7 +238,7 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceClient.IsHybridCheckpoint(modelName), Is.EqualTo(expected));
     }
 
-    /// <summary>Workflow requires references, a capable model, and the H3 profile.</summary>
+    /// <summary>Workflow requires prompt references and the H3 profile. The checkpoint name does not matter.</summary>
     [Test]
     public void VideoWorkflow_RequiresProfileCapabilityAndReferences()
     {
@@ -251,9 +251,56 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceClient.BuildVideoHeader("FL2VA", 5.13, PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "MiniMax_H3_Ref2VA_nvfp4_mixed", true)), Is.EqualTo("Task: FL2VA\nDuration: 5.13\nWorkflow: Ref2VA\n\n"));
         Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "h3ErosMax_beta6_3283276", true), Is.EqualTo("Ref2VA"));
         Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "h3ErosMax_beta6_3283276", false), Is.Null);
-        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "minimax_h3_fl2va_pruned_int8_convrot", true), Is.Null);
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "minimax_h3_fl2va_pruned_int8_convrot", true), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "minimax_h3_fl2va_pruned_int8_convrot", false), Is.Null);
         Assert.That(PromptEnhanceClient.IsHybridCheckpoint("redcraftHybridH3Krea2dual_40K2TDUAL_3196558"), Is.True);
         Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("krea-2", "redcraftHybridH3Krea2dual_40K2TDUAL_3196558", true), Is.Null);
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "10Eros_Max", true), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "10Eros_Max", false), Is.Null);
+        Assert.That(PromptEnhanceClient.IsHybridCheckpoint("10Eros_Max"), Is.False);
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "fasth3_omniref_fp8", true), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "fasth3_omniref_fp8", false), Is.Null);
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "PRISM_h3_int8", true), Is.EqualTo("Ref2VA"));
+        Assert.That(PromptEnhanceClient.WorkflowForVideoProfile("minimax-h3", "PRISM_h3_int8", false), Is.Null);
+    }
+
+    /// <summary>Informal image tags become official picture tags. Official media tags and bare prose stay put.</summary>
+    [Test]
+    public void NormalizeH3ImageTags_RewritesInformalTagsOnly()
+    {
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("<Image 1>"), Is.EqualTo("<Picture 1>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("<image 1>"), Is.EqualTo("<Picture 1>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("<image_1>"), Is.EqualTo("<Picture 1>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("<IMAGE_1>"), Is.EqualTo("<Picture 1>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("<Image1>"), Is.EqualTo("<Picture 1>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("<Image  2> and <image_3>"), Is.EqualTo("<Picture 2> and <Picture 3>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("keep <Picture 1>, <Video 2>, <Audio 3>, and <Subject 4>"), Is.EqualTo("keep <Picture 1>, <Video 2>, <Audio 3>, and <Subject 4>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("the image 1 stays prose"), Is.EqualTo("the image 1 stays prose"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags("<lora:image_1:0.5>"), Is.EqualTo("<lora:image_1:0.5>"));
+        Assert.That(PromptEnhanceClient.NormalizeH3ImageTags(null), Is.EqualTo(""));
+    }
+
+    /// <summary>The H3 image note names keyframes apart from Prompt Image slots.</summary>
+    [Test]
+    public void BuildH3ImageOrderNote_SeparatesKeyframesFromPictureSlots()
+    {
+        string fl2va = PromptEnhanceClient.BuildH3ImageOrderNote("FL2VA", "init,end,picture", true, 3);
+        Assert.That(fl2va, Does.Contain("Image 1 is the Init Image"));
+        Assert.That(fl2va, Does.Contain("Image 2 is the Video End Image"));
+        Assert.That(fl2va, Does.Contain("Image 3 is Prompt Image <Picture 1>."));
+        Assert.That(fl2va, Does.Not.Contain("<Picture 2>"));
+        string picturesOnly = PromptEnhanceClient.BuildH3ImageOrderNote("T2VA", "", true, 2);
+        Assert.That(picturesOnly, Does.Contain("Image 1 is Prompt Image <Picture 1>."));
+        Assert.That(picturesOnly, Does.Contain("Image 2 is Prompt Image <Picture 2>."));
+        Assert.That(picturesOnly, Does.Not.Contain("Init Image"));
+        string keyframeOnly = PromptEnhanceClient.BuildH3ImageOrderNote("I2VA", "", false, 1);
+        Assert.That(keyframeOnly, Does.Contain("Image 1 is the Init Image"));
+        Assert.That(keyframeOnly, Does.Contain("No Prompt Images are attached"));
+        Assert.That(keyframeOnly, Does.Not.Contain("Prompt Image <Picture 1>"));
+        string endAndPicture = PromptEnhanceClient.BuildH3ImageOrderNote("L2VA", "end,picture", true, 2);
+        Assert.That(endAndPicture, Does.Contain("Image 1 is the Video End Image"));
+        Assert.That(endAndPicture, Does.Contain("Image 2 is Prompt Image <Picture 1>."));
+        Assert.That(PromptEnhanceClient.BuildH3ImageOrderNote("FL2VA", "", false, 0), Is.EqualTo(""));
     }
 
     /// <summary>A model that matches no filename override, class, or compat class resolves to null with a

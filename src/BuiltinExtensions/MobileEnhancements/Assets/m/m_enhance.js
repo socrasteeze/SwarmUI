@@ -97,7 +97,7 @@ class MEnhance {
         return hasImages ? 'edit' : 't2i';
     }
 
-    /** Uses the resolved profile status to suppress image uploads for video profiles. */
+    /** Uses server status so a known video profile stays in T2I writer mode. */
     effectiveWriteMode(hasImages) {
         let key = JSON.stringify([this.effectiveModel(), this.profileOverride]);
         if (this.statusProfileKey != key || this.statusIsVideo == null) {
@@ -158,16 +158,81 @@ class MEnhance {
         return images;
     }
 
-    /** Mode fields for EnhancePrompt. Images are attached only when the resolved mode is edit. */
+    /** Comma-separated init, end, and picture roles for the same images referenceImageValues sends. */
+    videoImageRoles() {
+        let roles = [];
+        let add = (role, value) => {
+            if (roles.length >= 4) {
+                return;
+            }
+            if (value == null || `${value}` == '') {
+                return;
+            }
+            roles.push(role);
+        };
+        let apply = input => {
+            if (!input) {
+                return;
+            }
+            add('init', input['initimage']);
+            add('end', input['videoendimage']);
+            let prompts = input['promptimages'];
+            if (Array.isArray(prompts)) {
+                for (let i = 0; i < prompts.length; i++) {
+                    add('picture', prompts[i]);
+                }
+            }
+            else {
+                add('picture', prompts);
+            }
+        };
+        try {
+            let input = mState.buildGenInput();
+            if (input) {
+                apply(input);
+                return roles.join(',');
+            }
+        }
+        catch (e) {
+            // Fall through to the raw client state.
+        }
+        try {
+            if (mState.initImage) {
+                add('init', mState.initImage.value);
+            }
+            if (mState.videoEndImage) {
+                add('end', mState.videoEndImage.value);
+            }
+            let list = mState.promptImages || [];
+            for (let i = 0; i < list.length; i++) {
+                if (list[i]) {
+                    add('picture', list[i].value);
+                }
+            }
+        }
+        catch (e) {
+            return '';
+        }
+        return roles.join(',');
+    }
+
+    /** Mode fields for EnhancePrompt. Image profiles attach images only in edit mode.
+     * MiniMax H3 stays in t2i and still attaches init, end, and prompt images. */
     enhanceRequestFields() {
         let images = this.referenceImageValues();
         let mode = this.normalizeWriteMode(this.writeMode);
-        // Until status arrives, fall back to the local resolution. The server never prepares images for a
-        // video profile, so a pending status costs at most one unused upload.
+        // Until status arrives, fall back to the local resolution. A pending video status may attach
+        // images when the local mode is edit. The server uses them for MiniMax H3 and ignores them otherwise.
         let resolved = this.effectiveWriteMode(images.length > 0) || this.resolvedWriteMode(images.length > 0);
         let fields = { 'mode': mode, 'resolved_mode': resolved };
-        if (resolved == 'edit' && images.length > 0) {
+        let profileKey = JSON.stringify([this.effectiveModel(), this.profileOverride]);
+        let knownVideo = this.statusProfileKey == profileKey && this.statusIsVideo == true;
+        let forcedH3 = `${this.profileOverride || ''}` == 'minimax-h3';
+        if (images.length > 0 && (resolved == 'edit' || knownVideo || forcedH3)) {
             fields['images'] = images;
+            if (knownVideo || forcedH3) {
+                fields['video_image_roles'] = this.videoImageRoles();
+            }
         }
         return fields;
     }

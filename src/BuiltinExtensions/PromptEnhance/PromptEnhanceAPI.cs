@@ -109,8 +109,9 @@ public static class PromptEnhanceAPI
         [API.APIParameter("Optional clip length in seconds for video profiles. Ignored for image profiles, or when 0.")] double video_duration = 0,
         [API.APIParameter("Writer mode: 'auto', 't2i', or 'edit'. Auto is edit when reference images are present, otherwise t2i. The server resolves auto again from the images on this request. Known video profiles always use t2i.")] string mode = "auto",
         [API.APIParameter("Client-resolved writer mode, 't2i' or 'edit'. Used when mode is auto and this request carries no image bytes.")] string resolved_mode = "",
-        [API.APIParameter("Reference images for edit mode, init image first, then video end image, then prompt images. Data URIs, raw base64, or output-relative paths. At most 4 are used, each downscaled to a 768px JPEG before the writer call.")] string[] images = null,
-        [API.APIParameter("True when prompt image, audio, or video reference slots are populated; init and end frames do not count. For reference-capable MiniMax H3 models, selects the Ref2VA workflow; ignored for other profiles and models.")] bool video_has_references = false,
+        [API.APIParameter("Reference images, init image first, then video end image, then prompt images. Sent for edit mode, and for MiniMax H3 even though that profile stays in t2i. Data URIs, raw base64, or output-relative paths. At most 4 are used, each downscaled to a 768px JPEG before the writer call.")] string[] images = null,
+        [API.APIParameter("True when prompt image, audio, or video reference slots are populated; init and end frames do not count. For a MiniMax H3 profile, selects the Ref2VA workflow regardless of checkpoint name. Ignored for other profiles.")] bool video_has_references = false,
+        [API.APIParameter("Optional comma-separated roles for images on a MiniMax H3 request, in the same order as images: init, end, or picture. Empty infers roles from video_task. Ignored for other profiles.")] string video_image_roles = "",
         [API.APIParameter("Writer seed. 0 uses the fixed default and the result cache. Any other value is a reroll: it skips the cache read, and its result replaces the cached one.")] int seed = 0)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -123,15 +124,15 @@ public static class PromptEnhanceAPI
             await socket.SendAndReportError($"EnhancePrompt request from {session.User.UserID}", $"The prompt is too long (over {MaxPromptLength} characters).", API.WebsocketTimeout);
             return null;
         }
-        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration, mode, resolved_mode, images, video_has_references, seed), socket);
+        await API.RunWebsocketHandlerCallWS(EnhancePrompt_Internal, session, (prompt, model, profile_override, endpoint_override, strength, video_task, video_duration, mode, resolved_mode, images, video_has_references, video_image_roles, seed), socket);
         return null;
     }
 
     /// <summary>Internal handler: resolves a profile and endpoint, dispatches (or reuses a cached reply from)
     /// the writer LLM, and reports status/chunks/the terminal frame back over the websocket.</summary>
-    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration, string Mode, string ResolvedMode, string[] Images, bool VideoHasReferences, int Seed) input, Action<JObject> output, bool isWS)
+    public static async Task EnhancePrompt_Internal(Session session, (string Prompt, string Model, string ProfileOverride, string EndpointOverride, string Strength, string VideoTask, double VideoDuration, string Mode, string ResolvedMode, string[] Images, bool VideoHasReferences, string VideoImageRoles, int Seed) input, Action<JObject> output, bool isWS)
     {
-        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration, string mode, string resolvedModeHint, string[] images, bool videoHasReferences, int seed) = input;
+        (string prompt, string model, string profileOverride, string endpointOverride, string strength, string videoTask, double videoDuration, string mode, string resolvedModeHint, string[] images, bool videoHasReferences, string videoImageRoles, int seed) = input;
         try
         {
             T2IModel t2iModel = string.IsNullOrWhiteSpace(model) ? null : Program.MainSDModels.GetModel(model);
@@ -163,6 +164,12 @@ public static class PromptEnhanceAPI
                 output(new JObject() { ["passthrough"] = true, ["reason"] = "No Prompt Enhance writer endpoint is configured" });
                 return;
             }
+            bool h3 = string.Equals(profile.ID, "minimax-h3", StringComparison.OrdinalIgnoreCase);
+            string originalPrompt = prompt;
+            if (h3)
+            {
+                prompt = PromptEnhanceClient.NormalizeH3ImageTags(prompt);
+            }
             string shielded = PromptEnhanceClient.Shield(prompt, out List<string> extracted);
             if (PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID))
             {
@@ -174,12 +181,23 @@ public static class PromptEnhanceAPI
             string directed = PromptEnhanceClient.ApplyStrength(prompt, shielded, strength, profile.IsEdit, out string effectiveStrength, out string strengthNote, profile.ID);
             List<string> preparedImages = [];
             string imageDigest = "";
-            if (resolvedMode == "edit")
+            if (resolvedMode == "edit" || (h3 && hasImages))
             {
                 preparedImages = PromptEnhanceClient.PrepareReferenceImages(session, images, out imageDigest);
                 if (preparedImages.Count > 0)
                 {
-                    directed = $"{directed}\n\nReference images are attached in order as image 1 through image {preparedImages.Count}.";
+                    if (h3)
+                    {
+                        string imageNote = PromptEnhanceClient.BuildH3ImageOrderNote(videoTask, videoImageRoles, videoHasReferences, preparedImages.Count);
+                        if (imageNote.Length > 0)
+                        {
+                            directed = $"{imageNote}\n\n{directed}";
+                        }
+                    }
+                    else
+                    {
+                        directed = $"{directed}\n\nReference images are attached in order as image 1 through image {preparedImages.Count}.";
+                    }
                 }
             }
             // Keyed on 'directed' (the exact text the writer receives), not on 'shielded' - the strength name alone
@@ -193,7 +211,7 @@ public static class PromptEnhanceAPI
                 // Notes are not cached (only the prompt part is), so a cache hit never carries notes.
                 // Unwrap JSON positive_prompt here too: older cache entries may still hold a raw writer object.
                 string cachedUnwrapped = PromptEnhanceClient.UnwrapJsonPrompt(cachedPromptPart);
-                output(BuildResult(PromptEnhanceClient.Unshield(cachedUnwrapped, extracted), "", prompt, profile, endpoint, true, effectiveStrength, strengthNote, resolvedMode));
+                output(BuildResult(FinishPrompt(PromptEnhanceClient.Unshield(cachedUnwrapped, extracted), h3), "", originalPrompt, profile, endpoint, true, effectiveStrength, strengthNote, resolvedMode));
                 return;
             }
             if (!reachable)
@@ -294,7 +312,7 @@ public static class PromptEnhanceAPI
             // meaningful to replay from a stale cache hit. Store the unwrapped prompt so later hits never
             // re-surface a JSON object into the prompt box.
             PromptEnhanceCache.Put(key, promptPart);
-            output(BuildResult(PromptEnhanceClient.Unshield(promptPart, extracted), notes, prompt, profile, endpoint, false, effectiveStrength, strengthNote, resolvedMode));
+            output(BuildResult(FinishPrompt(PromptEnhanceClient.Unshield(promptPart, extracted), h3), notes, originalPrompt, profile, endpoint, false, effectiveStrength, strengthNote, resolvedMode));
         }
         catch (Exception ex)
         {
@@ -329,6 +347,17 @@ public static class PromptEnhanceAPI
             frame["strength_note"] = strengthNote;
         }
         return frame;
+    }
+
+    /// <summary>Applies the MiniMax H3 image-tag normalizer to a prompt that will be shown or applied.
+    /// Other profiles are returned unchanged.</summary>
+    private static string FinishPrompt(string text, bool h3)
+    {
+        if (!h3)
+        {
+            return text;
+        }
+        return PromptEnhanceClient.NormalizeH3ImageTags(text);
     }
 
     /// <summary>True when <paramref name="images"/> contains at least one non-blank value.</summary>

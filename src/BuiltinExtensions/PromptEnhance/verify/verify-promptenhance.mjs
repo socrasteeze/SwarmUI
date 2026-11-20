@@ -123,7 +123,7 @@ function buildHost(methodNames, extraProps, methodSource = source) {
         methodNames.push('videoRequestFields');
     }
     if (methodNames.some(name => name == 'open' || name == 'refreshStatus' || name == 'runAutoEnhance' || name == 'enhanceRequestFields' || name == 'syncWriteModeLabel')) {
-        for (let extra of ['enhanceRequestFields', 'referenceImageValues', 'resolvedWriteMode', 'normalizeWriteMode', 'syncWriteModeLabel', 'effectiveWriteMode', 'effectiveModel']) {
+        for (let extra of ['enhanceRequestFields', 'referenceImageValues', 'videoImageRoles', 'resolvedWriteMode', 'normalizeWriteMode', 'syncWriteModeLabel', 'effectiveWriteMode', 'effectiveModel']) {
             if (!methodNames.includes(extra)) {
                 methodNames.push(extra);
             }
@@ -882,7 +882,7 @@ function check(name, pass, detail) {
     let unload = readFileSync(`${root}/PromptEnhanceUnload.cs`, 'utf8');
     let extension = readFileSync(`${root}/PromptEnhanceExtension.cs`, 'utf8');
     let version = readFileSync(`${root}/Assets/profiles/VERSION`, 'utf8').trim();
-    check('pack version is 1.5.0+edit-mode', version == '1.5.0+edit-mode', version);
+    check('pack version is 1.5.1+h3-ref2va-vision', version == '1.5.1+h3-ref2va-vision', version);
     check('klein 9b maps to its edit profile', profiles.includes('["flux2-klein-9b"] = "flux2-klein-9b.edit"'), '');
     check('qwen image 2.1 maps to its edit profile', profiles.includes('["qwen-image-2.1"] = "qwen-image-2.1.edit"'), '');
     check('krea 2 maps to its reference profile', profiles.includes('["krea-2"] = "krea-2.reference"'), '');
@@ -918,11 +918,12 @@ function check(name, pass, detail) {
     });
     host.statusProfileKey = JSON.stringify([host.effectiveModel(), host.profileOverride]);
     let fields = host.enhanceRequestFields();
-    check('H3 Auto with an init image uses t2i and attaches no images', fields.resolved_mode == 't2i' && fields.images == null, JSON.stringify(fields));
+    check('H3 Auto with an init image uses t2i and attaches the frames', fields.resolved_mode == 't2i' && JSON.stringify(fields.images) == JSON.stringify(['first-frame', 'last-frame']), JSON.stringify(fields));
+    check('H3 frame roles mark init then end and not pictures', fields.video_image_roles == 'init,end', fields.video_image_roles);
     host.syncWriteModeLabel();
     check('H3 Auto label follows the server T2I mode', option.innerText == 'Auto (T2I)', option.innerText);
     host.writeMode = 'edit';
-    check('H3 explicit edit also attaches no images', host.enhanceRequestFields().resolved_mode == 't2i' && host.enhanceRequestFields().images == null, '');
+    check('H3 explicit edit stays t2i and still attaches the frames', host.enhanceRequestFields().resolved_mode == 't2i' && JSON.stringify(host.enhanceRequestFields().images) == JSON.stringify(['first-frame', 'last-frame']), '');
     host.statusIsVideo = false;
     check('a known image profile immediately honors an edit mode change', host.enhanceRequestFields().images.length == 2, '');
     host.writeMode = 'auto';
@@ -983,12 +984,12 @@ function check(name, pass, detail) {
     mState.videoEndImage = null;
     check('Simple start only uses I2VA', host.videoRequestFields().video_task == 'I2VA', '');
     let fields = host.enhanceRequestFields();
-    check('Simple H3 Auto with an init image is t2i with no images attached', fields.resolved_mode == 't2i' && fields.images == null, JSON.stringify(fields));
+    check('Simple H3 Auto with an init image is t2i and attaches that frame', fields.resolved_mode == 't2i' && JSON.stringify(fields.images) == JSON.stringify(['first-frame']) && fields.video_image_roles == 'init', JSON.stringify(fields));
     let option = { value: 'auto', textContent: '' };
     host.syncWriteModeLabel({ options: [option] });
     check('Simple H3 Auto label follows the server T2I mode', option.textContent == 'Auto (T2I)', option.textContent);
     host.writeMode = 'edit';
-    check('Simple H3 explicit edit still attaches no images', host.enhanceRequestFields().images == null && host.enhanceRequestFields().resolved_mode == 't2i', '');
+    check('Simple H3 explicit edit stays t2i and still attaches the init frame', host.enhanceRequestFields().resolved_mode == 't2i' && JSON.stringify(host.enhanceRequestFields().images) == JSON.stringify(['first-frame']), '');
     mState.promptImages = [{ kind: 'path', value: 'prompt-reference' }];
     input.promptimages = ['prompt-reference'];
     check('Simple prompt images signal video references', host.videoRequestFields().video_has_references == true, '');
@@ -1010,7 +1011,9 @@ function check(name, pass, detail) {
     let client = readFileSync(root + '/PromptEnhanceClient.cs', 'utf8');
     let profiles = readFileSync(root + '/PromptEnhanceProfiles.cs', 'utf8');
     check('the API threads optional video_has_references into the header decision', api.includes('bool video_has_references = false') && api.includes('bool VideoHasReferences') && api.includes('WorkflowForVideoProfile(profile.ID, model, videoHasReferences)'), '');
-    check('hybrid or Ref2VA names select Ref2VA only when references are present', client.includes('hasReferences && string.Equals(profileId, "minimax-h3", StringComparison.OrdinalIgnoreCase)') && client.includes('? WorkflowForModel(modelName) : null') && client.includes('Contains("ref2va", StringComparison.OrdinalIgnoreCase)') && client.includes('Contains("hybrid", StringComparison.OrdinalIgnoreCase)') && client.includes('Contains("erosmax", StringComparison.OrdinalIgnoreCase)'), '');
+    check('minimax-h3 with references selects Ref2VA for any checkpoint', client.includes('if (hasReferences && string.Equals(profileId, "minimax-h3", StringComparison.OrdinalIgnoreCase))') && client.includes('return "Ref2VA";') && !client.includes('? WorkflowForModel(modelName) : null'), '');
+    check('filename markers remain on the unused capability helper', client.includes('Contains("ref2va", StringComparison.OrdinalIgnoreCase)') && client.includes('Contains("hybrid", StringComparison.OrdinalIgnoreCase)') && client.includes('Contains("erosmax", StringComparison.OrdinalIgnoreCase)'), '');
+    check('H3 prepares images even when the writer mode stays t2i', api.includes('resolvedMode == "edit" || (h3 && hasImages)') && api.includes('BuildH3ImageOrderNote'), '');
     check('hybrid FL2VA without references keeps the task path and no Workflow line', client.includes('if (!string.IsNullOrWhiteSpace(workflow))') && client.includes('Task: {(VideoTasks.Contains(normalized) ? normalized : "T2VA")}'), '');
     check('video headers remain gated by KnownVideoProfileIDs', api.includes('if (PromptEnhanceProfiles.KnownVideoProfileIDs.Contains(profile.ID))'), '');
     check('both API paths resolve profile mode before applying edit mode', (api.match(/ResolveWriteModeForProfile\(profile,/g) || []).length == 2 && profiles.includes('return "t2i";'), '');
@@ -1039,7 +1042,7 @@ function check(name, pass, detail) {
         }, methodSource);
         host.refreshStatus();
         let fields = host.enhanceRequestFields();
-        check((methodSource == source ? 'Classic' : 'Simple') + ' status overrides local Auto edit without uploading frames', requestedMode == 'edit' && fields.resolved_mode == 't2i' && fields.images == null, JSON.stringify(fields));
+        check((methodSource == source ? 'Classic' : 'Simple') + ' status keeps T2I and still uploads the init frame', requestedMode == 'edit' && fields.resolved_mode == 't2i' && fields.images && fields.images[0] == 'first-frame', JSON.stringify(fields));
     }
     currentPresets = null;
     getGenInput = null;

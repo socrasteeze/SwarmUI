@@ -48,10 +48,12 @@ owned here.
    or an Image To Video model means a start frame, Video End Image means an end frame (`T2VA`, `I2VA`, `FL2VA`,
    `L2VA`), and duration is the last frame's timestamp on H3's 17n+5 frame grid. Image profiles never get it.
    The optional `video_has_references` request flag defaults to false. The frontend sets it when prompt image,
-   audio, or video reference slots are populated. Init Image and Video End Image do not set it. When true, a MiniMax H3 model name
-   containing `ref2va`, `hybrid`, or `erosmax` (case-insensitive) adds `Workflow: Ref2VA`. Without references, the
-   task header remains unchanged. The header is included in the cache-keyed text. Known video profiles always
-   use T2I writer mode, even when edit is requested.
+   audio, or video reference slots are populated. Init Image and Video End Image do not set it. When true, and the
+   resolved profile is `minimax-h3`, the header adds `Workflow: Ref2VA` for any checkpoint name. Without references,
+   the task header stays `Task:` / `Duration:` only, even if the filename looks like a hybrid. The header is included
+   in the cache-keyed text. Known video profiles always use T2I writer mode, even when edit is requested. They do not
+   switch to an edit profile. MiniMax H3 still attaches available Init Image, Video End Image, and Prompt Images to
+   the writer, with a short image-order note. Other profiles attach images only in edit mode.
 3. **Transport.** `PromptEnhanceClient.ChatStream` posts to `/api/chat` (Ollama) or `/v1/chat/completions`
    (OpenAI-compatible), streamed, and reads it back with `StreamReader.ReadLineAsync` against a linked
    cancellation token that carries both the per-request timeout and the session's own interrupt/shutdown
@@ -201,7 +203,7 @@ Generate menu and in the result panel on the desktop, and in the `/simple` sheet
 | Choice | What is sent |
 |---|---|
 | **Auto** | For image profiles, Edit when the current generation has an init image, video end image, or prompt image. Otherwise T2I. Known video profiles always use T2I. The closed control reads `Auto (Edit)` or `Auto (T2I)`. |
-| **T2I** | The base profile for the loaded model. Reference images are not sent. |
+| **T2I** | The base profile for the loaded model. Image profiles do not send reference images. MiniMax H3 stays on this profile and still sends keyframe and Prompt Images when they are present. |
 | **Edit** | The edit profile for that base, when one exists. |
 
 The request sends both `mode` (`auto`, `t2i`, or `edit`) and `resolved_mode` (`t2i` or `edit`). The server
@@ -223,7 +225,7 @@ Edit mode looks up a dedicated profile file for the base profile:
 short generic edit appendix appended, and is treated as an edit profile for the strength cap. The registered
 base text is not modified.
 
-In edit mode the init image, video end image, then prompt images are attached to the writer request. At most 4 are used.
+In edit mode, and for MiniMax H3 in T2I writer mode, the init image, video end image, then prompt images are attached to the writer request. At most 4 are used. Image profiles in explicit T2I mode do not attach images. H3 prepends a note that names each JPEG: keyframes are not `<Picture N>` slots, and Prompt Images are `<Picture 1>`, `<Picture 2>`, and so on. Informal `<Image N>` tags are rewritten to `<Picture N>` on the H3 path only.
 Each is downscaled on the server to a JPEG whose longest side is 768 pixels. Ollama receives them on the user
 message's `images` field. The digest of those JPEG bytes is part of the cache key. Swarm's receive limit
 (`Network.MaxReceiveBytes`, default 200 MB) already covers the payloads the browser sends before that
@@ -338,7 +340,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.5.0+edit-mode`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.5.1+h3-ref2va-vision`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 
