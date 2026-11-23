@@ -1,6 +1,6 @@
 import os, folder_paths, traceback
 
-from . import SwarmSpokeCache
+from . import SwarmSpokeCache, SwarmSpokeLoraLoader
 
 from . import SwarmBlending, SwarmImages, SwarmInternalUtil, SwarmKSampler, SwarmLoadImageB64, SwarmLoraLoader, SwarmMasks, SwarmSaveImageWS, SwarmTiling, SwarmExtractLora, SwarmUnsampler, SwarmLatents, SwarmInputNodes, SwarmTextHandling, SwarmText, SwarmReference, SwarmMath, SwarmSam2, SwarmAudio, SwarmVideo, SwarmModels
 
@@ -13,6 +13,7 @@ NODE_CLASS_MAPPINGS = (
     | SwarmKSampler.NODE_CLASS_MAPPINGS
     | SwarmLoadImageB64.NODE_CLASS_MAPPINGS
     | SwarmLoraLoader.NODE_CLASS_MAPPINGS
+    | SwarmSpokeLoraLoader.NODE_CLASS_MAPPINGS
     | SwarmMasks.NODE_CLASS_MAPPINGS
     | SwarmSaveImageWS.NODE_CLASS_MAPPINGS
     | SwarmTiling.NODE_CLASS_MAPPINGS
