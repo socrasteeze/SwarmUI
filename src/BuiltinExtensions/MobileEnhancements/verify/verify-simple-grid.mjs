@@ -249,9 +249,9 @@ check('the LoRA axis loads the library even though the Create LoRA sheet was nev
 const loraDim = await page.evaluate(() => [...__sheet().querySelectorAll('.m-grid-lora-options .m-grid-option')].map(e => ({
     name: e.textContent, dim: e.classList.contains('m-model-unavailable')
 })));
-check('the LoRA axis sorts the matching Anima variant first and dims the others',
-    loraDim.map(row => row.name).join(',') == 'style_a,detail,style_b'
-    && loraDim.map(row => row.dim).join(',') == 'false,true,true',
+check('the LoRA axis keeps every Anima-family LoRA and dims none of them',
+    loraDim.map(row => row.name).join(',') == 'detail,style_a,style_b'
+    && loraDim.map(row => row.dim).join(',') == 'false,false,false',
     JSON.stringify(loraDim));
 await page.evaluate(() => {
     // Picked by name, not by index: indexLoras sorts its corpus, so the fixture's declaration order is not

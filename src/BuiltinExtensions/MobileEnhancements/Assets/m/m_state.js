@@ -845,8 +845,9 @@ class MState {
 
     /** The per-class half of genpage `isModelArchCorrect`: exact `compat_class` on a sub-model (architecture
      * contains '/'), plus the same VAE and Chroma allowances. A base model, or a row with no class,
-     * counts as compatible. `anima`, `anima-2.9b`, and `anima-3.8b` stay distinct because the compare
-     * is equality, not a prefix. This compares against ONE active class; the any-enabled-model union that
+     * counts as compatible. `anima`, `anima-2.9b`, and `anima-3.8b` are one family: a sub-model of any of
+     * them matches a checkpoint of any of them. Every other architecture stays an exact compare.
+     * This compares against ONE active class; the any-enabled-model union that
      * `isModelArchCorrect` applies across its model parameters lives in `rowMatchesActive`. */
     static compatMatches(architecture, modelCompat, curCompat) {
         if (!modelCompat || !curCompat) {
@@ -865,6 +866,10 @@ class MState {
         if (arch.endsWith('/lora') && modelCompat.startsWith('flux-1') && curCompat.startsWith('chroma')) {
             return true;
         }
+        if ((modelCompat == 'anima' || modelCompat == 'anima-2.9b' || modelCompat == 'anima-3.8b')
+            && (curCompat == 'anima' || curCompat == 'anima-2.9b' || curCompat == 'anima-3.8b')) {
+            return true;
+        }
         return modelCompat == curCompat;
     }
 
@@ -874,8 +879,9 @@ class MState {
      * `curCompat` is an array of classes (or one class string); omitted, it is `activeModelCompats()`.
      * Null/empty means nothing to go on, so every row is compatible.
      * Checkpoints are always kept, matching the main Models tab (it does not dim Stable-Diffusion).
-     * A LoRA/ControlNet/VAE whose class id has no '/' is still a sub-model: the id is only a label,
-     * and treating it as a base model would mark every Anima variant compatible with the others. */
+     * A LoRA/ControlNet/VAE whose class id has no '/' is still a sub-model: the id is only a label.
+     * Treating a slash-less id as a base model would mark it compatible with every checkpoint, not
+     * only the Anima family. */
     rowMatchesActive(model, subtype, curCompat) {
         if (subtype == 'Stable-Diffusion') {
             return true;

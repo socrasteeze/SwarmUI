@@ -1278,8 +1278,10 @@ check('any-model compat: classes are deduped, a refiner alone counts, and none m
 check('any-model compat: the Limited label names every class the filter used',
     anyModel.label == 'Limited to stable-diffusion-xl-v1 + qwen-image, 2 hidden - tap to show all', anyModel.label);
 
-// A model's own known compat class outranks folder and preset-group inference. Anima variants share folders,
-// so treating the folder's aggregate classes as decisive lets incompatible 2.9B, 3.8B and base LoRAs mix.
+// A model's own known compat class outranks folder and preset-group inference. Anima, 2.9B, and 3.8B are
+// one family, so a known LoRA of any of those classes stays when any Anima checkpoint is selected. Unknown
+// metadata still uses the folder: anima38/ only has 3.8B presets, so an untagged row there stays hidden
+// under a 2.9B checkpoint.
 const animaVariantCompat = await page.evaluate(() => {
     mState.loadParamMeta({
         list: [],
@@ -1338,22 +1340,20 @@ const animaVariantCompat = await page.evaluate(() => {
     ], 'LoRA').map(row => row.name).join(',');
     return selected;
 });
-check('Anima compat: 2.9B excludes known 3.8B/base LoRAs in the shared preset-group folder',
-    animaVariantCompat['29'] == 'anima/lora-29.safetensors,anima/unknown.safetensors',
-    JSON.stringify(animaVariantCompat));
-check('Anima compat: 3.8B excludes known 2.9B/base LoRAs in the shared preset-group folder',
-    animaVariantCompat['38'] == 'anima/lora-38.safetensors,anima/unknown.safetensors',
-    JSON.stringify(animaVariantCompat));
-check('Anima compat: base excludes known 2.9B/3.8B LoRAs in the shared preset-group folder',
-    animaVariantCompat.base == 'anima/adapter.safetensors,anima/unknown.safetensors',
-    JSON.stringify(animaVariantCompat));
+let animaFamilyKept = 'anima/lora-29.safetensors,anima/lora-38.safetensors,anima/adapter.safetensors,anima/unknown.safetensors';
+check('Anima compat: 2.9B keeps known base, 2.9B, and 3.8B LoRAs in the shared folder',
+    animaVariantCompat['29'] == animaFamilyKept, JSON.stringify(animaVariantCompat));
+check('Anima compat: 3.8B keeps known base, 2.9B, and 3.8B LoRAs in the shared folder',
+    animaVariantCompat['38'] == animaFamilyKept, JSON.stringify(animaVariantCompat));
+check('Anima compat: base keeps known base, 2.9B, and 3.8B LoRAs in the shared folder',
+    animaVariantCompat.base == animaFamilyKept, JSON.stringify(animaVariantCompat));
 check('Anima compat: a known compatible class survives mismatching preset-group folder inference',
     animaVariantCompat.mismatchingFolder == 'anima38/known-29.safetensors', JSON.stringify(animaVariantCompat));
 check('Anima compat: unknown metadata still falls back to preset-group folder inference',
     animaVariantCompat.unknownFallback == '', JSON.stringify(animaVariantCompat));
 
-// Dimming uses the same exact compat_class compare. A shared anima/ folder must not make
-// base, 2.9B, and 3.8B look interchangeable, and a class id without '/' is still a LoRA.
+// Dimming uses the same family compare. A 2.9B checkpoint keeps base, 2.9B, and 3.8B LoRAs.
+// The Chroma/Flux LoRA allowance stays, and a checkpoint row is never dimmed.
 const animaDim = await page.evaluate(() => {
     mState.params['model'] = 'anima/checkpoint.safetensors';
     let rows = [
@@ -1375,12 +1375,12 @@ const animaDim = await page.evaluate(() => {
         checkpoint
     };
 });
-check('Anima dim: 2.9B keeps its LoRA and marks base and 3.8B incompatible',
-    !animaDim.base && animaDim.two && !animaDim.three && animaDim.checkpoint
-    && animaDim.order == 'anima/lora-29.safetensors,anima/adapter.safetensors,anima/lora-38.safetensors',
+check('Anima dim: a 2.9B checkpoint keeps base, 2.9B, and 3.8B LoRAs',
+    animaDim.base && animaDim.two && animaDim.three && animaDim.checkpoint
+    && animaDim.order == 'anima/adapter.safetensors,anima/lora-29.safetensors,anima/lora-38.safetensors',
     JSON.stringify(animaDim));
-check('Anima dim: compat match is exact, and the Chroma/Flux LoRA allowance still holds',
-    animaDim.chroma && !animaDim.baseOn29, JSON.stringify(animaDim));
+check('Anima dim: the Anima family matches across variants, and the Chroma/Flux LoRA allowance still holds',
+    animaDim.chroma && animaDim.baseOn29, JSON.stringify(animaDim));
 
 // Klein/ with no presets must still hard-hide under an SDXL Limited banner once any classed model in that
 // folder is a different architecture - folderCompatClasses covers hand-laid folders presetGroups() misses.
