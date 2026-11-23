@@ -830,6 +830,10 @@ public class T2IModelClassSorter
         {
             return isMiniMaxH3Image(h);
         }});
+        Register(new() { ID = "minimax-h3-image/lora", CompatClass = CompatMiniMaxH3Image, Name = "MiniMax H3 Image LoRA", StandardWidth = 2048, StandardHeight = 2048, IsThisModelOfClass = (m, h) =>
+        {
+            return false; // Can't distinguish from h3 video
+        }});
         Register(new() { ID = "minimax-h3-image/vae", CompatClass = CompatMiniMaxH3Image, Name = "MiniMax H3 Image VAE", StandardWidth = 2048, StandardHeight = 2048, IsThisModelOfClass = (m, h) =>
         {
             return false;
@@ -1161,6 +1165,8 @@ public class T2IModelClassSorter
         Remaps["hidream_o1_image"] = "hidream-o1";
         // ====================== kohya ss_network_module remaps ======================
         Remaps["networks.lora_minimax_h3"] = "minimax-h3/lora";
+        Remaps["MiniMax-H3-Image/lora"] = "minimax-h3-image/lora";
+        Remaps["minimaxh3image"] = "minimax-h3-image/lora";
     }
 
     /// <summary>True when <paramref name="clazz"/> is base Anima, Anima 2.9B, or Anima 3.8B.</summary>
@@ -1470,7 +1476,8 @@ public class T2IModelClassSorter
             ?? fix(header?["__metadata__"]?.Value<string>("model_type"))
             ?? fix(header.Value<string>("model_type"))
             ?? fix(header?["__metadata__"]?.Value<string>("ss_network_module"))
-            ?? fix(header.Value<string>("ss_network_module"));
+            ?? fix(header.Value<string>("ss_network_module"))
+            ?? fix(header.Value<string>("ss_architecture"));
         T2IModelClass matchedClass = null;
         if (arch is not null)
         {
