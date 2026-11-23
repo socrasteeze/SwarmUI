@@ -468,7 +468,7 @@ public partial class WorkflowGenerator
             }
             else if (CurrentCompat()?.LorasTargetTextEnc == false || tencWeight == 0)
             {
-                string newId = CreateNode("LoraLoaderModelOnly", new JObject()
+                string newId = CreateNode(Program.IsSpokeMode ? "SwarmSpokeLoraLoaderModelOnly" : "LoraLoaderModelOnly", new JObject()
                 {
                     ["model"] = model,
                     ["lora_name"] = lora.ToString(ModelFolderFormat),
@@ -478,7 +478,7 @@ public partial class WorkflowGenerator
             }
             else
             {
-                string newId = CreateNode("LoraLoader", new JObject()
+                string newId = CreateNode(Program.IsSpokeMode ? "SwarmSpokeLoraLoader" : "LoraLoader", new JObject()
                 {
                     ["model"] = model,
                     ["clip"] = clip,
