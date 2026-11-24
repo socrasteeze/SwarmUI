@@ -200,8 +200,10 @@ public class SessionHandler
         }
     }
 
-    public SessionHandler()
+    /// <summary>Backs up and opens the user database before startup proceeds.</summary>
+    internal static ILiteDatabase OpenUserDatabase()
     {
+        Directory.CreateDirectory(Program.DataDir);
         string userDbFile = $"{Program.DataDir}/Users.ldb";
         int backupCount = Program.ServerSettings.Maintenance.UserDBBackups;
         if (backupCount > 0 && File.Exists(userDbFile))
@@ -209,7 +211,18 @@ public class SessionHandler
             string folder = $"{Program.DataDir}/UsersBackups";
             BackupUserDatabase(userDbFile, folder, backupCount, DateTimeOffset.UtcNow);
         }
-        Database = new LiteDatabase(userDbFile);
+        return new LiteDatabase(userDbFile);
+    }
+
+    /// <summary>Opens the user database and initializes session state.</summary>
+    public SessionHandler() : this(OpenUserDatabase())
+    {
+    }
+
+    /// <summary>Initializes session state using the already-open user database.</summary>
+    internal SessionHandler(ILiteDatabase database)
+    {
+        Database = database;
         UserDatabase = Database.GetCollection<User.DatabaseEntry>("users");
         SessionDatabase = Database.GetCollection<Session.DatabaseEntry>("sessions");
         T2IPresets = Database.GetCollection<T2IPreset>("t2i_presets");

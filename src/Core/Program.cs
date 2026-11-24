@@ -130,6 +130,7 @@ public class Program
             Logs.Debug($"Unhandled exception: {e.ExceptionObject}");
         };
         List<Task> waitFor = [];
+        ILiteDatabase userDatabase = null;
         Utilities.CheckDotNet("10");
         try
         {
@@ -156,6 +157,18 @@ public class Program
                 Logs.Init("Spoke mode effective settings: ModelMetadataPerFolder=false; ImageMetadataIncludeModelHash=false.");
             }
             RebuildDataDir();
+            try
+            {
+                userDatabase = SessionHandler.OpenUserDatabase();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logs.Error($"Cannot open the user database. Use the running instance or a different --data_dir. {ex.Message}");
+                // The exit hooks must not run normal shutdown for a refused startup.
+                HasShutdown = true;
+                Environment.ExitCode = 1;
+                return;
+            }
             if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TMPDIR")))
             {
                 TempDir = Path.GetFullPath($"{DataDir}/tmp/{Environment.ProcessId}");
@@ -194,6 +207,7 @@ public class Program
         }
         catch (SwarmReadableErrorException ex)
         {
+            userDatabase?.Dispose();
             Logs.Error($"Command line arguments given are invalid: {ex.Message}");
             PrintCommandLineHelp();
             Environment.ExitCode = 1;
@@ -335,7 +349,7 @@ public class Program
         {
             SaveFilePath = GetCommandLineFlag("backends_file", $"{DataDir}/Backends.fds")
         };
-        Sessions = new();
+        Sessions = new(userDatabase);
         Sessions.MaxSpokeControllerSessionAge = TimeSpan.FromMinutes(Math.Max(1, ServerSettings.Network.SpokeControllerSessionMinutes));
         Web = new();
         timer.Check("Prep Options");
