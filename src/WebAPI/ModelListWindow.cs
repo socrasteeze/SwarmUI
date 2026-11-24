@@ -15,10 +15,10 @@ public class ModelListCandidate
     /// <summary>Trigger phrase. Empty when the model has none. Wildcards leave this empty.</summary>
     public string TriggerPhrase;
 
-    /// <summary>Created time. Missing metadata uses <see cref="long.MaxValue"/> so dates sort newest first.</summary>
+    /// <summary>Created time. Missing timestamps use zero and rank as oldest.</summary>
     public long TimeCreated;
 
-    /// <summary>Modified time. Missing metadata uses <see cref="long.MaxValue"/>.</summary>
+    /// <summary>Modified time. Missing timestamps use zero and rank as oldest.</summary>
     public long TimeModified;
 
     /// <summary>Compat class ID of the model's class. Empty when the model has no class, which makes it unclassed for <see cref="ModelListWindow.FilterByCompat"/>.</summary>
@@ -303,11 +303,11 @@ public static class ModelListWindow
         }
         else if (sortMode == ModelsAPI.ModelHistorySortMode.DateCreated)
         {
-            primary = b.TimeCreated.CompareTo(a.TimeCreated);
+            primary = Math.Max(0, b.TimeCreated).CompareTo(Math.Max(0, a.TimeCreated));
         }
         else if (sortMode == ModelsAPI.ModelHistorySortMode.DateModified)
         {
-            primary = b.TimeModified.CompareTo(a.TimeModified);
+            primary = Math.Max(0, b.TimeModified).CompareTo(Math.Max(0, a.TimeModified));
         }
         else
         {

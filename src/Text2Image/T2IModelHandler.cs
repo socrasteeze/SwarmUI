@@ -1219,6 +1219,12 @@ public class T2IModelHandler
         }
     }
 
+    /// <summary>Reads the filesystem creation time in Unix milliseconds, or zero when unavailable.</summary>
+    private static long ReadModelCreationTime(string path)
+    {
+        return Math.Max(0, new DateTimeOffset(File.GetCreationTimeUtc(path)).ToUnixTimeMilliseconds());
+    }
+
     /// <summary>Force-load the metadata for a model.</summary>
     public void LoadMetadata(T2IModel model)
     {
@@ -1240,6 +1246,7 @@ public class T2IModelHandler
         ActiveRefreshDiagnostics.Value?.RecordCacheOpen(Stopwatch.GetTimestamp() - cacheAcquireStarted);
         if (cache is null)
         {
+            model.Metadata ??= new() { TimeCreated = ReadModelCreationTime(model.RawFilePath), TimeModified = modified };
             return;
         }
         ModelMetadataStore metadata;
@@ -1523,7 +1530,7 @@ public class T2IModelHandler
                 SidecarFileVersion = ReadSwarmSidecarVersion(model),
                 SidecarVersionKnown = true,
                 TimeModified = modified,
-                TimeCreated = new DateTimeOffset(File.GetCreationTimeUtc(model.RawFilePath)).ToUnixTimeMilliseconds(),
+                TimeCreated = ReadModelCreationTime(model.RawFilePath),
                 ModelName = modelCacheId,
                 ModelClassType = clazz?.ID,
                 AnimaDepthClassified = true,
@@ -1585,7 +1592,10 @@ public class T2IModelHandler
         if (metadata.TimeModified == 0)
         {
             metadata.TimeModified = modified;
-            metadata.TimeCreated = modified;
+        }
+        if (metadata.TimeCreated <= 0)
+        {
+            metadata.TimeCreated = ReadModelCreationTime(model.RawFilePath);
         }
         lock (ModificationLock)
         {
@@ -1659,6 +1669,10 @@ public class T2IModelHandler
             }
             string fixedFileName = file.Replace('\\', '/');
             string fn = fixedFileName.AfterLast('/');
+            if (ModelType == "LoRA" && fn.Equals("optimizer.pt", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
             if (fn.StartsWithFast('.'))
             {
                 Logs.Verbose($"[Model Scan] Skipping hidden file {fixedFileName}");
@@ -1729,6 +1743,14 @@ public class T2IModelHandler
                     ActiveRefreshDiagnostics.Value?.RecordDuplicateSourceSkip();
                     model.AutoWarn();
                     return;
+                }
+                if (ModelType == "LoRA")
+                {
+                    model.Metadata = new()
+                    {
+                        TimeCreated = ReadModelCreationTime(fixedFileName),
+                        TimeModified = new DateTimeOffset(File.GetLastWriteTimeUtc(fixedFileName)).ToUnixTimeMilliseconds()
+                    };
                 }
                 model.AutoWarn();
             }

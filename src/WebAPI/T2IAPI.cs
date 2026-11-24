@@ -1379,7 +1379,7 @@ public static class T2IAPI
         "models":
         {
             "Stable-Diffusion": [["model1", "archid"], ["model2", "archid"]],
-            "LoRA": [["model1", "archid"], ["model2", "archid"]],
+            "LoRA": [["model1", "archid"], ["model2", "archid"]], // compact rows also include creation and modification times
             // etc
         },
         "wildcards": ["wildcard1", "wildcard2"],
@@ -1389,12 +1389,15 @@ public static class T2IAPI
         }
         """)]
     public static async Task<JObject> ListT2IParams(Session session,
-        [API.APIParameter("If true, omit the duplicate LoRA parameter value list. The models map still includes LoRAs.")] bool compact = false)
+        [API.APIParameter("If true, omit the duplicate LoRA parameter value list and append creation and modification times to each LoRA row in the models map. Times are Unix milliseconds, with 0 for unknown.")] bool compact = false)
     {
         JObject modelData = [];
         foreach (T2IModelHandler handler in Program.T2IModelSets.Values)
         {
-            modelData[handler.ModelType] = new JArray(handler.ListModelsFor(session).OrderBy(m => m.Name).Select(m => new JArray(m.Name, m.ModelClass?.ID)).ToArray());
+            bool includeDates = compact && handler.ModelType == "LoRA";
+            modelData[handler.ModelType] = new JArray(handler.ListModelsFor(session).OrderBy(m => m.Name).Select(m => includeDates
+                ? new JArray(m.Name, m.ModelClass?.ID, Math.Max(0, m.Metadata?.TimeCreated ?? 0), Math.Max(0, m.Metadata?.TimeModified ?? 0))
+                : new JArray(m.Name, m.ModelClass?.ID)).ToArray());
         }
         T2IParamType[] types = [.. T2IParamTypes.Types.Values.Where(p => p.Permission is null || session.User.HasPermission(p.Permission))];
         Dictionary<string, T2IParamGroup> groups = new(64);

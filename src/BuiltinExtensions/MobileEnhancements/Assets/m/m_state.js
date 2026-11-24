@@ -43,7 +43,7 @@ class MState {
         this.paramMeta = {};
         /** Preset objects from GetMyUserData ({title, description, param_map, preview_image, is_starred, output_root}). */
         this.presets = [];
-        /** Model name lists from ListT2IParams (subtype -> [[name, classId], ...]). */
+        /** Model rows from ListT2IParams. Every row starts with name and class ID. Compact LoRA rows append creation and modification times. */
         this.models = {};
         /** Starred ("favourite") model names from GetMyUserData, as subtype -> [name, ...]. Same store the
          * genpage's star buttons write through SetStarredModels, so a star set over there shows up here. */

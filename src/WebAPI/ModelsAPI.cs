@@ -743,7 +743,7 @@ public static class ModelsAPI
         {
             foreach (T2IModel possible in handler.Models.Values)
             {
-                consider(possible.Name, possible.Title, possible.Metadata?.TriggerPhrase, possible.Metadata?.TimeCreated ?? long.MaxValue, possible.Metadata?.TimeModified ?? long.MaxValue, () => possible.ToNetObject(dataImgs: dataImages), possible.ModelClass?.CompatClass?.ID, possible.ModelClass?.ID);
+                consider(possible.Name, possible.Title, possible.Metadata?.TriggerPhrase, possible.Metadata?.TimeCreated ?? 0, possible.Metadata?.TimeModified ?? 0, () => possible.ToNetObject(dataImgs: dataImages), possible.ModelClass?.CompatClass?.ID, possible.ModelClass?.ID);
             }
         }
         if (allowRemote)
@@ -756,7 +756,7 @@ public static class ModelsAPI
                     remoteTitle = name.AfterLast('/');
                 }
                 string remoteTrigger = possible["trigger_phrase"]?.ToString() ?? "";
-                consider(name, remoteTitle, remoteTrigger, long.MaxValue, long.MaxValue, () =>
+                consider(name, remoteTitle, remoteTrigger, T2IModel.ReadNetTimestamp(possible, "time_created"), T2IModel.ReadNetTimestamp(possible, "time_modified"), () =>
                 {
                     JObject toAdd = possible;
                     if (!dataImages && toAdd.TryGetValue("preview_image", out JToken previewImg) && previewImg.ToString().StartsWith("data:"))

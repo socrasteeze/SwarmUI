@@ -846,18 +846,19 @@ const searched = await page.evaluate(() => [...document.querySelectorAll('.m-lor
 check('LoRA picker: starred still leads a filtered list', searched.join(',') == 'zzz_starred,zzz_unstarred', searched.join(','));
 
 // Classic's model browser sorts Name, Title, DateCreated, DateModified, plus Reverse.
-// Dates are newest first. A missing timestamp sorts as newest, the same fallback ListModels uses.
+// Dates are newest first, including dates from the compact catalog. Missing dates rank as oldest.
 await page.fill('.m-lora-sheet .m-lora-search', '');
 await page.evaluate(pixel => {
     localStorage.setItem('models_LoRA_sort_by', 'Name');
     localStorage.setItem('models_LoRA_sort_reverse', 'false');
     mState.starredModels = {};
+    mState.models['LoRA'].push(['new.safetensors', null, 3000, 2000]);
     mCreate.indexLoras([
         { name: 'old.safetensors', title: 'Zed', time_created: 1000, time_modified: 5000, preview_image: pixel },
-        { name: 'new.safetensors', title: 'Amy', time_created: 3000, time_modified: 2000, preview_image: pixel },
         { name: 'mid.safetensors', title: 'Middle', time_created: 2000, time_modified: 9000, preview_image: pixel },
         { name: 'nostamp.safetensors', title: '', time_created: 0, time_modified: 0, preview_image: pixel }
     ]);
+    mState.models['LoRA'].pop();
     document.querySelector('.m-lora-sort select').value = 'Name';
     document.querySelector('.m-lora-sheet .m-lora-search').dispatchEvent(new Event('input'));
 }, PIXEL);
@@ -868,22 +869,22 @@ const loraKeys = () => page.evaluate(() => [...document.querySelectorAll('.m-lor
 await page.locator('.m-lora-sort select').selectOption('Name');
 check('LoRA sort: Name is A-Z by file name', (await loraKeys()).join(',') == 'mid,new,nostamp,old');
 await page.locator('.m-lora-sort select').selectOption('DateCreated');
-check('LoRA sort: Date created is newest first, and a missing date counts as newest',
-    (await loraKeys()).join(',') == 'nostamp,new,mid,old');
+check('LoRA sort: Date created is newest first, including dates from the compact catalog',
+    (await loraKeys()).join(',') == 'new,mid,old,nostamp');
 await page.click('.m-lora-sort-reverse');
 check('LoRA sort: Reverse flips Date created to oldest first',
-    (await loraKeys()).join(',') == 'old,mid,new,nostamp');
+    (await loraKeys()).join(',') == 'nostamp,old,mid,new');
 await page.click('.m-lora-sort-reverse');
 await page.locator('.m-lora-sort select').selectOption('DateModified');
 check('LoRA sort: Date modified uses its own timestamp',
-    (await loraKeys()).join(',') == 'nostamp,mid,old,new');
+    (await loraKeys()).join(',') == 'mid,old,new,nostamp');
 await page.locator('.m-lora-sort select').selectOption('Title');
 check('LoRA sort: Title is A-Z, with a blank title before named ones',
-    (await loraKeys()).join(',') == 'nostamp,new,mid,old');
+    (await loraKeys()).join(',') == 'new,nostamp,mid,old');
 await page.evaluate(() => { mState.starredModels = { 'LoRA': ['old.safetensors'] }; });
 await page.locator('.m-lora-sort select').selectOption('DateCreated');
 check('LoRA sort: a star stays first when the date order would bury it',
-    (await loraKeys()).join(',') == 'old,nostamp,new,mid');
+    (await loraKeys()).join(',') == 'old,new,mid,nostamp');
 await page.fill('.m-lora-sheet .m-lora-search', 'mid');
 await page.waitForTimeout(M_SEARCH_WAIT);
 check('LoRA sort: search still narrows the sorted list', (await loraKeys()).join(',') == 'mid');

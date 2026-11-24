@@ -1067,7 +1067,7 @@ class MCreate {
 
     /** Orders a LoRA list the way Classic's model browser does.
      * Name and Title are A-Z, then by file name. Dates are newest first.
-     * A missing timestamp sorts as newest, matching ListModels' unset-metadata fallback.
+     * A missing timestamp ranks as oldest, matching ListModels.
      * Reverse flips that whole order. Returns a copy. */
     static sortLoras(list) {
         return MCreate.sortModels(list, MCreate.loraSortSetting());
@@ -1082,7 +1082,7 @@ class MCreate {
         let timeOf = (model, field) => {
             let n = Number(model[field]);
             if (!Number.isFinite(n) || n <= 0) {
-                return Number.MAX_SAFE_INTEGER;
+                return 0;
             }
             return n;
         };
@@ -2719,24 +2719,20 @@ class MCreate {
      * The corpus is the name list from ListT2IParams, not a full ListModels dump. Titles and previews are a
      * metadata overlay: the first LoraCacheLimit rows, plus whatever a search, a folder page, or a visible
      * row (`ensureLoraMetadata`) has fetched. A row with no overlay yet still renders from its name.
-     * ListT2IParams already ships every LoRA name and class id at boot, uncapped and cheap.
+     * Compact ListT2IParams ships every LoRA name, class id, and sort timestamp at boot.
      * Re-indexing drops attempted-fetch flags, because the stubs are new and a miss has to be allowed again. */
     indexLoras(list) {
-        let rich = new Map();
-        for (let model of (list || [])) {
-            rich.set(model.name, model);
+        let models = new Map();
+        for (let [name, , created, modified] of (mState.models['LoRA'] || [])) {
+            models.set(name, { 'name': name, 'time_created': created, 'time_modified': modified });
         }
-        let names = new Set((mState.models['LoRA'] || []).map(entry => entry[0]));
-        // Anything ListModels reported that the boot list did not (a remote model, say) still belongs here.
-        for (let name of rich.keys()) {
-            names.add(name);
+        // Keep rich rows, including any that the boot list did not report.
+        for (let model of (list || [])) {
+            models.set(model.name, model);
         }
         this.loraMetaAttempted = new Set();
-        this.loraList = [...names].sort().map(name => {
-            let model = rich.get(name);
-            if (!model) {
-                return { 'name': name };
-            }
+        this.loraList = [...models.keys()].sort().map(name => {
+            let model = models.get(name);
             if (model._mListed || 'title' in model || 'preview_image' in model || 'trigger_phrase' in model || 'local' in model) {
                 model._mListed = true;
                 if (!model._mMetaRev) {

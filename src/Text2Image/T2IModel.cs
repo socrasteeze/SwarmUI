@@ -470,6 +470,12 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
         };
     }
 
+    /// <summary>Reads a timestamp from a model listing, with zero for missing or invalid values.</summary>
+    internal static long ReadNetTimestamp(JObject data, string field)
+    {
+        return long.TryParse(data[field]?.ToString(), out long timestamp) ? Math.Max(0, timestamp) : 0;
+    }
+
     public static T2IModel FromNetObject(JObject data)
     {
         return new T2IModel(null, null, null, $"{data["name"]}")
@@ -481,7 +487,12 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
             ModelClass = T2IModelClassSorter.ModelClasses.GetValueOrDefault($"{data["architecture"]}".ToLowerFast()) ?? null,
             StandardWidth = (int)data["standard_width"],
             StandardHeight = (int)data["standard_height"],
-            IsSupportedModelType = (bool)(data?["is_supported_model_format"] ?? false)
+            IsSupportedModelType = (bool)(data?["is_supported_model_format"] ?? false),
+            Metadata = new()
+            {
+                TimeCreated = ReadNetTimestamp(data, "time_created"),
+                TimeModified = ReadNetTimestamp(data, "time_modified")
+            }
         };
     }
 
