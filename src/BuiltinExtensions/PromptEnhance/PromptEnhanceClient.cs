@@ -520,6 +520,66 @@ public static class PromptEnhanceClient
         return text;
     }
 
+    /// <summary>Removes em dashes (U+2014) and en dashes (U+2013) from finished prompt text. A dash between
+    /// digits becomes an ASCII hyphen, so a range such as <c>1-10</c> stays readable. Any other dash, including
+    /// the spaces around a clause break, becomes <c>, </c>. <see cref="CollapseSeparators"/> then tidies repeated
+    /// commas and spacing. ASCII hyphens already in the text are left alone. Null and empty input return
+    /// <c>""</c>. Newlines are not reformatted. <c>FinishPrompt</c> calls this on every outgoing prompt after
+    /// notes have been split off, so a <c>NOTES:</c> line is not rewritten.</summary>
+    public static string SanitizeDashes(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return "";
+        }
+        bool replaced = false;
+        StringBuilder remaining = new(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c != '\u2014' && c != '\u2013')
+            {
+                remaining.Append(c);
+                continue;
+            }
+            replaced = true;
+            int end = i + 1;
+            while (end < text.Length && (text[end] == '\u2014' || text[end] == '\u2013'))
+            {
+                end++;
+            }
+            int after = end;
+            while (after < text.Length && (text[after] == ' ' || text[after] == '\t'))
+            {
+                after++;
+            }
+            int beforeSpaces = 0;
+            while (beforeSpaces < remaining.Length && (remaining[remaining.Length - 1 - beforeSpaces] == ' ' || remaining[remaining.Length - 1 - beforeSpaces] == '\t'))
+            {
+                beforeSpaces++;
+            }
+            int leftIndex = remaining.Length - beforeSpaces - 1;
+            bool leftDigit = leftIndex >= 0 && char.IsDigit(remaining[leftIndex]);
+            bool rightDigit = after < text.Length && char.IsDigit(text[after]);
+            bool nextPunct = after < text.Length && ",.;:!?)]}".IndexOf(text[after]) >= 0;
+            remaining.Length -= beforeSpaces;
+            if (leftDigit && rightDigit)
+            {
+                remaining.Append('-');
+            }
+            else if (!nextPunct)
+            {
+                remaining.Append(", ");
+            }
+            i = after - 1;
+        }
+        if (!replaced)
+        {
+            return text;
+        }
+        return CollapseSeparators(remaining.ToString());
+    }
+
     /// <summary>Re-appends the tokens <see cref="Shield"/> extracted onto the writer's reply, so nothing the writer
     /// never saw is lost. No-op when <paramref name="extracted"/> is empty. Appends as <c>", tok1, tok2"</c> onto the
     /// end of the reply, or as a new line after it if the reply's prose already ends with a period.</summary>

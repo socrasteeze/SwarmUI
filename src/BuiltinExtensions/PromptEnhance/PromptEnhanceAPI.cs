@@ -349,15 +349,17 @@ public static class PromptEnhanceAPI
         return frame;
     }
 
-    /// <summary>Applies the MiniMax H3 image-tag normalizer to a prompt that will be shown or applied.
-    /// Other profiles are returned unchanged.</summary>
+    /// <summary>Cleans a prompt that will be shown or applied. Em dashes and en dashes are stripped for every
+    /// profile, then the MiniMax H3 image-tag normalizer runs when <paramref name="h3"/> is true. Call this
+    /// after notes are split off, so a <c>NOTES:</c> line is left alone.</summary>
     private static string FinishPrompt(string text, bool h3)
     {
+        string cleaned = PromptEnhanceClient.SanitizeDashes(text);
         if (!h3)
         {
-            return text;
+            return cleaned;
         }
-        return PromptEnhanceClient.NormalizeH3ImageTags(text);
+        return PromptEnhanceClient.NormalizeH3ImageTags(cleaned);
     }
 
     /// <summary>True when <paramref name="images"/> contains at least one non-blank value.</summary>

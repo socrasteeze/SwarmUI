@@ -909,6 +909,50 @@ public class PromptEnhanceTests : SwarmUITest
 
     #endregion
 
+    #region PromptEnhanceClient.SanitizeDashes
+
+    // FinishPrompt (PromptEnhanceAPI) calls SanitizeDashes on every outgoing prompt, cache hit and fresh
+    // reply, after ExtractNotes. FinishPrompt stays private; these tests cover the public sanitizer it calls.
+
+    /// <summary>A spaced em dash is a clause break, so it becomes a comma and neither dash character remains.</summary>
+    [Test]
+    public void SanitizeDashes_ClauseBreak_BecomesComma()
+    {
+        string result = PromptEnhanceClient.SanitizeDashes("a red teapot \u2014 soft window light");
+        Assert.That(result, Does.Not.Contain("\u2014"));
+        Assert.That(result, Does.Not.Contain("\u2013"));
+        Assert.That(result, Does.Contain("teapot"));
+        Assert.That(result, Does.Contain("soft window light"));
+        Assert.That(result, Is.EqualTo("a red teapot, soft window light"));
+    }
+
+    /// <summary>An en dash between digits stays a readable range, written with an ASCII hyphen.</summary>
+    [Test]
+    public void SanitizeDashes_DigitRange_BecomesAsciiHyphen()
+    {
+        Assert.That(PromptEnhanceClient.SanitizeDashes("pages 1\u201310"), Is.EqualTo("pages 1-10"));
+        Assert.That(PromptEnhanceClient.SanitizeDashes("pages 1 \u2013 10"), Is.EqualTo("pages 1-10"));
+        Assert.That(PromptEnhanceClient.SanitizeDashes("2014\u20142018"), Is.EqualTo("2014-2018"));
+    }
+
+    /// <summary>ASCII hyphens are not dashes and are left unchanged.</summary>
+    [Test]
+    public void SanitizeDashes_AsciiHyphen_Unchanged()
+    {
+        string hyphenated = "a well-lit room";
+        Assert.That(PromptEnhanceClient.SanitizeDashes(hyphenated), Is.EqualTo(hyphenated));
+    }
+
+    /// <summary>Null and empty input return an empty string, matching the other reply cleaners.</summary>
+    [Test]
+    public void SanitizeDashes_NullOrEmpty_ReturnsEmpty()
+    {
+        Assert.That(PromptEnhanceClient.SanitizeDashes(null), Is.EqualTo(""));
+        Assert.That(PromptEnhanceClient.SanitizeDashes(""), Is.EqualTo(""));
+    }
+
+    #endregion
+
     #region PromptEnhanceClient.ApplyStrength
 
     /// <summary>Strength <c>faithful</c> sends the shielded prompt unchanged - exactly the pre-Strength

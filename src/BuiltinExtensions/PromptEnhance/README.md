@@ -340,7 +340,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.5.1+h3-ref2va-vision`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.5.2+krea-no-emdash`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 
