@@ -604,6 +604,57 @@ sent = await gridSent();
 check('a lone Prompt Replace value replaces nothing, so no axis is sent',
     !('gridgenpromptreplace' in sent) && sent.steps == '20,30', JSON.stringify(sent));
 
+state = await gridState({ promptreplace: ['ARTISTS || @a || @b'] });
+check('a Prompt Replace list on its own is a ready grid',
+    !state.disabled && state.count == '3 images', JSON.stringify(state));
+sent = await gridSent();
+check('that list is sent as find=value for every cell',
+    sent.gridgenpromptreplace == 'ARTISTS=ARTISTS||ARTISTS=@a||ARTISTS=@b', sent.gridgenpromptreplace);
+state = await gridState({ promptreplace: ['ARTISTS'] });
+check('a Prompt Replace key with no replacement values is not ready',
+    state.disabled && state.count == '1 image', JSON.stringify(state));
+state = await gridState({ promptreplace: [' || '] });
+check('a blank Prompt Replace axis is not ready',
+    state.disabled && state.count == 'No axes set yet.', JSON.stringify(state));
+state = await gridState({ promptreplace: ['ARTISTS || @a || @b'], steps: ['20', '30'] });
+check('Prompt Replace cells still multiply with another axis',
+    !state.disabled && state.count == '6 images', JSON.stringify(state));
+sent = await gridSent();
+check('both axes are sent, with the list expanded',
+    sent.gridgenpromptreplace == 'ARTISTS=ARTISTS||ARTISTS=@a||ARTISTS=@b' && sent.steps == '20,30', JSON.stringify(sent));
+
+await gridState({});
+const pastedReplace = await page.evaluate(() => {
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Prompt Replace');
+    let input = card.querySelector('.m-grid-custom-input');
+    input.value = 'ARTISTS || @a || @b, still one';
+    card.querySelector('.m-grid-add-button').click();
+    return {
+        values: mGrid.valuesFor('promptreplace').join('|'),
+        disabled: __sheet().querySelector('.m-grid-run').disabled,
+        count: __sheet().querySelector('.m-grid-count').textContent
+    };
+});
+check('pasting a key || value list fills the axis and marks it ready',
+    pastedReplace.values == 'ARTISTS|@a|@b, still one' && !pastedReplace.disabled && pastedReplace.count == '3 images',
+    JSON.stringify(pastedReplace));
+const reloadedReplace = await page.evaluate(() => {
+    let previous = localStorage.getItem('m_client_grid_selected');
+    localStorage.setItem('m_client_grid_selected', JSON.stringify({ promptreplace: ['ARTISTS || @a || @b'], steps: ['20'] }));
+    let loaded = MGrid.loadSelected();
+    if (previous == null) {
+        localStorage.removeItem('m_client_grid_selected');
+    }
+    else {
+        localStorage.setItem('m_client_grid_selected', previous);
+    }
+    return loaded;
+});
+check('a saved Prompt Replace list reloads as one cell per value',
+    reloadedReplace.promptreplace.join('|') == 'ARTISTS|@a|@b' && reloadedReplace.steps.join('|') == '20',
+    JSON.stringify(reloadedReplace));
+
 await gridState({ promptreplace: ['a=b', 'c'] });
 await page.evaluate(() => __sheet().querySelector('.m-grid-run').click());
 const blockedFind = await page.evaluate(() => ({
@@ -773,6 +824,24 @@ await modeSetup({});
 await page.evaluate(() => mCreate.doGenerate());
 mode = await modeState();
 check('with nothing saved the button says so, and a tap opens the sheet', mode.button == 'Set Up Grid' && mode.sheet && !mode.grid, JSON.stringify(mode));
+
+await modeSetup({ promptreplace: ['ARTISTS || @a || @b'] });
+await page.evaluate(() => mGrid.setActive(true));
+mode = await modeState();
+check('Grid mode treats a Prompt Replace list as ready', mode.button == 'Run Grid (3)' && mode.target == 'Grid Hub', JSON.stringify(mode));
+await page.evaluate(() => mCreate.doGenerate());
+await page.waitForFunction(() => window.__grid);
+mode = await modeState();
+check('a Generate tap runs that Prompt Replace grid',
+    !mode.sheet && mode.single == 0 && mode.grid.axes.length == 1
+        && mode.grid.axes[0].mode == 'gridgenpromptreplace'
+        && mode.grid.axes[0].vals == 'ARTISTS=ARTISTS||ARTISTS=@a||ARTISTS=@b',
+    JSON.stringify(mode.grid && mode.grid.axes));
+
+await modeSetup({ promptreplace: ['ARTISTS'] });
+await page.evaluate(() => mCreate.doGenerate());
+mode = await modeState();
+check('a Prompt Replace key alone still opens the sheet', mode.button == 'Set Up Grid' && mode.sheet && !mode.grid, JSON.stringify(mode));
 
 await modeSetup({ loraweights: ['0.5', '1'] });
 await page.evaluate(() => mCreate.doGenerate());

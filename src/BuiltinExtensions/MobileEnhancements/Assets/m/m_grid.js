@@ -34,7 +34,7 @@ class MGrid {
         { key: 'loraconfinement', mode: 'lorasectionconfinement', label: 'LoRA Section', kind: 'choice', separator: ',', needsLora: true,
             hint: 'Where the LoRAs axis applies: the full generation, the base stage, or the refiner.' },
         { key: 'promptreplace', mode: 'gridgenpromptreplace', label: 'Prompt Replace', kind: 'text', separator: '||',
-            hint: 'The first value is the text to find in the prompt, and it stays as the first cell. Each other value replaces it.' },
+            hint: 'The first value is the text to find in the prompt, and it stays as the first cell. Each other value replaces it. Paste a key || value || value list to set the whole axis.' },
         { key: 'aspectratio', mode: 'aspectratio', label: 'Aspect Ratio', kind: 'choice', separator: ',', skip: 'Custom' },
         { key: 'steps', mode: 'steps', label: 'Steps', kind: 'number', separator: ',',
             quick: ['4', '8', '16', '20', '30', '40'] },
@@ -65,7 +65,12 @@ class MGrid {
             let selected = {};
             for (let axis of MGrid.Axes) {
                 if (Array.isArray(data[axis.key])) {
-                    selected[axis.key] = data[axis.key].filter(v => typeof v == 'string');
+                    let values = data[axis.key].filter(v => typeof v == 'string');
+                    // A saved Prompt Replace file is one string. Expand it so the chips match the cells.
+                    if (axis.kind == 'text') {
+                        values = MGrid.splitPromptReplace(values);
+                    }
+                    selected[axis.key] = values;
                 }
             }
             return selected;
@@ -144,9 +149,10 @@ class MGrid {
     buildAxes() {
         let axes = [];
         for (let axis of MGrid.Axes) {
-            let values = this.valuesFor(axis.key);
+            let values = this.cellsFor(axis);
             if (axis.kind == 'text') {
-                // A lone value replaces nothing, so it is not an axis.
+                // One cell replaces nothing, so it is not an axis. A pasted `key || a || b` list is already
+                // expanded, and that list alone is a real axis.
                 if (values.length < 2) {
                     continue;
                 }
@@ -261,13 +267,47 @@ class MGrid {
         return this.selected[key] || [];
     }
 
-    /** How many images the current selection would produce: the product of every axis that has 1+ values.
-     * An axis with a single value still multiplies by one, so it costs nothing but does pin that value. */
+    /** Cells of one axis. Prompt Replace expands a `key || a || b` value into one cell per piece, so a
+     * pasted grid file counts as the axis it is. Every other axis returns its stored values unchanged. */
+    cellsFor(axis) {
+        let values = this.valuesFor(axis.key);
+        if (axis.kind != 'text') {
+            return values;
+        }
+        return MGrid.splitPromptReplace(values);
+    }
+
+    /** Splits prompt-replace values on `||`. A value without that separator stays one cell. Blank pieces
+     * are dropped. One remaining cell is not a runnable axis; callers decide that. */
+    static splitPromptReplace(values) {
+        let cells = [];
+        for (let value of values) {
+            let text = `${value}`;
+            if (!text.includes('||')) {
+                if (text.trim() != '') {
+                    cells.push(text);
+                }
+                continue;
+            }
+            let parts = text.split('||');
+            for (let part of parts) {
+                let trimmed = part.trim();
+                if (trimmed != '') {
+                    cells.push(trimmed);
+                }
+            }
+        }
+        return cells;
+    }
+
+    /** How many images the current selection would produce: the product of every axis that has 1+ cells.
+     * An axis with a single cell still multiplies by one, so it costs nothing but does pin that value.
+     * Prompt Replace counts the cells inside a `||` list, not the number of stored strings. */
     totalImages() {
         let total = 1;
         let axes = 0;
         for (let axis of MGrid.Axes) {
-            let count = this.valuesFor(axis.key).length;
+            let count = this.cellsFor(axis).length;
             if (count > 0) {
                 total *= count;
                 axes++;
@@ -345,7 +385,7 @@ class MGrid {
         content.appendChild(footer);
         let renderSummaries = () => {
             for (let axis of MGrid.Axes) {
-                let values = this.valuesFor(axis.key);
+                let values = this.cellsFor(axis);
                 summaries[axis.key].textContent = values.length == 0 ? 'off'
                     : `${values.length}: ${MGrid.summarise(values, axis)}`;
                 summaries[axis.key].classList.toggle('m-grid-card-on', values.length > 0);
@@ -483,9 +523,13 @@ class MGrid {
             customRow.appendChild(input);
             let add = mUI.el('button', 'm-grid-add-button', 'Add');
             let commit = () => {
-                // Prompt text carries its own commas, so a text value is one whole entry.
+                // Prompt text carries its own commas, so a text value is one whole entry. `||` is the
+                // grid-file separator, and that list is the whole axis rather than one value.
                 let added = (axis.kind == 'text' ? [`${input.value}`] : `${input.value}`.split(','))
                     .map(v => v.trim()).filter(v => v != '');
+                if (axis.kind == 'text') {
+                    added = MGrid.splitPromptReplace(added);
+                }
                 if (added.length == 0) {
                     return;
                 }
