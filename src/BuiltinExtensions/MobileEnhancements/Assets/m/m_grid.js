@@ -161,6 +161,60 @@ class MGrid {
             && MGrid.Axes.some(axis => axis.needsLora && this.valuesFor(axis.key).length > 0);
     }
 
+    /** The axis definition for a key, or null. */
+    static axis(key) {
+        for (let axis of MGrid.Axes) {
+            if (axis.key == key) {
+                return axis;
+            }
+        }
+        return null;
+    }
+
+    /** Cells of an axis. A lone Prompt Replace value counts as one so the readout stays "1 image",
+     * but isGridAxis still does not send it. */
+    cellCount(axis) {
+        if (!axis) {
+            return 0;
+        }
+        return this.cellsFor(axis).length;
+    }
+
+    /** The one cell of an axis that is not being sent, or null when it is empty or a real grid axis. */
+    oneCell(key) {
+        let axis = MGrid.axis(key);
+        if (this.cellCount(axis) != 1 || this.isGridAxis(axis)) {
+            return null;
+        }
+        return this.cellsFor(axis)[0];
+    }
+
+    /** True when Strength or Section has two or more cells. Those axes append after the LoRA axis,
+     * so a one-cell LoRA still has to be sent or the weight lines up with nothing. It multiplies by one. */
+    loraDependentsVary() {
+        return this.cellCount(MGrid.axis('loraweights')) >= 2 || this.cellCount(MGrid.axis('loraconfinement')) >= 2;
+    }
+
+    /** Whether this axis is sent as a grid axis. One cell is a fixed base param, except the LoRA case above. */
+    isGridAxis(axis) {
+        let count = this.cellCount(axis);
+        if (count >= 2) {
+            return true;
+        }
+        return axis.key == 'loras' && count == 1 && this.loraDependentsVary();
+    }
+
+    /** How many axes the payload will actually send. */
+    sentAxisCount() {
+        let count = 0;
+        for (let axis of MGrid.Axes) {
+            if (this.isGridAxis(axis)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     /** Whether the saved axes make a runnable grid. */
     isReady() {
         return this.totalImages() >= 2 && !this.needsLoraAxis();
@@ -176,17 +230,16 @@ class MGrid {
         }
     }
 
-    /** The axes to send, or null after warning why they cannot be sent. */
+    /** The axes to send, or null after warning why they cannot be sent.
+     * A one-cell axis is not included. applyFixed writes it onto the base instead. */
     buildAxes() {
         let axes = [];
         for (let axis of MGrid.Axes) {
+            if (!this.isGridAxis(axis)) {
+                continue;
+            }
             let values = this.cellsFor(axis);
             if (axis.kind == 'text') {
-                // One cell replaces nothing, so it is not an axis. A pasted `key || a || b` list is already
-                // expanded, and that list alone is a real axis.
-                if (values.length < 2) {
-                    continue;
-                }
                 // The server splits each cell on its first '=', so find text cannot contain one.
                 if (values[0].includes('=')) {
                     mUI.warn(`${axis.label}: the first value cannot contain "=".`);
@@ -196,7 +249,7 @@ class MGrid {
                 // contains '=', so one replacement with an '=' in it would break the implicit form.
                 axes.push({ 'mode': axis.mode, 'vals': values.map(v => `${values[0]}=${v}`).join(axis.separator) });
             }
-            else if (values.length > 0) {
+            else {
                 axes.push({ 'mode': axis.mode, 'vals': values.join(axis.separator) });
             }
         }
@@ -246,8 +299,12 @@ class MGrid {
                         base['exactbackendid'] = target.id;
                     }
                 }
-                mGen.runGrid(base, axes, { 'rows': this.rows });
-                mUI.note(`Grid started: ${this.totalImages()} images.`);
+                // Grid Image holds three axes (X, Y, Y2). More than that still runs: Just Images
+                // skips the contact sheet and generates every cell.
+                let outputType = axes.length > 3 ? 'Just Images' : 'Grid Image';
+                mGen.runGrid(base, axes, { 'rows': this.rows, 'outputType': outputType });
+                let sheet = outputType == 'Just Images' ? ' No combined grid image.' : '';
+                mUI.note(`Grid started: ${this.totalImages()} images.${sheet}`);
                 onStarted();
             };
             if (typeof mControlNet != 'undefined' && mControlNet.isAnima(mState.mergedParams())) {
@@ -405,20 +462,27 @@ class MGrid {
         return cells;
     }
 
-    /** How many images the current selection would produce: the product of every axis that has 1+ cells.
-     * An axis with a single cell still multiplies by one, so it costs nothing but does pin that value.
-     * Prompt Replace counts the cells inside a `||` list, not the number of stored strings. */
+    /** How many images the current selection would produce: the product of the multi-value axes only.
+     * A one-cell axis is pinned on the base and does not multiply. No multi-value axis is one image when
+     * something is pinned, and zero when nothing is set. */
     totalImages() {
         let total = 1;
-        let axes = 0;
+        let multi = 0;
+        let fixed = false;
         for (let axis of MGrid.Axes) {
-            let count = this.cellsFor(axis).length;
-            if (count > 0) {
+            let count = this.cellCount(axis);
+            if (count >= 2) {
                 total *= count;
-                axes++;
+                multi++;
+            }
+            else if (count == 1) {
+                fixed = true;
             }
         }
-        return axes == 0 ? 0 : total;
+        if (multi == 0) {
+            return fixed ? 1 : 0;
+        }
+        return total;
     }
 
     /** Fills a grid sheet element. `close` dismisses that sheet. Reset calls this again on the open element
@@ -512,9 +576,10 @@ class MGrid {
             }
             let total = this.totalImages();
             let needsLora = this.needsLoraAxis();
+            let combined = this.sentAxisCount() > 3 ? ', no combined grid image' : '';
             count.textContent = needsLora ? 'Pick a LoRA in the LoRAs axis first.'
                 : total == 0 ? 'No axes set yet.'
-                : `${total} image${total == 1 ? '' : 's'}`;
+                : `${total} image${total == 1 ? '' : 's'}${combined}`;
             // Disabled rather than hidden, and the count above says why: a Run button that vanishes reads as
             // a bug, while one that is visibly unavailable next to "No axes set yet" explains itself.
             runButton.disabled = !this.isReady();
@@ -592,7 +657,98 @@ class MGrid {
                 }
             }
         }
+        this.applyFixed(base);
         return base;
+    }
+
+    /** Writes one-cell axes onto the base. Strength and Section land on the LoRA list: on the one LoRA
+     * when that axis is not sent, or as the trailing entries the server lines up with each LoRA cell. */
+    applyFixed(base) {
+        let lora = MGrid.axis('loras');
+        if (this.cellCount(lora) == 1 && !this.isGridAxis(lora)) {
+            this.pinLora(base, this.cellsFor(lora)[0]);
+        }
+        else if (this.isGridAxis(lora)) {
+            let extra = this.loraCellWidth();
+            let weight = this.oneCell('loraweights');
+            let section = this.oneCell('loraconfinement');
+            if (weight != null) {
+                this.appendLoraList(base, 'loraweights', weight, '1', extra);
+            }
+            if (section != null) {
+                this.appendLoraList(base, 'lorasectionconfinement', section, '0', extra);
+            }
+        }
+        for (let axis of MGrid.Axes) {
+            if (axis.key == 'loras' || axis.key == 'loraweights' || axis.key == 'loraconfinement' || axis.kind == 'text') {
+                continue;
+            }
+            if (this.cellCount(axis) != 1) {
+                continue;
+            }
+            let value = this.cellsFor(axis)[0];
+            if (axis.mode == 'aspectratio' && MState.AspectReferences[value]) {
+                base['aspectratio'] = value;
+                base['sidelength'] = `${mState.resolveSideLength(base)}`;
+                delete base['width'];
+                delete base['height'];
+            }
+            else {
+                base[axis.mode] = value;
+            }
+        }
+    }
+
+    /** How many LoRAs the widest LoRA cell appends. One name is one. A comma stack inside a cell is more. */
+    loraCellWidth() {
+        let width = 1;
+        for (let cell of this.cellsFor(MGrid.axis('loras'))) {
+            let count = MState.toList(cell).length;
+            if (count > width) {
+                width = count;
+            }
+        }
+        return width;
+    }
+
+    /** Appends the one LoRA cell onto the base, with its one strength and section when those are set. */
+    pinLora(base, cell) {
+        let weight = this.oneCell('loraweights');
+        let section = this.oneCell('loraconfinement');
+        let names = MState.toList(base['loras']);
+        let weights = MState.toList(base['loraweights']);
+        while (weights.length < names.length) {
+            weights.push('1');
+        }
+        let confs = MState.toList(base['lorasectionconfinement']);
+        for (let name of MState.toList(cell)) {
+            names.push(name);
+            weights.push(weight != null ? weight : '1');
+            if (section != null) {
+                while (confs.length < names.length - 1) {
+                    confs.push('0');
+                }
+                confs.push(section);
+            }
+        }
+        base['loras'] = names;
+        base['loraweights'] = weights;
+        if (section != null) {
+            base['lorasectionconfinement'] = confs;
+        }
+    }
+
+    /** Pads a LoRA-parallel list out to the base LoRAs, then appends `value` once per axis LoRA in the cell. */
+    appendLoraList(base, key, value, pad, extra) {
+        let list = MState.toList(base[key]);
+        let names = MState.toList(base['loras']);
+        while (list.length < names.length) {
+            list.push(pad);
+        }
+        for (let i = 0; i < extra; i++) {
+            list.push(value);
+        }
+        base[key] = list;
     }
 
     /** Fills one axis card. Each kind gets the picker its values actually need. */

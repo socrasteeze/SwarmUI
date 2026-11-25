@@ -2236,10 +2236,15 @@ button.m-header-link {
     line-height: 1;
     padding: 0 0.1rem;
 }
-.m-grid-quick,
 .m-grid-options {
     display: flex;
     flex-wrap: wrap;
+    gap: 0.3rem;
+}
+/* Equal columns, so 0.25 and 1 take the same width. Chips and name rows are not this class. */
+.m-grid-quick {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(4.25rem, 1fr));
     gap: 0.3rem;
 }
 .m-grid-options {
@@ -2289,6 +2294,13 @@ button.m-header-link {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+.m-grid-quick-button {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
 }
 .m-grid-quick-button.m-selected,
 .m-grid-option.m-selected {

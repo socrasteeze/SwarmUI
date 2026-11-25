@@ -263,7 +263,7 @@ class MGenSocket {
             'baseParams': baseParams,
             'gridAxes': sorted.map(a => ({ 'mode': a.mode, 'vals': a.vals })),
             'outputFolderName': 'm-grid',
-            'outputType': 'Grid Image',
+            'outputType': opts.outputType == 'Just Images' ? 'Just Images' : 'Grid Image',
             'doOverwrite': false,
             'fastSkip': false,
             'generatePage': false,

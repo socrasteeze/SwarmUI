@@ -560,18 +560,20 @@ class MCreate {
     /** How far a finger may travel and still count as a tap rather than a scroll, in CSS pixels. */
     static TapSlopPx = 10;
 
-    /** Generate on tap (the saved grid, in Grid mode); long-press (600ms) opens the grid form.
+    /** How long a press on Generate is held before the grid sheet opens, in milliseconds. */
+    static GridHoldMs = 600;
+
+    /** Generate on a short press (the saved grid, in Grid mode); a 600ms hold opens the grid form.
      *
-     * The finger's travel is tracked, not just the fact that it moved. Previously any touchmove cleared the
-     * long-press timer but recorded nothing, so touchend still fired a generation - meaning a scroll that
-     * merely STARTED on the button queued a batch on release. Moving the generate bar up next to the prompt
-     * put a full-width target in the middle of the scroll area and made that misfire easy to hit.
-     * The slop also stops sub-pixel jitter from cancelling a deliberate long-press, which previously made the
-     * grid sheet a coin flip to open. */
+     * Pointer events cover mouse and touch. A second listener for touch or click would also run: browsers
+     * emit those for the same press, and the batch would start twice or the sheet would open on a click.
+     * Travel is tracked, not just the fact of a move. A press that slides off is a scroll, not a tap, and
+     * not a hold. A pointer the system takes away is never a tap. */
     wireGenerateButton() {
         let holdTimer = null;
         let held = false;
         let moved = false;
+        let tracking = false;
         let startX = 0;
         let startY = 0;
         let cancelHold = () => {
@@ -580,47 +582,54 @@ class MCreate {
                 holdTimer = null;
             }
         };
-        this.genButton.addEventListener('touchstart', (e) => {
-            held = false;
-            moved = false;
-            let touch = e.touches.item(0);
-            startX = touch ? touch.clientX : 0;
-            startY = touch ? touch.clientY : 0;
-            cancelHold();
-            holdTimer = setTimeout(() => {
-                held = true;
-                this.openGridSheet();
-            }, 600);
-        }, { passive: true });
-        this.genButton.addEventListener('touchmove', (e) => {
-            let touch = e.touches.item(0);
-            if (!touch) {
+        this.genButton.addEventListener('pointerdown', (e) => {
+            if (e.button != 0 || tracking) {
                 return;
             }
-            if (Math.abs(touch.clientX - startX) > MCreate.TapSlopPx || Math.abs(touch.clientY - startY) > MCreate.TapSlopPx) {
+            held = false;
+            moved = false;
+            tracking = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            cancelHold();
+            try {
+                this.genButton.setPointerCapture(e.pointerId);
+            }
+            catch (err) {
+                /* A synthetic event has no pointer to capture. */
+            }
+            holdTimer = setTimeout(() => {
+                holdTimer = null;
+                held = true;
+                this.openGridSheet();
+            }, MCreate.GridHoldMs);
+        });
+        this.genButton.addEventListener('pointermove', (e) => {
+            if (!tracking) {
+                return;
+            }
+            if (Math.abs(e.clientX - startX) > MCreate.TapSlopPx || Math.abs(e.clientY - startY) > MCreate.TapSlopPx) {
                 moved = true;
                 cancelHold();
             }
-        }, { passive: true });
-        this.genButton.addEventListener('touchend', (e) => {
+        });
+        this.genButton.addEventListener('pointerup', (e) => {
+            if (e.button != 0 || !tracking) {
+                return;
+            }
+            tracking = false;
             cancelHold();
             if (!held && !moved) {
                 e.preventDefault();
                 this.doGenerate();
             }
         });
-        // A touch the system takes away is never a tap. Without this the flags keep their last values and a
-        // later stray touchend could still generate.
-        this.genButton.addEventListener('touchcancel', () => {
+        this.genButton.addEventListener('pointercancel', () => {
+            tracking = false;
             cancelHold();
             moved = true;
         });
         this.genButton.addEventListener('contextmenu', (e) => e.preventDefault());
-        this.genButton.addEventListener('click', (e) => {
-            if (e.detail > 0 && !('ontouchstart' in window)) {
-                this.doGenerate();
-            }
-        });
     }
 
     /** Fires one generation batch. Stays on this tab - the preview is right here.

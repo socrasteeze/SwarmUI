@@ -138,7 +138,8 @@ await page.evaluate(() => {
     mState.params['model'] = 'anima/checkpoint.safetensors';
     // Intercepted rather than sent: this is the payload every check below reads.
     window.__grid = null;
-    mGen.runGrid = (base, axes) => { window.__grid = { base, axes }; };
+    window.__realRunGrid = mGen.runGrid.bind(mGen);
+    mGen.runGrid = (base, axes, opts) => { window.__grid = { base, axes, opts: opts || null }; };
 });
 
 // ---- Registration and shape ----
@@ -280,13 +281,14 @@ await page.evaluate(() => {
 });
 const payload = await page.evaluate(() => window.__grid);
 const byMode = Object.fromEntries(payload.axes.map(a => [a.mode, a.vals]));
-check('every filled axis is sent, and no empty one is',
-    payload.axes.map(a => a.mode).sort().join(',') == 'cfgscale,loras,sampler,steps',
-    payload.axes.map(a => a.mode).join(','));
+check('multi-value axes are sent, and a one-value axis is a fixed param',
+    payload.axes.map(a => a.mode).sort().join(',') == 'loras,sampler,steps'
+    && !('cfgscale' in byMode) && `${payload.base.cfgscale}` == '4.5',
+    JSON.stringify({ axes: payload.axes.map(a => a.mode), cfg: payload.base.cfgscale }));
 check('the LoRA axis is joined with || so a stacked value stays one cell',
     byMode.loras == 'ill/style_a||ill/style_b', byMode.loras);
 check('every other axis is joined with a comma',
-    byMode.steps == '20,30' && byMode.sampler == 'euler,er_sde' && byMode.cfgscale == '4.5',
+    byMode.steps == '20,30' && byMode.sampler == 'euler,er_sde',
     JSON.stringify(byMode));
 check('the batch count never reaches the base params', !('images' in payload.base), JSON.stringify(Object.keys(payload.base)));
 check('a LoRA axis keeps non-overlapping base LoRAs so cells stack session + axis',
@@ -1227,6 +1229,208 @@ check('IME composition and keyCode 229 do not add',
     && enterAdd.ime.keyCode == 229, JSON.stringify(enterAdd));
 check('Enter in a LoRA or Preset search does not add the search text',
     enterAdd.loras == '' && enterAdd.searchEnter.prevented == false, JSON.stringify(enterAdd));
+
+// ---- One-cell axes are base params. More than three varying axes still runs, as Just Images. ----
+const folded = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.params['prompt'] = 'a cat';
+    mState.setLoras([]);
+    mGrid.starting = false;
+    mGrid.selected = {
+        preset: ['a/one', 'a/two', 'a/three', 'a/four', 'a/five'],
+        loras: ['ill/style_a', 'ill/style_b'],
+        loraweights: ['1'],
+        loraconfinement: ['0'],
+        promptreplace: ['cat', 'dog', 'wolf', 'fox', 'bird', 'fish', 'frog']
+    };
+    window.__grid = null;
+    mGrid.open();
+    let run = __sheet().querySelector('.m-grid-run');
+    let count = __sheet().querySelector('.m-grid-count').textContent;
+    run.click();
+    let payload = window.__grid;
+    let modes = payload.axes.map(a => a.mode).sort();
+    let weights = MState.toList(payload.base.loraweights);
+    let confs = MState.toList(payload.base.lorasectionconfinement);
+    return {
+        disabled: run.disabled,
+        count,
+        modes,
+        weights: weights[weights.length - 1],
+        section: confs[confs.length - 1],
+        outputType: payload.opts && payload.opts.outputType,
+        loraVals: payload.axes.find(a => a.mode == 'loras').vals
+    };
+});
+check('five presets, two LoRAs and seven replacements count as 70, and the one-value LoRA axes do not',
+    !folded.disabled && folded.count == '70 images' && folded.modes.join(',') == 'gridgenpresets,gridgenpromptreplace,loras',
+    JSON.stringify(folded));
+check('that run sends Grid Image, and the one strength and section are on the base LoRA list',
+    folded.outputType == 'Grid Image' && folded.weights == '1' && folded.section == '0'
+    && folded.loraVals == 'ill/style_a||ill/style_b',
+    JSON.stringify(folded));
+
+const justImages = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mState.params['prompt'] = 'a cat';
+    mGrid.starting = false;
+    mGrid.selected = {
+        preset: ['a/one', 'a/two'],
+        loras: ['ill/style_a', 'ill/style_b'],
+        steps: ['20', '30'],
+        sampler: ['euler', 'er_sde']
+    };
+    window.__grid = null;
+    mGrid.open();
+    let count = __sheet().querySelector('.m-grid-count').textContent;
+    let run = __sheet().querySelector('.m-grid-run');
+    run.click();
+    return {
+        disabled: run.disabled,
+        count,
+        modes: window.__grid.axes.map(a => a.mode).sort(),
+        outputType: window.__grid.opts && window.__grid.opts.outputType
+    };
+});
+check('four varying axes still start, as Just Images, and the count says there is no combined image',
+    !justImages.disabled && justImages.modes.length == 4 && justImages.outputType == 'Just Images'
+    && justImages.count == '16 images, no combined grid image',
+    JSON.stringify(justImages));
+
+const wiredOutput = await page.evaluate(() => {
+    let sent = [];
+    let previous = window.makeWSRequest;
+    window.makeWSRequest = (route, data) => { sent.push({ route, outputType: data.outputType, axes: data.gridAxes.length }); };
+    window.__realRunGrid({ prompt: 'a cat' }, [
+        { mode: 'steps', vals: '20,30' },
+        { mode: 'cfgscale', vals: '1,2' },
+        { mode: 'sampler', vals: 'euler,er_sde' }
+    ], { outputType: 'Grid Image' });
+    window.__realRunGrid({ prompt: 'a cat' }, [
+        { mode: 'steps', vals: '20,30' },
+        { mode: 'cfgscale', vals: '1,2' },
+        { mode: 'sampler', vals: 'euler,er_sde' },
+        { mode: 'scheduler', vals: 'normal,karras' }
+    ], { outputType: 'Just Images' });
+    window.__realRunGrid({ prompt: 'a cat' }, [{ mode: 'steps', vals: '20,30' }], {});
+    window.makeWSRequest = previous;
+    return sent;
+});
+check('runGrid sends Grid Image, Just Images, or Grid Image when the caller omits it',
+    wiredOutput.length == 3
+    && wiredOutput[0].outputType == 'Grid Image' && wiredOutput[0].axes == 3
+    && wiredOutput[1].outputType == 'Just Images' && wiredOutput[1].axes == 4
+    && wiredOutput[2].outputType == 'Grid Image' && wiredOutput[2].route == 'GridGenRun',
+    JSON.stringify(wiredOutput));
+
+// ---- Quick-pick buttons share one width. Name rows and chips do not have to. ----
+const quickWidths = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.selected = {};
+    mGrid.open();
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(item => item.querySelector('.m-grid-card-name').textContent == 'LoRA Strength');
+    card.open = true;
+    let widths = [...card.querySelectorAll('.m-grid-quick-button')].map(button => button.getBoundingClientRect().width);
+    let min = Math.min(...widths);
+    let max = Math.max(...widths);
+    return { widths, span: max - min, count: widths.length };
+});
+check('LoRA Strength quick-pick buttons are the same width',
+    quickWidths.count == 6 && quickWidths.span <= 1 && quickWidths.widths.every(width => width > 20),
+    JSON.stringify(quickWidths));
+
+// ---- A mouse hold opens the grid sheet. A short click still generates, once. ----
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.sheetContent = null;
+    mGrid.sheetClose = null;
+    mState.params['prompt'] = 'a cat';
+    mGrid.starting = false;
+    mGrid.selected = { steps: ['20', '30'] };
+    mGrid.setActive(true);
+    mCreate.renderGenTarget();
+    window.__grid = null;
+    window.__runs = 0;
+    let orig = mGen.runGrid;
+    mGen.runGrid = (base, axes, opts) => {
+        window.__runs++;
+        orig(base, axes, opts);
+    };
+    // Dispatched on the button. A real mouse press in this harness lands on the page body: the preview
+    // sits on top of the scrolled Generate row, so elementFromPoint never sees the button.
+    let button = document.querySelector('.m-gen-split .m-generate-button');
+    window.__pointer = (type, dx) => {
+        button.dispatchEvent(new PointerEvent(type, {
+            bubbles: true, cancelable: true, composed: true,
+            pointerId: 1, pointerType: 'mouse', isPrimary: true,
+            button: 0, buttons: type == 'pointerup' || type == 'pointercancel' ? 0 : 1,
+            clientX: 20 + (dx || 0), clientY: 20
+        }));
+    };
+});
+await page.evaluate(() => window.__pointer('pointerdown'));
+await page.waitForTimeout(80);
+await page.evaluate(() => window.__pointer('pointerup'));
+const shortPress = await page.evaluate(() => ({
+    runs: window.__runs,
+    sheet: !!document.querySelector('.m-grid-sheet'),
+    axes: window.__grid && window.__grid.axes && window.__grid.axes[0] && window.__grid.axes[0].vals
+}));
+check('a short mouse click runs the saved grid once and does not open the sheet',
+    shortPress.runs == 1 && !shortPress.sheet && shortPress.axes == '20,30', JSON.stringify(shortPress));
+
+await page.evaluate(() => {
+    window.__grid = null;
+    window.__runs = 0;
+    mGrid.starting = false;
+    window.__pointer('pointerdown');
+});
+await page.waitForFunction(() => !!document.querySelector('.m-grid-card'));
+await page.evaluate(() => window.__pointer('pointerup'));
+await page.waitForTimeout(100);
+const heldPress = await page.evaluate(() => ({
+    runs: window.__runs,
+    sheet: !!document.querySelector('.m-grid-card'),
+    grid: window.__grid
+}));
+check('holding the mouse on Generate for about 600ms opens the grid sheet and does not run',
+    heldPress.runs == 0 && heldPress.sheet && heldPress.grid == null, JSON.stringify(heldPress));
+
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    window.__grid = null;
+    window.__runs = 0;
+    mGrid.starting = false;
+    window.__pointer('pointerdown');
+    window.__pointer('pointermove', 40);
+});
+await page.waitForTimeout(700);
+await page.evaluate(() => window.__pointer('pointerup', 40));
+const slidPress = await page.evaluate(() => ({
+    runs: window.__runs,
+    sheet: !!document.querySelector('.m-grid-sheet')
+}));
+check('a mouse press that slides off Generate does not open the sheet or run',
+    slidPress.runs == 0 && !slidPress.sheet, JSON.stringify(slidPress));
+
+await page.evaluate(() => document.querySelector('.m-gen-target').click());
+const caretOpened = await page.evaluate(() => ({
+    modes: [...document.querySelectorAll('.m-gen-mode .m-seg-button')].map(button => button.textContent).join(','),
+    runs: window.__runs
+}));
+check('the target caret still opens its own sheet and does not run the grid',
+    caretOpened.modes == 'Single,Grid' && caretOpened.runs == 0, JSON.stringify(caretOpened));
 
 // ---- The search keyboard stays up through a pick, and goes when the list is scrolled ----
 // A real mouse click, not element.click(): only a real press moves focus to the tapped button.
