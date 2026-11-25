@@ -955,13 +955,13 @@ public class PromptEnhanceTests : SwarmUITest
 
     #region PromptEnhanceClient.ApplyStrength
 
-    /// <summary>Strength <c>faithful</c> sends the shielded prompt unchanged - exactly the pre-Strength
-    /// behavior.</summary>
+    /// <summary>Strength <c>faithful</c> prepends <see cref="PromptEnhanceClient.FaithfulDirective"/> so the
+    /// writer is told to stay nearly verbatim instead of polishing into glossy prose.</summary>
     [Test]
-    public void ApplyStrength_Faithful_SendsPromptUnchanged()
+    public void ApplyStrength_Faithful_PrependsFaithfulDirective()
     {
         string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "faithful", false, out string effective, out string note);
-        Assert.That(result, Is.EqualTo("a cat"));
+        Assert.That(result, Is.EqualTo($"{PromptEnhanceClient.FaithfulDirective}a cat"));
         Assert.That(effective, Is.EqualTo("faithful"));
         Assert.That(note, Is.Null);
     }
@@ -971,18 +971,18 @@ public class PromptEnhanceTests : SwarmUITest
     public void ApplyStrength_Expand_PrependsExpandDirective()
     {
         string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "expand", false, out string effective, out string note);
-        Assert.That(result, Is.EqualTo("Mode: expand\n\na cat"));
+        Assert.That(result, Is.EqualTo($"{PromptEnhanceClient.ExpandDirective}a cat"));
+        Assert.That(PromptEnhanceClient.ExpandDirective, Does.StartWith("Mode: expand\n\n"));
         Assert.That(effective, Is.EqualTo("expand"));
         Assert.That(note, Is.Null);
     }
 
-    /// <summary>Strength <c>full</c> prepends the exact full-scene directive from the spec, verbatim.</summary>
+    /// <summary>Strength <c>full</c> prepends <see cref="PromptEnhanceClient.FullDirective"/>.</summary>
     [Test]
     public void ApplyStrength_Full_PrependsFullDirective()
     {
         string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "full", false, out string effective, out string note);
-        Assert.That(result, Is.EqualTo(
-            "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged. Do not name an art style or medium I did not ask for, and do not mention these instructions in the prompt.\n\na cat"));
+        Assert.That(result, Is.EqualTo($"{PromptEnhanceClient.FullDirective}a cat"));
         Assert.That(effective, Is.EqualTo("full"));
         Assert.That(note, Is.Null);
     }
@@ -1009,7 +1009,7 @@ public class PromptEnhanceTests : SwarmUITest
     public void ApplyStrength_IsCaseInsensitive()
     {
         string result = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "ExPaNd", false, out string effective, out string note);
-        Assert.That(result, Is.EqualTo("Mode: expand\n\na cat"));
+        Assert.That(result, Is.EqualTo($"{PromptEnhanceClient.ExpandDirective}a cat"));
         Assert.That(effective, Is.EqualTo("expand"));
     }
 
@@ -1050,7 +1050,7 @@ public class PromptEnhanceTests : SwarmUITest
     {
         string result = PromptEnhanceClient.ApplyStrength("/fully render this", "/fully render this", "expand", false, out string effective, out string note);
         Assert.That(effective, Is.EqualTo("expand"));
-        Assert.That(result, Is.EqualTo("Mode: expand\n\n/fully render this"));
+        Assert.That(result, Is.EqualTo($"{PromptEnhanceClient.ExpandDirective}/fully render this"));
     }
 
     /// <summary>On an edit profile, strength <c>full</c> is capped down to <c>expand</c>, and a note explains
@@ -1059,7 +1059,7 @@ public class PromptEnhanceTests : SwarmUITest
     public void ApplyStrength_EditProfile_FullIsCappedToExpandWithNote()
     {
         string result = PromptEnhanceClient.ApplyStrength("edit the sky", "edit the sky", "full", true, out string effective, out string note);
-        Assert.That(result, Is.EqualTo("Mode: expand\n\nedit the sky"));
+        Assert.That(result, Is.EqualTo($"{PromptEnhanceClient.ExpandDirective}edit the sky"));
         Assert.That(effective, Is.EqualTo("expand"));
         Assert.That(note, Is.EqualTo("Full scene is not available for edit profiles; used Expand."));
     }
@@ -1070,11 +1070,11 @@ public class PromptEnhanceTests : SwarmUITest
     public void ApplyStrength_EditProfile_FaithfulAndExpand_Unaffected()
     {
         string faithfulResult = PromptEnhanceClient.ApplyStrength("edit the sky", "edit the sky", "faithful", true, out string faithfulEffective, out string faithfulNote);
-        Assert.That(faithfulResult, Is.EqualTo("edit the sky"));
+        Assert.That(faithfulResult, Is.EqualTo($"{PromptEnhanceClient.FaithfulDirective}edit the sky"));
         Assert.That(faithfulEffective, Is.EqualTo("faithful"));
         Assert.That(faithfulNote, Is.Null);
         string expandResult = PromptEnhanceClient.ApplyStrength("edit the sky", "edit the sky", "expand", true, out string expandEffective, out string expandNote);
-        Assert.That(expandResult, Is.EqualTo("Mode: expand\n\nedit the sky"));
+        Assert.That(expandResult, Is.EqualTo($"{PromptEnhanceClient.ExpandDirective}edit the sky"));
         Assert.That(expandEffective, Is.EqualTo("expand"));
         Assert.That(expandNote, Is.Null);
     }
@@ -1187,8 +1187,8 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceClient.BuildOllamaBody(reroll)["options"]?.Value<int>("seed"), Is.EqualTo(4242));
     }
 
-    /// <summary>Krea 2 gets its own full-scene directive, which never forbids naming a medium. Other profiles,
-    /// and the Krea 2 reference profile, keep the shared one.</summary>
+    /// <summary>Krea 2 and the Krea 2 reference profile use the Krea directives. Other profiles keep the shared
+    /// ones. Every directive names the boilerplate ban.</summary>
     [Test]
     public void ApplyStrength_Full_Krea2UsesItsOwnDirective()
     {
@@ -1196,12 +1196,29 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(krea, Is.EqualTo($"{PromptEnhanceClient.KreaFullDirective}a cat"));
         Assert.That(krea, Does.Not.Contain("Do not name an art style"));
         Assert.That(effective, Is.EqualTo("full"));
+        string kreaReference = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "full", false, out _, out _, "krea-2.reference");
+        Assert.That(kreaReference, Is.EqualTo($"{PromptEnhanceClient.KreaFullDirective}a cat"));
         string other = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "full", false, out _, out _, "anima");
         Assert.That(other, Is.EqualTo($"{PromptEnhanceClient.FullDirective}a cat"));
-        Assert.That(PromptEnhanceClient.FullDirectiveFor("krea-2.reference"), Is.EqualTo(PromptEnhanceClient.FullDirective));
+        Assert.That(PromptEnhanceClient.FullDirectiveFor("krea-2.reference"), Is.EqualTo(PromptEnhanceClient.KreaFullDirective));
+        Assert.That(PromptEnhanceClient.FullDirectiveFor("anima"), Is.EqualTo(PromptEnhanceClient.FullDirective));
         string kreaExpand = PromptEnhanceClient.ApplyStrength("a cat", "a cat", "expand", false, out _, out _, "krea-2");
         Assert.That(kreaExpand, Is.EqualTo($"{PromptEnhanceClient.KreaExpandDirective}a cat"));
-        Assert.That(PromptEnhanceClient.ExpandDirectiveFor("krea-2.reference"), Is.EqualTo(PromptEnhanceClient.ExpandDirective));
+        Assert.That(PromptEnhanceClient.ExpandDirectiveFor("krea-2.reference"), Is.EqualTo(PromptEnhanceClient.KreaExpandDirective));
+        Assert.That(PromptEnhanceClient.ExpandDirectiveFor("anima"), Is.EqualTo(PromptEnhanceClient.ExpandDirective));
+        Assert.That(PromptEnhanceClient.FaithfulDirectiveFor("krea-2"), Is.EqualTo(PromptEnhanceClient.KreaFaithfulDirective));
+        Assert.That(PromptEnhanceClient.FaithfulDirectiveFor("krea-2.reference"), Is.EqualTo(PromptEnhanceClient.KreaFaithfulDirective));
+        Assert.That(PromptEnhanceClient.FaithfulDirectiveFor("Krea-2.Reference"), Is.EqualTo(PromptEnhanceClient.KreaFaithfulDirective));
+        Assert.That(PromptEnhanceClient.FaithfulDirectiveFor("anima"), Is.EqualTo(PromptEnhanceClient.FaithfulDirective));
+        Assert.That(PromptEnhanceClient.FaithfulDirective, Does.Contain("boilerplate"));
+        Assert.That(PromptEnhanceClient.ExpandDirective, Does.Contain("boilerplate"));
+        Assert.That(PromptEnhanceClient.FullDirective, Does.Contain("boilerplate"));
+        Assert.That(PromptEnhanceClient.KreaFaithfulDirective, Does.Contain("boilerplate"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("boilerplate"));
+        Assert.That(PromptEnhanceClient.KreaFullDirective, Does.Contain("boilerplate"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.StartWith("Mode: expand\n\n"));
+        Assert.That(PromptEnhanceClient.KreaFullDirective, Does.EndWith("Request: "));
+        Assert.That(PromptEnhanceClient.KreaFaithfulDirective, Does.EndWith("Request: "));
     }
 
     /// <summary>Endpoint config loads an optional integer <c>num_ctx</c>, and a missing key stays null.</summary>

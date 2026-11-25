@@ -103,9 +103,9 @@ the profile files themselves are never modified:
 
 | API value | Effect |
 |---|---|
-| `faithful` | Sends the shielded prompt unchanged - exactly the pre-Strength behavior. |
-| `expand` | Prepends `Mode: expand\n\n` - the profile pack's own "restrained visual additions" switch. |
-| `full` | **Default.** Prepends an explicit instruction to build out setting, lighting, camera framing, mood, and material detail while keeping every detail the user gave unchanged. It also tells the writer not to name an art style the user did not ask for and not to repeat the instruction in the prompt - without that, Krea 2 echoed "the art style remains consistent..." into its output and the tag profiles added "anime style". |
+| `faithful` | Prepends a rewrite directive. Keep the user's words and their order nearly verbatim. Only fix grammar, and add at most a few concrete details that are already implied. Never add quality or style boilerplate the user did not write (cinematic, photorealistic, high contrast, masterpiece, ultra detailed, 8k, dramatic lighting, bokeh, highly detailed, ultra HD, 4k, and close cousins). Prefer plain snapshot language. |
+| `expand` | Prepends `Mode: expand` plus a modest-addition instruction: concrete scene details only (what is in the picture, where, and what is happening), about 1.5 times the user's length, the same boilerplate ban, and the same snapshot language. An already detailed request is only polished. |
+| `full` | **Default.** Prepends a complete-scene instruction. When the user left them out, the writer may add ordinary setting, lighting, and framing as visible facts. The same boilerplate ban applies. Additions stay snapshot language, not glossy or cinematic wording. It does not invent an art style or a fancy medium the user did not ask for. A plain "photograph of" or "illustration of" is acceptable only when a medium is needed and the user named none. It still tells the writer not to mention the instructions in the prompt. |
 
 Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
 
@@ -126,10 +126,12 @@ Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
    never interact with shielding - `Unshield` still re-appends the shield-extracted tokens exactly as before.
    The shortcut check in rule 1 looks at the user's raw, unshielded prompt.
 
-Krea 2 has its own Expand and Full scene directives (`KreaExpandDirective`, `KreaFullDirective`). The shared
-Full scene directive forbids naming a medium, which the Krea 2 profile asks for, and its mood and material
-wording drew sounds, smells and guesses from the 8B writer. The bare `Mode: expand` drew a comma tag list.
-The Krea 2 reference profile keeps the shared rules.
+Krea 2 and the Krea 2 reference profile use their own Faithful, Expand, and Full scene directives
+(`KreaFaithfulDirective`, `KreaExpandDirective`, `KreaFullDirective`). Any profile id that equals or starts
+with `krea-2` (case-insensitive) gets those, including `krea-2.reference`. Faithful begins with `Mode: rewrite`.
+Expand and Full scene still begin with `Mode: expand`, and all three still end in `Request:`, so the writer
+keeps sentences instead of a comma tag list. The wording matches the three levels above. Other profiles use
+the shared directives.
 
 ## Reroll
 
@@ -140,7 +142,7 @@ cache.
 
 The cache key (`PromptEnhanceCache.Key`) hashes the exact text the writer receives - directive included - plus
 the effective strength, the resolved writer mode (`t2i` or `edit`), and a digest of the downscaled reference
-images, so a `full` rewrite and a `faithful` pass-through of the same idea never collide, an edit and a
+images, so a `full` rewrite and a `faithful` rewrite of the same idea never collide, an edit and a
 text-to-image rewrite of the same words never collide, a repeat request at the same strength still hits the
 cache, and revising a directive's wording invalidates the replies written against the old wording instead of
 serving them. Both the `running` status frame and the terminal result
@@ -340,7 +342,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.5.2+krea-no-emdash`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.5.3+krea-tone-down`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 

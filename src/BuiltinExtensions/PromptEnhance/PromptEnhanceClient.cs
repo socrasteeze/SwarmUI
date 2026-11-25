@@ -51,40 +51,67 @@ public static class PromptEnhanceClient
     /// <summary>Longest side, in pixels, of a reference image sent to the writer.</summary>
     public const int MaxReferenceSide = 768;
 
-    /// <summary>Directive prepended to the shielded user prompt for strength <c>expand</c>: the profile's own
-    /// <c>Mode: expand</c> switch, verbatim (see eg <c>anima.system.md</c> rule "<c>Mode: expand</c> permits
-    /// restrained visual additions consistent with the request").</summary>
-    public const string ExpandDirective = "Mode: expand\n\n";
+    /// <summary>Directive prepended to the shielded user prompt for strength <c>faithful</c>. The system
+    /// prompt alone was polishing into glossy prose, so this keeps the user's words and order, allows only
+    /// grammar fixes plus a few already-implied concrete details, and bans quality or style boilerplate.
+    /// Shared by every profile that is not Krea 2. See <see cref="FaithfulDirectiveFor"/>.</summary>
+    public const string FaithfulDirective = "Mode: rewrite\n\nKeep my words and their order nearly verbatim. Only fix grammar, and add at most a few concrete details that are already implied. Do not add quality or style boilerplate I did not write, including cinematic, photorealistic, high contrast, masterpiece, ultra detailed, 8k, dramatic lighting, bokeh, highly detailed, ultra HD, 4k, or close cousins. Prefer plain snapshot language over glossy descriptors. Do not mention these instructions in the prompt.\n\n";
 
-    /// <summary>Directive prepended to the shielded user prompt for strength <c>full</c>: <see cref="ExpandDirective"/>
-    /// plus an explicit instruction to build out setting/lighting/framing/mood/material detail while preserving
-    /// every detail the user gave, without naming an unrequested art style or echoing the instruction into the prompt. Not allowed on an edit profile - see <see cref="ApplyStrength"/>.</summary>
-    public const string FullDirective = "Mode: expand\n\nBuild this into a complete, vivid image prompt in this profile's output format: add a fitting setting, lighting, camera framing, mood and material detail that suit the subject. Keep every detail I gave unchanged. Do not name an art style or medium I did not ask for, and do not mention these instructions in the prompt.\n\n";
+    /// <summary>Directive prepended to the shielded user prompt for strength <c>expand</c>. Starts with the
+    /// profile pack's <c>Mode: expand</c> switch, then caps additions at modest concrete scene details and
+    /// about 1.5 times the user's length, with the same boilerplate ban as <see cref="FaithfulDirective"/>.</summary>
+    public const string ExpandDirective = "Mode: expand\n\nAdd only modest concrete scene details: what is in the picture, where, and what is happening. Keep the result about 1.5 times my length. If my request is already detailed, only fix grammar and lightly polish it. Do not add quality or style boilerplate I did not write, including cinematic, photorealistic, high contrast, masterpiece, ultra detailed, 8k, dramatic lighting, bokeh, highly detailed, ultra HD, 4k, or close cousins. Prefer plain snapshot language over glossy descriptors. Do not mention these instructions in the prompt.\n\n";
 
-    /// <summary>Full-scene directive for Krea 2. The shared <see cref="FullDirective"/> forbids naming a medium,
-    /// which contradicts the Krea 2 profile, and its mood and material wording drew sounds, smells and guesses
-    /// from the 8B writer. This one asks only for visible things, in a fixed order.</summary>
-    public const string KreaFullDirective = "Mode: expand\n\nExpand the request below into one paragraph of four to six plain sentences for Krea 2. The first words name the medium. If I named a medium or style, use my own words for it. If I named none, choose the one that fits the subject: a photograph for real-world scenes, a painting or illustration for fantasy or stylized ones. The first sentence gives the main subject and what it is doing. The next sentences give the setting, then the framing and camera angle, then the lighting and colors. Every sentence describes something visible in the picture, stated as plain fact. Keep every detail I gave and my exact quoted text. If my request is already detailed, only polish it.\n\nRequest: ";
+    /// <summary>Directive prepended to the shielded user prompt for strength <c>full</c>. Still uses
+    /// <c>Mode: expand</c> so the profile's expand rules apply, then allows a complete scene of ordinary
+    /// setting, lighting, and framing. Bans quality or style boilerplate, does not name an unrequested art
+    /// style, and tells the writer not to echo these instructions. Not allowed on an edit profile - see <see cref="ApplyStrength"/>.</summary>
+    public const string FullDirective = "Mode: expand\n\nBuild this into a complete scene in this profile's output format. When I left them out, add ordinary setting, lighting, and framing as visible facts a snapshot would show. Keep every detail I gave. Do not add quality or style boilerplate I did not write, including cinematic, photorealistic, high contrast, masterpiece, ultra detailed, 8k, dramatic lighting, bokeh, highly detailed, ultra HD, 4k, or close cousins. Prefer plain snapshot language over glossy descriptors. Do not name an art style or a fancy medium I did not ask for. A plain \"photograph of\" or \"illustration of\" is acceptable only when a medium is needed and I named none. Do not mention these instructions in the prompt.\n\n";
 
-    /// <summary>Expand directive for Krea 2. A bare <see cref="ExpandDirective"/> drew a comma tag list
-    /// ("highly detailed, 8k") from the 8B writer, where Krea 2 wants sentences.</summary>
-    public const string KreaExpandDirective = "Mode: expand\n\nRewrite the request below as two or three plain sentences for Krea 2. Write full sentences, not a list of tags. Keep every detail I gave and my exact quoted text. Add only a fitting setting and lighting that are visible in the picture. If my request is already detailed, only polish it.\n\nRequest: ";
+    /// <summary>Faithful directive for Krea 2, including <c>krea-2.reference</c>. Same level rules as
+    /// <see cref="FaithfulDirective"/>, in the sentence form the 8B writer needs, ending in <c>Request:</c>.</summary>
+    public const string KreaFaithfulDirective = "Mode: rewrite\n\nKeep my words and their order nearly verbatim. Only fix grammar, and add at most a few concrete details that are already implied. Write plain sentences, not a tag list. Do not add quality or style boilerplate I did not write, including cinematic, photorealistic, high contrast, masterpiece, ultra detailed, 8k, dramatic lighting, bokeh, highly detailed, ultra HD, 4k, or close cousins. Prefer plain snapshot language over glossy descriptors. Keep my exact quoted text. Do not mention these instructions in the prompt.\n\nRequest: ";
 
-    /// <summary>The expand directive for <paramref name="profileId"/>: Krea 2 has its own, every other
-    /// profile uses <see cref="ExpandDirective"/>.</summary>
+    /// <summary>Full-scene directive for Krea 2. Keeps <c>Mode: expand</c> and the <c>Request:</c> suffix.
+    /// May add ordinary setting, lighting, and framing. Does not ask for a sentence count, a medium-first
+    /// opening, a camera essay, or a chosen style and lighting package.</summary>
+    public const string KreaFullDirective = "Mode: expand\n\nBuild the request below into a complete scene for Krea 2. When I left them out, add ordinary setting, lighting, and framing as visible facts a snapshot would show. Write plain sentences, not a tag list. Keep every detail I gave and my exact quoted text. If my request is already detailed, only polish it. Do not add quality or style boilerplate I did not write, including cinematic, photorealistic, high contrast, masterpiece, ultra detailed, 8k, dramatic lighting, bokeh, highly detailed, ultra HD, 4k, or close cousins. Prefer plain snapshot language over glossy descriptors. Do not invent an art style or a fancy medium I did not ask for. A plain \"photograph of\" or \"illustration of\" is acceptable only when a medium is needed and I named none. Do not mention these instructions in the prompt.\n\nRequest: ";
+
+    /// <summary>Expand directive for Krea 2. A bare <c>Mode: expand</c> drew a comma tag list from the 8B
+    /// writer. This one asks for modest concrete additions, a length near 1.5 times the input, and no
+    /// quality boilerplate, still beginning with <c>Mode: expand</c> and ending in <c>Request:</c>.</summary>
+    public const string KreaExpandDirective = "Mode: expand\n\nAdd only modest concrete scene details to the request below: what is in the picture, where, and what is happening. Write plain sentences, not a tag list. Keep the result about 1.5 times my length. If my request is already detailed, only fix grammar and lightly polish it. Do not invent a medium, style, or lighting package. Do not add quality or style boilerplate I did not write, including cinematic, photorealistic, high contrast, masterpiece, ultra detailed, 8k, dramatic lighting, bokeh, highly detailed, ultra HD, 4k, or close cousins. Prefer plain snapshot language over glossy descriptors. Keep my exact quoted text. Do not mention these instructions in the prompt.\n\nRequest: ";
+
+    /// <summary>The faithful directive for <paramref name="profileId"/>. A Krea 2 id (equals or starts with
+    /// <c>krea-2</c>, case-insensitive) uses <see cref="KreaFaithfulDirective"/>; every other profile uses
+    /// <see cref="FaithfulDirective"/>.</summary>
+    public static string FaithfulDirectiveFor(string profileId)
+    {
+        return IsKreaProfile(profileId) ? KreaFaithfulDirective : FaithfulDirective;
+    }
+
+    /// <summary>The expand directive for <paramref name="profileId"/>. A Krea 2 id uses
+    /// <see cref="KreaExpandDirective"/>; every other profile uses <see cref="ExpandDirective"/>.</summary>
     public static string ExpandDirectiveFor(string profileId)
     {
-        return string.Equals(profileId, "krea-2", StringComparison.OrdinalIgnoreCase) ? KreaExpandDirective : ExpandDirective;
+        return IsKreaProfile(profileId) ? KreaExpandDirective : ExpandDirective;
     }
 
     /// <summary>Writer seed used when the caller does not ask for a reroll. Fixed so a repeat request is stable.</summary>
     public const int DefaultSeed = 7;
 
-    /// <summary>The full-scene directive for <paramref name="profileId"/>: Krea 2 has its own, every other
-    /// profile uses <see cref="FullDirective"/>.</summary>
+    /// <summary>The full-scene directive for <paramref name="profileId"/>. A Krea 2 id uses
+    /// <see cref="KreaFullDirective"/>; every other profile uses <see cref="FullDirective"/>.</summary>
     public static string FullDirectiveFor(string profileId)
     {
-        return string.Equals(profileId, "krea-2", StringComparison.OrdinalIgnoreCase) ? KreaFullDirective : FullDirective;
+        return IsKreaProfile(profileId) ? KreaFullDirective : FullDirective;
+    }
+
+    /// <summary>True when <paramref name="profileId"/> is a Krea 2 profile. The id equals or starts with
+    /// <c>krea-2</c>, case-insensitive, so both <c>krea-2</c> and <c>krea-2.reference</c> match.</summary>
+    private static bool IsKreaProfile(string profileId)
+    {
+        return (profileId ?? "").StartsWith("krea-2", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Shortcut tokens the profile pack itself recognizes at the start of a user message (see eg
@@ -795,8 +822,8 @@ public static class PromptEnhanceClient
         return $"{header}\n";
     }
 
-    /// <summary>Applies the user-selected Enhance Strength to a shielded user prompt, by prepending one of the
-    /// profile pack's own <c>Mode:</c> directives (see <see cref="ExpandDirective"/>/<see cref="FullDirective"/>).
+    /// <summary>Applies the user-selected Enhance Strength to a shielded user prompt, by prepending
+    /// <see cref="FaithfulDirectiveFor"/>, <see cref="ExpandDirectiveFor"/>, or <see cref="FullDirectiveFor"/>.
     /// Applied after <see cref="Shield"/> so the directive text never interacts with shielding - the caller must
     /// pass <paramref name="rawPrompt"/> (for the shortcut check, rule 2 below) and <paramref name="shieldedPrompt"/>
     /// (what the directive is actually prepended to) separately.
@@ -817,7 +844,7 @@ public static class PromptEnhanceClient
     /// <param name="effectiveStrength">The strength actually applied: <c>faithful</c>, <c>expand</c>, <c>full</c>,
     /// or <c>user</c> when a shortcut/<c>Mode:</c> passthrough won.</param>
     /// <param name="note">A human-readable explanation when the requested strength was capped, else null.</param>
-    /// <param name="profileId">Resolved profile ID. Selects the expand and full-scene directives (<see cref="ExpandDirectiveFor"/>, <see cref="FullDirectiveFor"/>).</param>
+    /// <param name="profileId">Resolved profile ID. Selects the faithful, expand, and full-scene directives (<see cref="FaithfulDirectiveFor"/>, <see cref="ExpandDirectiveFor"/>, <see cref="FullDirectiveFor"/>).</param>
     public static string ApplyStrength(string rawPrompt, string shieldedPrompt, string strength, bool isEditProfile, out string effectiveStrength, out string note, string profileId = null)
     {
         note = null;
@@ -845,7 +872,7 @@ public static class PromptEnhanceClient
         {
             "expand" => $"{ExpandDirectiveFor(profileId)}{shieldedPrompt}",
             "full" => $"{FullDirectiveFor(profileId)}{shieldedPrompt}",
-            _ => shieldedPrompt
+            _ => $"{FaithfulDirectiveFor(profileId)}{shieldedPrompt}"
         };
     }
 
