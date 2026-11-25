@@ -353,6 +353,102 @@ class MImages {
         return typeof meta.prompt == 'string' ? meta.prompt : '';
     }
 
+    /** Params object for one image, or null when metadata is missing or not an object.
+     * A JSON string is parsed first. Prefers sui_image_params, then the object itself. */
+    imageParams(metadata) {
+        if (!metadata) {
+            return null;
+        }
+        let full = metadata;
+        if (typeof full == 'string') {
+            try {
+                full = JSON.parse(full);
+            }
+            catch (e) {
+                return null;
+            }
+        }
+        if (!full || typeof full != 'object' || Array.isArray(full)) {
+            return null;
+        }
+        let params = full.sui_image_params || full;
+        if (!params || typeof params != 'object' || Array.isArray(params)) {
+            return null;
+        }
+        return params;
+    }
+
+    /** File name only, with the folder and a trailing weight-file extension removed. */
+    shortModelName(name) {
+        if (typeof name != 'string') {
+            return '';
+        }
+        let text = name.trim().replaceAll('\\', '/');
+        if (!text) {
+            return '';
+        }
+        let slash = text.lastIndexOf('/');
+        if (slash != -1) {
+            text = text.substring(slash + 1);
+        }
+        return text.replace(/\.(safetensors|ckpt|sft|gguf|engine|pt|bin)$/i, '');
+    }
+
+    /** List param as an array or as comma-separated text. Empty entries stay so weights keep their index. */
+    metadataList(value) {
+        if (Array.isArray(value)) {
+            let items = [];
+            for (let item of value) {
+                items.push(item == null ? '' : `${item}`.trim());
+            }
+            return items;
+        }
+        if (typeof value == 'number' && !Number.isNaN(value)) {
+            return [`${value}`];
+        }
+        if (typeof value != 'string' || !value.trim()) {
+            return [];
+        }
+        let parts = value.includes('\n|||\n') ? value.split('\n|||\n') : value.split(',');
+        let items = [];
+        for (let part of parts) {
+            items.push(part.trim());
+        }
+        return items;
+    }
+
+    /** Checkpoint and LoRA lines. Empty when the image has neither, so the block can be omitted. */
+    modelSummary(metadata) {
+        let params = this.imageParams(metadata);
+        if (!params) {
+            return '';
+        }
+        let lines = [];
+        let model = this.shortModelName(params.model);
+        if (model) {
+            lines.push(`Checkpoint: ${model}`);
+        }
+        let loras = this.metadataList(params.loras);
+        let weights = this.metadataList(params.loraweights);
+        let bits = [];
+        for (let i = 0; i < loras.length; i++) {
+            let name = this.shortModelName(loras[i]);
+            if (!name) {
+                continue;
+            }
+            if (i < weights.length && weights[i] != '') {
+                bits.push(`${name}: ${weights[i]}`);
+            }
+            else {
+                bits.push(name);
+            }
+        }
+        if (bits.length > 0) {
+            lines.push(`LoRAs: ${bits.join(', ')}`);
+        }
+        return lines.join('\n');
+    }
+
     /** Copies text. Resolves false when the async API and the textarea fallback both fail. */
     copyText(text) {
         let fallback = () => {
@@ -418,6 +514,13 @@ class MImages {
             prompt.setAttribute('aria-label', 'Resolved Prompt');
             prompt.setAttribute('role', 'note');
             overlay.appendChild(prompt);
+        }
+        let modelText = this.modelSummary(entry.metadata);
+        if (modelText) {
+            let models = mUI.el('div', 'm-viewer-models', modelText);
+            models.setAttribute('aria-label', 'Checkpoint and LoRAs');
+            models.setAttribute('role', 'note');
+            overlay.appendChild(models);
         }
         let actions = mUI.el('div', 'm-viewer-actions');
         let closed = false;
@@ -569,8 +672,7 @@ class MImages {
                 });
             });
         });
-        let closeButton = addAction('Close', close);
-        closeButton.classList.add('m-viewer-close');
+        addAction('Close', close);
         overlay.appendChild(actions);
         overlay.addEventListener('keydown', e => {
             if (e.key == 'Escape') {
