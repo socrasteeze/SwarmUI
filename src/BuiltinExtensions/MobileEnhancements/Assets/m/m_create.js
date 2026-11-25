@@ -83,7 +83,107 @@ class MCreate {
         this.previewCanvas.appendChild(mUI.el('div', 'm-preview-canvas-bar'));
         this.previewWrap.appendChild(this.previewCanvas);
         this.pending = false;
+        this.previewRendering = false;
         this.renderPreviewState();
+        // The column count depends on the box width. A window resize, or a keyboard that changes it, lands here.
+        this.previewObserver = new ResizeObserver(() => this.renderPreviewState());
+        this.previewObserver.observe(this.previewWrap);
+    }
+
+    /** Width, reserved height, and gap of the live preview, in pixels.
+     * The grid is display:none while empty, so a missing height falls back to --m-preview-h. */
+    previewBox() {
+        let grid = this.previewGrid;
+        // The wrap, not the grid: a vertical scrollbar inside the grid would shrink clientWidth and
+        // the column count could flip back and forth.
+        let width = this.previewWrap.clientWidth;
+        let height = grid.clientHeight;
+        let gap = parseFloat(getComputedStyle(grid).rowGap);
+        if (!Number.isFinite(gap) || gap < 0) {
+            gap = 0;
+        }
+        if (!(height > 0)) {
+            let raw = getComputedStyle(this.previewWrap).getPropertyValue('--m-preview-h').trim();
+            let value = parseFloat(raw);
+            if (Number.isFinite(value)) {
+                if (raw.endsWith('dvh') || raw.endsWith('vh')) {
+                    height = window.innerHeight * value / 100;
+                }
+                else {
+                    height = value;
+                }
+            }
+        }
+        if (!(width > 0)) {
+            width = this.previewWrap.clientWidth;
+        }
+        return { 'width': width, 'height': height, 'gap': gap };
+    }
+
+    /** Width/height of one cell. A real preview image wins. Otherwise the Create-tab aspect.
+     * A 1px stub is not a real image, so it does not override the Create tab. */
+    previewAspectRatio() {
+        for (let key in this.liveTiles) {
+            let img = this.liveTiles[key].querySelector('img');
+            if (img && img.naturalWidth >= 2 && img.naturalHeight >= 2) {
+                return img.naturalWidth / img.naturalHeight;
+            }
+        }
+        for (let key in this.liveTiles) {
+            let meta = this.liveTiles[key].dataset.metadata;
+            if (!meta) {
+                continue;
+            }
+            try {
+                let params = (JSON.parse(meta).sui_image_params) || {};
+                let w = parseInt(params.width, 10);
+                let h = parseInt(params.height, 10);
+                if (w > 1 && h > 1) {
+                    return w / h;
+                }
+            }
+            catch (e) {
+                /* unreadable metadata falls through to the Create tab */
+            }
+        }
+        if (typeof mState != 'undefined') {
+            let res = mState.previewResolution();
+            if (res && res[0] > 0 && res[1] > 0) {
+                return res[0] / res[1];
+            }
+            let aspect = mState.params['aspectratio'];
+            if (aspect && MState.AspectReferences[aspect]) {
+                return MState.AspectReferences[aspect][0] / MState.AspectReferences[aspect][1];
+            }
+            if (aspect && MState.ExtraAspects[aspect]) {
+                return MState.ExtraAspects[aspect];
+            }
+            if (mState.customRatio > 0) {
+                return mState.customRatio;
+            }
+        }
+        return 1;
+    }
+
+    /** How many columns fit. One tile is always one column. Otherwise each cell is half the reserved
+     * height (two rows visible, the rest scroll) and as many of that width fit across as the box allows.
+     * ratio is cell width/height, so a portrait cell is narrower and more of them fit. */
+    static previewColumns(width, height, ratio, count, gap) {
+        if (!(count > 1) || !(width > 0) || !(height > 0)) {
+            return 1;
+        }
+        let space = Number.isFinite(gap) && gap >= 0 ? gap : 0;
+        let safeRatio = ratio > 0 ? ratio : 1;
+        let cellHeight = Math.max(1, (height - space) / 2);
+        let minWidth = Math.max(1, cellHeight * safeRatio);
+        let columns = Math.floor((width + space) / (minWidth + space));
+        if (columns < 1) {
+            columns = 1;
+        }
+        if (columns > count) {
+            columns = count;
+        }
+        return columns;
     }
 
     /** Builds the (initially detached, empty) resolved-prompt readout shown below the preview. Kept out of
@@ -156,16 +256,23 @@ class MCreate {
      * The block occupies the same height in every one of these states - idle, queued, generating, done - so
      * none of the transitions between them moves anything below it. */
     renderPreviewState() {
+        if (this.previewRendering) {
+            return;
+        }
+        this.previewRendering = true;
         let count = Object.keys(this.liveTiles).length;
         this.previewWrap.classList.toggle('m-preview-empty', count == 0);
         this.previewCanvas.classList.toggle('m-preview-canvas-pending', this.pending);
         this.previewCanvasLabel.textContent = this.pending ? 'Queued...' : 'No preview yet';
-        let columns = count > 1 ? 2 : 1;
-        // Cells are sized to fill the reserved canvas rather than to a fixed dvh, so a 1-up, a 2-up and a 2x2
-        // all come out the same total height instead of each batch size being its own layout.
+        let box = this.previewBox();
+        let ratio = count > 1 ? this.previewAspectRatio() : 1;
+        let columns = MCreate.previewColumns(box.width, box.height, ratio, count, box.gap);
+        // At most two rows stay inside the reserved canvas. A third row scrolls, same as before.
+        // One tile stays a single full-height cell. Two or more rows share that height.
         let rows = Math.min(2, Math.max(1, Math.ceil(count / columns)));
-        this.previewGrid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+        this.previewGrid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
         this.previewGrid.style.setProperty('--m-preview-cell-h', rows > 1 ? 'calc((var(--m-preview-h) - 0.3rem) / 2)' : 'var(--m-preview-h)');
+        this.previewRendering = false;
     }
 
     /** WS frame handling for the live preview tiles. */
@@ -315,7 +422,13 @@ class MCreate {
     /** One preview cell: image, progress bar, tap-to-open in the shared viewer. */
     buildTile() {
         let tile = mUI.el('div', 'm-preview-cell');
-        tile.appendChild(document.createElement('img'));
+        let img = document.createElement('img');
+        img.addEventListener('load', () => {
+            if (img.naturalWidth >= 2 && img.naturalHeight >= 2) {
+                this.renderPreviewState();
+            }
+        });
+        tile.appendChild(img);
         tile.appendChild(mUI.el('div', 'm-tile-progress'));
         tile.addEventListener('click', () => {
             if (tile.dataset.url) {

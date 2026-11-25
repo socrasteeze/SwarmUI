@@ -711,7 +711,7 @@ class MState {
 
     /** Resets one generation back to blank: prompt, negative, model, LoRAs, images, frames, resolution
      * picks, active presets, prompt images, and Simple grid config (axes, Grid mode, rows, which sections
-     * were left open). The filename prefix stays. It labels the session, not one generation. Session data
+     * were left open, and the merged grid image, which returns to on). The filename prefix stays. It labels the session, not one generation. Session data
      * and unrelated client prefs (haptics, image sort, resolved-prompt collapse, LoRA sort) stay too.
      * The More tab's Reset mobile client state is the full wipe: it clears storage and reloads. */
     resetParams() {

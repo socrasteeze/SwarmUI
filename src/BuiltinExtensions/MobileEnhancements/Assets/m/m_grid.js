@@ -60,6 +60,9 @@ class MGrid {
      * and only an opened section is stored. */
     static OpenKey = 'm_client_grid_open';
 
+    /** Merged grid image. Absent means on, which is the default. '0' means off: each cell still saves. */
+    static CompositeKey = 'm_client_grid_composite';
+
     /** Values selected per axis key, saved so a second run that changes one axis does not mean rebuilding
      * all of them, and so Grid mode's Generate button has something to run after a reload. */
     constructor() {
@@ -70,6 +73,8 @@ class MGrid {
         this.active = MGrid.loadActive();
         /** Axis key -> true when that section was left open. Missing means collapsed. */
         this.openSections = MGrid.loadOpenSections();
+        /** True when the user wants the merged grid image. More than three axes still skips it. */
+        this.composite = MGrid.loadComposite();
         /** The grid sheet element while it is on screen, so a reset can rebuild it in place. */
         this.sheetContent = null;
         this.sheetClose = null;
@@ -79,7 +84,7 @@ class MGrid {
 
     /** Drops every persisted Simple grid setting. An absent key is the default. */
     static clearStorage() {
-        for (let key of [MGrid.SelectedKey, MGrid.ModeKey, MGrid.RowsKey, MGrid.OpenKey]) {
+        for (let key of [MGrid.SelectedKey, MGrid.ModeKey, MGrid.RowsKey, MGrid.OpenKey, MGrid.CompositeKey]) {
             try {
                 localStorage.removeItem(key);
             }
@@ -215,6 +220,20 @@ class MGrid {
         return count;
     }
 
+    /** A grid image has three slots (X, Y, Y2). More than that cannot ask for one. */
+    compositeAllowed() {
+        return this.sentAxisCount() <= 3;
+    }
+
+    /** Grid Image, unless the user turned the merged image off or more than three axes vary.
+     * Both of those still generate every cell. */
+    outputType() {
+        if (!this.compositeAllowed() || !this.composite) {
+            return 'Just Images';
+        }
+        return 'Grid Image';
+    }
+
     /** Whether the saved axes make a runnable grid. */
     isReady() {
         return this.totalImages() >= 2 && !this.needsLoraAxis();
@@ -299,9 +318,10 @@ class MGrid {
                         base['exactbackendid'] = target.id;
                     }
                 }
-                // Grid Image holds three axes (X, Y, Y2). More than that still runs: Just Images
-                // skips the contact sheet and generates every cell.
-                let outputType = axes.length > 3 ? 'Just Images' : 'Grid Image';
+                // Re-read so a run from the Generate button matches the stored choice, not a stale copy.
+                // More than three axes still forces Just Images inside outputType().
+                this.composite = MGrid.loadComposite();
+                let outputType = this.outputType();
                 mGen.runGrid(base, axes, { 'rows': this.rows, 'outputType': outputType });
                 let sheet = outputType == 'Just Images' ? ' No combined grid image.' : '';
                 mUI.note(`Grid started: ${this.totalImages()} images.${sheet}`);
@@ -335,6 +355,31 @@ class MGrid {
     static saveRowsPref(rows) {
         try {
             localStorage.setItem(MGrid.RowsKey, `${rows}`);
+        }
+        catch (e) {
+            /* private mode / quota */
+        }
+    }
+
+    /** True when the merged grid image is wanted. A missing key is on. */
+    static loadComposite() {
+        try {
+            return localStorage.getItem(MGrid.CompositeKey) != '0';
+        }
+        catch (e) {
+            return true;
+        }
+    }
+
+    /** Stores the merged-image choice. On removes the key so the default stays "absent". */
+    static saveComposite(on) {
+        try {
+            if (on) {
+                localStorage.removeItem(MGrid.CompositeKey);
+            }
+            else {
+                localStorage.setItem(MGrid.CompositeKey, '0');
+            }
         }
         catch (e) {
             /* private mode / quota */
@@ -388,13 +433,14 @@ class MGrid {
         }
     }
 
-    /** Clears axes, Grid mode, rows, and remembered section state, then repaints an open grid sheet
-     * and the Generate button. Other client prefs are left alone. */
+    /** Clears axes, Grid mode, rows, remembered section state, and the merged-image choice, then
+     * repaints an open grid sheet and the Generate button. Other client prefs are left alone. */
     reset() {
         this.selected = {};
         this.rows = 0;
         this.active = false;
         this.openSections = {};
+        this.composite = true;
         MGrid.clearStorage();
         if (this.sheetContent && this.sheetContent.isConnected) {
             this.fillSheet(this.sheetContent, this.sheetClose || (() => {}));
@@ -564,6 +610,39 @@ class MGrid {
         paintRowChoice();
         layout.appendChild(layoutRow);
         footer.appendChild(layout);
+        let compositeRow = mUI.el('div', 'm-grid-layout');
+        let compositeLabel = mUI.el('div', 'm-grid-layout-label', 'Grid Image');
+        compositeRow.appendChild(compositeLabel);
+        let compositeChoices = mUI.el('div', 'm-grid-layout-choices m-seg-group');
+        compositeChoices.setAttribute('role', 'group');
+        compositeChoices.setAttribute('aria-label', 'Grid Image');
+        let paintComposite = () => {
+            let allowed = this.compositeAllowed();
+            let on = allowed && this.composite;
+            for (let button of compositeChoices.querySelectorAll('.m-grid-composite-button')) {
+                button.classList.toggle('m-selected', (button.dataset.composite == '1') == on);
+                button.disabled = !allowed;
+            }
+            compositeLabel.title = allowed
+                ? 'On builds one merged image. Off saves each cell only.'
+                : 'A grid image holds 3 axes. This run saves each cell.';
+        };
+        for (let choice of [{ value: '1', label: 'On' }, { value: '0', label: 'Off' }]) {
+            let button = mUI.el('button', 'm-grid-composite-button', choice.label);
+            button.type = 'button';
+            button.dataset.composite = choice.value;
+            button.addEventListener('click', () => {
+                if (!this.compositeAllowed()) {
+                    return;
+                }
+                this.composite = choice.value == '1';
+                MGrid.saveComposite(this.composite);
+                renderSummaries();
+            });
+            compositeChoices.appendChild(button);
+        }
+        compositeRow.appendChild(compositeChoices);
+        footer.appendChild(compositeRow);
         let runButton = mUI.el('button', 'm-generate-button m-grid-run', 'Run Grid');
         footer.appendChild(runButton);
         content.appendChild(footer);
@@ -576,10 +655,11 @@ class MGrid {
             }
             let total = this.totalImages();
             let needsLora = this.needsLoraAxis();
-            let combined = this.sentAxisCount() > 3 ? ', no combined grid image' : '';
+            let combined = total >= 2 && this.outputType() == 'Just Images' ? ', no combined grid image' : '';
             count.textContent = needsLora ? 'Pick a LoRA in the LoRAs axis first.'
                 : total == 0 ? 'No axes set yet.'
                 : `${total} image${total == 1 ? '' : 's'}${combined}`;
+            paintComposite();
             // Disabled rather than hidden, and the count above says why: a Run button that vanishes reads as
             // a bug, while one that is visibly unavailable next to "No axes set yet" explains itself.
             runButton.disabled = !this.isReady();
@@ -595,6 +675,7 @@ class MGrid {
             mUI.warn('You do not have grid generation permission.');
             return;
         }
+        this.composite = MGrid.loadComposite();
         let content = mUI.el('div', 'm-grid-sheet');
         let close = () => {};
         this.fillSheet(content, () => close());

@@ -803,14 +803,14 @@ button.m-header-link {
     padding-bottom: 0.4rem;
     margin-bottom: 0.2rem;
 }
-/* --m-preview-cell-h is set by renderPreviewState from the tile count, so a 1-up, a 2-up and a 2x2 all fill
-   the reserved canvas instead of each batch size being its own height. */
+/* --m-preview-cell-h is set by renderPreviewState. One tile fills the canvas. Two or more rows share it,
+   at most two rows visible, so the block height never changes. Column count follows the box width and the
+   cell aspect: a portrait cell is narrower, so more of them fit on a wide row. */
 .m-preview-grid {
     display: grid;
     gap: 0.3rem;
-    /* Fixed, not max-height: this box IS the reserved canvas. 1-up, 2-up and 2x2 fit exactly; anything larger
-       (a big preset batch, or grid-gen cells streaming in) scrolls inside it rather than growing the block
-       down over the prompt. */
+    /* Fixed, not max-height: this box IS the reserved canvas. Extra rows scroll inside it rather than
+       growing the block down over the prompt. */
     height: var(--m-preview-h);
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -2368,7 +2368,8 @@ button.m-header-link {
     flex: 1 1 auto;
     gap: 0.3rem;
 }
-.m-grid-layout-button {
+.m-grid-layout-button,
+.m-grid-composite-button {
     flex: 1 1 0;
     background: var(--background-panel);
     color: var(--text);
@@ -2378,9 +2379,13 @@ button.m-header-link {
     padding: 0 0.4rem;
     font-size: 14px;
 }
-.m-grid-layout-button.m-selected {
+.m-grid-layout-button.m-selected,
+.m-grid-composite-button.m-selected {
     border-color: var(--emphasis);
     color: var(--emphasis);
+}
+.m-grid-composite-button:disabled {
+    opacity: 0.4;
 }
 .m-grid-run {
     width: 100%;

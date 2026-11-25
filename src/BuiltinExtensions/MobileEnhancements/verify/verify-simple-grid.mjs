@@ -17,6 +17,10 @@
  * 10. Axis sections start collapsed. The header toggles one section, and that choice is restored next open.
  * 11. Enter in an axis value field adds like the Add button. Empty Enter and IME Enter do not. Search fields
  *     are not value fields.
+ * 12. Grid Image, next to Rows, defaults to on. Off persists and sends Just Images. Reset Params turns it
+ *     back on. More than three varying axes forces Just Images and disables the control until the count drops.
+ * 13. The Create live preview picks columns from the box width and the cell aspect. A wide portrait preview
+ *     uses at least three columns. A narrow box uses fewer. One image stays one column. Resizing updates it.
  * 4. LoRA axis values are extension-stripped, matching how a LoRA is named everywhere else in the client.
  * 5. The image count is the product of the live axes, and Run is unavailable below two images - a "grid" of
  *    one is a generation.
@@ -1461,6 +1465,241 @@ for (const [name, listClass, key] of [['LoRAs', '.m-grid-lora-options', 'loras']
     });
     check(`scrolling the ${name} list closes the keyboard`, afterScroll.focusedBefore && afterScroll.top > 0 && !afterScroll.focused, JSON.stringify(afterScroll));
 }
+
+// ---- Grid Image defaults on, persists off, and more than three axes forces it off. ----
+const gridImage = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.sheetContent = null;
+    mGrid.sheetClose = null;
+    mGrid.reset();
+    mState.params.prompt = 'a cat';
+    mState.params.filenameprefix = 'keep-prefix';
+    localStorage.setItem('m_client_haptics', 'off');
+    mGrid.selected = { steps: ['20', '30'], cfgscale: ['1', '2'] };
+    mGrid.saveSelected();
+    window.__grid = null;
+    mGrid.starting = false;
+    mGrid.open();
+    let row = () => [...__sheet().querySelectorAll('.m-grid-layout')]
+        .find(item => item.querySelector('.m-grid-layout-label').textContent == 'Grid Image');
+    let read = () => {
+        let buttons = [...row().querySelectorAll('button')];
+        let selected = buttons.find(button => button.classList.contains('m-selected'));
+        return {
+            label: row().querySelector('.m-grid-layout-label').textContent,
+            selected: selected ? selected.textContent : '',
+            disabled: buttons.map(button => button.disabled),
+            stored: localStorage.getItem('m_client_grid_composite'),
+            count: __sheet().querySelector('.m-grid-count').textContent,
+            nearRows: row().previousElementSibling.querySelector('.m-grid-layout-label').textContent
+        };
+    };
+    // Run closes the sheet. Drop whatever is left, then open a fresh one.
+    let reopen = () => {
+        for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+            elem.remove();
+        }
+        mGrid.sheetContent = null;
+        mGrid.sheetClose = null;
+        mGrid.starting = false;
+        mGrid.open();
+    };
+    let initial = read();
+    __sheet().querySelector('.m-grid-run').click();
+    let onType = window.__grid && window.__grid.opts && window.__grid.opts.outputType;
+    reopen();
+    row().querySelector('button[data-composite="0"]').click();
+    let off = read();
+    window.__grid = null;
+    __sheet().querySelector('.m-grid-run').click();
+    let offType = window.__grid && window.__grid.opts && window.__grid.opts.outputType;
+    reopen();
+    let reopened = read();
+    mState.resetParams();
+    let reset = read();
+    mState.params.prompt = 'a cat';
+    mGrid.selected = { steps: ['20', '30'], cfgscale: ['1', '2'] };
+    mGrid.saveSelected();
+    reopen();
+    let resetReady = read();
+    window.__grid = null;
+    __sheet().querySelector('.m-grid-run').click();
+    let resetType = window.__grid && window.__grid.opts && window.__grid.opts.outputType;
+    mGrid.selected = {
+        preset: ['a/one', 'a/two'],
+        loras: ['ill/style_a', 'ill/style_b'],
+        steps: ['20', '30'],
+        sampler: ['euler', 'er_sde']
+    };
+    mGrid.saveSelected();
+    reopen();
+    let forced = read();
+    window.__grid = null;
+    __sheet().querySelector('.m-grid-run').click();
+    let forcedType = window.__grid && window.__grid.opts && window.__grid.opts.outputType;
+    let storedWhileForced = localStorage.getItem('m_client_grid_composite');
+    mGrid.selected = { steps: ['20', '30'], cfgscale: ['1', '2'], sampler: ['euler', 'er_sde'] };
+    mGrid.saveSelected();
+    reopen();
+    let back = read();
+    window.__grid = null;
+    __sheet().querySelector('.m-grid-run').click();
+    let backType = window.__grid && window.__grid.opts && window.__grid.opts.outputType;
+    reopen();
+    row().querySelector('button[data-composite="0"]').click();
+    mGrid.selected = {
+        preset: ['a/one', 'a/two'],
+        loras: ['ill/style_a', 'ill/style_b'],
+        steps: ['20', '30'],
+        sampler: ['euler', 'er_sde']
+    };
+    mGrid.saveSelected();
+    reopen();
+    let forcedOff = read();
+    mGrid.selected = { steps: ['20', '30'], cfgscale: ['1', '2'] };
+    mGrid.saveSelected();
+    reopen();
+    let preferenceBack = read();
+    return {
+        initial, onType, off, offType, reopened, reset, resetReady, resetType, forced, forcedType,
+        storedWhileForced, back, backType, forcedOff, preferenceBack,
+        prefix: mState.params.filenameprefix,
+        haptics: localStorage.getItem('m_client_haptics')
+    };
+});
+check('Grid Image sits by Rows and defaults to on, and that run sends Grid Image',
+    gridImage.initial.label == 'Grid Image' && gridImage.initial.nearRows == 'Rows'
+    && gridImage.initial.selected == 'On' && gridImage.initial.stored == null
+    && gridImage.initial.disabled.join(',') == 'false,false'
+    && gridImage.initial.count == '4 images' && gridImage.onType == 'Grid Image',
+    JSON.stringify(gridImage.initial));
+check('turning Grid Image off persists and the run sends Just Images',
+    gridImage.off.selected == 'Off' && gridImage.off.stored == '0'
+    && gridImage.off.count == '4 images, no combined grid image' && gridImage.offType == 'Just Images'
+    && gridImage.reopened.selected == 'Off' && gridImage.reopened.stored == '0',
+    JSON.stringify({ off: gridImage.off, reopened: gridImage.reopened, offType: gridImage.offType }));
+check('Reset Params turns Grid Image back on and a run of three or fewer axes sends Grid Image',
+    gridImage.reset.selected == 'On' && gridImage.reset.stored == null
+    && gridImage.reset.count == 'No axes set yet.'
+    && gridImage.resetReady.selected == 'On' && gridImage.resetReady.count == '4 images'
+    && gridImage.resetType == 'Grid Image'
+    && gridImage.prefix == 'keep-prefix' && gridImage.haptics == 'off',
+    JSON.stringify({ reset: gridImage.reset, resetReady: gridImage.resetReady, resetType: gridImage.resetType }));
+check('more than three varying axes forces Just Images and disables Grid Image without forgetting the default',
+    gridImage.forced.selected == 'Off' && gridImage.forced.disabled.join(',') == 'true,true'
+    && gridImage.forced.count == '16 images, no combined grid image'
+    && gridImage.forcedType == 'Just Images' && gridImage.storedWhileForced == null,
+    JSON.stringify(gridImage.forced));
+check('dropping back to three or fewer axes honors the saved Grid Image choice',
+    gridImage.back.selected == 'On' && gridImage.back.disabled.join(',') == 'false,false'
+    && gridImage.backType == 'Grid Image'
+    && gridImage.forcedOff.selected == 'Off' && gridImage.forcedOff.stored == '0'
+    && gridImage.forcedOff.disabled.join(',') == 'true,true'
+    && gridImage.preferenceBack.selected == 'Off' && gridImage.preferenceBack.stored == '0'
+    && gridImage.preferenceBack.disabled.join(',') == 'false,false',
+    JSON.stringify({ back: gridImage.back, forcedOff: gridImage.forcedOff, preferenceBack: gridImage.preferenceBack }));
+
+// ---- Live preview columns follow width and aspect, including a resize. ----
+const previewMath = await page.evaluate(() => ({
+    wide: MCreate.previewColumns(1100, 400, 2 / 3, 6, 4.8),
+    narrow: MCreate.previewColumns(220, 400, 2 / 3, 6, 4.8),
+    one: MCreate.previewColumns(1100, 400, 2 / 3, 1, 4.8),
+    landscape: MCreate.previewColumns(1100, 400, 21 / 9, 6, 4.8)
+}));
+check('preview column math fits at least three portrait cells on a wide row, and fewer on a narrow one',
+    previewMath.wide >= 3 && previewMath.narrow < previewMath.wide && previewMath.narrow >= 1
+    && previewMath.one == 1 && previewMath.landscape < previewMath.wide,
+    JSON.stringify(previewMath));
+
+await page.evaluate(() => {
+    mCreate.clearTiles();
+    mCreate.currentRequest = null;
+    mCreate.previewWrap.style.width = '1100px';
+    mCreate.previewWrap.style.maxWidth = 'none';
+    mCreate.previewWrap.style.setProperty('--m-preview-h', '400px');
+    mState.params.aspectratio = '21:9';
+    mState.params.sidelength = '1024';
+    let pixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    for (let i = 0; i < 6; i++) {
+        mCreate.onFrame('progress', { request_id: 'preview-layout', batch_index: i, overall_percent: 0.2, preview: pixel });
+    }
+});
+const previewWideLandscape = await page.evaluate(() => {
+    let raw = mCreate.previewGrid.style.gridTemplateColumns;
+    let match = /repeat\((\d+)/.exec(raw);
+    return { columns: match ? parseInt(match[1], 10) : 0, raw, ratio: mCreate.previewAspectRatio() };
+});
+const portraitUrl = await page.evaluate(() => {
+    let canvas = document.createElement('canvas');
+    canvas.width = 20;
+    canvas.height = 30;
+    return canvas.toDataURL('image/png');
+});
+await page.evaluate(url => {
+    mCreate.clearTiles();
+    mCreate.currentRequest = null;
+    for (let i = 0; i < 6; i++) {
+        mCreate.onFrame('progress', { request_id: 'preview-portrait', batch_index: i, overall_percent: 0.2, preview: url });
+    }
+}, portraitUrl);
+await page.waitForFunction(() => {
+    let match = /repeat\((\d+)/.exec(mCreate.previewGrid.style.gridTemplateColumns);
+    return match && parseInt(match[1], 10) >= 3;
+});
+const previewWidePortrait = await page.evaluate(() => {
+    let raw = mCreate.previewGrid.style.gridTemplateColumns;
+    let match = /repeat\((\d+)/.exec(raw);
+    let img = mCreate.previewGrid.querySelector('img');
+    return {
+        columns: match ? parseInt(match[1], 10) : 0,
+        raw,
+        natural: img ? [img.naturalWidth, img.naturalHeight] : [0, 0]
+    };
+});
+check('a wide preview with portrait cells uses at least three columns',
+    previewWidePortrait.columns >= 3 && previewWidePortrait.columns > previewWideLandscape.columns,
+    JSON.stringify({ landscape: previewWideLandscape, portrait: previewWidePortrait }));
+
+await page.evaluate(() => { mCreate.previewWrap.style.width = '220px'; });
+await page.waitForFunction(() => {
+    let match = /repeat\((\d+)/.exec(mCreate.previewGrid.style.gridTemplateColumns);
+    return match && parseInt(match[1], 10) < 3;
+});
+const previewNarrow = await page.evaluate(() => {
+    let match = /repeat\((\d+)/.exec(mCreate.previewGrid.style.gridTemplateColumns);
+    return match ? parseInt(match[1], 10) : 0;
+});
+check('a narrow preview uses fewer columns, and resizing the container is what updates them',
+    previewNarrow >= 1 && previewNarrow < previewWidePortrait.columns, `${previewNarrow} vs ${previewWidePortrait.columns}`);
+
+await page.evaluate(() => {
+    mCreate.clearTiles();
+    mCreate.currentRequest = null;
+    mCreate.previewWrap.style.width = '1100px';
+    mCreate.onFrame('progress', {
+        request_id: 'preview-one', batch_index: 0, overall_percent: 0.2,
+        preview: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+    });
+});
+const previewOne = await page.evaluate(() => {
+    let match = /repeat\((\d+)/.exec(mCreate.previewGrid.style.gridTemplateColumns);
+    return {
+        columns: match ? parseInt(match[1], 10) : 0,
+        height: getComputedStyle(mCreate.previewGrid.querySelector('.m-preview-cell')).height,
+        canvas: getComputedStyle(mCreate.previewGrid).height
+    };
+});
+check('a single preview image stays one column',
+    previewOne.columns == 1, JSON.stringify(previewOne));
+
+await page.evaluate(() => {
+    mCreate.previewWrap.style.width = '';
+    mCreate.previewWrap.style.maxWidth = '';
+    mCreate.previewWrap.style.removeProperty('--m-preview-h');
+    mGrid.reset();
+});
 
 await browser.close();
 const failed = results.filter(result => !result.pass).length;
