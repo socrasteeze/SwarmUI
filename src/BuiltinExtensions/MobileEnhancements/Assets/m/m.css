@@ -2098,7 +2098,8 @@ button.m-header-link {
 }
 
 /* --- Grid sheet (m_grid.js) ---
-   One collapsed card per axis, so the sheet opens as a five-line menu rather than five expanded pickers.
+   Sections start collapsed, so the sheet opens as a short menu. A section stays open only when the user
+   left it open (m_client_grid_open). The native marker is hidden; the chevron is the open/closed cue.
    The card that is open owns the scroll; the others are one line each. */
 .m-grid-sheet {
     display: flex;
@@ -2144,8 +2145,22 @@ button.m-header-link {
     cursor: pointer;
     list-style: none;
 }
-.m-grid-card-head::-webkit-details-marker {
+.m-grid-card-head::-webkit-details-marker,
+.m-grid-card-head::marker {
     display: none;
+    content: '';
+}
+.m-grid-card-chevron {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-right: 2px solid var(--text-soft);
+    border-bottom: 2px solid var(--text-soft);
+    transform: rotate(-45deg);
+}
+.m-grid-card[open] > .m-grid-card-head .m-grid-card-chevron {
+    transform: rotate(45deg);
 }
 .m-grid-card-name {
     font-weight: bold;

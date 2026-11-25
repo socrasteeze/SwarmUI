@@ -47,7 +47,7 @@ class MCreate {
         this.resetButton.title = 'Reset params';
         this.resetButton.setAttribute('aria-label', 'Reset Params');
         this.resetButton.addEventListener('click', () => {
-            mUI.confirm('Reset prompt, images, model, LoRAs, and all other params to blank?', () => {
+            mUI.confirm('Reset prompt, images, model, LoRAs, grid, and all other params to blank?', () => {
                 // Clears any suggestions left over from the prompt text this is about to erase - onInput()
                 // only recomputes on the box's own 'input' event, and this reset never fires one.
                 mAutoComplete.hide();

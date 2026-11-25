@@ -709,11 +709,11 @@ class MState {
         }
     }
 
-    /** Resets generation params back to blank: prompt, negative, model, LoRAs, images, resolution picks,
-     * active presets, and prompt images all clear. Leaves session data (paramMeta/presets/models/wildcards)
-     * and unrelated client prefs (haptics, image sort mode, preview collapse state) untouched - this is
-     * "start a fresh generation", not "wipe the client" (that's the More tab's Reset mobile client state,
-     * which also clears localStorage and reloads). */
+    /** Resets one generation back to blank: prompt, negative, model, LoRAs, images, frames, resolution
+     * picks, active presets, prompt images, and Simple grid config (axes, Grid mode, rows, which sections
+     * were left open). The filename prefix stays. It labels the session, not one generation. Session data
+     * and unrelated client prefs (haptics, image sort, resolved-prompt collapse, LoRA sort) stay too.
+     * The More tab's Reset mobile client state is the full wipe: it clears storage and reloads. */
     resetParams() {
         // The filename prefix deliberately survives: this button means "start a fresh generation", and the
         // prefix is a label for the whole working session, not part of any one generation's settings.
@@ -732,6 +732,9 @@ class MState {
         this.clearPinnedUpscale();
         this.clearUserTouched();
         this.customRatio = 0;
+        if (typeof mGrid != 'undefined' && mGrid.reset) {
+            mGrid.reset();
+        }
         this.changed();
     }
 

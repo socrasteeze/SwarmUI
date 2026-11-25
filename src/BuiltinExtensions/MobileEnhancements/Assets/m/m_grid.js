@@ -47,6 +47,19 @@ class MGrid {
             hint: 'Pairs with the Sampler above - normal, karras, beta.' }
     ];
 
+    /** Axis values. Absent means no axes. */
+    static SelectedKey = 'm_client_grid_selected';
+
+    /** 'grid' or absent. Absent is Single. */
+    static ModeKey = 'm_client_grid_mode';
+
+    /** Contact-sheet row count. Absent or 0 is Auto. */
+    static RowsKey = 'm_client_grid_rows';
+
+    /** Axis keys the user left open. Sections start collapsed, so a missing key is collapsed
+     * and only an opened section is stored. */
+    static OpenKey = 'm_client_grid_open';
+
     /** Values selected per axis key, saved so a second run that changes one axis does not mean rebuilding
      * all of them, and so Grid mode's Generate button has something to run after a reload. */
     constructor() {
@@ -55,14 +68,31 @@ class MGrid {
         this.rows = MGrid.loadRowsPref();
         /** Grid mode: the Create tab's Generate button runs the saved axes instead of one batch. */
         this.active = MGrid.loadActive();
+        /** Axis key -> true when that section was left open. Missing means collapsed. */
+        this.openSections = MGrid.loadOpenSections();
+        /** The grid sheet element while it is on screen, so a reset can rebuild it in place. */
+        this.sheetContent = null;
+        this.sheetClose = null;
         /** True while a run is resolving its backend, so a double tap cannot start two grids. */
         this.starting = false;
+    }
+
+    /** Drops every persisted Simple grid setting. An absent key is the default. */
+    static clearStorage() {
+        for (let key of [MGrid.SelectedKey, MGrid.ModeKey, MGrid.RowsKey, MGrid.OpenKey]) {
+            try {
+                localStorage.removeItem(key);
+            }
+            catch (e) {
+                /* private mode */
+            }
+        }
     }
 
     /** Saved axis values, keeping only known axes and text values. Empty on a missing or damaged entry. */
     static loadSelected() {
         try {
-            let data = JSON.parse(localStorage.getItem('m_client_grid_selected') || '{}');
+            let data = JSON.parse(localStorage.getItem(MGrid.SelectedKey) || '{}');
             let selected = {};
             for (let axis of MGrid.Axes) {
                 if (Array.isArray(data[axis.key])) {
@@ -84,7 +114,7 @@ class MGrid {
     /** Stores the axis values. */
     saveSelected() {
         try {
-            localStorage.setItem('m_client_grid_selected', JSON.stringify(this.selected));
+            localStorage.setItem(MGrid.SelectedKey, JSON.stringify(this.selected));
         }
         catch (e) {
             /* private mode / quota */
@@ -94,7 +124,7 @@ class MGrid {
     /** Whether Grid mode was left on. */
     static loadActive() {
         try {
-            return localStorage.getItem('m_client_grid_mode') == 'grid';
+            return localStorage.getItem(MGrid.ModeKey) == 'grid';
         }
         catch (e) {
             return false;
@@ -105,7 +135,7 @@ class MGrid {
     setActive(active) {
         this.active = active;
         try {
-            localStorage.setItem('m_client_grid_mode', active ? 'grid' : 'single');
+            localStorage.setItem(MGrid.ModeKey, active ? 'grid' : 'single');
         }
         catch (e) {
             /* private mode / quota */
@@ -232,7 +262,7 @@ class MGrid {
     /** Persisted row-count preference. 0 means Auto. */
     static loadRowsPref() {
         try {
-            let raw = localStorage.getItem('m_client_grid_rows');
+            let raw = localStorage.getItem(MGrid.RowsKey);
             if (raw == null || raw === '') {
                 return 0;
             }
@@ -247,10 +277,84 @@ class MGrid {
     /** Stores the row-count preference (0 = Auto). */
     static saveRowsPref(rows) {
         try {
-            localStorage.setItem('m_client_grid_rows', `${rows}`);
+            localStorage.setItem(MGrid.RowsKey, `${rows}`);
         }
         catch (e) {
             /* private mode / quota */
+        }
+    }
+
+    /** Sections the user left open. Unknown keys and anything other than true are dropped.
+     * A missing or damaged entry is every section collapsed, which is also the first-open default. */
+    static loadOpenSections() {
+        try {
+            let data = JSON.parse(localStorage.getItem(MGrid.OpenKey) || '{}');
+            let open = {};
+            if (!data || typeof data != 'object' || Array.isArray(data)) {
+                return open;
+            }
+            for (let axis of MGrid.Axes) {
+                if (typeof data[axis.key] == 'boolean' && data[axis.key]) {
+                    open[axis.key] = true;
+                }
+            }
+            return open;
+        }
+        catch (e) {
+            return {};
+        }
+    }
+
+    /** Whether this section should open. Default is collapsed. */
+    isSectionOpen(key) {
+        return this.openSections[key] === true;
+    }
+
+    /** Remembers one section. Closing the last open section removes the key so the default stays "absent". */
+    setSectionOpen(key, open) {
+        if (open) {
+            this.openSections[key] = true;
+        }
+        else {
+            delete this.openSections[key];
+        }
+        try {
+            if (Object.keys(this.openSections).length == 0) {
+                localStorage.removeItem(MGrid.OpenKey);
+            }
+            else {
+                localStorage.setItem(MGrid.OpenKey, JSON.stringify(this.openSections));
+            }
+        }
+        catch (e) {
+            /* private mode / quota */
+        }
+    }
+
+    /** Clears axes, Grid mode, rows, and remembered section state, then repaints an open grid sheet
+     * and the Generate button. Other client prefs are left alone. */
+    reset() {
+        this.selected = {};
+        this.rows = 0;
+        this.active = false;
+        this.openSections = {};
+        MGrid.clearStorage();
+        if (this.sheetContent && this.sheetContent.isConnected) {
+            this.fillSheet(this.sheetContent, this.sheetClose || (() => {}));
+        }
+        this.syncModeSheet();
+        if (typeof mCreate != 'undefined' && mCreate.renderGenTarget) {
+            mCreate.renderGenTarget();
+        }
+    }
+
+    /** The Generate-on sheet's Single/Grid choice is built once. A reset has to move the highlight
+     * itself, or the sheet keeps showing Grid after the mode is already Single. */
+    syncModeSheet() {
+        for (let group of document.querySelectorAll('.m-gen-mode')) {
+            for (let button of group.querySelectorAll('.m-seg-button')) {
+                button.classList.toggle('m-selected', (button.textContent == 'Grid') == !!this.active);
+            }
         }
     }
 
@@ -317,14 +421,17 @@ class MGrid {
         return axes == 0 ? 0 : total;
     }
 
-    /** The grid sheet. */
-    open() {
-        if (!MGrid.permitted()) {
-            mUI.warn('You do not have grid generation permission.');
-            return;
+    /** Fills a grid sheet element. `close` dismisses that sheet. Reset calls this again on the open element
+     * so the summaries, rows, and which sections are open match the cleared defaults without a second sheet. */
+    fillSheet(content, close) {
+        let previousTitle = content.querySelector('.m-sheet-title');
+        let titleId = previousTitle && previousTitle.id ? previousTitle.id : '';
+        content.innerHTML = '';
+        let title = mUI.el('div', 'm-sheet-title', 'Grid Generate');
+        if (titleId) {
+            title.id = titleId;
         }
-        let content = mUI.el('div', 'm-grid-sheet');
-        content.appendChild(mUI.el('div', 'm-sheet-title', 'Grid Generate'));
+        content.appendChild(title);
         content.appendChild(mUI.el('div', 'm-grid-intro',
             'Runs every combination of the axes you fill in. Everything else comes from the Create tab as it '
             + 'stands right now.'));
@@ -333,7 +440,16 @@ class MGrid {
         let summaries = {};
         for (let axis of MGrid.Axes) {
             let card = mUI.el('details', 'm-grid-card');
+            // Set before the toggle listener, so restoring a remembered section does not write it again.
+            if (this.isSectionOpen(axis.key)) {
+                card.open = true;
+            }
             let head = mUI.el('summary', 'm-grid-card-head');
+            // The native disclosure marker is hidden. This chevron is the visible open/closed affordance.
+            // The summary itself is still the toggle, so keyboard and screen-reader behavior stays native.
+            let chevron = mUI.el('span', 'm-grid-card-chevron');
+            chevron.setAttribute('aria-hidden', 'true');
+            head.appendChild(chevron);
             head.appendChild(mUI.el('span', 'm-grid-card-name', axis.label));
             let summary = mUI.el('span', 'm-grid-card-summary');
             head.appendChild(summary);
@@ -345,6 +461,9 @@ class MGrid {
                 this.saveSelected();
                 renderSummaries();
                 mCreate.renderGenTarget();
+            });
+            card.addEventListener('toggle', () => {
+                this.setSectionOpen(axis.key, card.open);
             });
             cards.appendChild(card);
         }
@@ -401,8 +520,27 @@ class MGrid {
             runButton.disabled = !this.isReady();
         };
         renderSummaries();
+        runButton.type = 'button';
         runButton.addEventListener('click', () => this.run(() => close()));
-        let close = mUI.openSheet(content);
+    }
+
+    /** The grid sheet. */
+    open() {
+        if (!MGrid.permitted()) {
+            mUI.warn('You do not have grid generation permission.');
+            return;
+        }
+        let content = mUI.el('div', 'm-grid-sheet');
+        let close = () => {};
+        this.fillSheet(content, () => close());
+        close = mUI.openSheet(content, () => {
+            if (this.sheetContent == content) {
+                this.sheetContent = null;
+                this.sheetClose = null;
+            }
+        });
+        this.sheetContent = content;
+        this.sheetClose = close;
         return close;
     }
 
@@ -523,6 +661,7 @@ class MGrid {
             input.placeholder = axis.kind == 'text' ? 'Add a value' : 'Other values, comma separated';
             customRow.appendChild(input);
             let add = mUI.el('button', 'm-grid-add-button', 'Add');
+            add.type = 'button';
             let commit = () => {
                 // Prompt text carries its own commas, so a text value is one whole entry. `||` is the
                 // grid-file separator, and that list is the whole axis rather than one value.
@@ -547,6 +686,18 @@ class MGrid {
                 onChange();
             };
             add.addEventListener('click', commit);
+            // Enter adds the typed value, the same way the button does. Search fields are not this input.
+            // IME uses Enter to confirm a candidate (isComposing, or keyCode 229); that must not insert it.
+            input.addEventListener('keydown', event => {
+                if (event.key != 'Enter') {
+                    return;
+                }
+                if (event.isComposing || event.keyCode == 229) {
+                    return;
+                }
+                event.preventDefault();
+                commit();
+            });
             customRow.appendChild(add);
             body.appendChild(customRow);
         }

@@ -12,6 +12,11 @@
  * 7. Row-count chooser (Auto/1/2/3/4) persists in localStorage and is forwarded as runGrid opts.rows.
  * 8. Picking from the LoRA or Preset list keeps the search focused, so the on-screen keyboard stays up and
  *    the sheet does not move. Scrolling the list dismisses it.
+ * 9. Reset Params clears every Simple grid setting (axes, Grid mode, rows, remembered open sections)
+ *    and repaints the sheet and Generate button. Other client prefs and the filename prefix stay.
+ * 10. Axis sections start collapsed. The header toggles one section, and that choice is restored next open.
+ * 11. Enter in an axis value field adds like the Add button. Empty Enter and IME Enter do not. Search fields
+ *     are not value fields.
  * 4. LoRA axis values are extension-stripped, matching how a LoRA is named everywhere else in the client.
  * 5. The image count is the product of the live axes, and Run is unavailable below two images - a "grid" of
  *    one is a generation.
@@ -994,6 +999,234 @@ await page.evaluate(() => mCreate.doGenerate());
 await page.waitForFunction(() => window.__single > 0);
 mode = await modeState();
 check('Single mode still generates one batch', mode.button == 'Generate' && mode.target == 'Hub' && mode.single == 1 && !mode.grid, JSON.stringify(mode));
+
+// ---- Sections start collapsed, remember what was left open, and Reset Params puts them back ----
+await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.sheetContent = null;
+    mGrid.sheetClose = null;
+    mGrid.reset();
+});
+const sectionStart = await page.evaluate(() => {
+    mGrid.open();
+    let cards = [...__sheet().querySelectorAll('.m-grid-card')];
+    let allClosed = cards.every(card => !card.open);
+    let chevron = cards[0].querySelector('.m-grid-card-chevron');
+    let closed = getComputedStyle(chevron).transform;
+    let steps = cards.find(card => card.querySelector('.m-grid-card-name').textContent == 'Steps');
+    let cfg = cards.find(card => card.querySelector('.m-grid-card-name').textContent == 'CFG Scale');
+    steps.querySelector('summary').click();
+    let opened = getComputedStyle(steps.querySelector('.m-grid-card-chevron')).transform;
+    steps.querySelector('summary').click();
+    let closedAgain = !steps.open && !cfg.open && localStorage.getItem('m_client_grid_open') == null;
+    steps.querySelector('summary').click();
+    return {
+        count: cards.length,
+        chevrons: cards.filter(card => card.querySelector('.m-grid-card-chevron')).length,
+        allClosed,
+        stepsOpen: steps.open,
+        cfgStillClosed: !cfg.open,
+        markerHidden: getComputedStyle(steps.querySelector('summary'), '::marker').content,
+        transformChanged: closed != opened && opened != 'none',
+        closedAgain
+    };
+});
+check('grid sections start collapsed, with a chevron on every header',
+    sectionStart.count == 10 && sectionStart.chevrons == 10 && sectionStart.allClosed
+    && (sectionStart.markerHidden == 'none' || sectionStart.markerHidden == '""' || sectionStart.markerHidden == ''),
+    JSON.stringify(sectionStart));
+check('a section header toggles only that section, and the chevron changes',
+    sectionStart.stepsOpen && sectionStart.cfgStillClosed && sectionStart.transformChanged && sectionStart.closedAgain,
+    JSON.stringify(sectionStart));
+
+const sectionMemory = await page.evaluate(async () => {
+    mGrid.sheetClose();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    mGrid.open();
+    let cards = [...__sheet().querySelectorAll('.m-grid-card')];
+    let openOf = name => cards.find(card => card.querySelector('.m-grid-card-name').textContent == name).open;
+    let stored = JSON.parse(localStorage.getItem('m_client_grid_open') || '{}');
+    return { steps: openOf('Steps'), cfg: openOf('CFG Scale'), sampler: openOf('Sampler'), stored };
+});
+check('an opened section is remembered after the sheet is closed and opened again',
+    sectionMemory.steps && !sectionMemory.cfg && !sectionMemory.sampler && sectionMemory.stored.steps == true
+    && sectionMemory.stored.cfgscale == null, JSON.stringify(sectionMemory));
+
+const gridReset = await page.evaluate(() => {
+    localStorage.setItem('m_client_haptics', 'off');
+    localStorage.setItem('m_client_img_sort', 'Name A-Z');
+    localStorage.setItem('m_client_resolved_collapsed', '0');
+    localStorage.setItem('models_LoRA_sort_by', 'Name');
+    mState.params.prompt = 'a cat';
+    mState.params.filenameprefix = 'keep-prefix';
+    mGrid.selected = { steps: ['20', '30'], promptreplace: ['cat', 'dog'] };
+    mGrid.saveSelected();
+    mGrid.rows = 3;
+    MGrid.saveRowsPref(3);
+    mGrid.setActive(true);
+    mGrid.openSections = { steps: true, cfgscale: true };
+    mGrid.setSectionOpen('steps', true);
+    mGrid.setSectionOpen('cfgscale', true);
+    mCreate.renderGenTarget();
+    let before = { button: mCreate.genButton.textContent, target: mCreate.genTargetLabel.textContent };
+    mCreate.openGenTargetSheet();
+    let modeBefore = [...__sheet().querySelectorAll('.m-gen-mode .m-seg-button')]
+        .find(button => button.classList.contains('m-selected')).textContent;
+    mState.resetParams();
+    let sheet = mGrid.sheetContent;
+    let cards = [...sheet.querySelectorAll('.m-grid-card')];
+    let modeButtons = [...document.querySelectorAll('.m-gen-mode .m-seg-button')];
+    return {
+        before,
+        modeBefore,
+        prompt: mState.params.prompt,
+        prefix: mState.params.filenameprefix,
+        selected: mGrid.selected,
+        active: mGrid.active,
+        rows: mGrid.rows,
+        open: mGrid.openSections,
+        storedSelected: localStorage.getItem('m_client_grid_selected'),
+        storedMode: localStorage.getItem('m_client_grid_mode'),
+        storedRows: localStorage.getItem('m_client_grid_rows'),
+        storedOpen: localStorage.getItem('m_client_grid_open'),
+        haptics: localStorage.getItem('m_client_haptics'),
+        sort: localStorage.getItem('m_client_img_sort'),
+        resolved: localStorage.getItem('m_client_resolved_collapsed'),
+        loraSort: localStorage.getItem('models_LoRA_sort_by'),
+        button: mCreate.genButton.textContent,
+        target: mCreate.genTargetLabel.textContent,
+        count: sheet.querySelector('.m-grid-count').textContent,
+        runDisabled: sheet.querySelector('.m-grid-run').disabled,
+        summariesOff: cards.every(card => card.querySelector('.m-grid-card-summary').textContent == 'off'),
+        allCollapsed: cards.every(card => !card.open),
+        rowsLabel: [...sheet.querySelectorAll('.m-grid-layout-button')].find(button => button.classList.contains('m-selected')).textContent,
+        modeAfter: modeButtons.filter(button => button.classList.contains('m-selected')).map(button => button.textContent).join(',')
+    };
+});
+check('resetParams clears grid axes, mode, rows, and open sections from memory and storage',
+    Object.keys(gridReset.selected).length == 0 && gridReset.active == false && gridReset.rows == 0
+    && Object.keys(gridReset.open).length == 0
+    && gridReset.storedSelected == null && gridReset.storedMode == null
+    && gridReset.storedRows == null && gridReset.storedOpen == null, JSON.stringify(gridReset));
+check('resetParams leaves the filename prefix and non-grid client prefs',
+    gridReset.prefix == 'keep-prefix' && gridReset.prompt == ''
+    && gridReset.haptics == 'off' && gridReset.sort == 'Name A-Z'
+    && gridReset.resolved == '0' && gridReset.loraSort == 'Name', JSON.stringify(gridReset));
+check('an open grid sheet and the Generate button return to the empty Single defaults',
+    gridReset.before.button == 'Run Grid (4)' && gridReset.before.target == 'Grid Hub'
+    && gridReset.button == 'Generate' && gridReset.target == 'Hub'
+    && gridReset.count == 'No axes set yet.' && gridReset.runDisabled
+    && gridReset.summariesOff && gridReset.allCollapsed && gridReset.rowsLabel == 'Auto', JSON.stringify(gridReset));
+check('an open Generate-on sheet returns to Single',
+    gridReset.modeBefore == 'Grid' && gridReset.modeAfter == 'Single', JSON.stringify(gridReset));
+
+const resetButton = await page.evaluate(() => {
+    mGrid.selected = { cfgscale: ['1', '2'] };
+    mGrid.saveSelected();
+    mGrid.setActive(true);
+    mGrid.rows = 2;
+    MGrid.saveRowsPref(2);
+    mGrid.setSectionOpen('sampler', true);
+    mState.params.filenameprefix = 'keep-prefix';
+    let seen = '';
+    let original = window.confirm;
+    window.confirm = message => { seen = message; return true; };
+    mCreate.resetButton.click();
+    window.confirm = original;
+    return {
+        seen,
+        active: mGrid.active,
+        rows: mGrid.rows,
+        selected: mGrid.selected,
+        storedOpen: localStorage.getItem('m_client_grid_open'),
+        prefix: mState.params.filenameprefix,
+        button: mCreate.genButton.textContent
+    };
+});
+check('the Reset Params button clears the same grid config',
+    resetButton.seen.includes('grid') && resetButton.active == false && resetButton.rows == 0
+    && Object.keys(resetButton.selected).length == 0 && resetButton.storedOpen == null
+    && resetButton.prefix == 'keep-prefix' && resetButton.button == 'Generate', JSON.stringify(resetButton));
+
+// ---- Enter in a value field adds like the Add button. Search fields are not value fields. ----
+const enterAdd = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    mGrid.sheetContent = null;
+    mGrid.sheetClose = null;
+    mGrid.reset();
+    mState.params.prompt = 'a cat';
+    window.__grid = null;
+    window.__single = 0;
+    mGen.generate = () => { window.__single++; };
+    mGrid.open();
+    let card = name => [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(item => item.querySelector('.m-grid-card-name').textContent == name);
+    let enter = (input, patch) => {
+        let event = new KeyboardEvent('keydown', {
+            key: 'Enter', bubbles: true, cancelable: true,
+            isComposing: !!(patch && patch.isComposing)
+        });
+        if (patch && patch.keyCode != null) {
+            Object.defineProperty(event, 'keyCode', { configurable: true, get: () => patch.keyCode });
+        }
+        input.dispatchEvent(event);
+        return { prevented: event.defaultPrevented, keyCode: event.keyCode };
+    };
+    let replace = card('Prompt Replace').querySelector('.m-grid-custom-input');
+    replace.value = 'red || blue';
+    let replaceEnter = enter(replace);
+    let replaceValues = mGrid.valuesFor('promptreplace').join('|');
+    let replaceCleared = replace.value;
+    let steps = card('Steps').querySelector('.m-grid-custom-input');
+    steps.value = '12, 18, 12';
+    let stepsEnter = enter(steps);
+    let stepsValues = mGrid.valuesFor('steps').join('|');
+    steps.value = '12';
+    enter(steps);
+    let stepsDeduped = mGrid.valuesFor('steps').join('|');
+    steps.value = '   ';
+    let emptyEnter = enter(steps);
+    let afterEmpty = mGrid.valuesFor('steps').join('|');
+    let emptyLeft = steps.value;
+    steps.value = '99';
+    let composing = enter(steps, { isComposing: true });
+    let afterComposing = mGrid.valuesFor('steps').join('|');
+    let ime = enter(steps, { keyCode: 229 });
+    let afterIme = mGrid.valuesFor('steps').join('|');
+    let search = card('LoRAs').querySelector('.m-grid-search');
+    search.value = 'style_a';
+    let searchEnter = enter(search);
+    return {
+        replaceEnter, replaceValues, replaceCleared,
+        stepsEnter, stepsValues, stepsDeduped,
+        emptyEnter, afterEmpty, emptyLeft,
+        composing, afterComposing, ime, afterIme,
+        searchEnter,
+        loras: mGrid.valuesFor('loras').join('|'),
+        searchValue: search.value,
+        runs: window.__grid,
+        single: window.__single
+    };
+});
+check('Enter in Prompt Replace adds like Add, including a || list',
+    enterAdd.replaceValues == 'red|blue' && enterAdd.replaceCleared == '' && enterAdd.replaceEnter.prevented,
+    JSON.stringify(enterAdd));
+check('Enter in another axis adds a comma list, trimmed and de-duplicated',
+    enterAdd.stepsValues == '12|18' && enterAdd.stepsDeduped == '12|18' && enterAdd.stepsEnter.prevented,
+    JSON.stringify(enterAdd));
+check('empty Enter adds nothing and still does not submit',
+    enterAdd.afterEmpty == '12|18' && enterAdd.emptyLeft.trim() == '' && enterAdd.emptyEnter.prevented
+    && enterAdd.runs == null && enterAdd.single == 0, JSON.stringify(enterAdd));
+check('IME composition and keyCode 229 do not add',
+    enterAdd.afterComposing == '12|18' && enterAdd.afterIme == '12|18'
+    && enterAdd.composing.prevented == false && enterAdd.ime.prevented == false
+    && enterAdd.ime.keyCode == 229, JSON.stringify(enterAdd));
+check('Enter in a LoRA or Preset search does not add the search text',
+    enterAdd.loras == '' && enterAdd.searchEnter.prevented == false, JSON.stringify(enterAdd));
 
 // ---- The search keyboard stays up through a pick, and goes when the list is scrolled ----
 // A real mouse click, not element.click(): only a real press moves focus to the tapped button.
