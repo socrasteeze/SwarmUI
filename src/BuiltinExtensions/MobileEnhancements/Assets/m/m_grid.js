@@ -7,8 +7,9 @@
  *
  * This is the same GridGenRun call with a built surface instead: fixed axes, each with a picker suited
  * to its own type. Preset is the shared [Grid Gen] Presets axis (mode gridgenpresets): one selected title
- * per cell, applied on the server on top of the Create tab. A model axis is deliberately not here - a grid
- * over that is a desk job, and the classic UI is one tap away in More.
+ * per cell, applied on the server on top of the Create tab. The picker groups those titles by the folder
+ * in front of the first slash, because the same name is saved in more than one folder. A model axis is
+ * deliberately not here - a grid over that is a desk job, and the classic UI is one tap away in More.
  *
  * The axes are the four comparisons worth running from a phone, plus Sampler, which is what "scheduler"
  * usually means in practice - ER-SDE and the DPM family are samplers, and offering only the Scheduler
@@ -594,32 +595,30 @@ class MGrid {
                 }
                 let term = search.value.trim().toLowerCase();
                 let matches = presets.filter(preset => typeof MControlNet == 'undefined' || !MControlNet.isPreset(preset))
-                    .filter(preset => !term
-                    || `${preset.title} ${preset.description || ''} ${MGrid.shortValue(preset.title)}`.toLowerCase().includes(term));
-                matches = [...matches].sort((a, b) => {
-                    if (!!a.is_starred != !!b.is_starred) {
-                        return a.is_starred ? -1 : 1;
-                    }
-                    return `${a.title}`.localeCompare(`${b.title}`);
-                });
+                    .filter(preset => MGrid.presetMatches(preset, term));
                 if (matches.length == 0) {
                     list.appendChild(mUI.el('div', 'm-strip-empty', presets.length == 0
                         ? 'No presets yet.' : 'No presets match.'));
                     return;
                 }
+                // Cap with the same starred-first order as before, then group what fit. A starred preset
+                // in a later folder still gets a slot; the header is only there so the short name is readable.
                 let limit = typeof MPresets != 'undefined' && MPresets.PickerLimit ? MPresets.PickerLimit : 60;
-                let shown = matches.slice(0, limit);
-                for (let preset of shown) {
-                    let label = MGrid.shortValue(preset.title);
-                    if (preset.is_starred) {
-                        label = `\u2605 ${label}`;
+                let shown = [...matches].sort(MGrid.comparePresets).slice(0, limit);
+                for (let group of MGrid.groupPresets(shown)) {
+                    list.appendChild(mUI.el('div', 'm-grid-folder', group.label));
+                    for (let preset of group.presets) {
+                        let label = MGrid.presetButtonLabel(preset.title);
+                        if (preset.is_starred) {
+                            label = `\u2605 ${label}`;
+                        }
+                        let button = mUI.el('button', 'm-grid-option', label);
+                        button.title = preset.title;
+                        button.dataset.preset = preset.title;
+                        button.classList.toggle('m-selected', this.valuesFor(axis.key).includes(preset.title));
+                        button.addEventListener('click', () => toggle(preset.title));
+                        list.appendChild(button);
                     }
-                    let button = mUI.el('button', 'm-grid-option', label);
-                    button.title = preset.title;
-                    button.dataset.preset = preset.title;
-                    button.classList.toggle('m-selected', this.valuesFor(axis.key).includes(preset.title));
-                    button.addEventListener('click', () => toggle(preset.title));
-                    list.appendChild(button);
                 }
                 if (matches.length > shown.length) {
                     list.appendChild(mUI.el('div', 'm-list-count',
@@ -745,6 +744,63 @@ class MGrid {
         return slash >= 0 ? text.substring(slash + 1) : text;
     }
 
+    /** Folder in a preset title ('krea/Realism' -> 'krea'). A title with no slash is a root preset. */
+    static presetFolder(title) {
+        return MState.presetGroup(title);
+    }
+
+    /** Name under a folder header: everything after the first slash. A root title is unchanged. */
+    static presetButtonLabel(title) {
+        let text = `${title || ''}`;
+        let slash = text.indexOf('/');
+        if (slash < 0 || slash >= text.length - 1) {
+            return text;
+        }
+        return text.substring(slash + 1);
+    }
+
+    /** True when the search is empty or hits the title, its folder, the short name, or the description. */
+    static presetMatches(preset, term) {
+        if (!term) {
+            return true;
+        }
+        let title = `${preset.title || ''}`;
+        let hay = `${title} ${MGrid.presetFolder(title)} ${preset.description || ''} ${MGrid.shortValue(title)}`;
+        return hay.toLowerCase().includes(term);
+    }
+
+    /** Starred first, then title. The same order the preset list used before folder headers. */
+    static comparePresets(a, b) {
+        if (!!a.is_starred != !!b.is_starred) {
+            return a.is_starred ? -1 : 1;
+        }
+        return `${a.title}`.localeCompare(`${b.title}`);
+    }
+
+    /** Named folders in order, then root titles under Other. Starred still lead inside each folder. */
+    static groupPresets(presets) {
+        let buckets = new Map();
+        for (let preset of presets) {
+            let folder = MGrid.presetFolder(preset.title);
+            if (!buckets.has(folder)) {
+                buckets.set(folder, []);
+            }
+            buckets.get(folder).push(preset);
+        }
+        let folders = [...buckets.keys()].filter(folder => folder != '');
+        folders.sort((a, b) => a.localeCompare(b));
+        if (buckets.has('')) {
+            folders.push('');
+        }
+        let groups = [];
+        for (let folder of folders) {
+            let items = buckets.get(folder);
+            items.sort(MGrid.comparePresets);
+            groups.push({ folder: folder, label: folder == '' ? 'Other' : folder, presets: items });
+        }
+        return groups;
+    }
+
     /** A one-line label that cuts from the start when too long: a LoRA's version is at the end of its name.
      * The bdi keeps the name reading left to right inside the right-to-left box that makes the cut. */
     static tailLabel(text) {
@@ -757,6 +813,11 @@ class MGrid {
     static valueLabel(axis, value) {
         if (axis.key == 'loraconfinement') {
             return MCreate.loraSectionLabel(value);
+        }
+        // Preset values are the full title, folder included. Shortening them made krea/Realism and
+        // krea-lf/Realism the same chip and the same summary line.
+        if (axis.kind == 'preset') {
+            return `${value}`;
         }
         return axis.kind == 'text' ? `${value}` : MGrid.shortValue(value);
     }

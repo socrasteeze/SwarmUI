@@ -424,8 +424,8 @@ const presetPicked = await page.evaluate(titles => {
 }, presetTitles);
 check('the four TrattoNero presets can be multi-selected by their full titles',
     presetPicked.selected.join('|') == presetTitles.join('|'), presetPicked.selected.join('|'));
-check('preset chips use the short name after the folder slash',
-    presetPicked.chips.join('|') == presetTitles.map(t => t.split('/').pop()).join('|'),
+check('preset chips keep the folder, so the same name from two folders stays distinct',
+    presetPicked.chips.join('|') == presetTitles.join('|'),
     presetPicked.chips.join('|'));
 check('four presets is a runnable grid of four images',
     presetPicked.count == '4 images' && !presetPicked.disabled, JSON.stringify(presetPicked));
@@ -455,6 +455,86 @@ const presetEmpty = await page.evaluate(() => {
 });
 check('an empty Preset axis is left out of the run',
     presetEmpty.join(',') == 'steps', presetEmpty.join(','));
+
+const presetFolders = await page.evaluate(() => {
+    for (let elem of document.querySelectorAll('.m-sheet, .m-sheet-backdrop')) {
+        elem.remove();
+    }
+    window.__gridPresets = [
+        { title: 'krea/Realism', description: '', param_map: {}, is_starred: false },
+        { title: 'krea-lf/Realism', description: 'krea look', param_map: {}, is_starred: false },
+        { title: 'qwen2/Realism', description: '', param_map: {}, is_starred: false },
+        { title: 'krea/Starred Look', description: '', param_map: {}, is_starred: true },
+        { title: 'Plain Root', description: '', param_map: {}, is_starred: false },
+        { title: 'krea/sub/Realism', description: '', param_map: {}, is_starred: false }
+    ];
+    mState.presets = window.__gridPresets;
+    mGrid.selected = {};
+    mGrid.open();
+    let card = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Preset');
+    card.open = true;
+    let read = () => ({
+        headers: [...card.querySelectorAll('.m-grid-folder')].map(e => e.textContent),
+        buttons: [...card.querySelectorAll('.m-grid-option')].map(e => ({
+            preset: e.dataset.preset,
+            label: e.textContent
+        }))
+    });
+    let listed = read();
+    let search = card.querySelector('.m-grid-search');
+    search.value = 'krea-lf';
+    search.dispatchEvent(new Event('input'));
+    let lf = read();
+    search.value = 'krea';
+    search.dispatchEvent(new Event('input'));
+    let krea = read();
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    [...card.querySelectorAll('.m-grid-option')].find(b => b.dataset.preset == 'krea/Realism').click();
+    [...card.querySelectorAll('.m-grid-option')].find(b => b.dataset.preset == 'krea-lf/Realism').click();
+    let samplerFolders = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Sampler')
+        .querySelectorAll('.m-grid-folder').length;
+    let steps = [...__sheet().querySelectorAll('.m-grid-card')]
+        .find(c => c.querySelector('.m-grid-card-name').textContent == 'Steps');
+    steps.open = true;
+    return {
+        listed,
+        lf,
+        krea,
+        summary: card.querySelector('.m-grid-card-summary').textContent,
+        chips: [...card.querySelectorAll('.m-grid-chip')].map(e => e.childNodes[0].textContent.trim()),
+        samplerFolders,
+        stepLabels: [...steps.querySelectorAll('.m-grid-quick-button')].map(e => e.textContent)
+    };
+});
+let presetLabel = Object.fromEntries(presetFolders.listed.buttons.map(b => [b.preset, b.label]));
+let kreaOrder = presetFolders.listed.buttons
+    .filter(b => b.preset.startsWith('krea/')).map(b => b.preset);
+check('preset buttons sit under folder headers, and a root preset is under Other',
+    presetFolders.listed.headers.join(',') == 'krea,krea-lf,qwen2,Other'
+    && presetLabel['krea/Realism'] == 'Realism'
+    && presetLabel['krea-lf/Realism'] == 'Realism'
+    && presetLabel['qwen2/Realism'] == 'Realism'
+    && presetLabel['krea/sub/Realism'] == 'sub/Realism'
+    && presetLabel['Plain Root'] == 'Plain Root',
+    JSON.stringify(presetFolders.listed));
+check('a starred preset still leads its folder and still wears a star',
+    kreaOrder[0] == 'krea/Starred Look' && presetLabel['krea/Starred Look'] == '\u2605 Starred Look',
+    JSON.stringify(kreaOrder));
+check('preset search matches a folder name, and krea-lf does not also open every krea preset',
+    presetFolders.lf.headers.join(',') == 'krea-lf'
+    && presetFolders.lf.buttons.map(b => b.preset).join(',') == 'krea-lf/Realism'
+    && presetFolders.krea.headers.join(',') == 'krea,krea-lf'
+    && presetFolders.krea.buttons.every(b => b.preset.startsWith('krea')),
+    JSON.stringify({ lf: presetFolders.lf, krea: presetFolders.krea.headers }));
+check('preset chips and the axis summary show the folder, and other axes stay ungrouped',
+    presetFolders.chips.join('|') == 'krea/Realism|krea-lf/Realism'
+    && presetFolders.summary == '2: krea/Realism, krea-lf/Realism'
+    && presetFolders.samplerFolders == 0
+    && presetFolders.stepLabels.join(',') == '4,8,16,20,30,40',
+    JSON.stringify({ chips: presetFolders.chips, summary: presetFolders.summary, steps: presetFolders.stepLabels }));
 
 const gridLoraSearch = await page.evaluate(async () => {
     let calls = 0;

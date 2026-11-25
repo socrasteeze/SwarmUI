@@ -2242,6 +2242,24 @@ button.m-header-link {
     flex-direction: column;
     flex-wrap: nowrap;
 }
+/* Folder label above that folder's preset buttons. Sticky so a long group keeps its name while it scrolls. */
+.m-grid-folder {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    align-self: stretch;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0.15rem 0.15rem 0.1rem;
+    background: var(--background-panel);
+    color: var(--text-soft);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+}
+.m-grid-option + .m-grid-folder {
+    padding-top: 0.55rem;
+}
 .m-grid-quick-button,
 .m-grid-option {
     background: var(--background-panel);
