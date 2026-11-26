@@ -183,7 +183,7 @@ class GenPageBrowserClass {
         /** When set, a non-empty filter debounces through this instead of hiding rows locally. */
         this.serverFilter = null;
         this.serverFilterTimer = null;
-        /** Server-search results are already filtered. The local substring test would drop multi-word matches. */
+        /** Server-search results are already filtered, so buildContentList does not apply the text test again. */
         this.skipClientFilter = false;
         /** Replaces the header count when a listing is a window of a larger total. */
         this.countText = null;
@@ -521,7 +521,7 @@ class GenPageBrowserClass {
             let file = files[i];
             id++;
             let desc = this.describe(file);
-            if (this.filter && !this.skipClientFilter && !desc.searchable.toLowerCase().includes(this.filter)) {
+            if (this.filter && !this.skipClientFilter && !textMatchesSearch(desc.searchable, this.filter)) {
                 continue;
             }
             if (i >= maxBuildNow) {

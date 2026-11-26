@@ -637,7 +637,7 @@ public static class ModelsAPI
         [API.APIParameter("If true, allow remote models. If false, only local models.")] bool allowRemote = true,
         [API.APIParameter("If true, the sorting should be done in reverse.")] bool sortReverse = false,
         [API.APIParameter("If true, provide model images in raw data format. If false, use URLs.")] bool dataImages = false,
-        [API.APIParameter("If non-empty, only files whose searched text contains every whitespace-separated word, case-insensitively. By default that text is the full name, the title, and the trigger phrase. search_fields can narrow it. Applied before total and before the cap, so total is the match count. Wildcards have no trigger phrase.")] string search = "",
+        [API.APIParameter("If non-empty, only files whose searched text contains every whitespace-separated word, case-insensitively, anywhere in that text. By default that text is the full name, the title, and the trigger phrase. search_fields can narrow it. Applied before total and before the cap, so total is the match count. A search also returns matches nested deeper than depth; an empty search does not. Wildcards have no trigger phrase.")] string search = "",
         [API.APIParameter("If greater than 0, return at most this many files after sorting, and never more than ModelListSanityCap. 0 uses ModelListSanityCap alone.")] int limit = 0,
         [API.APIParameter("How many sorted matches to skip before taking limit. 0 starts at the first match.")] int offset = 0,
         [API.APIParameter("If non-empty, a comma-separated list of compat class IDs. Only models that can load under at least one of them are kept. A model with no compat class is judged by the classed models in its top-level folder, and kept when that is unknown. Applied after search and before total and the cap, so total is the post-filter count and compat_hidden counts the search matches removed. Ignored for Wildcards and Stable-Diffusion.")] string compat = "",
@@ -694,7 +694,7 @@ public static class ModelsAPI
             {
                 return;
             }
-            bool inWindow = name[path.Length..].CountCharacter('/') < depth;
+            bool inWindow = ModelListWindow.InFileWindow(name[path.Length..], depth, search);
             if (!compatFilter)
             {
                 addFolders(name);
@@ -779,6 +779,7 @@ public static class ModelsAPI
             ModelListCompatResult kept = ModelListWindow.FilterByCompat(matched, activeCompat, subtype, folderEvidence);
             ModelListCompatResult keptDeep = ModelListWindow.FilterByCompat(deepMatched, activeCompat, subtype, folderEvidence);
             matched = kept.Kept;
+            deepMatched = keptDeep.Kept;
             compatHidden = kept.Hidden;
             foreach (ModelListCandidate candidate in kept.Kept.Concat(keptDeep.Kept))
             {
@@ -802,7 +803,8 @@ public static class ModelsAPI
             ["total"] = window.Total,
             ["returned"] = window.Returned,
             ["truncated"] = window.Truncated,
-            ["compat_hidden"] = compatHidden
+            ["compat_hidden"] = compatHidden,
+            ["depth_limited"] = string.IsNullOrWhiteSpace(search) && deepMatched.Count > 0
         };
     }
 

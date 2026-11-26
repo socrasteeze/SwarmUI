@@ -775,8 +775,9 @@ class ModelBrowserWrapper {
                 'compat': compat,
                 'compatHidden': data.compat_hidden || 0
             };
+            cached.depthLimited = !!data.depth_limited;
             this.listCache.set(key, cached);
-            if (search == '' && this.subType == 'LoRA' && files.length < total && this.browser.filter) {
+            if (search == '' && this.subType == 'LoRA' && (files.length < total || cached.depthLimited) && this.browser.filter) {
                 this.unfilteredTruncated = true;
                 this.fetchModels(path, depth, sortBy, reverse, this.browser.filter, 0, false, callback, fix, false);
                 return;
@@ -801,7 +802,7 @@ class ModelBrowserWrapper {
 
     /** Publishes a cache hit, or follows a saved filter with a server search when the folder is still truncated. */
     applyCached(path, depth, sortBy, reverse, search, cached, callback, fix) {
-        if (search == '' && this.subType == 'LoRA' && cached.files.length < cached.total && this.browser.filter) {
+        if (search == '' && this.subType == 'LoRA' && (cached.files.length < cached.total || cached.depthLimited) && this.browser.filter) {
             this.unfilteredTruncated = true;
             this.fetchModels(path, depth, sortBy, reverse, this.browser.filter, 0, false, callback, fix, false);
             return;
@@ -813,7 +814,7 @@ class ModelBrowserWrapper {
     /** Hands the window to the browser and remembers how to load the next page. */
     publishListing(path, depth, sortBy, reverse, search, cached, callback, fix) {
         if (search == '') {
-            this.unfilteredTruncated = this.subType == 'LoRA' && cached.files.length < cached.total;
+            this.unfilteredTruncated = this.subType == 'LoRA' && (cached.files.length < cached.total || cached.depthLimited);
         }
         this.pagePath = path;
         this.pageDepth = depth;

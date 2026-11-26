@@ -1067,6 +1067,24 @@ function strBeforeLast(str, char) {
     return index < 0 ? str : str.substring(0, index);
 }
 
+/**
+ * True when every whitespace-separated word of query is a case-insensitive substring of haystack.
+ * An empty or whitespace query matches everything. Word order does not matter, and a word may sit in the middle of a name.
+ */
+function textMatchesSearch(haystack, query) {
+    let terms = `${query || ''}`.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+    if (terms.length == 0) {
+        return true;
+    }
+    let text = `${haystack || ''}`.toLowerCase();
+    for (let term of terms) {
+        if (!text.includes(term)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /** Returns a simple matcher function based on some asterisked text. */
 function simpleAsteriskedMatcher(matcher, caseSensitive = false) {
     if (!caseSensitive) {

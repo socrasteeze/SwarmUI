@@ -16,6 +16,31 @@ public class ModelListSearchLimitTests : SwarmUITest
         Setup();
     }
 
+    /// <summary>A word in the middle of a name or path matches. Underscores are not a boundary. Comparison is case-insensitive.</summary>
+    [Test]
+    public static void TestMatches_MidNameSubstring()
+    {
+        Assert.That(ModelListWindow.Matches("word_word2.safetensors", "", "", "word2"), Is.True);
+        Assert.That(ModelListWindow.Matches("foo_word2_bar.safetensors", "", "", "WORD2"), Is.True);
+        Assert.That(ModelListWindow.Matches("SomeFolder/word_word2.safetensors", "", "", "word2"), Is.True);
+        Assert.That(ModelListWindow.Matches("SomeFolder/word_word2.safetensors", "Style Pack", "", "word2 style"), Is.True);
+        Assert.That(ModelListWindow.Matches("SomeFolder/style_x.safetensors", "Pack", "", "word2 style"), Is.False);
+        Assert.That(ModelListWindow.Matches("style_word_word2.safetensors", "", "", "word2 style"), Is.True);
+        Assert.That(ModelListWindow.Matches("other.safetensors", "Nope", "unrelated", "word2"), Is.False);
+    }
+
+    /// <summary>An empty search stays inside the browse depth. A search does not, so a nested name is still a hit.</summary>
+    [Test]
+    public static void TestInFileWindow_SearchIgnoresDepth()
+    {
+        Assert.That(ModelListWindow.InFileWindow("word_word2.safetensors", 1, ""), Is.True);
+        Assert.That(ModelListWindow.InFileWindow("SomeFolder/word_word2.safetensors", 1, ""), Is.False);
+        Assert.That(ModelListWindow.InFileWindow("a/b/c/word_word2.safetensors", 3, ""), Is.False);
+        Assert.That(ModelListWindow.InFileWindow("SomeFolder/word_word2.safetensors", 1, "word2"), Is.True);
+        Assert.That(ModelListWindow.InFileWindow("a/b/c/word_word2.safetensors", 1, "word2"), Is.True);
+        Assert.That(ModelListWindow.InFileWindow("SomeFolder/word_word2.safetensors", 1, "   "), Is.False);
+    }
+
     /// <summary>A name, a title, and a trigger phrase each match on their own, case-insensitively.</summary>
     [Test]
     public static void TestMatches_NameTitleTriggerAndCase()

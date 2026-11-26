@@ -206,6 +206,22 @@ public static class ModelListWindow
     /// <summary>Weight-file extensions removed from a <c>name_title</c> search. Longer suffixes are listed first.</summary>
     static readonly string[] SearchWeightExtensions = [".safetensors", ".engine", ".gguf", ".ckpt", ".pth", ".sft", ".bin", ".pt"];
 
+    /// <summary>Whether <paramref name="relativeName"/> belongs in the file window.
+    /// An empty search stays inside <paramref name="depth"/> so browsing does not load the whole tree.
+    /// A search does not: the file cap still limits the response, but a nested name is not dropped just because the folder depth is shallow.</summary>
+    public static bool InFileWindow(string relativeName, int depth, string search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            if (string.IsNullOrEmpty(relativeName))
+            {
+                return false;
+            }
+            return relativeName.CountCharacter('/') < depth;
+        }
+        return true;
+    }
+
     /// <summary>True when every whitespace-separated word of <paramref name="search"/> appears in the searched text.
     /// An empty or whitespace search matches everything. Comparison is case-insensitive and is a contains check, not a word-boundary check.
     /// <paramref name="searchFields"/> empty, null, or anything other than <c>name_title</c> searches the full name, the title, and the trigger phrase.
