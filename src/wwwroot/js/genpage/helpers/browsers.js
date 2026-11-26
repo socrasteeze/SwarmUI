@@ -146,6 +146,24 @@ class BrowserTreePart {
 }
 
 /**
+ * True when every whitespace-separated word of query is a case-insensitive substring of haystack.
+ * An empty or whitespace query matches everything. Word order does not matter, and a word may sit in the middle of a name.
+ */
+function textMatchesSearch(haystack, query) {
+    let terms = `${query || ''}`.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+    if (terms.length == 0) {
+        return true;
+    }
+    let text = `${haystack || ''}`.toLowerCase();
+    for (let term of terms) {
+        if (!text.includes(term)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
  * Class that handles browsable content sections (eg models list, presets list, etc).
  */
 class GenPageBrowserClass {
@@ -183,7 +201,7 @@ class GenPageBrowserClass {
         /** When set, a non-empty filter debounces through this instead of hiding rows locally. */
         this.serverFilter = null;
         this.serverFilterTimer = null;
-        /** Server-search results are already filtered, so buildContentList does not apply the text test again. */
+        /** When true, buildContentList does not apply the text filter. */
         this.skipClientFilter = false;
         /** Replaces the header count when a listing is a window of a larger total. */
         this.countText = null;

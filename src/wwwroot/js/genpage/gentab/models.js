@@ -827,10 +827,29 @@ class ModelBrowserWrapper {
         this.pageCompatHidden = cached.compatHidden || 0;
         this.pageMore = this.subType == 'LoRA' && this.pageShown < this.pageTotal;
         this.browser.serverFilter = (this.subType == 'LoRA' && this.unfilteredTruncated) ? text => this.onServerFilter(text) : null;
-        this.browser.skipClientFilter = this.pageSearch != '';
+        // Keep the text test on. A server hit still has to pass it, and rows already loaded can match fields the server does not search.
+        this.browser.skipClientFilter = false;
         this.browser.countText = this.pageMore ? `${this.pageShown} / ${this.pageTotal}` : null;
         let folders = (cached.folders || []).slice().sort((a, b) => a.localeCompare(b));
-        let files = this.decorateFiles(path, cached.files);
+        let rows = cached.files ? cached.files.slice() : [];
+        if (search && this.subType == 'LoRA') {
+            let base = this.listCache.get(this.listCacheKey(path, depth, sortBy, reverse, '', cached.compat || ''));
+            if (base && base.files) {
+                let seen = {};
+                for (let file of rows) {
+                    if (file && file.name) {
+                        seen[file.name] = true;
+                    }
+                }
+                for (let file of base.files) {
+                    if (file && file.name && !seen[file.name]) {
+                        rows.push(file);
+                        seen[file.name] = true;
+                    }
+                }
+            }
+        }
+        let files = this.decorateFiles(path, rows);
         if (callback) {
             callback(folders, files);
         }

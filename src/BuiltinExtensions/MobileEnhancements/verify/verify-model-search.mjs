@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const utilSrc = readFileSync(`${repo}/src/wwwroot/js/util.js`, 'utf8');
+const utilSrc = readFileSync(`${repo}/src/wwwroot/js/genpage/helpers/browsers.js`, 'utf8');
 const start = utilSrc.indexOf('function textMatchesSearch(');
 if (start < 0) {
     throw new Error('textMatchesSearch not found');
