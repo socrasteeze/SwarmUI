@@ -386,6 +386,7 @@ class GridGenClass {
             'outputType': type,
             'continueOnError': getOpt('continue-on-error'),
             'showOutputs': getOpt('show-outputs'),
+            'randomSeedPerGen': getOpt('random-seed-per-gen'),
             'saveConfig': this.getSaveConfig(),
         };
         let axisData = [];
@@ -489,6 +490,7 @@ class GridGenClass {
                 ${makeCheckboxInput(null, 'grid-gen-opt-weight-order', '', 'Allow Reordering', 'If checked, the grid generator will reorder processing order of axes to maximize generation speed.\nIf unchecked, will be ordered such that the topmost axis will loop first, then the next axis will advance by one and loop the axis above again, etc.', true, false, true)}&emsp;
                 ${makeCheckboxInput(null, 'grid-gen-opt-continue-on-error', '', 'Continue On Error', 'If checked, if any generations failure, those will be skipped and the grid will continue.', false, false, true)}&emsp;
                 ${makeCheckboxInput(null, 'grid-gen-opt-show-outputs', '', 'Show Outputs', 'If checked, shows the images on-page as they come in. If not checked, only the final result is shown.', true, false, true)}&emsp;
+                ${makeCheckboxInput(null, 'grid-gen-opt-random-seed-per-gen', '', 'Random seed per gen', 'If checked, each generation gets its own random seed when Seed is -1, and its own random Variation Seed when that is -1. A Seed axis value, or any seed that is not -1, is left as set. Off reuses one locked seed for the whole grid.', false, false, true)}&emsp;
             </div>
             <div class="hoverable-minor-hint-text">
                 When using numbered parameters, you can type for example "<code>1, 2, .., 10</code>" to automatically have the "<code>..</code>" part filled in.

@@ -602,7 +602,7 @@ public class GridGeneratorExtension : Extension
         return new Drawables().Font("src/wwwroot/fonts/unifont-12.0.01.woff2", FontStyleType.Normal, FontWeight.Bold, FontStretch.Normal).FontPointSize(16 * sizeMult);
     }
 
-    public async Task<JObject> GridGenRun(WebSocket socket, Session session, JObject raw, string outputFolderName, bool doOverwrite, bool fastSkip, bool generatePage, bool publishGenMetadata, bool dryRun, bool weightOrder, string outputType, bool continueOnError, bool showOutputs)
+    public async Task<JObject> GridGenRun(WebSocket socket, Session session, JObject raw, string outputFolderName, bool doOverwrite, bool fastSkip, bool generatePage, bool publishGenMetadata, bool dryRun, bool weightOrder, string outputType, bool continueOnError, bool showOutputs, bool randomSeedPerGen = false)
     {
         Utilities.QuickGC();
         using Session.GenClaim claim = session.Claim(gens: 1);
@@ -624,7 +624,11 @@ public class GridGeneratorExtension : Extension
         baseParams.Remove(T2IParamTypes.BatchSize);
         baseParams.Remove(T2IParamTypes.Images);
         baseParams.Remove(T2IParamTypes.OutputIntermediateImages);
-        baseParams.LockSeeds();
+        // Off: lock -1 once so every cell shares it. On: leave -1. Each cell applies axes, then ApplySpecialLogic locks that cell's own -1 seed and variation seed.
+        if (!randomSeedPerGen)
+        {
+            baseParams.LockSeeds();
+        }
         await sendStatus();
         int gridRows = 0;
         if (raw.TryGetValue("gridRows", out JToken gridRowsTok))
