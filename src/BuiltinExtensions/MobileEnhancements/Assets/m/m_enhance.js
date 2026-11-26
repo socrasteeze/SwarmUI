@@ -32,6 +32,12 @@ class MEnhance {
         }
         /** Enhance Strength: faithful / expand / full. */
         this.strength = this.pref('strength', 'full');
+        /** Writer endpoint id. Same localStorage key and default as the desktop panel. */
+        this.endpointOverride = this.pref('endpoint', 'orca-27b');
+        /** Writer select while the sheet is open, or null. */
+        this.endpointSelect = null;
+        /** Enabled endpoints from the last status reply. */
+        this.writerEndpoints = [];
         /** Writer mode: 'auto', 't2i', or 'edit'. Same localStorage key as the desktop control. */
         this.writeMode = this.normalizeWriteMode(this.pref('write_mode', 'auto'));
         /** Profiles list from the last successful status reply (for the sheet select). */
@@ -392,6 +398,7 @@ class MEnhance {
             }
             this.profiles = data.profiles || [];
             this.allowedStrengths = (data.resolved && data.resolved.strengths) || ['faithful', 'expand', 'full'];
+            this.applyWriterEndpoints(data.endpoints || []);
             if (this.sheet && this.sheet.content && this.sheet.content.isConnected) {
                 this.fillProfileSelect(this.sheet.profileSelect);
                 this.applyStrengthOptions(this.sheet.strengthSelect);
@@ -476,6 +483,95 @@ class MEnhance {
         select.value = this.strength;
     }
 
+    /** Id sent as endpoint_override. Empty only when no writer is selected. */
+    writerEndpointId() {
+        if (this.endpointOverride == null) {
+            this.endpointOverride = this.pref('endpoint', 'orca-27b');
+        }
+        return this.endpointOverride || '';
+    }
+
+    /** Visible Writer option: label, else the model name after the last slash, else the id. */
+    writerOptionLabel(endpoint) {
+        let label = '';
+        if (endpoint.label) {
+            label = ('' + endpoint.label).trim();
+        }
+        if (!label && endpoint.model) {
+            let model = ('' + endpoint.model).trim();
+            let slash = model.lastIndexOf('/');
+            label = slash >= 0 ? model.substring(slash + 1) : model;
+        }
+        if (!label) {
+            label = '' + (endpoint.id || '');
+        }
+        if (endpoint.healthy === false) {
+            label = label + ' (unreachable)';
+        }
+        return label;
+    }
+
+    /** Rebuilds the Writer select from the enabled endpoints chosen by applyWriterEndpoints. */
+    fillWriterSelect() {
+        let select = this.endpointSelect;
+        if (!select) {
+            return;
+        }
+        select.innerHTML = '';
+        let enabled = this.writerEndpoints || [];
+        for (let i = 0; i < enabled.length; i++) {
+            let option = document.createElement('option');
+            option.value = enabled[i].id;
+            option.textContent = this.writerOptionLabel(enabled[i]);
+            select.appendChild(option);
+        }
+        select.value = this.endpointOverride || '';
+    }
+
+    /** Aligns the stored writer id with enabled status endpoints and refreshes the select. */
+    applyWriterEndpoints(endpoints) {
+        let enabled = [];
+        let list = endpoints || [];
+        for (let i = 0; i < list.length; i++) {
+            if (list[i] && list[i].enabled !== false) {
+                enabled.push(list[i]);
+            }
+        }
+        this.writerEndpoints = enabled;
+        let stored = this.endpointOverride;
+        if (stored == null) {
+            stored = this.pref('endpoint', 'orca-27b');
+        }
+        let chosen = '';
+        let sawStored = false;
+        let sawDefault = false;
+        for (let i = 0; i < enabled.length; i++) {
+            if (enabled[i].id == stored) {
+                sawStored = true;
+            }
+            if (enabled[i].id == 'orca-27b') {
+                sawDefault = true;
+            }
+        }
+        if (enabled.length == 0) {
+            chosen = '';
+        }
+        else if (sawStored) {
+            chosen = stored;
+        }
+        else if (sawDefault) {
+            chosen = 'orca-27b';
+        }
+        else {
+            chosen = enabled[0].id;
+        }
+        this.endpointOverride = chosen;
+        if (chosen && this.pref('endpoint', '') != chosen) {
+            this.setPref('endpoint', chosen);
+        }
+        this.fillWriterSelect();
+    }
+
     /** Opens the enhance sheet and starts a request. Always reachable so a missing auto-profile can be fixed
      * via the profile override dropdown inside the sheet (same contract as desktop). A non-zero seed is a reroll. */
     open(seed = 0) {
@@ -529,6 +625,15 @@ class MEnhance {
         this.applyStrengthOptions(strengthSelect);
         strengthRow.appendChild(strengthSelect);
         controls.appendChild(strengthRow);
+
+        let writerRow = mUI.el('div', 'm-enhance-row m-enhance-writer');
+        writerRow.appendChild(mUI.el('label', 'm-enhance-label', 'Writer'));
+        let writerSelect = document.createElement('select');
+        writerSelect.className = 'm-enhance-select';
+        this.endpointSelect = writerSelect;
+        this.fillWriterSelect();
+        writerRow.appendChild(writerSelect);
+        controls.appendChild(writerRow);
         content.appendChild(controls);
 
         let preview = document.createElement('textarea');
@@ -564,7 +669,7 @@ class MEnhance {
 
         this.sheet = {
             content, status, preview, notes, conflict, passthrough, applyBtn,
-            profileSelect, strengthSelect, writeSelect
+            profileSelect, strengthSelect, writeSelect, writerSelect
         };
         this.lastResult = null;
         this.applyEnabled = false;
@@ -573,6 +678,7 @@ class MEnhance {
 
         let closeSheet = mUI.openSheet(content);
         let disconnected = () => {
+            this.endpointSelect = null;
             this.sheet = null;
             if (this.socket && this.running) {
                 this.settled = true;
@@ -642,6 +748,20 @@ class MEnhance {
             closeSheet();
             this.open();
         });
+        writerSelect.addEventListener('change', () => {
+            this.endpointOverride = writerSelect.value;
+            if (this.endpointOverride) {
+                this.setPref('endpoint', this.endpointOverride);
+            }
+            if (this.running && this.socket) {
+                this.settled = true;
+                try { this.socket.close(); } catch (e) { /* ignore */ }
+                this.running = false;
+            }
+            disconnected();
+            closeSheet();
+            this.open();
+        });
 
         let model = this.effectiveModel();
         this.syncProfileOverride(model);
@@ -652,7 +772,7 @@ class MEnhance {
             'prompt': prompt,
             'model': model,
             'profile_override': this.profileOverride,
-            'endpoint_override': '',
+            'endpoint_override': this.writerEndpointId(),
             'strength': this.strength,
             'seed': seed,
             ...this.videoRequestFields(),

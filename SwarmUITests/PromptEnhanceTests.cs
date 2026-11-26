@@ -1245,6 +1245,52 @@ public class PromptEnhanceTests : SwarmUITest
             Assert.That(PromptEnhanceEndpoints.Endpoints[0].ID, Is.EqualTo("capped"));
             Assert.That(PromptEnhanceEndpoints.Endpoints[0].NumCtx, Is.EqualTo(8192));
             Assert.That(PromptEnhanceEndpoints.Endpoints[1].NumCtx, Is.Null);
+            Assert.That(PromptEnhanceEndpoints.Endpoints[0].Label, Is.Null);
+        }
+        finally
+        {
+            Program.DataDir = previousDataDir;
+            PromptEnhanceEndpoints.Endpoints = prior;
+            try
+            {
+                Directory.Delete(tempDir, true);
+            }
+            catch (Exception)
+            {
+                // Best-effort - a stray open handle on a throwaway temp dir is not worth failing the test over.
+            }
+        }
+    }
+
+    /// <summary>A <c>label</c> in the endpoint file is loaded, an unknown field is ignored, and status returns the label.</summary>
+    [Test]
+    public void Init_LoadsLabelOntoStatus()
+    {
+        List<PromptEnhanceEndpoint> prior = PromptEnhanceEndpoints.Endpoints;
+        string tempDir = Path.Combine(Path.GetTempPath(), $"swarmui-promptenhance-label-{Guid.NewGuid():N}");
+        string previousDataDir = Program.DataDir;
+        try
+        {
+            Directory.CreateDirectory($"{tempDir}/PromptEnhance");
+            File.WriteAllText($"{tempDir}/PromptEnhance/endpoints.json", """
+                {
+                  "endpoints": [
+                    {"id": "orca-27b", "url": "http://127.0.0.1:11434", "kind": "ollama", "model": "orca", "label": " Orca 27B ", "enabled": true, "unused_field": "ignored"},
+                    {"id": "off", "url": "http://127.0.0.1:11435", "kind": "ollama", "model": "other", "enabled": false}
+                  ]
+                }
+                """);
+            Program.DataDir = tempDir;
+            PromptEnhanceEndpoints.Init();
+            Assert.That(PromptEnhanceEndpoints.Endpoints.Count, Is.EqualTo(2));
+            Assert.That(PromptEnhanceEndpoints.Endpoints[0].Label, Is.EqualTo("Orca 27B"));
+            Assert.That(PromptEnhanceEndpoints.Endpoints[1].Label, Is.Null);
+            JObject status = PromptEnhanceAPI.ListPromptEnhanceStatus(null, "", "", "auto", "").GetAwaiter().GetResult();
+            JArray rows = (JArray)status["endpoints"];
+            Assert.That(rows.Count, Is.EqualTo(2));
+            Assert.That(rows[0].Value<string>("id"), Is.EqualTo("orca-27b"));
+            Assert.That(rows[0].Value<string>("label"), Is.EqualTo("Orca 27B"));
+            Assert.That(rows[1].Value<string>("label"), Is.EqualTo(""));
         }
         finally
         {

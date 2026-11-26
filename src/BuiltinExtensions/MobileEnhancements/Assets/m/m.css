@@ -1501,6 +1501,9 @@ button.m-header-link {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.4rem;
 }
+.m-enhance-controls .m-enhance-writer {
+    grid-column: 1 / -1;
+}
 .m-enhance-controls .m-enhance-select {
     width: 100%;
     min-width: 0;

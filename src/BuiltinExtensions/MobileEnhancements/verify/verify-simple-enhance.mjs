@@ -266,6 +266,48 @@ const opened = await page.evaluate(() => {
 check('tapping Enhance opens the review sheet even when disabled',
     opened.hasSheet && opened.sheets >= 1 && opened.hasProfileSelect, JSON.stringify(opened));
 
+const writer = await page.evaluate(() => {
+    localStorage.removeItem('promptenhance_endpoint');
+    mEnhance.endpointOverride = null;
+    mEnhance.running = false;
+    mEnhance.sheet = null;
+    mEnhance.endpointSelect = null;
+    window.__enhanceStatus.endpoints = [
+        { id: 'orca-27b', label: 'Orca 27B', model: 'hub/orca', enabled: true, healthy: true },
+        { id: 'gemma-4-12b', model: 'google/gemma-4-12b', enabled: true, healthy: false },
+        { id: 'off', model: 'skipped', enabled: false, healthy: true }
+    ];
+    window.__enhanceCalls = [];
+    window.makeWSRequest = (route, data) => {
+        window.__enhanceCalls.push(data);
+        return { addEventListener() {}, close() {} };
+    };
+    mEnhance.refreshStatus();
+    mEnhance.open();
+    let sheet = mEnhance.sheet && mEnhance.sheet.content;
+    let select = mEnhance.sheet && mEnhance.sheet.writerSelect;
+    let labels = select ? [...select.options].map(option => option.textContent) : [];
+    let first = window.__enhanceCalls[0] || null;
+    select.value = 'gemma-4-12b';
+    select.dispatchEvent(new Event('change'));
+    let second = window.__enhanceCalls[1] || null;
+    return {
+        row: !!(sheet && sheet.querySelector('.m-enhance-writer')),
+        labels,
+        value: mEnhance.sheet && mEnhance.sheet.writerSelect && mEnhance.sheet.writerSelect.value,
+        stored: localStorage.getItem('promptenhance_endpoint'),
+        first: first && first.endpoint_override,
+        second: second && second.endpoint_override,
+        calls: window.__enhanceCalls.length
+    };
+});
+check('the enhance sheet builds a Writer select from enabled endpoints',
+    writer.row && writer.labels.length == 2 && writer.labels[0] == 'Orca 27B' && writer.labels[1] == 'gemma-4-12b (unreachable)',
+    JSON.stringify(writer));
+check('opening the sheet sends the stored writer, and choosing one sends that id',
+    writer.first == 'orca-27b' && writer.second == 'gemma-4-12b' && writer.stored == 'gemma-4-12b' && writer.value == 'gemma-4-12b',
+    JSON.stringify(writer));
+
 await browser.close();
 
 const failed = results.filter(r => !r.pass);

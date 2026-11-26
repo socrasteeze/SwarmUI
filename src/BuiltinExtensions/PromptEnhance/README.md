@@ -276,7 +276,8 @@ always has a stable value to key health results and API overrides on. The health
 (ollama) or `GET /v1/models` (openai), status code only, 5 second timeout, and the result is cached 5 seconds
 per endpoint. With a single enabled endpoint, `ListPromptEnhanceStatus` does not probe; `healthy` is null
 until a writer call records a result. `ListPromptEnhanceStatus` never exposes endpoint URLs to the client -
-only `id`, `kind`, `model`, `enabled`, `healthy`.
+only `id`, `kind`, `model`, `label`, `enabled`, `healthy`. Optional `label` is a display name. A blank or
+missing label is returned as an empty string. Unknown JSON fields are ignored.
 
 ## Folder/filename override config
 
@@ -325,6 +326,19 @@ button; if the panel was already open, it also re-sends the request immediately 
 `PromptEnhanceProfiles.Resolve` already returns null with a reason (`Unknown profile override '<id>'`) for
 an override naming no known profile - that reason surfaces the same way any other disabled-button reason
 does, in the button's tooltip.
+
+## Writer dropdown
+
+The Generate tab Prompt Enhance panel and the Simple tab enhance sheet each have a **Writer** dropdown.
+It lists every enabled endpoint from `ListPromptEnhanceStatus`, including ones that are currently
+unreachable. The option text is `label` when that is set, otherwise the model name after the last `/`,
+otherwise the endpoint `id`. An endpoint with `healthy: false` keeps that text and adds ` (unreachable)`.
+The choice is stored in `localStorage` under `promptenhance_endpoint`, so the two surfaces stay on the
+same writer. The default id is `orca-27b`. If that stored id is not in the enabled list, the dropdown
+selects `orca-27b` when that id is present, otherwise the first enabled endpoint, and writes the choice
+back. Every `EnhancePrompt` request sends it as `endpoint_override`. The override is an empty string only
+when no endpoint is selected. Changing Writer while a result is on screen sends the request again, the
+same way changing Strength does. The status line still shows `writer_model` and `endpoint`.
 
 ## Caller contract
 

@@ -35,7 +35,7 @@ public static class PromptEnhanceAPI
         """
         "pack_version": "1.1.0+7ff564b9",
         "profiles": [{"id": "anima", "display": "Anima", "target_model": "Anima"}],
-        "endpoints": [{"id": "writer", "kind": "ollama", "model": "some-writer-model", "enabled": true, "healthy": true}],
+        "endpoints": [{"id": "writer", "kind": "ollama", "model": "some-writer-model", "label": "", "enabled": true, "healthy": true}],
         "resolved": {"profile": "anima", "reason": null, "strengths": ["faithful", "expand", "full"], "mode": "auto", "resolved_mode": "t2i", "is_video": false}
         """)]
     public static async Task<JObject> ListPromptEnhanceStatus(Session session,
@@ -69,6 +69,7 @@ public static class PromptEnhanceAPI
                 ["id"] = endpoint.ID,
                 ["kind"] = endpoint.Kind,
                 ["model"] = endpoint.Model,
+                ["label"] = endpoint.Label ?? "",
                 ["enabled"] = endpoint.Enabled,
                 ["healthy"] = healthy.HasValue ? new JValue(healthy.Value) : JValue.CreateNull()
             };

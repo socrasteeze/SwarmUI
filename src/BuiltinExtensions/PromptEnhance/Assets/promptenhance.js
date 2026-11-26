@@ -105,6 +105,13 @@ class PromptEnhanceHelperClass {
         this.strength = this.pref('strength', 'full');
         /** The Strength <select> inside the panel. */
         this.strengthSelect = null;
+        /** Writer endpoint id sent as endpoint_override. Same localStorage key as the Simple sheet.
+         * Default orca-27b. Empty only when status listed no enabled endpoint. */
+        this.endpointOverride = this.pref('endpoint', 'orca-27b');
+        /** The Writer <select> inside the panel. */
+        this.endpointSelect = null;
+        /** Enabled endpoints from the last status reply, in server order. */
+        this.writerEndpoints = [];
         /** The prompt text this feature most recently wrote into the prompt box (via manual Apply or the
          * auto-enhance path), so a second generate click is never re-enhanced against its own output. Cleared
          * alongside provenance whenever the prompt box's value diverges from it. */
@@ -323,6 +330,10 @@ class PromptEnhanceHelperClass {
                     <label class="prompt-enhance-profile-label translate">Strength</label>
                     <select id="prompt_enhance_strength_select" class="auto-dropdown prompt-enhance-strength-select"></select>
                 </div>
+                <div class="prompt-enhance-profile-row">
+                    <label class="prompt-enhance-profile-label translate">Writer</label>
+                    <select id="prompt_enhance_writer_select" class="auto-dropdown prompt-enhance-writer-select"></select>
+                </div>
                 <textarea class="prompt-enhance-preview" rows="6" readonly></textarea>
                 <div class="prompt-enhance-notes" style="display:none"></div>
                 <div class="prompt-enhance-conflict" style="display:none"></div>
@@ -345,6 +356,7 @@ class PromptEnhanceHelperClass {
         }
         this.profileSelect = panel.querySelector('.prompt-enhance-profile-select');
         this.strengthSelect = panel.querySelector('.prompt-enhance-strength-select');
+        this.endpointSelect = panel.querySelector('.prompt-enhance-writer-select');
         this.previewArea = panel.querySelector('.prompt-enhance-preview');
         this.notesBlock = panel.querySelector('.prompt-enhance-notes');
         this.conflictBlock = panel.querySelector('.prompt-enhance-conflict');
@@ -387,6 +399,111 @@ class PromptEnhanceHelperClass {
                 this.open();
             }
         });
+        this.fillWriterSelect();
+        this.endpointSelect.addEventListener('change', () => this.onWriterChanged());
+    }
+
+    /** Id sent as endpoint_override. Empty only when no writer is selected. */
+    writerEndpointId() {
+        if (this.endpointOverride == null) {
+            this.endpointOverride = this.pref('endpoint', 'orca-27b');
+        }
+        return this.endpointOverride || '';
+    }
+
+    /** Visible Writer option: label, else the model name after the last slash, else the id. */
+    writerOptionLabel(endpoint) {
+        let label = '';
+        if (endpoint.label) {
+            label = ('' + endpoint.label).trim();
+        }
+        if (!label && endpoint.model) {
+            let model = ('' + endpoint.model).trim();
+            let slash = model.lastIndexOf('/');
+            label = slash >= 0 ? model.substring(slash + 1) : model;
+        }
+        if (!label) {
+            label = '' + (endpoint.id || '');
+        }
+        if (endpoint.healthy === false) {
+            label = label + ' (unreachable)';
+        }
+        return label;
+    }
+
+    /** Rebuilds the Writer select from the enabled endpoints chosen by applyWriterEndpoints. */
+    fillWriterSelect() {
+        let select = this.endpointSelect;
+        if (!select) {
+            return;
+        }
+        select.innerHTML = '';
+        let enabled = this.writerEndpoints || [];
+        for (let i = 0; i < enabled.length; i++) {
+            let option = document.createElement('option');
+            option.value = enabled[i].id;
+            option.innerText = this.writerOptionLabel(enabled[i]);
+            select.appendChild(option);
+        }
+        select.value = this.endpointOverride || '';
+    }
+
+    /** Aligns the stored writer id with enabled status endpoints and refreshes the select. */
+    applyWriterEndpoints(endpoints) {
+        let enabled = [];
+        let list = endpoints || [];
+        for (let i = 0; i < list.length; i++) {
+            if (list[i] && list[i].enabled !== false) {
+                enabled.push(list[i]);
+            }
+        }
+        this.writerEndpoints = enabled;
+        let stored = this.endpointOverride;
+        if (stored == null) {
+            stored = this.pref('endpoint', 'orca-27b');
+        }
+        let chosen = '';
+        let sawStored = false;
+        let sawDefault = false;
+        for (let i = 0; i < enabled.length; i++) {
+            if (enabled[i].id == stored) {
+                sawStored = true;
+            }
+            if (enabled[i].id == 'orca-27b') {
+                sawDefault = true;
+            }
+        }
+        if (enabled.length == 0) {
+            chosen = '';
+        }
+        else if (sawStored) {
+            chosen = stored;
+        }
+        else if (sawDefault) {
+            chosen = 'orca-27b';
+        }
+        else {
+            chosen = enabled[0].id;
+        }
+        this.endpointOverride = chosen;
+        if (chosen && this.pref('endpoint', '') != chosen) {
+            this.setPref('endpoint', chosen);
+        }
+        this.fillWriterSelect();
+    }
+
+    /** Persists the Writer select and re-sends when a result is already on screen. */
+    onWriterChanged() {
+        if (this.endpointSelect) {
+            this.endpointOverride = this.endpointSelect.value;
+        }
+        if (this.endpointOverride) {
+            this.setPref('endpoint', this.endpointOverride);
+        }
+        if (this.panel.classList.contains('prompt-enhance-panel-open')) {
+            this.close();
+            this.open();
+        }
     }
 
     /** Fills the Strength <select> with the three fixed levels, once - unlike the profile list, these never
@@ -633,7 +750,7 @@ class PromptEnhanceHelperClass {
         this.setEnhanceBusy(true);
         this.setStatus('Enhancing...');
         this.settled = false;
-        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, 'seed': seed, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
+        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': this.writerEndpointId(), 'strength': this.strength, 'seed': seed, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
                 this.settled = true;
             }
@@ -1012,6 +1129,7 @@ class PromptEnhanceHelperClass {
             this.syncWriteModeLabel();
             this.populateProfileOptions(data.profiles || []);
             this.applyStrengthOptions((data.resolved && data.resolved.strengths) || ['faithful', 'expand', 'full']);
+            this.applyWriterEndpoints(data.endpoints || []);
         }, 0, error => {
             if (requestSeq != this.statusRequestSeq) {
                 return;
@@ -1123,7 +1241,7 @@ class PromptEnhanceHelperClass {
             this.showPassthrough(reason);
             this.dispatchGenerateClick(altKey);
         };
-        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': '', 'strength': this.strength, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
+        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': this.writerEndpointId(), 'strength': this.strength, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
             if (data.status != null || data.chunk != null) {
                 return;
             }

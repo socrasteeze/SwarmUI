@@ -24,7 +24,8 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="Enabled">Whether this endpoint should be considered at all.</param>
 /// <param name="NumCtx">Optional Ollama <c>num_ctx</c>. Null omits the option so Ollama keeps its default
 /// context length. Ignored for the <c>openai</c> kind.</param>
-public record class PromptEnhanceEndpoint(string ID, string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, bool Enabled, int? NumCtx = null);
+/// <param name="Label">Optional display name from the endpoint file. Blank falls back to the model, then the id.</param>
+public record class PromptEnhanceEndpoint(string ID, string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, bool Enabled, int? NumCtx = null, string Label = null);
 
 /// <summary>Loads and holds the ordered list of configured writer-host endpoints, and probes them for
 /// reachability.
@@ -91,6 +92,7 @@ public static class PromptEnhanceEndpoints
                         Logs.Warning($"[PromptEnhance] Endpoint config entry {index} duplicates id '{original}' - renamed to '{id}'.");
                     }
                     string url = (entry.Value<string>("url") ?? "").TrimEnd('/');
+                    string label = (entry.Value<string>("label") ?? "").Trim();
                     loaded.Add(new(
                         id,
                         url,
@@ -99,7 +101,8 @@ public static class PromptEnhanceEndpoints
                         entry.Value<string>("keep_alive") ?? "5m",
                         entry.Value<int?>("timeout_seconds") ?? 120,
                         entry.Value<bool?>("enabled") ?? true,
-                        entry.Value<int?>("num_ctx")));
+                        entry.Value<int?>("num_ctx"),
+                        string.IsNullOrWhiteSpace(label) ? null : label));
                 }
             }
             Endpoints = loaded;

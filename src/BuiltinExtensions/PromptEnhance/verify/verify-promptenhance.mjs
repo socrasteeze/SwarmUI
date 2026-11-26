@@ -140,6 +140,21 @@ function buildHost(methodNames, extraProps, methodSource = source) {
     if (methodNames.some(name => name == 'open' || name == 'handleFrame' || name == 'close' || name == 'runAutoEnhance') && !methodNames.includes('setEnhanceBusy')) {
         methodNames.push('setEnhanceBusy');
     }
+    if (methodNames.some(name => name == 'refreshStatus' || name == 'applyWriterEndpoints' || name == 'onWriterChanged' || name == 'fillWriterSelect')) {
+        for (let extra of ['applyWriterEndpoints', 'fillWriterSelect', 'writerOptionLabel', 'pref', 'setPref']) {
+            if (!methodNames.includes(extra)) {
+                methodNames.push(extra);
+            }
+        }
+    }
+    if (methodNames.some(name => name == 'open' || name == 'runAutoEnhance' || name == 'onWriterChanged')) {
+        if (!methodNames.includes('writerEndpointId')) {
+            methodNames.push('writerEndpointId');
+        }
+        if (!methodNames.includes('pref')) {
+            methodNames.push('pref');
+        }
+    }
     let pieces = [];
     for (let i = 0; i < methodNames.length; i++) {
         pieces.push(extractMethod(methodSource, methodNames[i]));
@@ -169,6 +184,8 @@ function makeFakeElement() {
         classList: makeFakeClassList(),
         addEventListener: () => {},
         removeEventListener: () => {},
+        setAttribute() {},
+        removeAttribute() {},
         dispatched: [],
         dispatchEvent(evt) { this.dispatched.push(evt); }
     };
@@ -513,6 +530,7 @@ function check(name, pass, detail) {
     check('the click is intercepted exactly once (stopPropagation and preventDefault each called once)', event.stoppedCount == 1 && event.preventedCount == 1, `stopped=${event.stoppedCount} prevented=${event.preventedCount}`);
     check('exactly one EnhancePrompt request is sent, carrying the current prompt', capturedInData != null && capturedInData.prompt == 'a cat', `inData=${JSON.stringify(capturedInData)}`);
     check('...and carrying the current strength preference', capturedInData != null && capturedInData.strength == 'full', `inData=${JSON.stringify(capturedInData)}`);
+    check('...and carrying the stored writer endpoint, defaulting to orca-27b', capturedInData != null && capturedInData.endpoint_override == 'orca-27b', `inData=${JSON.stringify(capturedInData)}`);
     check('the generate button is not re-clicked while the request is still in flight', host.generateButton.dispatched.length == 0, `dispatched=${host.generateButton.dispatched.length}`);
     check('the generate button shows an "Enhancing..." busy state while it runs', host.generateButton.innerText == 'Enhancing...', `innerText="${host.generateButton.innerText}"`);
 
@@ -784,6 +802,7 @@ function check(name, pass, detail) {
         return { addEventListener: () => {} };
     };
     getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+    localStorage.setItem('promptenhance_endpoint', 'orca-27b');
     let promptBox = makeFakeElement();
     promptBox.value = 'a dragon';
     let host = buildHost(['open', 'resetPanel', 'showPanel', 'setStatus', 'handleFrame', 'showConflict', 'showPassthrough', 'setApplyEnabled'], {
@@ -807,6 +826,7 @@ function check(name, pass, detail) {
     host.open();
     check('open() sends the current strength preference in its EnhancePrompt request', capturedInData != null && capturedInData.strength == 'expand', `inData=${JSON.stringify(capturedInData)}`);
     check('...alongside the current prompt and profile override', capturedInData != null && capturedInData.prompt == 'a dragon' && capturedInData.profile_override == '', `inData=${JSON.stringify(capturedInData)}`);
+    check('open() sends the stored writer endpoint', capturedInData != null && capturedInData.endpoint_override == 'orca-27b', `inData=${JSON.stringify(capturedInData)}`);
 }
 
 // ====================================================================================================
@@ -882,7 +902,7 @@ function check(name, pass, detail) {
     let unload = readFileSync(`${root}/PromptEnhanceUnload.cs`, 'utf8');
     let extension = readFileSync(`${root}/PromptEnhanceExtension.cs`, 'utf8');
     let version = readFileSync(`${root}/Assets/profiles/VERSION`, 'utf8').trim();
-    check('pack version is 1.5.2+krea-no-emdash', version == '1.5.2+krea-no-emdash', version);
+    check('pack version is 1.5.3+krea-tone-down', version == '1.5.3+krea-tone-down', version);
     check('klein 9b maps to its edit profile', profiles.includes('["flux2-klein-9b"] = "flux2-klein-9b.edit"'), '');
     check('qwen image 2.1 maps to its edit profile', profiles.includes('["qwen-image-2.1"] = "qwen-image-2.1.edit"'), '');
     check('krea 2 maps to its reference profile', profiles.includes('["krea-2"] = "krea-2.reference"'), '');
@@ -1047,6 +1067,85 @@ function check(name, pass, detail) {
     currentPresets = null;
     getGenInput = null;
     mState = null;
+}
+
+// ====================================================================================================
+// Part 26: the Writer select is built from enabled status endpoints and chooses endpoint_override.
+// ====================================================================================================
+{
+    check('the panel markup builds a Writer select', source.includes('id="prompt_enhance_writer_select"') && source.includes('>Writer</label>'), '');
+    document = {
+        getElementById: () => null,
+        createElement() {
+            return { value: '', innerText: '' };
+        }
+    };
+    localStorage.removeItem('promptenhance_endpoint');
+    let select = {
+        value: '',
+        options: [],
+        set innerHTML(value) {
+            if (value == '') {
+                this.options = [];
+            }
+        },
+        appendChild(option) {
+            this.options.push(option);
+        }
+    };
+    getRequiredElementById = () => ({ value: 'some_model.safetensors' });
+    let promptBox = makeFakeElement();
+    promptBox.value = 'a cat';
+    let calls = [];
+    makeWSRequest = (url, inData) => {
+        calls.push(inData);
+        return { addEventListener() {} };
+    };
+    let host = buildHost(['applyWriterEndpoints', 'onWriterChanged', 'open', 'close', 'resetPanel', 'showPanel', 'setStatus', 'setApplyEnabled'], {
+        endpointSelect: select,
+        endpointOverride: null,
+        writerEndpoints: [],
+        promptBox: promptBox,
+        panel: { classList: makeFakeClassList(['prompt-enhance-panel-open']) },
+        previewArea: makeFakeElement(),
+        statusLine: makeFakeElement(),
+        notesBlock: makeFakeElement(),
+        conflictBlock: makeFakeElement(),
+        passthroughBlock: makeFakeElement(),
+        applyButton: makeFakeElement(),
+        button: makeFakeElement(),
+        applyEnabled: false,
+        lastResult: null,
+        running: false,
+        autoRunning: false,
+        settled: false,
+        socket: null,
+        profileOverride: '',
+        strength: 'full'
+    });
+    host.applyWriterEndpoints([
+        { id: 'orca-27b', label: 'Orca 27B', model: 'hub/orca', enabled: true, healthy: true },
+        { id: 'gemma-4-12b', model: 'google/gemma-4-12b', enabled: true, healthy: false },
+        { id: 'off', model: 'skipped', enabled: false, healthy: true }
+    ]);
+    check('Writer options are the enabled endpoints, with a label and an unreachable suffix', select.options.length == 2
+        && select.options[0].value == 'orca-27b' && select.options[0].innerText == 'Orca 27B'
+        && select.options[1].value == 'gemma-4-12b' && select.options[1].innerText == 'gemma-4-12b (unreachable)',
+        JSON.stringify(select.options));
+    check('a missing stored id selects orca-27b and persists it', host.endpointOverride == 'orca-27b' && select.value == 'orca-27b'
+        && localStorage.getItem('promptenhance_endpoint') == 'orca-27b', `override=${host.endpointOverride}`);
+    select.value = 'gemma-4-12b';
+    host.onWriterChanged();
+    check('choosing a Writer re-sends EnhancePrompt with that endpoint id', calls.length == 1 && calls[0].endpoint_override == 'gemma-4-12b'
+        && localStorage.getItem('promptenhance_endpoint') == 'gemma-4-12b', `calls=${JSON.stringify(calls)}`);
+    host.endpointOverride = 'retired';
+    host.setPref('endpoint', 'retired');
+    host.applyWriterEndpoints([
+        { id: 'gemma-4-12b', label: 'Gemma 4 12B', enabled: true, healthy: null }
+    ]);
+    check('a stored id missing from the list falls back to the first enabled endpoint', host.endpointOverride == 'gemma-4-12b'
+        && select.options.length == 1 && select.options[0].innerText == 'Gemma 4 12B' && select.value == 'gemma-4-12b',
+        `override=${host.endpointOverride} label=${select.options[0] && select.options[0].innerText}`);
 }
 
 const failed = results.filter(r => !r.pass);
