@@ -902,7 +902,7 @@ function check(name, pass, detail) {
     let unload = readFileSync(`${root}/PromptEnhanceUnload.cs`, 'utf8');
     let extension = readFileSync(`${root}/PromptEnhanceExtension.cs`, 'utf8');
     let version = readFileSync(`${root}/Assets/profiles/VERSION`, 'utf8').trim();
-    check('pack version is 1.6.0+krea-t2i-structure', version == '1.6.0+krea-t2i-structure', version);
+    check('pack version is 1.6.1+krea-expand-floor', version == '1.6.1+krea-expand-floor', version);
     check('klein 9b maps to its edit profile', profiles.includes('["flux2-klein-9b"] = "flux2-klein-9b.edit"'), '');
     check('qwen image 2.1 maps to its edit profile', profiles.includes('["qwen-image-2.1"] = "qwen-image-2.1.edit"'), '');
     check('krea 2 maps to its reference profile', profiles.includes('["krea-2"] = "krea-2.reference"'), '');

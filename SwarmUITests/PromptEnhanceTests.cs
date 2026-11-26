@@ -1189,7 +1189,8 @@ public class PromptEnhanceTests : SwarmUITest
 
     /// <summary>Krea 2 and the Krea 2 reference profile use the Krea directives. Other profiles keep the shared
     /// ones. Every directive names the boilerplate ban. Krea Expand and Full ask for the paragraph and clause
-    /// order. Krea Faithful may only add a missing medium, light, or shot size.</summary>
+    /// order. Short or incomplete Expand requests must reach about 40 words. Already detailed means most
+    /// clauses are present, or the request is already around 40 words. Krea Faithful has no 40-word floor.</summary>
     [Test]
     public void ApplyStrength_Full_Krea2UsesItsOwnDirective()
     {
@@ -1226,6 +1227,14 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceClient.KreaFullDirective, Does.Contain("one natural-language paragraph of about 40 to 120 words"));
         Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("use this order: medium and shot"));
         Assert.That(PromptEnhanceClient.KreaFullDirective, Does.Contain("use this order: medium and shot"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.EndWith("Request: "));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("must still reach about 40 words"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("A short complete sentence is not already detailed"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("Already detailed means the request already has most of those clauses, or is already around 40 words or more"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("ordinary implied visible facts"));
+        Assert.That(PromptEnhanceClient.KreaFaithfulDirective, Does.Not.Contain("reach about 40 words"));
+        Assert.That(PromptEnhanceClient.KreaFaithfulDirective, Does.Not.Contain("40 to 120"));
+        Assert.That(PromptEnhanceClient.ExpandDirective, Does.Not.Contain("short complete sentence"));
         Assert.That(PromptEnhanceClient.FaithfulDirective, Does.Contain("nearly verbatim"));
         Assert.That(PromptEnhanceClient.FaithfulDirective, Does.Not.Contain("missing medium"));
         Assert.That(PromptEnhanceClient.ExpandDirective, Does.Contain("1.5 times"));
