@@ -160,7 +160,11 @@ public class GridGeneratorExtension : Extension
         };
         GridRunnerPostDryHook = (runner, param, set) =>
         {
+            bool seedWasMinusOne = !param.TryGet(T2IParamTypes.Seed, out long seedBefore) || seedBefore == -1;
+            bool variationWasMinusOne = param.TryGet(T2IParamTypes.VariationSeed, out long varBefore) && varBefore == -1;
             param.ApplySpecialLogic();
+            long lockedSeed = param.Get(T2IParamTypes.Seed, -1);
+            param.TryGet(T2IParamTypes.VariationSeed, out long lockedVariation);
             SwarmUIGridData data = runner.Grid.LocalData as SwarmUIGridData;
             if (data.Claim.ShouldCancel)
             {
@@ -204,70 +208,112 @@ public class GridGeneratorExtension : Extension
                     match.ApplyTo(thisParams);
                 }
             }
+            bool hasSeed = thisParams.TryGet(T2IParamTypes.Seed, out long seedNow);
+            bool seedStillRandom = ValueStillAuto(seedWasMinusOne, hasSeed, seedNow, lockedSeed);
+            bool hasVariation = thisParams.TryGet(T2IParamTypes.VariationSeed, out long varNow);
+            bool variationStillRandom = variationWasMinusOne && ValueStillAuto(true, hasVariation, varNow, lockedVariation);
+            bool variationApplies = thisParams.Get(T2IParamTypes.VariationSeedStrength, 0) > 0;
+            GridCellSeedSplit split = PlanPerImageSeeds(thisParams.Get(T2IParamTypes.BatchSize, 1), data.RandomSeedPerGen, seedStillRandom, variationStillRandom, variationApplies);
             int iteration = runner.Iteration;
-            Task t = Task.Run(() => T2IEngine.CreateImageTask(thisParams, $"{iteration}", data.Claim, data.AddOutput, setError, true,
-                (image, metadata) =>
+            Task StartOne(T2IParamInput runParams)
+            {
+                Task t = Task.Run(() => T2IEngine.CreateImageTask(runParams, $"{iteration}", data.Claim, data.AddOutput, setError, true,
+                    (image, metadata) =>
+                    {
+                        Logs.Info($"Completed gen #{iteration} (of {runner.TotalRun}) ... Set: '{set.Data}', file '{set.BaseFilepath}'");
+                        string mainpath = $"{set.Grid.Runner.BasePath}/{set.BaseFilepath}";
+                        string ext = set.Grid.Format;
+                        string metaExtra = "";
+                        if (image.File.Type.MetaType != MediaMetaType.Image)
+                        {
+                            ext = image.File.Type.Extension;
+                            metaExtra += $"file_extensions_alt[\"{set.BaseFilepath}\"] = \"{ext}\"\nfix_video(\"{set.BaseFilepath}\")";
+                        }
+                        string targetPath = $"{mainpath}.{ext}";
+                        string dir = targetPath.Replace('\\', '/').BeforeLast('/');
+                        if (set.Grid.OutputType == Grid.OutputyTypeEnum.WEB_PAGE)
+                        {
+                            if (!Directory.Exists(dir))
+                            {
+                                Directory.CreateDirectory(dir);
+                            }
+                            File.WriteAllBytes(targetPath, image.ActualFileTask is not null ? image.ActualFileTask.Result.RawData : image.File.RawData);
+                            if (set.Grid.PublishMetadata && (!string.IsNullOrWhiteSpace(metadata) || !string.IsNullOrWhiteSpace(metaExtra)))
+                            {
+                                metadata ??= "{}";
+                                File.WriteAllBytes($"{mainpath}.metadata.js", $"all_metadata[\"{set.BaseFilepath}\"] = {metadata}\n{metaExtra}".EncodeUTF8());
+                            }
+                            string output = $"/{set.Grid.Runner.URLBase}/{set.BaseFilepath}.{ext}";
+                            if (data.ShowOutputs)
+                            {
+                                data.AddOutput(new JObject() { ["image"] = output, ["batch_index"] = $"{iteration}", ["request_id"] = $"{runParams.UserRequestId}", ["metadata"] = metadata });
+                            }
+                            WebhookManager.SendEveryGenWebhook(runParams, output, image.File);
+                        }
+                        else
+                        {
+                            (string url, string filePath) = runParams.Get(T2IParamTypes.DoNotSave, false) ? (image.File.AsDataString(), null) : data.Session.SaveImage(image, iteration, runParams, metadata);
+                            if (url == "ERROR")
+                            {
+                                setError($"Server failed to save an image.");
+                                return;
+                            }
+                            if (data.ShowOutputs)
+                            {
+                                data.AddOutput(new JObject() { ["image"] = url, ["batch_index"] = $"{iteration}", ["request_id"] = $"{runParams.UserRequestId}", ["metadata"] = string.IsNullOrWhiteSpace(metadata) ? null : metadata });
+                            }
+                            WebhookManager.SendEveryGenWebhook(runParams, url, image.File);
+                            if (set.Grid.OutputType == Grid.OutputyTypeEnum.GRID_IMAGE)
+                            {
+                                data.GeneratedOutputs.TryAdd(set.BaseFilepath, image.File);
+                            }
+                        }
+                    }));
+                lock (data.UpdateLock)
                 {
-                    Logs.Info($"Completed gen #{iteration} (of {runner.TotalRun}) ... Set: '{set.Data}', file '{set.BaseFilepath}'");
-                    string mainpath = $"{set.Grid.Runner.BasePath}/{set.BaseFilepath}";
-                    string ext = set.Grid.Format;
-                    string metaExtra = "";
-                    if (image.File.Type.MetaType != MediaMetaType.Image)
-                    {
-                        ext = image.File.Type.Extension;
-                        metaExtra += $"file_extensions_alt[\"{set.BaseFilepath}\"] = \"{ext}\"\nfix_video(\"{set.BaseFilepath}\")";
-                    }
-                    string targetPath = $"{mainpath}.{ext}";
-                    string dir = targetPath.Replace('\\', '/').BeforeLast('/');
-                    if (set.Grid.OutputType == Grid.OutputyTypeEnum.WEB_PAGE)
-                    {
-                        if (!Directory.Exists(dir))
-                        {
-                            Directory.CreateDirectory(dir);
-                        }
-                        File.WriteAllBytes(targetPath, image.ActualFileTask is not null ? image.ActualFileTask.Result.RawData : image.File.RawData);
-                        if (set.Grid.PublishMetadata && (!string.IsNullOrWhiteSpace(metadata) || !string.IsNullOrWhiteSpace(metaExtra)))
-                        {
-                            metadata ??= "{}";
-                            File.WriteAllBytes($"{mainpath}.metadata.js", $"all_metadata[\"{set.BaseFilepath}\"] = {metadata}\n{metaExtra}".EncodeUTF8());
-                        }
-                        string output = $"/{set.Grid.Runner.URLBase}/{set.BaseFilepath}.{ext}";
-                        if (data.ShowOutputs)
-                        {
-                            data.AddOutput(new JObject() { ["image"] = output, ["batch_index"] = $"{iteration}", ["request_id"] = $"{thisParams.UserRequestId}", ["metadata"] = metadata });
-                        }
-                        WebhookManager.SendEveryGenWebhook(thisParams, output, image.File);
-                    }
-                    else
-                    {
-                        (string url, string filePath) = thisParams.Get(T2IParamTypes.DoNotSave, false) ? (image.File.AsDataString(), null) : data.Session.SaveImage(image, iteration, thisParams, metadata);
-                        if (url == "ERROR")
-                        {
-                            setError($"Server failed to save an image.");
-                            return;
-                        }
-                        if (data.ShowOutputs)
-                        {
-                            data.AddOutput(new JObject() { ["image"] = url, ["batch_index"] = $"{iteration}", ["request_id"] = $"{thisParams.UserRequestId}", ["metadata"] = string.IsNullOrWhiteSpace(metadata) ? null : metadata });
-                        }
-                        WebhookManager.SendEveryGenWebhook(thisParams, url, image.File);
-                        if (set.Grid.OutputType == Grid.OutputyTypeEnum.GRID_IMAGE)
-                        {
-                            data.GeneratedOutputs.TryAdd(set.BaseFilepath, image.File);
-                        }
-                    }
-                }));
-            lock (data.UpdateLock)
-            {
-                data.Rendering.Add(t);
+                    data.Rendering.Add(t);
+                }
+                int requests = Program.Backends.QueuedRequests;
+                if (requests < Program.ServerSettings.Backends.MaxRequestsForcedOrder)
+                {
+                    Logs.Debug($"Grid Gen micro-pausing to maintain order as {requests} < {Program.ServerSettings.Backends.MaxRequestsForcedOrder}");
+                    Task.Delay(20).Wait(); // Tiny few-ms delay to encourage tasks retaining order.
+                }
+                return t;
             }
-            int requests = Program.Backends.QueuedRequests;
-            if (requests < Program.ServerSettings.Backends.MaxRequestsForcedOrder)
+            if (!split.Separate)
             {
-                Logs.Debug($"Grid Gen micro-pausing to maintain order as {requests} < {Program.ServerSettings.Backends.MaxRequestsForcedOrder}");
-                Task.Delay(20).Wait(); // Tiny few-ms delay to encourage tasks retaining order.
+                return StartOne(thisParams);
             }
-            return t;
+            // One batched graph would draw seed+i. Separate runs keep the same image count and give each image its own -1 roll.
+            Task last = null;
+            for (int imageIndex = 0; imageIndex < split.Count; imageIndex++)
+            {
+                if (data.Claim.ShouldCancel)
+                {
+                    break;
+                }
+                if (imageIndex > 0)
+                {
+                    Task[] active = data.GetActive();
+                    if (active.Length > data.MaxSimul)
+                    {
+                        Task.WaitAny(active);
+                    }
+                }
+                T2IParamInput one = thisParams.Clone();
+                one.Set(T2IParamTypes.BatchSize, 1);
+                if (split.RerollSeed)
+                {
+                    one.Set(T2IParamTypes.Seed, Random.Shared.Next());
+                }
+                if (split.RerollVariation)
+                {
+                    one.Set(T2IParamTypes.VariationSeed, Random.Shared.Next());
+                }
+                last = StartOne(one);
+            }
+            return last ?? Task.CompletedTask;
         };
         PostPreprocessCallback = (runner) =>
         {
@@ -374,6 +420,54 @@ public class GridGeneratorExtension : Extension
             matches.Add(match);
         }
         return true;
+    }
+
+    /// <summary>How one grid cell's images are seeded. <see cref="Count"/> is the batch that cell already asked for.
+    /// It is never the Images count, and it is never increased to make room for new seeds.</summary>
+    public class GridCellSeedSplit
+    {
+        /// <summary>Images this cell will produce. Same number with the random-seed toggle on or off.</summary>
+        public int Count;
+
+        /// <summary>When true, run <see cref="Count"/> single-image generations instead of one batched generation.</summary>
+        public bool Separate;
+
+        /// <summary>Assign a new random seed on each separated image. False when the seed is a fixed value.</summary>
+        public bool RerollSeed;
+
+        /// <summary>Assign a new random variation seed on each separated image.</summary>
+        public bool RerollVariation;
+    }
+
+    /// <summary>True when <paramref name="valueNow"/> is still the -1 that grid seed locking is allowed to replace.
+    /// A concrete value written by a Seed axis or a preset returns false.</summary>
+    public static bool ValueStillAuto(bool wasMinusOne, bool hasValue, long valueNow, long lockedValue)
+    {
+        if (!wasMinusOne)
+        {
+            return hasValue && valueNow == -1;
+        }
+        if (!hasValue)
+        {
+            return false;
+        }
+        return valueNow == -1 || valueNow == lockedValue;
+    }
+
+    /// <summary>Plans seeds for one cell. <paramref name="batchSize"/> is Batch Size after axes and presets.
+    /// The grid does not loop on Images, so that count is not an argument and cannot add generations.
+    /// A batch larger than one stays one generation unless the toggle is on and a -1 seed would otherwise become seed+i.</summary>
+    public static GridCellSeedSplit PlanPerImageSeeds(int batchSize, bool randomPerGen, bool seedStillRandom, bool variationStillRandom, bool variationApplies)
+    {
+        int count = batchSize < 1 ? 1 : batchSize;
+        bool separate = randomPerGen && count > 1 && (seedStillRandom || (variationStillRandom && variationApplies));
+        return new GridCellSeedSplit()
+        {
+            Count = count,
+            Separate = separate,
+            RerollSeed = separate && seedStillRandom,
+            RerollVariation = separate && variationStillRandom
+        };
     }
 
     /// <summary>Appends comma-stackable grid axis values onto <paramref name="param"/>.
@@ -544,6 +638,9 @@ public class GridGeneratorExtension : Extension
         /// <summary>Optional contact-sheet row count from /simple (gridRows). 0 = server default layout.</summary>
         public int GridRows = 0;
 
+        /// <summary>When true, a -1 seed is rolled again for every image, including each image of a batch that shares a cell.</summary>
+        public bool RandomSeedPerGen = false;
+
         public Task[] GetActive()
         {
             lock (UpdateLock)
@@ -647,7 +744,8 @@ public class GridGeneratorExtension : Extension
             ContinueOnError = continueOnError,
             ShowOutputs = showOutputs,
             SaveConfig = raw.TryGetValue("saveConfig", out JToken saveConfig) ? saveConfig as JObject : null,
-            GridRows = gridRows
+            GridRows = gridRows,
+            RandomSeedPerGen = randomSeedPerGen
         };
         Grid grid = null;
         try
