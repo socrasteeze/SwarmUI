@@ -1188,7 +1188,8 @@ public class PromptEnhanceTests : SwarmUITest
     }
 
     /// <summary>Krea 2 and the Krea 2 reference profile use the Krea directives. Other profiles keep the shared
-    /// ones. Every directive names the boilerplate ban.</summary>
+    /// ones. Every directive names the boilerplate ban. Krea Expand and Full ask for the paragraph and clause
+    /// order. Krea Faithful may only add a missing medium, light, or shot size.</summary>
     [Test]
     public void ApplyStrength_Full_Krea2UsesItsOwnDirective()
     {
@@ -1219,6 +1220,16 @@ public class PromptEnhanceTests : SwarmUITest
         Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.StartWith("Mode: expand\n\n"));
         Assert.That(PromptEnhanceClient.KreaFullDirective, Does.EndWith("Request: "));
         Assert.That(PromptEnhanceClient.KreaFaithfulDirective, Does.EndWith("Request: "));
+        Assert.That(PromptEnhanceClient.KreaFaithfulDirective, Does.StartWith("Mode: rewrite\n\n"));
+        Assert.That(PromptEnhanceClient.KreaFaithfulDirective, Does.Contain("only add a missing medium, light, or shot size"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("one natural-language paragraph of about 40 to 120 words"));
+        Assert.That(PromptEnhanceClient.KreaFullDirective, Does.Contain("one natural-language paragraph of about 40 to 120 words"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Contain("use this order: medium and shot"));
+        Assert.That(PromptEnhanceClient.KreaFullDirective, Does.Contain("use this order: medium and shot"));
+        Assert.That(PromptEnhanceClient.FaithfulDirective, Does.Contain("nearly verbatim"));
+        Assert.That(PromptEnhanceClient.FaithfulDirective, Does.Not.Contain("missing medium"));
+        Assert.That(PromptEnhanceClient.ExpandDirective, Does.Contain("1.5 times"));
+        Assert.That(PromptEnhanceClient.KreaExpandDirective, Does.Not.Contain("1.5 times"));
     }
 
     /// <summary>Endpoint config loads an optional integer <c>num_ctx</c>, and a missing key stays null.</summary>

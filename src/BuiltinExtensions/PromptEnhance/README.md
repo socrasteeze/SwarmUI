@@ -128,10 +128,22 @@ Rules `PromptEnhanceClient.ApplyStrength` applies, in order:
 
 Krea 2 and the Krea 2 reference profile use their own Faithful, Expand, and Full scene directives
 (`KreaFaithfulDirective`, `KreaExpandDirective`, `KreaFullDirective`). Any profile id that equals or starts
-with `krea-2` (case-insensitive) gets those, including `krea-2.reference`. Faithful begins with `Mode: rewrite`.
+with `krea-2` (case-insensitive) gets those, including `krea-2.reference`. They do not use the shared wording
+in the table above. Faithful begins with `Mode: rewrite`. It may only add a missing medium, light, or shot
+size, and it leaves an already-specific prompt alone apart from grammar. It may be shorter than 40 words.
 Expand and Full scene still begin with `Mode: expand`, and all three still end in `Request:`, so the writer
-keeps sentences instead of a comma tag list. The wording matches the three levels above. Other profiles use
-the shared directives.
+keeps sentences instead of a comma tag list. Expand and Full scene each ask for one natural-language paragraph
+of about 40 to 120 words. When a part is present or being added, the order is medium and shot, subject, action
+or pose or expression, clothing and materials, setting and layout, camera (angle, framing, depth of field),
+lighting quality and direction, then style, palette, and grain. The most important facts stay early. The hard
+cap is about 500 tokens, and the writer must not pad. Text that must render goes in quotes. Weight syntax such
+as `(word:1.2)` or `word:1.2` is banned. The writer describes what should be present and does not write
+negations, because Krea Turbo ignores negatives. The same quality-tag and boilerplate ban as the shared
+directives still applies, including hyperrealistic. For a realistic or photographic request, Expand and Full
+may mention ordinary imperfections such as pores, flyaway hairs, or film grain. Those do not go on
+illustrations, and they are not quality-tag substitutes. Full scene may fill a missing clause in that order
+with an ordinary visible fact. Expand adds only what the request supports. Other profiles use the shared
+directives.
 
 ## Reroll
 
@@ -356,7 +368,7 @@ question. The contract they're written against (`profiles-noninteractive`, autho
 
 ## Profile pack
 
-Shipped profile-pack version: **`1.5.3+krea-tone-down`** (`Assets/profiles/VERSION`, read at extension init and
+Shipped profile-pack version: **`1.6.0+krea-t2i-structure`** (`Assets/profiles/VERSION`, read at extension init and
 folded into every cache key and provenance record, so a stale copy is detectable rather than silently
 mismatched against a newer grading run).
 
