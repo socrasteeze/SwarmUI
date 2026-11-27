@@ -225,6 +225,12 @@ class MobileEnhancements {
         if (!this.isStandalone) {
             return 0;
         }
+        let isIos = this.isIos();
+        // iOS reserves an opaque status bar outside the web view. An inset reported in that mode
+        // would add a second band above the app.
+        if (isIos && this.statusBarStyle() != 'black-translucent') {
+            return 0;
+        }
         let reported = this.readEnvInsetTop();
         if (reported > 0) {
             return Math.min(reported, MobileEnhancements.MaxSafeTop);
@@ -232,12 +238,7 @@ class MobileEnhancements {
         // Every other platform reports this inset correctly, so a zero there is a real zero. Substituting a
         // fallback would put a permanent dead band across the top of, for example, an Android edge-to-edge
         // portrait PWA that has nothing to avoid.
-        if (!this.isIos()) {
-            return 0;
-        }
-        // A non-translucent status bar is reserved by iOS: the web view begins under it, so a reported zero
-        // is a real zero here too. Padding on top of that is the double-count the gates below exist to avoid.
-        if (this.statusBarStyle() != 'black-translucent') {
+        if (!isIos) {
             return 0;
         }
         // Landscape: iOS hides the status bar outright for standalone web apps, so there is nothing to clear.

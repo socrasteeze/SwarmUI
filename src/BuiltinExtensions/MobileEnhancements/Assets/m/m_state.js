@@ -777,6 +777,9 @@ class MState {
         return slash == -1 ? '' : title.substring(0, slash);
     }
 
+    /** Case-insensitive natural ordering for visible preset and folder names. */
+    static PresetNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
     /** Every group that has at least one preset, sorted. */
     presetGroups() {
         let groups = new Set();
@@ -789,7 +792,7 @@ class MState {
                 groups.add(group);
             }
         }
-        return [...groups].sort((a, b) => a.localeCompare(b));
+        return [...groups].sort(MState.PresetNameCollator.compare);
     }
 
     /** A model name with its file extension removed, folders kept. The two sources of model names disagree:

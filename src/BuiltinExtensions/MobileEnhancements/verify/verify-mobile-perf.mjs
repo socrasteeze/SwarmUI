@@ -8,9 +8,8 @@
  *     under status-bar-style black-translucent, which is exactly the mode that draws the app underneath the
  *     status bar - so consuming env(safe-area-inset-top) directly left the top tab strip behind the clock.
  *     mobile_core.js's measureSafeAreaTop() prefers the reported value and falls back only once it has
- *     confirmed the app is genuinely full-bleed. These checks pin that decision table down - including that
- *     the fallback is inert under the status-bar style the extension actually ships ('black', since
- *     2026-08-29), where iOS reserves the bar itself and any padding would be paid twice.
+ *     confirmed the app is genuinely full-bleed. Under the shipped 'black' status-bar style, iOS reserves
+ *     the bar itself. These checks confirm the app adds no padding in that mode.
  *
  *  2. The per-frame cost of the mobile hot paths. setMobileTopbarCollapse() runs on every scroll event and
  *     every touchmove of a topbar drag; it used to interleave a document-root custom-property write with a
@@ -114,7 +113,8 @@ const safeAreaCases = [
     // height is paid twice (once by iOS, once by us) and the header sits 62px below the clock.
     { name: 'status-bar-style black: iOS reserves the bar, no padding (the 894/956 device)', env: 0, innerH: 894, innerW: 440, screenH: 956, screenW: 440, screenY: 0, statusBar: 'black', expect: 0 },
     { name: 'status-bar-style default: same, no padding', env: 0, innerH: 852, innerW: 393, screenH: 852, screenW: 393, statusBar: 'default', expect: 0 },
-    { name: 'status-bar-style black still honours a reported inset', env: 47, innerH: 852, innerW: 393, screenH: 852, screenW: 393, statusBar: 'black', expect: 47 },
+    { name: 'status-bar-style black adds no padding even with a reported inset', env: 47, innerH: 852, innerW: 393, screenH: 852, screenW: 393, statusBar: 'black', expect: 0 },
+    { name: 'other platforms keep a reported inset with the iOS meta present', env: 24, innerH: 852, innerW: 393, screenH: 852, screenW: 393, ios: false, statusBar: 'black', expect: 24 },
     { name: 'status-bar-style value is case/space-insensitive', env: 0, innerH: 852, innerW: 393, screenH: 852, screenW: 393, statusBar: ' Black-Translucent ', expect: 59 },
 ];
 

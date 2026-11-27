@@ -717,15 +717,6 @@ button.m-header-link {
     overflow: hidden;
     background: var(--background-panel);
 }
-.m-stepper-label {
-    grid-column: 1 / -1;
-    padding: 0.15rem 0.35rem;
-    color: var(--text-soft);
-    font-size: 13px;
-    line-height: 1.2;
-    text-align: center;
-    white-space: nowrap;
-}
 .m-stepper-button {
     min-width: 44px;
     min-height: 44px;

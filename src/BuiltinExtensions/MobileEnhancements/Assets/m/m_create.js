@@ -994,7 +994,7 @@ class MCreate {
         MCreate.syncOptions(this.archSelect, [['', 'All'], ...groups.map(group => [group, group])], mState.archFilter);
     }
 
-    /** Preset picklist, starred first. Single pick on purpose: the full UI can merge several presets into one
+    /** Alphabetical preset picklist. Single pick on purpose: the full UI can merge several presets into one
      * generation and this client deliberately cannot. The merge is an order-sensitive stack that nothing on
      * screen could show, so what it produced on a phone was a list where each tap silently added one more
      * invisible layer - and the fork owner never uses it. The selected option IS the active preset;
@@ -1019,17 +1019,17 @@ class MCreate {
             return;
         }
         this.presetSelect.disabled = false;
-        let sorted = [...visible].sort((a, b) => (b.is_starred ? 1 : 0) - (a.is_starred ? 1 : 0));
-        let entries = [['', 'No preset']];
-        for (let preset of sorted) {
-            // With a group selected the folder prefix is the same on every visible option, so it is spending
-            // scarce picker width to say nothing. Under "all" it is the only architecture cue there is.
+        let entries = [];
+        for (let preset of visible) {
+            // Shorten labels in the selected folder. An active preset from another folder keeps its path.
             let label = preset.title;
             if (mState.archFilter && label.startsWith(`${mState.archFilter}/`)) {
                 label = label.substring(mState.archFilter.length + 1);
             }
             entries.push([preset.title, label]);
         }
+        entries.sort((a, b) => MState.PresetNameCollator.compare(a[1], b[1]));
+        entries.unshift(['', 'No preset']);
         MCreate.syncOptions(this.presetSelect, entries, mState.activePresets[0] || '');
     }
 
@@ -2492,7 +2492,9 @@ class MCreate {
      * cover the short interval before ListT2IParams lands. */
     buildNumberStepper(paramId, label, fallback) {
         let wrap = mUI.el('div', 'm-number-stepper');
-        wrap.appendChild(mUI.el('span', 'm-stepper-label', label));
+        wrap.setAttribute('role', 'group');
+        wrap.setAttribute('aria-label', label);
+        wrap.title = label;
         let minus = mUI.el('button', 'm-stepper-button', '\u2212');
         minus.setAttribute('aria-label', `Decrease ${label}`);
         minus.addEventListener('click', () => this.adjustQuickNumber(paramId, -1));

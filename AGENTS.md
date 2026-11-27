@@ -1168,6 +1168,8 @@ Entries below are dated in **local time (-0700)** and listed newest first. One e
 
 ## Fork Delta (living list — keep updated)
 
+- `src/wwwroot/js/genpage/gentab/presets.js` — **Classic preset sort (2026-11-27).** Default sorts by visible name with case-insensitive natural order within each star group. Folder names use the same order. Name, Path, and Reverse keep their existing behavior.
+
 - `src/Core/Program.cs`, `src/Accounts/SessionHandler.cs` — **early user database open (2026-11-24).** Startup opens the user database before temporary directory creation, settings writes, and background services. File access failures report the cause and refuse startup without running normal shutdown hooks. Session initialization remains at its existing startup point.
 
 - `src/Text2Image/T2IModel.cs`, `T2IModelHandler.cs`, `src/WebAPI/ModelsAPI.cs`, `ModelListWindow.cs`, and `T2IAPI.cs` — **LoRA date sorting (2026-11-24).** Missing dates rank as oldest. The model index fills missing creation times from the filesystem and skips `optimizer.pt` in LoRA folders. Compact `ListT2IParams` LoRA rows append creation and modification times so `/simple` can sort the full list before loading previews and titles.

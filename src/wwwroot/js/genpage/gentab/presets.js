@@ -560,11 +560,14 @@ function editPreset(preset) {
     }
 }
 
+/** Case-insensitive natural ordering for the default preset sort and preset folders. */
+let presetNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 function getPresetSortValue(sortBy, preset) {
     switch (sortBy) {
+        case 'Default':
         case 'Name': return preset.title.substring(preset.title.lastIndexOf('/') + 1);
         case 'Path': return preset.title;
-        case 'Default': return '';
         default: return preset.title;
     }
 }
@@ -579,6 +582,9 @@ function presetSortCompare(sortBy, a, b) {
     }
     let valueA = getPresetSortValue(sortBy, a);
     let valueB = getPresetSortValue(sortBy, b);
+    if (sortBy == 'Default') {
+        return presetNameCollator.compare(valueA, valueB);
+    }
     return valueA.localeCompare(valueB);
 }
 
@@ -636,7 +642,7 @@ function listPresetFolderAndFiles(path, isRefresh, callback, depth) {
                 }
             }
         }
-        folders.sort((a, b) => a.localeCompare(b));
+        folders.sort(presetNameCollator.compare);
         callback(folders, files);
         if (fix) {
             fix();
