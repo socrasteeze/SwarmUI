@@ -1056,6 +1056,67 @@ const arch = await page.evaluate(() => {
 check('arch filter: other known group folders are hidden',
     arch == 'ill/keep.safetensors,misc/unknown.safetensors', arch);
 
+// The LF preset variant shares its folder family with the base architecture in both directions.
+const archFamily = await page.evaluate(() => {
+    let state = new MState();
+    state.presets = [
+        { title: 'krea/base', param_map: {} },
+        { title: 'krea-lf/base', param_map: {} },
+        { title: 'ill/base', param_map: {} }
+    ];
+    let rows = [
+        { name: 'krea/keep.safetensors' },
+        { name: 'krea-lf/also.safetensors' },
+        { name: 'ill/hide.safetensors' },
+        { name: 'misc/unknown.safetensors' }
+    ];
+    let result = {};
+    for (let group of ['krea-lf', 'krea']) {
+        state.archFilter = group;
+        result[group] = state.filterByArch(rows, 'LoRA').map(row => row.name).join(',');
+    }
+    return result;
+});
+check('arch filter: krea and krea-lf retain the same folder family',
+    archFamily['krea-lf'] == 'krea/keep.safetensors,krea-lf/also.safetensors,misc/unknown.safetensors'
+    && archFamily['krea'] == archFamily['krea-lf'], JSON.stringify(archFamily));
+
+// Both picker gates retain Krea-family LoRAs for the selected Krea 2 checkpoint.
+const kreaGates = await page.evaluate(() => {
+    let state = new MState();
+    state.loadParamMeta({
+        list: [],
+        models: {
+            'Stable-Diffusion': [['krea-lf/ckpt.safetensors', 'krea-2']],
+            'LoRA': [['krea/keep.safetensors', 'krea-2/lora'], ['qwen/hide.safetensors', 'qwen-image/lora']]
+        },
+        model_classes: {
+            'krea-2': { compat_class: 'krea-2' },
+            'krea-2/lora': { compat_class: 'krea-2' },
+            'qwen-image/lora': { compat_class: 'qwen-image' }
+        }
+    });
+    state.presets = [
+        { title: 'krea/base', param_map: { model: 'krea-lf/ckpt.safetensors' } },
+        { title: 'krea-lf/base', param_map: { model: 'krea-lf/ckpt.safetensors' } }
+    ];
+    state.archFilter = 'krea-lf';
+    state.activePresets = ['krea-lf/base'];
+    let rows = [
+        { name: 'krea/keep.safetensors' },
+        { name: 'krea/untyped.safetensors' },
+        { name: 'krea-lf/also.safetensors' },
+        { name: 'qwen/hide.safetensors' }
+    ];
+    return {
+        arch: state.filterByArch(rows, 'LoRA').map(row => row.name).join(','),
+        compat: state.filterByModelCompat(rows, 'LoRA').map(row => row.name).join(',')
+    };
+});
+check('Krea 2: architecture and checkpoint compatibility gates retain family LoRAs',
+    kreaGates.arch == 'krea/keep.safetensors,krea/untyped.safetensors,krea-lf/also.safetensors'
+    && kreaGates.compat == kreaGates.arch, JSON.stringify(kreaGates));
+
 // LoRA picker Limited mode hard-hides other known architecture folders (banner must match the list).
 const archHard = await page.evaluate(() => {
     mState.presets = [

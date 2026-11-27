@@ -988,6 +988,14 @@ class MState {
         return map;
     }
 
+    /** Drops the laptop-fit suffix from a lowercased architecture folder with a base name. */
+    static archFolderFamily(name) {
+        if (name.length > 3 && name.endsWith('-lf')) {
+            return name.slice(0, -3);
+        }
+        return name;
+    }
+
     /** Filters a ListModels result down to the selected architecture.
      *
      * Folder prefix is the first gate, because that is how the architecture picker itself is defined (the
@@ -995,7 +1003,7 @@ class MState {
      * Compat class alone cannot tell Illustrious from Pony from Anima - they all report SDXL - so a qwen or
      * flux LoRA sitting in its own folder used to survive an 'ill' filter whenever it had no class, or the
      * wrong shared one. A model whose first folder is a *different* known group is out. A model in the
-     * selected group is in, even if its class is missing.
+     * selected folder family is in, even if its class is missing.
      *
      * Models outside any known group still use compat class. Unknown class is kept: unknown is not the same
      * as incompatible, and silently hiding a model the user can see in the full UI is worse than showing one
@@ -1007,7 +1015,7 @@ class MState {
         }
         // Case-folded on both sides: the filter's group names come from preset titles and the folders from
         // disk paths, and 'Flux2/' vs a 'flux2/...' preset group is the same architecture, not a different one.
-        let filter = this.archFilter.toLowerCase();
+        let filterFamily = MState.archFolderFamily(this.archFilter.toLowerCase());
         let groups = new Set(this.presetGroups().map(g => g.toLowerCase()));
         let classes = this.groupCompatClasses(this.archFilter);
         let folderClasses = this.folderCompatClasses();
@@ -1017,7 +1025,7 @@ class MState {
         // restores the full list including starred other-arch rows.
         return models.filter(model => {
             let folder = MState.modelFolder(model.name).toLowerCase();
-            if (folder == filter) {
+            if (MState.archFolderFamily(folder) == filterFamily) {
                 return true;
             }
             // Other known preset-group folders are out (ill vs qwen vs anima), even when untagged.
