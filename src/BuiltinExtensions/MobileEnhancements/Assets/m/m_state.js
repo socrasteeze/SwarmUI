@@ -996,6 +996,12 @@ class MState {
         return name;
     }
 
+    /** Allows a name-based twin unless both preset groups resolve to disjoint checkpoint classes. */
+    canAliasArchFolder(classes, twinGroup) {
+        let twinClasses = this.groupCompatClasses(twinGroup);
+        return classes.size == 0 || twinClasses.size == 0 || MState.setHasAny(classes, twinClasses);
+    }
+
     /** Filters a ListModels result down to the selected architecture.
      *
      * Folder prefix is the first gate, because that is how the architecture picker itself is defined (the
@@ -1015,9 +1021,12 @@ class MState {
         }
         // Case-folded on both sides: the filter's group names come from preset titles and the folders from
         // disk paths, and 'Flux2/' vs a 'flux2/...' preset group is the same architecture, not a different one.
-        let filterFamily = MState.archFolderFamily(this.archFilter.toLowerCase());
-        let groups = new Set(this.presetGroups().map(g => g.toLowerCase()));
+        let filterFolder = this.archFilter.toLowerCase();
+        let filterFamily = MState.archFolderFamily(filterFolder);
+        let twinFolder = filterFolder == filterFamily ? `${filterFamily}-lf` : filterFamily;
+        let groups = new Map(this.presetGroups().map(group => [group.toLowerCase(), group]));
         let classes = this.groupCompatClasses(this.archFilter);
+        let allowAlias = this.canAliasArchFolder(classes, groups.get(twinFolder));
         let folderClasses = this.folderCompatClasses();
         // Starred models are NOT exempt: Limited means Limited. A starred Flux LoRA under an ill filter
         // used to stay on screen with a star badge and look like the filter was broken. Favourites still
@@ -1025,7 +1034,7 @@ class MState {
         // restores the full list including starred other-arch rows.
         return models.filter(model => {
             let folder = MState.modelFolder(model.name).toLowerCase();
-            if (MState.archFolderFamily(folder) == filterFamily) {
+            if (folder == filterFolder || (allowAlias && MState.archFolderFamily(folder) == filterFamily)) {
                 return true;
             }
             // Other known preset-group folders are out (ill vs qwen vs anima), even when untagged.
@@ -1103,7 +1112,7 @@ class MState {
         return classes;
     }
 
-    /** Whether any of `classes` is in `set`. Plain loop: `set` is a Set of compat classes, `classes` an array. */
+    /** Whether any of the iterable `classes` is in `set`. */
     static setHasAny(set, classes) {
         for (let c of classes) {
             if (set.has(c)) {

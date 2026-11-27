@@ -1117,6 +1117,48 @@ check('Krea 2: architecture and checkpoint compatibility gates retain family LoR
     kreaGates.arch == 'krea/keep.safetensors,krea/untyped.safetensors,krea-lf/also.safetensors'
     && kreaGates.compat == kreaGates.arch, JSON.stringify(kreaGates));
 
+// Qwen's LF folder uses Qwen Image 2.1, while the base folder uses Qwen Image 1.0.
+let qwenFamilies = await page.evaluate(() => {
+    let state = new MState();
+    state.loadParamMeta({
+        models: {
+            'Stable-Diffusion': [
+                ['qwen/ckpt.safetensors', 'qwen-image'],
+                ['qwen2/ckpt.safetensors', 'qwen-image-2.1']
+            ],
+            'LoRA': [['qwen/keep-or-hide.safetensors', 'qwen-image/lora']]
+        },
+        model_classes: {
+            'qwen-image': { compat_class: 'qwen-image' },
+            'qwen-image-2.1': { compat_class: 'qwen-image-2.1' },
+            'qwen-image/lora': { compat_class: 'qwen-image' }
+        }
+    });
+    state.presets = [
+        { title: 'qwen/base', param_map: { model: 'qwen/ckpt.safetensors' } },
+        { title: 'qwen-lf/base', param_map: { model: 'qwen2/ckpt.safetensors' } },
+        { title: 'qwen2/base', param_map: { model: 'qwen2/ckpt.safetensors' } },
+        { title: 'ill/base', param_map: {} }
+    ];
+    let rows = [
+        { name: 'qwen/keep-or-hide.safetensors' },
+        { name: 'qwen-lf/also.safetensors' },
+        { name: 'qwen2/other.safetensors' },
+        { name: 'qwen21/untagged.safetensors' },
+        { name: 'ill/hide.safetensors' }
+    ];
+    let result = {};
+    for (let group of ['qwen-lf', 'qwen', 'qwen2']) {
+        state.archFilter = group;
+        result[group] = state.filterByArch(rows, 'LoRA').map(row => row.name).join(',');
+    }
+    return result;
+});
+check('arch filter: qwen, qwen-lf and qwen2 retain separate folder families',
+    qwenFamilies['qwen-lf'] == 'qwen-lf/also.safetensors,qwen21/untagged.safetensors'
+    && qwenFamilies['qwen'] == 'qwen/keep-or-hide.safetensors,qwen21/untagged.safetensors'
+    && qwenFamilies['qwen2'] == 'qwen2/other.safetensors,qwen21/untagged.safetensors', JSON.stringify(qwenFamilies));
+
 // LoRA picker Limited mode hard-hides other known architecture folders (banner must match the list).
 const archHard = await page.evaluate(() => {
     mState.presets = [
