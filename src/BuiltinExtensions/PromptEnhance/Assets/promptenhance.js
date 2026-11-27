@@ -65,6 +65,7 @@ class PromptEnhanceHelperClass {
          * callbacks capture the sequence value current at dispatch time and compare it against this field when
          * they run, so only the most-recently-dispatched request is ever allowed to touch the button. */
         this.statusRequestSeq = 0;
+        this.statusBackend = null;
         /** Pending 'input' listener on the prompt box that clears provenance once its value diverges from the
          * applied prompt, or null when none is armed. */
         this.clearProvenanceListener = null;
@@ -154,6 +155,11 @@ class PromptEnhanceHelperClass {
         }
         this.profileOverride = '';
         getRequiredElementById('current_model').addEventListener('change', () => this.scheduleStatusRefresh());
+        document.addEventListener('change', () => {
+            if (this.statusBackend != this.effectiveBackend()) {
+                this.scheduleStatusRefresh();
+            }
+        });
         featureSetChangedCallbacks.push(() => this.scheduleStatusRefresh());
         // Preset clicks update currentPresets inside updatePresetList and do not always change the model
         // dropdown. Wrap that function so a preset that sets model re-resolves the profile.
@@ -216,6 +222,26 @@ class PromptEnhanceHelperClass {
             }
         }
         return model;
+    }
+
+    /** Resolves the backend using the same enabled control and preset order as generation. */
+    effectiveBackend() {
+        let value = '';
+        let param = gen_param_types.find(type => type.id == 'exactbackendid');
+        let input = document.getElementById('input_exactbackendid');
+        if (param && input && isParamEnabled(param)) {
+            value = getInputVal(input, true) ?? '';
+        }
+        let presets = (typeof currentPresets == 'undefined' ? null : currentPresets) || [];
+        for (let i = 0; i < presets.length; i++) {
+            let map = presets[i] && presets[i].param_map;
+            if (map && Object.prototype.hasOwnProperty.call(map, 'exactbackendid')) {
+                let picked = map.exactbackendid;
+                value = typeof picked == 'string' && picked.includes('{value}')
+                    ? picked.replaceAll('{value}', String(value ?? '')) : picked;
+            }
+        }
+        return `${value ?? ''}`;
     }
 
     /** Drops a manual profile override when the effective model changes. The override then lasts only until
@@ -408,7 +434,7 @@ class PromptEnhanceHelperClass {
         if (this.endpointOverride == null) {
             this.endpointOverride = this.pref('endpoint', 'orca-27b');
         }
-        return this.endpointOverride || '';
+        return this.statusBackend == this.effectiveBackend() && this.writerEndpoints.some(endpoint => endpoint.id == this.endpointOverride) ? this.endpointOverride : '';
     }
 
     /** Visible Writer option: label, else the model name after the last slash, else the id. */
@@ -486,9 +512,6 @@ class PromptEnhanceHelperClass {
             chosen = enabled[0].id;
         }
         this.endpointOverride = chosen;
-        if (chosen && this.pref('endpoint', '') != chosen) {
-            this.setPref('endpoint', chosen);
-        }
         this.fillWriterSelect();
     }
 
@@ -750,15 +773,19 @@ class PromptEnhanceHelperClass {
         this.setEnhanceBusy(true);
         this.setStatus('Enhancing...');
         this.settled = false;
-        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': this.writerEndpointId(), 'strength': this.strength, 'seed': seed, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
+        this.socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'exactbackendid': this.effectiveBackend(), 'profile_override': this.profileOverride, 'endpoint_override': this.writerEndpointId(), 'strength': this.strength, 'seed': seed, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
             if (data.result != null || data.conflict != null || data.needs_input != null || data.passthrough != null) {
                 this.settled = true;
             }
             this.handleFrame(data);
-        }, 0, error => {
+        }, 0, (error, data) => {
             this.settled = true;
             this.running = false;
             this.setEnhanceBusy(false);
+            if (data && data.error_id == 'prompt_enhance_unavailable') {
+                this.showConflict(error, false);
+                return;
+            }
             this.showPassthrough(error);
             showError(error);
         });
@@ -851,7 +878,21 @@ class PromptEnhanceHelperClass {
     }
 
     /** Debounces refreshStatus() to at most one call per second. */
+    /** Clears writer state when the selected backend changes. */
+    syncStatusBackend() {
+        let backend = this.effectiveBackend();
+        if (this.statusBackend != backend) {
+            this.statusBackend = backend;
+            this.statusRequestSeq += 1;
+            this.writerEndpoints = [];
+            this.statusProfileKey = null;
+            this.endpointOverride = this.pref('endpoint', 'orca-27b');
+            this.fillWriterSelect();
+        }
+    }
+
     scheduleStatusRefresh() {
+        this.syncStatusBackend();
         if (this.statusTimer) {
             return;
         }
@@ -1110,6 +1151,7 @@ class PromptEnhanceHelperClass {
      * necessarily whichever was dispatched last.</p>
      */
     refreshStatus() {
+        this.syncStatusBackend();
         let model = this.effectiveModel();
         this.syncProfileOverride(model);
         this.syncWriteModeLabel();
@@ -1118,8 +1160,10 @@ class PromptEnhanceHelperClass {
         let mode = this.normalizeWriteMode(this.writeMode);
         let local = this.resolvedWriteMode(this.referenceImageValues().length > 0);
         let statusKey = JSON.stringify([model, this.profileOverride]);
-        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': mode, 'resolved_mode': local }, data => {
-            if (requestSeq != this.statusRequestSeq) {
+        let backend = this.effectiveBackend();
+        this.statusBackend = backend;
+        genericRequest('ListPromptEnhanceStatus', { 'exactbackendid': backend, 'model': model, 'profile_override': this.profileOverride, 'mode': mode, 'resolved_mode': local }, data => {
+            if (requestSeq != this.statusRequestSeq || backend != this.effectiveBackend()) {
                 return;
             }
             this.statusProfileKey = statusKey;
@@ -1131,7 +1175,7 @@ class PromptEnhanceHelperClass {
             this.applyStrengthOptions((data.resolved && data.resolved.strengths) || ['faithful', 'expand', 'full']);
             this.applyWriterEndpoints(data.endpoints || []);
         }, 0, error => {
-            if (requestSeq != this.statusRequestSeq) {
+            if (requestSeq != this.statusRequestSeq || backend != this.effectiveBackend()) {
                 return;
             }
             console.warn(`Prompt Enhance: status check failed: ${error}`);
@@ -1141,9 +1185,8 @@ class PromptEnhanceHelperClass {
 
     /** Decides whether the button should be enabled from a ListPromptEnhanceStatus response, and sets it.
      * <p>Only a missing profile disables the button. An unhealthy/unreachable writer endpoint does not - the
-     * server fails open (cache hit, or a passthrough marker) either way, so disabling here would just be a
-     * second, redundant gate on the same fail-open contract. Endpoint health is instead surfaced in the
-     * button's own title text.</p>
+     * button stays actionable so the server can report the selected machine's availability. Endpoint health
+     * is surfaced in the button's own title text.</p>
      */
     applyStatusToButton(data) {
         let display = '';
@@ -1186,8 +1229,8 @@ class PromptEnhanceHelperClass {
         if (endpoints.length > 0 && !sawEnabled) {
             knownDown = true;
         }
-        let reason = knownDown ? 'No Prompt Enhance writer endpoint is currently reachable - the prompt will pass through unchanged.'
-            : `Profile: ${display}. Rewrite this prompt with a local writer LLM for the currently loaded model.`;
+        let reason = data.unavailable_reason || (knownDown ? 'No Prompt Enhance writer endpoint is currently reachable.'
+            : `Profile: ${display}. Rewrite this prompt with a local writer LLM for the currently loaded model.`);
         this.setButtonEnabled(true, reason);
     }
 
@@ -1241,7 +1284,7 @@ class PromptEnhanceHelperClass {
             this.showPassthrough(reason);
             this.dispatchGenerateClick(altKey);
         };
-        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'profile_override': this.profileOverride, 'endpoint_override': this.writerEndpointId(), 'strength': this.strength, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
+        let socket = makeWSRequest('EnhancePrompt', { 'prompt': prompt, 'model': model, 'exactbackendid': this.effectiveBackend(), 'profile_override': this.profileOverride, 'endpoint_override': this.writerEndpointId(), 'strength': this.strength, ...this.videoRequestFields(), ...this.enhanceRequestFields() }, data => {
             if (data.status != null || data.chunk != null) {
                 return;
             }
@@ -1271,7 +1314,18 @@ class PromptEnhanceHelperClass {
             if (data.passthrough != null) {
                 failOpen(data.reason);
             }
-        }, 0, error => failOpen(`${error}`));
+        }, 0, (error, data) => {
+            if (data && data.error_id == 'prompt_enhance_unavailable') {
+                this.autoRunning = false;
+                this.setEnhanceBusy(false);
+                this.setGenerateButtonBusy(false);
+                this.resetPanel();
+                this.showPanel();
+                this.showConflict(error, false);
+                return;
+            }
+            failOpen(`${error}`);
+        });
         if (!socket) {
             failOpen('Failed to open the Prompt Enhance connection.');
         }

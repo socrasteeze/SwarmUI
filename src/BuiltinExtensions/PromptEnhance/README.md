@@ -62,14 +62,11 @@ owned here.
    A generation unloads that model separately (see "Unload on generate" below) and does not change this
    value. A reply is capped at 32,000 characters (a runaway stream aborts rather than buffering forever);
    a submitted prompt over 20,000 characters is rejected outright, before any shielding or caching work.
-4. **Cache.** Every prompt is looked up before it is ever dispatched, keyed on
-   `(directed prompt, profile ID, profile-pack version, endpoint's configured model, strength, resolved writer mode, reference-image digest)`. When exactly
-   one endpoint is enabled, or an override names one enabled endpoint, that endpoint is used with no health
-   probe first, so a cache hit does not wait on the writer host. Several enabled endpoints still probe, and
-   that result is cached for 5 seconds. A connection failure records the endpoint unhealthy, probes any
-   *other* enabled endpoint, and retries that one once. If none answer, the request returns an error the UI
-   shows verbatim, for example `Prompt enhance: local Ollama at 127.0.0.1:11434 not reachable`. An empty
-   (or notes-only) reply is never cached.
+4. **Routing and cache.** The server scopes writer selection to the generation's Exact Backend ID and
+   probes the selected writer before looking up a cached reply. The cache key includes the directed
+   prompt, profile and version, writer host and model, strength, resolved mode, and reference-image
+   digest. If the connection fails before any text arrives, the server can retry once at another URL
+   in the same backend scope. An empty or notes-only reply is never cached.
 5. **Provenance.** Applying a result writes one hidden T2I param, `Prompt Enhance Provenance`
    (id `promptenhanceprovenance`) as JSON: `original`, `profile`, `pack_version`, `writer_model`, `endpoint`,
    `cached`, `strength` (the effective strength actually used - see "Strength" below). It is registered
@@ -85,9 +82,8 @@ owned here.
 
 | Condition | Behavior |
 |---|---|
-| Endpoint unreachable or connection failure | **Error.** The UI shows `Prompt enhance: local Ollama at <host> not reachable` (or `writer` for an OpenAI-compatible host). Auto mode still generates the original prompt. |
+| No scoped endpoint is configured or reachable | **Error.** The UI shows `Can't enhance: <machine> Ollama is unavailable`. Auto mode stops before generation. |
 | No profile resolves for the loaded model | Enhance button disabled, reason in its tooltip. Nothing is sent. |
-| No endpoint configured, or nothing healthy and no cache hit | Passthrough, reason shown. |
 | Reply begins `CONFLICT:` | Hard stop. Red block, the line shown verbatim, no Apply. |
 | Reply begins `NEEDS INPUT:` | Hard stop, same red block treatment, plus a logged profile miss (`Logs.Warning`) - a non-interactive profile should never emit this. |
 | Reply is empty or whitespace-only after `NOTES:` lines are split off | Treated as passthrough, not cached. |
@@ -162,8 +158,8 @@ The panel and the `/simple` sheet have a **Reroll** button. It sends a random no
 reply over the cached one. `seed: 0` (the default, and what auto-enhance sends) keeps the fixed seed and the
 cache.
 
-The cache key (`PromptEnhanceCache.Key`) hashes the exact text the writer receives - directive included - plus
-the effective strength, the resolved writer mode (`t2i` or `edit`), and a digest of the downscaled reference
+The cache key (`PromptEnhanceCache.Key`) hashes the exact text the writer receives, including the directive, along with
+the writer host, the effective strength, the resolved writer mode (`t2i` or `edit`), and a digest of the downscaled reference
 images, so a `full` rewrite and a `faithful` rewrite of the same idea never collide, an edit and a
 text-to-image rewrite of the same words never collide, a repeat request at the same strength still hits the
 cache, and revising a directive's wording invalidates the replies written against the old wording instead of
@@ -201,15 +197,13 @@ current prompt is not already the applied-enhanced text, the interceptor calls `
   then re-dispatches a synthetic click on the generate button under a **re-entry guard** flag
   (`this.reentryGuard`). The interceptor's first line is `if (this.reentryGuard) { return; }`, so that one
   synthetic click passes straight through to the real generate handler instead of being intercepted again.
-- On `conflict` or `needs_input`: shows the existing red block and does **not** generate - a conflict blocks
-  generation entirely, per the failure posture above.
-- On `passthrough`, a transport `error`, or an empty result: shows the existing "Not enhanced" marker and
-  generates anyway with the original, unmodified prompt (fail open).
+- A conflict, request for input, or unavailable writer stops the pending generation and shows the reason.
+- A passthrough, other transport error, or empty result shows the "Not enhanced" marker and generates
+  with the original prompt.
 - The generate button shows a brief "Enhancing..." busy state for the duration (cold start on the writer
   host is roughly 7-8 seconds), restored to its original text once the request settles.
 
-This resolves exactly once per real click, never per image in a batch or grid - the interception happens at
-the button itself, not inside `T2IEngine`/`PreGenerateEvent`, neither of which this extension touches.
+Auto-enhance runs once per intercepted click, regardless of batch or grid size.
 
 **"Generate Forever" is not intercepted, on purpose.** `doGenForeverOnce()` (`generatecontrols.js`) calls
 `mainGenHandler.doGenerate()` directly - it never touches `alt_generate_button` at all, so there is no click
@@ -260,20 +254,20 @@ downscale.
 `T2IEngine.PreGenerateEvent` starts an unload check and returns immediately. The check runs on `Task.Run`.
 It never blocks, delays, or fails the generation, and every exception is logged at debug.
 
-For the active endpoint, and only when that endpoint is Ollama, it GETs `<base>/api/ps` with a 2 second
-timeout. If the endpoint's model is in that list, it POSTs `<base>/api/generate` with
-`{"model": "<endpoint model>", "keep_alive": 0}`. A batch claims the check at most once every 5 seconds.
-Normal enhance requests still send `keep_alive` `5m`.
+The check uses the last Ollama endpoint that completed an Enhance request for that session and generation
+backend scope. It GETs `<base>/api/ps` on that endpoint with a 2 second timeout. If the writer model is
+loaded, it POSTs `<base>/api/generate` with `{"model": "<endpoint model>", "keep_alive": 0}`.
+The check runs at most once per writer every 5 seconds. Normal Enhance requests send `keep_alive` `5m`.
 
 ## Endpoints
 
-Configured writer hosts live in `Data/PromptEnhance/endpoints.json` (gitignored - a writer-host address is
-never committed). It is an **ordered list**. One enabled entry is used directly. A health probe runs only
-after that call fails, or up front when several entries are enabled. A default file is written on first run:
+Configured writer hosts live in the gitignored file `Data/PromptEnhance/endpoints.json`. The server checks
+eligible endpoints in file order unless the selected Writer is in that scope. Both Enhance and status
+take the generation target in `exactbackendid`. The first run creates this default configuration.
 
 ```json
 {
-  "_comment": "Ordered list. A single enabled endpoint is used directly; health is probed only after a failure, or when several endpoints are enabled. kind is 'ollama' or 'openai'.",
+  "_comment": "Ordered writer endpoints. List the Exact Backend IDs in backends.",
   "endpoints": [
     {
       "id": "writer",
@@ -282,24 +276,29 @@ after that call fails, or up front when several entries are enabled. A default f
       "model": "huihui_ai/qwen3-vl-abliterated:8b-instruct",
       "keep_alive": "5m",
       "timeout_seconds": 120,
+      "backends": [0],
+      "machine": "desktop",
       "enabled": true
     }
   ]
 }
 ```
 
-To point this at a real writer host, edit `url` to the writer host's LAN or tailnet address (never a
-private IP or hostname baked into this repo). Enhance chat requests always send `keep_alive` `5m`; the
-value stored here is not what those requests send. `kind` is `ollama` (`POST /api/chat`) or `openai` (an
+Set `backends` to the integer IDs served by each writer. An unpinned request uses backend `0`. A legacy
+entry without `backends` can serve backend `0` if its URL is loopback. For a spoke, list the parent
+and worker IDs together, such as `[18, -2]`, and set `url` to that machine's Ollama address. Put a preferred
+address before any alternate address for the same machine. Use `machine` to name the machine in UI errors.
+Restart Swarm to load the file after editing it. Configuration changes require no rebuild.
+
+Enhance chat requests send `keep_alive` `5m`. `kind` is `ollama` (`POST /api/chat`) or `openai` (an
 OpenAI-compatible server such as LM Studio, `POST /v1/chat/completions`); it is lowercased on load, and an
 entry with any other kind is skipped with a logged error rather than crashing extension init. `id` defaults
 to `endpoint<index>` when absent and is deduplicated (a repeated ID is renamed and a warning logged) so it
-always has a stable value to key health results and API overrides on. The health probe is `GET /api/tags`
-(ollama) or `GET /v1/models` (openai), status code only, 5 second timeout, and the result is cached 5 seconds
-per endpoint. With a single enabled endpoint, `ListPromptEnhanceStatus` does not probe; `healthy` is null
-until a writer call records a result. `ListPromptEnhanceStatus` never exposes endpoint URLs to the client -
-only `id`, `kind`, `model`, `label`, `enabled`, `healthy`. Optional `label` is a display name. A blank or
-missing label is returned as an empty string. Unknown JSON fields are ignored.
+always has a stable API override value. The health probe checks the status code of `GET /api/tags` (ollama)
+or `GET /v1/models` (openai) with a 5 second timeout. Status can reuse a result for 5 seconds. With a single
+eligible endpoint, status reports `healthy: null` when there is no recent result. Its endpoint fields are
+`id`, `kind`, `model`, `label`, `enabled`, and `healthy`. When all eligible writers are known to be down or
+the scope is empty, it also supplies `unavailable_reason`. Optional `label` is a display name.
 
 ## Folder/filename override config
 
@@ -352,15 +351,14 @@ does, in the button's tooltip.
 ## Writer dropdown
 
 The Generate tab Prompt Enhance panel and the Simple tab enhance sheet each have a **Writer** dropdown.
-It lists every enabled endpoint from `ListPromptEnhanceStatus`, including ones that are currently
-unreachable. The option text is `label` when that is set, otherwise the model name after the last `/`,
+It lists the enabled endpoints for the selected backend, including unreachable writers. The option text
+is `label` when that is set, otherwise the model name after the last `/`,
 otherwise the endpoint `id`. An endpoint with `healthy: false` keeps that text and adds ` (unreachable)`.
-The choice is stored in `localStorage` under `promptenhance_endpoint`, so the two surfaces stay on the
-same writer. The default id is `orca-27b`. If that stored id is not in the enabled list, the dropdown
-selects `orca-27b` when that id is present, otherwise the first enabled endpoint, and writes the choice
-back. Every `EnhancePrompt` request sends it as `endpoint_override`. The override is an empty string only
-when no endpoint is selected. Changing Writer while a result is on screen sends the request again, the
-same way changing Strength does. The status line still shows `writer_model` and `endpoint`.
+An explicit choice is stored in `localStorage` under `promptenhance_endpoint`. If that ID is outside the
+current scope, the dropdown selects `orca-27b` when available or the first eligible writer. The client
+sends the selection as `endpoint_override`. The server honors it only within the requested backend's scope.
+Changing Writer while a result is on screen sends the request again. The status line shows
+`writer_model` and `endpoint`.
 
 ## Caller contract
 

@@ -9,9 +9,7 @@ using System.Net.Http;
 namespace SwarmUI.Builtin_PromptEnhanceExtension;
 
 /// <summary>One configured writer-host endpoint: an address the Enhance feature can send a chat request
-/// to, plus the settings that request needs.
-/// <para>Modeled on <c>InterrogateBackends.Backends</c>: an ordered list rather than a single address, so
-/// a second writer host or a hub-local fallback is a config line, not a refactor.</para></summary>
+/// to, plus the settings that request needs.</summary>
 /// <param name="ID">Short identifier, used as the stored config key and the API/override value.</param>
 /// <param name="Url">Base URL of the writer host, trailing slash stripped.</param>
 /// <param name="Kind">Either <c>ollama</c> (<c>POST /api/chat</c>) or <c>openai</c> (an OpenAI-compatible
@@ -25,11 +23,20 @@ namespace SwarmUI.Builtin_PromptEnhanceExtension;
 /// <param name="NumCtx">Optional Ollama <c>num_ctx</c>. Null omits the option so Ollama keeps its default
 /// context length. Ignored for the <c>openai</c> kind.</param>
 /// <param name="Label">Optional display name from the endpoint file. Blank falls back to the model, then the id.</param>
-public record class PromptEnhanceEndpoint(string ID, string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, bool Enabled, int? NumCtx = null, string Label = null);
+/// <param name="Backends">Exact generation backend IDs served by this endpoint. Null allows only loopback for the desktop.</param>
+/// <param name="Machine">Optional machine name shown when the writer is unavailable.</param>
+public record class PromptEnhanceEndpoint(string ID, string Url, string Kind, string Model, string KeepAlive, int TimeoutSeconds, bool Enabled, int? NumCtx = null, string Label = null, int[] Backends = null, string Machine = null)
+{
+    /// <summary>Whether the endpoint serves this backend, including legacy desktop loopback entries.</summary>
+    public bool ServesBackend(int backendId)
+    {
+        return Backends?.Contains(backendId) ?? (backendId == 0 && Uri.TryCreate(Url, UriKind.Absolute, out Uri uri) && uri.IsLoopback);
+    }
+}
 
 /// <summary>Loads and holds the ordered list of configured writer-host endpoints, and probes them for
 /// reachability.
-/// <para>First enabled, healthy endpoint wins. The config lives outside the repo under
+/// <para>The first healthy endpoint within the selected backend's scope wins. The config lives under
 /// <see cref="Program.DataDir"/> so a user's writer-host address is never committed.</para></summary>
 public static class PromptEnhanceEndpoints
 {
@@ -44,15 +51,15 @@ public static class PromptEnhanceEndpoints
     /// that just answered or just refused.</summary>
     private const long HealthCacheMs = 5000;
 
-    /// <summary>Per-endpoint-ID cached health result, with the <see cref="Environment.TickCount64"/> it was taken at.</summary>
-    private static readonly Dictionary<string, (bool Healthy, long CheckedAtMs)> HealthCache = [];
+    /// <summary>Cached health by writer service, with the <see cref="Environment.TickCount64"/> it was taken at.</summary>
+    private static readonly Dictionary<(string Url, string Kind), (bool Healthy, long CheckedAtMs)> HealthCache = [];
 
     /// <summary>Guards <see cref="HealthCache"/> against concurrent probes.</summary>
     private static readonly object HealthLock = new();
 
     /// <summary>Loads <see cref="Endpoints"/> from <see cref="ConfigPath"/>, writing a default config file
     /// on first run. Never throws: a missing or malformed file logs an error and leaves <see cref="Endpoints"/>
-    /// empty, which the API surfaces as "no endpoints configured" rather than crashing extension init.</summary>
+    /// empty so the API reports the writer as unavailable.</summary>
     public static void Init()
     {
         try
@@ -93,6 +100,12 @@ public static class PromptEnhanceEndpoints
                     }
                     string url = (entry.Value<string>("url") ?? "").TrimEnd('/');
                     string label = (entry.Value<string>("label") ?? "").Trim();
+                    JToken backendIds = entry["backends"];
+                    if (backendIds is not null && (backendIds is not JArray ids || ids.Any(value => value.Type != JTokenType.Integer || !int.TryParse(value.ToString(), out _))))
+                    {
+                        Logs.Error($"[PromptEnhance] Endpoint config entry {index} has invalid backend IDs - skipping it.");
+                        continue;
+                    }
                     loaded.Add(new(
                         id,
                         url,
@@ -102,7 +115,9 @@ public static class PromptEnhanceEndpoints
                         entry.Value<int?>("timeout_seconds") ?? 120,
                         entry.Value<bool?>("enabled") ?? true,
                         entry.Value<int?>("num_ctx"),
-                        string.IsNullOrWhiteSpace(label) ? null : label));
+                        string.IsNullOrWhiteSpace(label) ? null : label,
+                        backendIds?.ToObject<int[]>(),
+                        entry.Value<string>("machine")?.Trim()));
                 }
             }
             Endpoints = loaded;
@@ -120,7 +135,7 @@ public static class PromptEnhanceEndpoints
     {
         return new JObject()
         {
-            ["_comment"] = "Ordered list. A single enabled endpoint is used directly; health is probed only after a failure, or when several endpoints are enabled. kind is 'ollama' or 'openai'. Optional num_ctx (Ollama only) caps context length when set.",
+            ["_comment"] = "Ordered writer endpoints. List the Exact Backend IDs served by each endpoint in backends (0 is desktop or unpinned). Optional machine names the host in UI errors. kind is 'ollama' or 'openai'. Optional num_ctx caps Ollama context length.",
             ["endpoints"] = new JArray()
             {
                 new JObject()
@@ -131,55 +146,28 @@ public static class PromptEnhanceEndpoints
                     ["model"] = "huihui_ai/qwen3-vl-abliterated:8b-instruct",
                     ["keep_alive"] = "5m",
                     ["timeout_seconds"] = 120,
+                    ["backends"] = new JArray(0),
+                    ["machine"] = "desktop",
                     ["enabled"] = true
                 }
             }
         };
     }
 
-    /// <summary>The endpoint a request can use without a health probe.
-    /// <para>An override that names one enabled endpoint is that endpoint. With no override, exactly one
-    /// enabled endpoint is that endpoint. Several enabled endpoints, or an override that names nothing
-    /// enabled, return null so the caller probes (or reports that nothing is configured).</para></summary>
-    public static PromptEnhanceEndpoint EndpointForDirectUse(string overrideId)
+    /// <summary>Parses the generation target. An unpinned request uses the desktop. An invalid pin has no scope.</summary>
+    public static int? BackendId(string value)
     {
-        List<PromptEnhanceEndpoint> enabled = [];
-        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
+        if (string.IsNullOrWhiteSpace(value))
         {
-            if (endpoint.Enabled)
-            {
-                enabled.Add(endpoint);
-            }
+            return 0;
         }
-        if (!string.IsNullOrWhiteSpace(overrideId))
-        {
-            foreach (PromptEnhanceEndpoint endpoint in enabled)
-            {
-                if (endpoint.ID == overrideId)
-                {
-                    return endpoint;
-                }
-            }
-            return null;
-        }
-        if (enabled.Count == 1)
-        {
-            return enabled[0];
-        }
-        return null;
+        return int.TryParse(value, out int backendId) ? backendId : null;
     }
 
-    /// <summary>The first enabled endpoint, or null when none are enabled.</summary>
-    public static PromptEnhanceEndpoint FirstEnabled()
+    /// <summary>Enabled writers for the selected backend, in config order.</summary>
+    public static List<PromptEnhanceEndpoint> ForBackend(int? backendId)
     {
-        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
-        {
-            if (endpoint.Enabled)
-            {
-                return endpoint;
-            }
-        }
-        return null;
+        return backendId is int id ? [.. Endpoints.Where(endpoint => endpoint.Enabled && endpoint.ServesBackend(id))] : [];
     }
 
     /// <summary>Records a health result for <paramref name="endpoint"/> so the next few seconds reuse it
@@ -192,7 +180,7 @@ public static class PromptEnhanceEndpoints
         }
         lock (HealthLock)
         {
-            HealthCache[endpoint.ID] = (healthy, Environment.TickCount64);
+            HealthCache[(endpoint.Url, endpoint.Kind)] = (healthy, Environment.TickCount64);
         }
     }
 
@@ -207,7 +195,7 @@ public static class PromptEnhanceEndpoints
         long now = Environment.TickCount64;
         lock (HealthLock)
         {
-            if (HealthCache.TryGetValue(endpoint.ID, out (bool Healthy, long CheckedAtMs) cached) && (now - cached.CheckedAtMs) < HealthCacheMs)
+            if (HealthCache.TryGetValue((endpoint.Url, endpoint.Kind), out (bool Healthy, long CheckedAtMs) cached) && (now - cached.CheckedAtMs) < HealthCacheMs)
             {
                 return cached.Healthy;
             }
@@ -215,26 +203,20 @@ public static class PromptEnhanceEndpoints
         return null;
     }
 
-    /// <summary>Host:port (or host) from an endpoint URL, for an error the user can act on.</summary>
-    public static string HostLabel(PromptEnhanceEndpoint endpoint)
+    /// <summary>Error for the requested machine, including when the machine has no enabled endpoints.</summary>
+    public static string UnreachableMessage(int? backendId)
     {
-        string host = endpoint?.Url ?? "";
-        if (host.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        PromptEnhanceEndpoint namedEndpoint = backendId is int id
+            ? Endpoints.FirstOrDefault(endpoint => endpoint.ServesBackend(id) && !string.IsNullOrWhiteSpace(endpoint.Machine))
+            : null;
+        string machine = namedEndpoint?.Machine ?? backendId switch
         {
-            host = host["http://".Length..];
-        }
-        else if (host.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            host = host["https://".Length..];
-        }
-        return host;
-    }
-
-    /// <summary>Error text when a writer host refuses the connection. Ollama is named as local Ollama.</summary>
-    public static string UnreachableMessage(PromptEnhanceEndpoint endpoint)
-    {
-        string who = endpoint is not null && endpoint.Kind == "ollama" ? "local Ollama" : "writer";
-        return $"Prompt enhance: {who} at {HostLabel(endpoint)} not reachable";
+            0 => "desktop",
+            18 or -2 => "laptop",
+            null => "selected backend",
+            _ => $"backend {backendId}"
+        };
+        return $"Can't enhance: {machine} Ollama is unavailable";
     }
 
     /// <summary>Whether <paramref name="ex"/> is a connection failure rather than a timeout or a bad reply.
@@ -248,15 +230,10 @@ public static class PromptEnhanceEndpoints
     }
 
     /// <summary>Whether an endpoint answers its health probe (<c>GET /api/tags</c> for <c>ollama</c>,
-    /// <c>GET /v1/models</c> for <c>openai</c>) within 5 seconds. Cached per endpoint ID for 5 seconds so a
-    /// resolve-then-dispatch pair of calls does not double the probe cost.</summary>
-    public static async Task<bool> IsHealthy(PromptEnhanceEndpoint endpoint)
+    /// <c>GET /v1/models</c> for <c>openai</c>) within 5 seconds. Status may reuse fresh cached results.</summary>
+    private static async Task<bool> IsHealthy(PromptEnhanceEndpoint endpoint, bool useCache)
     {
-        if (endpoint is null)
-        {
-            return false;
-        }
-        bool? cached = CachedHealth(endpoint);
+        bool? cached = useCache ? CachedHealth(endpoint) : null;
         if (cached.HasValue)
         {
             return cached.Value;
@@ -274,7 +251,7 @@ public static class PromptEnhanceEndpoints
         {
             string path = endpoint.Kind == "openai" ? "/v1/models" : "/api/tags";
             using CancellationTokenSource cancel = new(TimeSpan.FromSeconds(5));
-            using HttpResponseMessage response = await Utilities.UtilWebClient.GetAsync($"{endpoint.Url}{path}", HttpCompletionOption.ResponseHeadersRead, cancel.Token);
+            using HttpResponseMessage response = await PromptEnhanceClient.Client.GetAsync($"{endpoint.Url}{path}", HttpCompletionOption.ResponseHeadersRead, cancel.Token);
             return response.IsSuccessStatusCode;
         }
         catch (Exception)
@@ -283,28 +260,13 @@ public static class PromptEnhanceEndpoints
         }
     }
 
-    /// <summary>Picks the endpoint to actually use for one request. When <paramref name="overrideId"/> names
-    /// a known enabled endpoint, only that one is probed. Otherwise walks <see cref="Endpoints"/> in order
-    /// and returns the first enabled endpoint that answers its health probe. Null if none qualify.</summary>
-    public static async Task<PromptEnhanceEndpoint> FirstHealthy(string overrideId)
+    /// <summary>Finds the first eligible writer that answers a fresh health probe.</summary>
+    public static async Task<PromptEnhanceEndpoint> FirstHealthy(IEnumerable<PromptEnhanceEndpoint> scoped)
     {
-        List<PromptEnhanceEndpoint> endpoints = Endpoints;
-        if (!string.IsNullOrWhiteSpace(overrideId))
+        HashSet<(string Url, string Kind)> checkedHosts = [];
+        foreach (PromptEnhanceEndpoint endpoint in scoped)
         {
-            PromptEnhanceEndpoint match = endpoints.FirstOrDefault(endpoint => endpoint.ID == overrideId && endpoint.Enabled);
-            if (match is null)
-            {
-                return null;
-            }
-            return await IsHealthy(match) ? match : null;
-        }
-        foreach (PromptEnhanceEndpoint endpoint in endpoints)
-        {
-            if (!endpoint.Enabled)
-            {
-                continue;
-            }
-            if (await IsHealthy(endpoint))
+            if (checkedHosts.Add((endpoint.Url, endpoint.Kind)) && await IsHealthy(endpoint, false))
             {
                 return endpoint;
             }
@@ -312,54 +274,14 @@ public static class PromptEnhanceEndpoints
         return null;
     }
 
-    /// <summary>The first enabled endpoint other than <paramref name="failed"/> that answers a health probe.
-    /// Disabled entries are skipped without a probe. Null when nothing else is enabled and healthy, which
-    /// is the single-endpoint case: the failed call already was the probe.</summary>
-    public static async Task<PromptEnhanceEndpoint> FirstOtherHealthy(PromptEnhanceEndpoint failed)
+    /// <summary>Health for scoped status rows. A lone writer uses its cached result, if any.</summary>
+    public static async Task<List<(PromptEnhanceEndpoint Endpoint, bool? Healthy)>> HealthAll(List<PromptEnhanceEndpoint> scoped)
     {
-        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
-        {
-            if (!endpoint.Enabled || (failed is not null && endpoint.ID == failed.ID))
-            {
-                continue;
-            }
-            if (await IsHealthy(endpoint))
-            {
-                return endpoint;
-            }
-        }
-        return null;
-    }
-
-    /// <summary>Health for the status API. A fresh cache entry is reused. When at most one endpoint is
-    /// enabled, an uncached entry is reported as unknown (null) instead of blocking the status call on a
-    /// probe — EnhancePrompt uses that endpoint directly and records health from the writer call.
-    /// Several enabled endpoints are still probed, through the same short cache.</summary>
-    public static async Task<List<(PromptEnhanceEndpoint Endpoint, bool? Healthy)>> HealthAll()
-    {
-        int enabledCount = 0;
-        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
-        {
-            if (endpoint.Enabled)
-            {
-                enabledCount++;
-            }
-        }
         List<(PromptEnhanceEndpoint Endpoint, bool? Healthy)> results = [];
-        foreach (PromptEnhanceEndpoint endpoint in Endpoints)
+        foreach (PromptEnhanceEndpoint endpoint in scoped)
         {
-            bool? cached = CachedHealth(endpoint);
-            if (cached.HasValue)
-            {
-                results.Add((endpoint, cached.Value));
-                continue;
-            }
-            if (enabledCount <= 1)
-            {
-                results.Add((endpoint, null));
-                continue;
-            }
-            results.Add((endpoint, await IsHealthy(endpoint)));
+            bool? healthy = scoped.Count == 1 ? CachedHealth(endpoint) : await IsHealthy(endpoint, true);
+            results.Add((endpoint, healthy));
         }
         return results;
     }

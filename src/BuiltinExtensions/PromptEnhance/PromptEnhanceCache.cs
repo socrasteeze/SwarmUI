@@ -7,8 +7,7 @@ using System.Security.Cryptography;
 
 namespace SwarmUI.Builtin_PromptEnhanceExtension;
 
-/// <summary>Caches enhanced prompts by their inputs, so a repeat request behaves consistently and works
-/// even while the writer host is asleep.
+/// <summary>Caches enhanced prompts by their inputs, so a repeat request behaves consistently.
 /// <para>Not an optimization: the profile pack is versioned non-deterministic text, so the same idea can
 /// legitimately enhance differently across writer-model or profile-pack changes. The cache key folds in
 /// every input that can change the answer, which is what makes batches, grids, and reruns reproducible.</para>
@@ -39,13 +38,13 @@ public static class PromptEnhanceCache
     /// <summary>Builds the cache key for one enhance request: a lowercase SHA256 hex digest of every input
     /// that can change the result. Stable for identical inputs, and changes whenever the prompt, the
     /// resolved profile, the profile-pack version, the writer model, the effective Enhance Strength, the
-    /// resolved writer mode (<c>t2i</c> or <c>edit</c>), or the reference-image digest differs. Two
+    /// resolved writer mode (<c>t2i</c> or <c>edit</c>), the reference-image digest, or the writer host differs. Two
     /// different strengths prepend two different directives (see <c>PromptEnhanceClient.ApplyStrength</c>),
     /// so they must never collide on the same key. <paramref name="imageDigest"/> is a hash of the
     /// downscaled image bytes, empty when no reference image was attached.</summary>
-    public static string Key(string prompt, string profileId, string packVersion, string writerModel, string strength, string resolvedMode = "", string imageDigest = "")
+    public static string Key(string prompt, string profileId, string packVersion, string writerModel, string strength, string resolvedMode = "", string imageDigest = "", string writerHost = "")
     {
-        string raw = $"{prompt}|{profileId}|{packVersion}|{writerModel}|{strength}|{resolvedMode}|{imageDigest}";
+        string raw = $"{prompt}|{profileId}|{packVersion}|{writerModel}|{strength}|{resolvedMode}|{imageDigest}|{writerHost}";
         return Utilities.BytesToHex(SHA256.HashData(raw.EncodeUTF8())).ToLowerFast();
     }
 

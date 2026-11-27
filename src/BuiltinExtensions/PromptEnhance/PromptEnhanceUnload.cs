@@ -1,8 +1,10 @@
 using FreneticUtilities.FreneticExtensions;
 using Newtonsoft.Json.Linq;
+using SwarmUI.Accounts;
 using SwarmUI.Text2Image;
 using SwarmUI.Utils;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace SwarmUI.Builtin_PromptEnhanceExtension;
@@ -18,15 +20,37 @@ public static class PromptEnhanceUnload
     /// <summary>Timeout for the <c>/api/ps</c> check and for the unload post, each.</summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(2);
 
-    /// <summary><see cref="Environment.TickCount64"/> before which another unload attempt is skipped.</summary>
-    private static long NextAllowedAt = 0;
+    /// <summary>Last writer that answered each session on each backend scope.</summary>
+    private static readonly ConditionalWeakTable<Session, Dictionary<int, PromptEnhanceEndpoint>> LastWriters = new();
 
-    /// <summary>HTTP client for the unload calls. The timeout is the whole bound: the generation path does
-    /// not wait on this client at all.</summary>
-    private static readonly HttpClient Client = new()
+    /// <summary>Per-writer timestamp before which another unload attempt is skipped.</summary>
+    private static readonly ConcurrentDictionary<PromptEnhanceEndpoint, long> NextAllowedAt = new();
+
+    /// <summary>Records the writer for this session and every backend alias served by the writer.</summary>
+    public static void RememberWriter(Session session, PromptEnhanceEndpoint endpoint)
     {
-        Timeout = RequestTimeout
-    };
+        Dictionary<int, PromptEnhanceEndpoint> writers = LastWriters.GetOrCreateValue(session);
+        lock (writers)
+        {
+            foreach (int backendId in endpoint.Backends ?? [0])
+            {
+                writers[backendId] = endpoint;
+            }
+        }
+    }
+
+    /// <summary>Gets the writer that answered on the selected backend for this session.</summary>
+    private static PromptEnhanceEndpoint FindWriter(Session session, int? backendId)
+    {
+        if (session is null || backendId is not int id || !LastWriters.TryGetValue(session, out Dictionary<int, PromptEnhanceEndpoint> writers))
+        {
+            return null;
+        }
+        lock (writers)
+        {
+            return writers.GetValueOrDefault(id);
+        }
+    }
 
     /// <summary>Handler for <see cref="T2IEngine.PreGenerateEvent"/>. Starts an unload attempt and returns.
     /// Never throws.</summary>
@@ -34,25 +58,13 @@ public static class PromptEnhanceUnload
     {
         try
         {
-            RequestUnload();
-        }
-        catch (Exception ex)
-        {
-            Logs.Debug($"[PromptEnhance] Writer unload was not started: {ex.ReadableString()}");
-        }
-    }
-
-    /// <summary>Schedules at most one unload attempt per <see cref="DebounceMs"/>. The scheduled work is not
-    /// awaited. Never throws.</summary>
-    public static void RequestUnload()
-    {
-        try
-        {
-            if (!TryClaim())
+            int? backendId = PromptEnhanceEndpoints.BackendId(args.UserInput.Get(T2IParamTypes.ExactBackendID, ""));
+            PromptEnhanceEndpoint endpoint = FindWriter(args.UserInput.SourceSession, backendId);
+            if (endpoint is null || endpoint.Kind != "ollama" || !TryClaim(endpoint))
             {
                 return;
             }
-            _ = Task.Run(UnloadAsync);
+            _ = Task.Run(() => UnloadAsync(endpoint));
         }
         catch (Exception ex)
         {
@@ -61,17 +73,17 @@ public static class PromptEnhanceUnload
     }
 
     /// <summary>True when this caller won the debounce window. Concurrent callers from one batch lose.</summary>
-    private static bool TryClaim()
+    private static bool TryClaim(PromptEnhanceEndpoint endpoint)
     {
         long now = Environment.TickCount64;
         while (true)
         {
-            long allowed = Volatile.Read(ref NextAllowedAt);
+            long allowed = NextAllowedAt.GetOrAdd(endpoint, long.MinValue);
             if (now < allowed)
             {
                 return false;
             }
-            if (Interlocked.CompareExchange(ref NextAllowedAt, now + DebounceMs, allowed) == allowed)
+            if (NextAllowedAt.TryUpdate(endpoint, now + DebounceMs, allowed))
             {
                 return true;
             }
@@ -81,25 +93,17 @@ public static class PromptEnhanceUnload
     /// <summary>GET <c>/api/ps</c> on the active endpoint. When that endpoint is Ollama and its model is
     /// loaded, POST <c>/api/generate</c> with <c>keep_alive</c> 0. Every failure is logged at debug and
     /// swallowed.</summary>
-    private static async Task UnloadAsync()
+    private static async Task UnloadAsync(PromptEnhanceEndpoint endpoint)
     {
         try
         {
-            PromptEnhanceEndpoint endpoint = PromptEnhanceEndpoints.EndpointForDirectUse(null);
-            if (endpoint is null)
-            {
-                endpoint = PromptEnhanceEndpoints.FirstEnabled();
-            }
-            if (endpoint is null || endpoint.Kind != "ollama" || string.IsNullOrWhiteSpace(endpoint.Model) || string.IsNullOrWhiteSpace(endpoint.Url))
-            {
-                return;
-            }
-            using HttpResponseMessage listed = await Client.GetAsync($"{endpoint.Url}/api/ps");
+            using CancellationTokenSource listTimeout = new(RequestTimeout);
+            using HttpResponseMessage listed = await PromptEnhanceClient.Client.GetAsync($"{endpoint.Url}/api/ps", listTimeout.Token);
             if (!listed.IsSuccessStatusCode)
             {
                 return;
             }
-            string body = await listed.Content.ReadAsStringAsync();
+            string body = await listed.Content.ReadAsStringAsync(listTimeout.Token);
             if (!ModelIsListed(body, endpoint.Model))
             {
                 return;
@@ -113,7 +117,8 @@ public static class PromptEnhanceUnload
             {
                 Content = new StringContent(payload.ToString(Newtonsoft.Json.Formatting.None), Encoding.UTF8, "application/json")
             };
-            using HttpResponseMessage unloaded = await Client.SendAsync(post, HttpCompletionOption.ResponseHeadersRead);
+            using CancellationTokenSource unloadTimeout = new(RequestTimeout);
+            using HttpResponseMessage unloaded = await PromptEnhanceClient.Client.SendAsync(post, HttpCompletionOption.ResponseHeadersRead, unloadTimeout.Token);
         }
         catch (Exception ex)
         {

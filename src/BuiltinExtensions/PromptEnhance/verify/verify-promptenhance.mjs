@@ -52,6 +52,9 @@ let triggerChangeFor = () => {};
 // (makeWSRequest, MouseEvent) - reassigned per test the same way document/triggerChangeFor are above.
 let getRequiredElementById = () => ({ value: '' });
 let getParamById = () => null;
+let gen_param_types = [];
+let isParamEnabled = () => true;
+let getInputVal = input => input.value;
 // Generation input the writer-mode image check reads. Null unless a test sets a function.
 let getGenInput = null;
 let makeWSRequest = () => null;
@@ -87,7 +90,7 @@ function extractMethod(src, name) {
     // This method tests JSON object text and therefore contains literal "{" characters. The simple brace
     // counter below intentionally serves the older methods, but cannot distinguish those string bytes from
     // code. Its next class-level doc block is the exact method boundary.
-    if (name == 'unwrapEnhanceResult') {
+    if (name == 'unwrapEnhanceResult' || name == 'effectiveBackend') {
         let nextDoc = src.indexOf('\n    /**', sigIdx + 1);
         if (nextDoc < 0) {
             throw new Error(`method ${name} has no following class member`);
@@ -155,11 +158,18 @@ function buildHost(methodNames, extraProps, methodSource = source) {
             methodNames.push('pref');
         }
     }
+    if (methodNames.some(name => ['open', 'runAutoEnhance', 'refreshStatus', 'writerEndpointId', 'syncStatusBackend'].includes(name))) {
+        for (let extra of ['effectiveBackend', 'syncStatusBackend']) {
+            if (!methodNames.includes(extra)) {
+                methodNames.push(extra);
+            }
+        }
+    }
     let pieces = [];
     for (let i = 0; i < methodNames.length; i++) {
         pieces.push(extractMethod(methodSource, methodNames[i]));
     }
-    let host = Object.assign({}, extraProps);
+    let host = Object.assign({ statusBackend: '', writerEndpoints: [{ id: 'orca-27b' }], endpointOverride: 'orca-27b', statusRequestSeq: 0 }, extraProps);
     eval(`Object.assign(host, {${pieces.join(',')}});`);
     return host;
 }
@@ -471,9 +481,7 @@ function check(name, pass, detail) {
     });
     check('(contrast) a resolved profile with a healthy endpoint enables the button', host2.buttonEnabled === true, `buttonEnabled=${host2.buttonEnabled}`);
 
-    // A resolved profile but no healthy endpoint must NOT disable the button: the server fails open (a cache
-    // hit still answers, or the passthrough marker if it does not), so disabling here would just be a second,
-    // redundant gate on the same contract. Health is instead surfaced in the button's title.
+    // An unhealthy endpoint leaves the button actionable and exposes the reason in its title.
     let host3 = buildHost(['applyStatusToButton', 'setButtonEnabled'], {
         button: makeFakeElement(),
         buttonEnabled: false
@@ -484,8 +492,8 @@ function check(name, pass, detail) {
         endpoints: [{ id: 'laptop', kind: 'ollama', model: 'qwen3:8b', enabled: true, healthy: false }],
         resolved: { profile: 'anima', reason: '' }
     });
-    check('a resolved profile with no healthy endpoint still enables the button (fail-open + cache contract)', host3.buttonEnabled === true, `buttonEnabled=${host3.buttonEnabled}`);
-    check('...and the title explains the endpoint is not reachable', host3.button.title.includes('pass through unchanged'), `title="${host3.button.title}"`);
+    check('a resolved profile with no healthy endpoint still enables the button', host3.buttonEnabled === true, `buttonEnabled=${host3.buttonEnabled}`);
+    check('...and the title explains the endpoint is not reachable', host3.button.title.includes('not reachable'), `title="${host3.button.title}"`);
 }
 
 // ====================================================================================================
@@ -913,7 +921,7 @@ function check(name, pass, detail) {
     check('ollama messages carry an images field', client.includes('user["images"] = images'), '');
     check('generation hooks the unload on PreGenerateEvent', extension.includes('PreGenerateEvent += PromptEnhanceUnload.OnPreGenerate'), '');
     check('unload reads /api/ps and posts keep_alive 0', unload.includes('/api/ps') && unload.includes('["keep_alive"] = 0') && unload.includes('/api/generate'), '');
-    check('unload is not awaited on the generation path', unload.includes('Task.Run(UnloadAsync)') && unload.includes('DebounceMs = 5000'), '');
+    check('unload is not awaited on the generation path', unload.includes('Task.Run(() => UnloadAsync(endpoint))') && unload.includes('DebounceMs = 5000'), '');
     let klein = readFileSync(`${root}/Assets/profiles/flux2-klein-9b.edit.system.md`, 'utf8');
     let qwen = readFileSync(`${root}/Assets/profiles/qwen-image-2.1.edit.system.md`, 'utf8');
     let krea = readFileSync(`${root}/Assets/profiles/krea-2.reference.system.md`, 'utf8');
@@ -1123,6 +1131,7 @@ function check(name, pass, detail) {
         profileOverride: '',
         strength: 'full'
     });
+    localStorage.setItem('promptenhance_endpoint', 'retired');
     host.applyWriterEndpoints([
         { id: 'orca-27b', label: 'Orca 27B', model: 'hub/orca', enabled: true, healthy: true },
         { id: 'gemma-4-12b', model: 'google/gemma-4-12b', enabled: true, healthy: false },
@@ -1132,8 +1141,8 @@ function check(name, pass, detail) {
         && select.options[0].value == 'orca-27b' && select.options[0].innerText == 'Orca 27B'
         && select.options[1].value == 'gemma-4-12b' && select.options[1].innerText == 'gemma-4-12b (unreachable)',
         JSON.stringify(select.options));
-    check('a missing stored id selects orca-27b and persists it', host.endpointOverride == 'orca-27b' && select.value == 'orca-27b'
-        && localStorage.getItem('promptenhance_endpoint') == 'orca-27b', `override=${host.endpointOverride}`);
+    check('a missing stored id selects orca-27b without changing the saved choice', host.endpointOverride == 'orca-27b' && select.value == 'orca-27b'
+        && localStorage.getItem('promptenhance_endpoint') == 'retired', `override=${host.endpointOverride}`);
     select.value = 'gemma-4-12b';
     host.onWriterChanged();
     check('choosing a Writer re-sends EnhancePrompt with that endpoint id', calls.length == 1 && calls[0].endpoint_override == 'gemma-4-12b'

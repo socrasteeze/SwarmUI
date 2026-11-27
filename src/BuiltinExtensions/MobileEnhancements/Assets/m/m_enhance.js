@@ -60,6 +60,7 @@ class MEnhance {
         this.statusTimer = null;
         this.lastStatusCall = 0;
         this.statusRequestSeq = 0;
+        this.statusBackend = null;
         /** Prompt text most recently applied, so provenance clears when the user edits away from it. */
         this.appliedEnhancedText = null;
         this.clearProvenanceListener = null;
@@ -83,6 +84,16 @@ class MEnhance {
         catch (e) {
             return (mState.params['model'] || '') + '';
         }
+    }
+
+    /** Uses the stable remote parent even when the backend snapshot is absent. */
+    effectiveBackend() {
+        let target = MState.normalizeGenTarget(mState.genTarget);
+        if (target.kind == 'remote') {
+            return `${target.parent}`;
+        }
+        let resolved = mState.resolveGenTarget();
+        return resolved.id == null ? '' : `${resolved.id}`;
     }
 
     /** 'auto', 't2i', or 'edit'. Anything else is auto. */
@@ -364,7 +375,21 @@ class MEnhance {
         this.renderPill();
     }
 
+    /** Clears writer state when the selected backend changes. */
+    syncStatusBackend() {
+        let backend = this.effectiveBackend();
+        if (this.statusBackend != backend) {
+            this.statusBackend = backend;
+            this.statusRequestSeq += 1;
+            this.writerEndpoints = [];
+            this.statusProfileKey = null;
+            this.endpointOverride = this.pref('endpoint', 'orca-27b');
+            this.fillWriterSelect();
+        }
+    }
+
     scheduleStatusRefresh() {
+        this.syncStatusBackend();
         let now = Date.now();
         let wait = Math.max(0, 1000 - (now - this.lastStatusCall));
         if (this.statusTimer) {
@@ -378,6 +403,7 @@ class MEnhance {
     }
 
     refreshStatus() {
+        this.syncStatusBackend();
         let model = this.effectiveModel();
         this.syncProfileOverride(model);
         this.statusRequestSeq += 1;
@@ -385,8 +411,10 @@ class MEnhance {
         let mode = this.normalizeWriteMode(this.writeMode);
         let local = this.resolvedWriteMode(this.referenceImageValues().length > 0);
         let statusKey = JSON.stringify([model, this.profileOverride]);
-        genericRequest('ListPromptEnhanceStatus', { 'model': model, 'profile_override': this.profileOverride, 'mode': mode, 'resolved_mode': local }, data => {
-            if (requestSeq != this.statusRequestSeq) {
+        let backend = this.effectiveBackend();
+        this.statusBackend = backend;
+        genericRequest('ListPromptEnhanceStatus', { 'exactbackendid': backend, 'model': model, 'profile_override': this.profileOverride, 'mode': mode, 'resolved_mode': local }, data => {
+            if (requestSeq != this.statusRequestSeq || backend != this.effectiveBackend()) {
                 return;
             }
             this.statusProfileKey = statusKey;
@@ -404,7 +432,7 @@ class MEnhance {
                 this.applyStrengthOptions(this.sheet.strengthSelect);
             }
         }, 0, error => {
-            if (requestSeq != this.statusRequestSeq) {
+            if (requestSeq != this.statusRequestSeq || backend != this.effectiveBackend()) {
                 return;
             }
             console.warn(`Prompt Enhance: status check failed: ${error}`);
@@ -447,8 +475,8 @@ class MEnhance {
         if (endpoints.length > 0 && !sawEnabled) {
             knownDown = true;
         }
-        let reason = knownDown ? 'No Prompt Enhance writer endpoint is currently reachable - the prompt will pass through unchanged.'
-            : `Profile: ${display}. Rewrite this prompt with a local writer LLM for the currently loaded model.`;
+        let reason = data.unavailable_reason || (knownDown ? 'No Prompt Enhance writer endpoint is currently reachable.'
+            : `Profile: ${display}. Rewrite this prompt with a local writer LLM for the currently loaded model.`);
         this.setButtonEnabled(true, reason);
     }
 
@@ -488,7 +516,7 @@ class MEnhance {
         if (this.endpointOverride == null) {
             this.endpointOverride = this.pref('endpoint', 'orca-27b');
         }
-        return this.endpointOverride || '';
+        return this.statusBackend == this.effectiveBackend() && this.writerEndpoints.some(endpoint => endpoint.id == this.endpointOverride) ? this.endpointOverride : '';
     }
 
     /** Visible Writer option: label, else the model name after the last slash, else the id. */
@@ -566,9 +594,6 @@ class MEnhance {
             chosen = enabled[0].id;
         }
         this.endpointOverride = chosen;
-        if (chosen && this.pref('endpoint', '') != chosen) {
-            this.setPref('endpoint', chosen);
-        }
         this.fillWriterSelect();
     }
 
@@ -771,6 +796,7 @@ class MEnhance {
         let payload = {
             'prompt': prompt,
             'model': model,
+            'exactbackendid': this.effectiveBackend(),
             'profile_override': this.profileOverride,
             'endpoint_override': this.writerEndpointId(),
             'strength': this.strength,
@@ -793,7 +819,7 @@ class MEnhance {
             if (!this.running) {
                 this.renderPill();
             }
-        }, 0, error => {
+        }, 0, (error, data) => {
             this.settled = true;
             this.running = false;
             this.renderPill();
@@ -801,7 +827,7 @@ class MEnhance {
             if (this.sheet && this.sheet.content.isConnected) {
                 this.sheet.status.textContent = text;
                 this.sheet.passthrough.style.display = '';
-                this.sheet.passthrough.textContent = text.indexOf('Prompt enhance:') == 0 ? text : `Not enhanced: ${text}`;
+                this.sheet.passthrough.textContent = (data && data.error_id == 'prompt_enhance_unavailable') || text.indexOf('Prompt enhance:') == 0 ? text : `Not enhanced: ${text}`;
             }
             showError(error);
         });

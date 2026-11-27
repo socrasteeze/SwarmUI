@@ -1114,24 +1114,23 @@ public class PromptEnhanceTests : SwarmUITest
 
     #endregion
 
-    #region PromptEnhanceEndpoints direct use
+    #region PromptEnhanceEndpoints backend scope
 
-    /// <summary>One enabled endpoint is used with no probe, even when a disabled laptop entry is also listed.
-    /// The unreachable message names local Ollama and the host, without the scheme.</summary>
+    /// <summary>Legacy loopback writers are desktop-only. Unscoped remote writers are excluded.</summary>
     [Test]
-    public void EndpointForDirectUse_SingleEnabled_SkipsProbeChoice()
+    public void ForBackend_UnpinnedUsesDesktopScope()
     {
         List<PromptEnhanceEndpoint> prior = PromptEnhanceEndpoints.Endpoints;
         try
         {
             PromptEnhanceEndpoints.Endpoints =
             [
-                new PromptEnhanceEndpoint("laptop", "http://192.0.2.10:11434", "ollama", "other", "30m", 120, false),
+                new PromptEnhanceEndpoint("unscoped", "http://192.0.2.10:11434", "ollama", "other", "30m", 120, true),
                 new PromptEnhanceEndpoint("hub-local", "http://127.0.0.1:11434", "ollama", "writer", "30m", 120, true)
             ];
-            PromptEnhanceEndpoint chosen = PromptEnhanceEndpoints.EndpointForDirectUse("");
-            Assert.That(chosen?.ID, Is.EqualTo("hub-local"));
-            Assert.That(PromptEnhanceEndpoints.UnreachableMessage(chosen), Is.EqualTo("Prompt enhance: local Ollama at 127.0.0.1:11434 not reachable"));
+            Assert.That(PromptEnhanceEndpoints.ForBackend(PromptEnhanceEndpoints.BackendId("")).ConvertAll(endpoint => endpoint.ID), Is.EqualTo(new[] { "hub-local" }));
+            Assert.That(PromptEnhanceEndpoints.ForBackend(PromptEnhanceEndpoints.BackendId("invalid")), Is.Empty);
+            Assert.That(PromptEnhanceEndpoints.UnreachableMessage(0), Is.EqualTo("Can't enhance: desktop Ollama is unavailable"));
             Assert.That(PromptEnhanceEndpoints.IsUnreachable(new System.Net.Http.HttpRequestException("Prompt Enhance endpoint 'http://127.0.0.1:11434' could not be reached: connection refused")), Is.True);
             Assert.That(PromptEnhanceEndpoints.IsUnreachable(new InvalidOperationException("Prompt Enhance endpoint 'http://127.0.0.1:11434' timed out after 120 seconds.")), Is.False);
         }
@@ -1141,20 +1140,25 @@ public class PromptEnhanceTests : SwarmUITest
         }
     }
 
-    /// <summary>Several enabled endpoints are not a direct-use choice. The caller probes those.</summary>
-    [Test]
-    public void EndpointForDirectUse_SeveralEnabled_ReturnsNull()
+    /// <summary>Both backend aliases share one ordered writer scope, separate from the desktop.</summary>
+    [TestCase("18")]
+    [TestCase("-2")]
+    public void ForBackend_SpokeAliasesShareScope(string backend)
     {
         List<PromptEnhanceEndpoint> prior = PromptEnhanceEndpoints.Endpoints;
         try
         {
             PromptEnhanceEndpoints.Endpoints =
             [
-                new PromptEnhanceEndpoint("a", "http://127.0.0.1:11434", "ollama", "writer", "30m", 120, true),
-                new PromptEnhanceEndpoint("b", "http://127.0.0.1:11435", "ollama", "writer", "30m", 120, true)
+                new PromptEnhanceEndpoint("desktop", "http://127.0.0.1:11434", "ollama", "writer", "30m", 120, true, Backends: [0]),
+                new PromptEnhanceEndpoint("preferred", "http://192.0.2.10:11434", "ollama", "writer", "30m", 120, true, Backends: [18, -2], Machine: "laptop"),
+                new PromptEnhanceEndpoint("alternate", "http://192.0.2.11:11434", "ollama", "writer", "30m", 120, true, Backends: [18, -2]),
+                new PromptEnhanceEndpoint("off", "http://192.0.2.12:11434", "ollama", "writer", "30m", 120, false, Backends: [18, -2])
             ];
-            Assert.That(PromptEnhanceEndpoints.EndpointForDirectUse(null), Is.Null);
-            Assert.That(PromptEnhanceEndpoints.EndpointForDirectUse("b")?.ID, Is.EqualTo("b"));
+            int? backendId = PromptEnhanceEndpoints.BackendId(backend);
+            Assert.That(PromptEnhanceEndpoints.ForBackend(backendId).ConvertAll(endpoint => endpoint.ID), Is.EqualTo(new[] { "preferred", "alternate" }));
+            Assert.That(PromptEnhanceEndpoints.ForBackend(0).ConvertAll(endpoint => endpoint.ID), Is.EqualTo(new[] { "desktop" }));
+            Assert.That(PromptEnhanceEndpoints.UnreachableMessage(backendId), Is.EqualTo("Can't enhance: laptop Ollama is unavailable"));
         }
         finally
         {
@@ -1314,8 +1318,8 @@ public class PromptEnhanceTests : SwarmUITest
             File.WriteAllText($"{tempDir}/PromptEnhance/endpoints.json", """
                 {
                   "endpoints": [
-                    {"id": "orca-27b", "url": "http://127.0.0.1:11434", "kind": "ollama", "model": "orca", "label": " Orca 27B ", "enabled": true, "unused_field": "ignored"},
-                    {"id": "off", "url": "http://127.0.0.1:11435", "kind": "ollama", "model": "other", "enabled": false}
+                    {"id": "orca-27b", "url": "http://127.0.0.1:11434", "kind": "ollama", "model": "orca", "label": " Orca 27B ", "enabled": true, "backends": [0], "unused_field": "ignored"},
+                    {"id": "remote", "url": "http://192.0.2.10:11434", "kind": "ollama", "model": "other", "enabled": true, "backends": [18, -2], "machine": "laptop"}
                   ]
                 }
                 """);
@@ -1326,10 +1330,14 @@ public class PromptEnhanceTests : SwarmUITest
             Assert.That(PromptEnhanceEndpoints.Endpoints[1].Label, Is.Null);
             JObject status = PromptEnhanceAPI.ListPromptEnhanceStatus(null, "", "", "auto", "").GetAwaiter().GetResult();
             JArray rows = (JArray)status["endpoints"];
-            Assert.That(rows.Count, Is.EqualTo(2));
+            Assert.That(rows.Count, Is.EqualTo(1));
             Assert.That(rows[0].Value<string>("id"), Is.EqualTo("orca-27b"));
             Assert.That(rows[0].Value<string>("label"), Is.EqualTo("Orca 27B"));
-            Assert.That(rows[1].Value<string>("label"), Is.EqualTo(""));
+            JObject remoteStatus = PromptEnhanceAPI.ListPromptEnhanceStatus(null, "", exactbackendid: "-2").GetAwaiter().GetResult();
+            JArray remoteRows = (JArray)remoteStatus["endpoints"];
+            Assert.That(remoteRows.Count, Is.EqualTo(1));
+            Assert.That(remoteRows[0].Value<string>("id"), Is.EqualTo("remote"));
+            Assert.That(remoteRows[0].Value<string>("label"), Is.EqualTo(""));
         }
         finally
         {

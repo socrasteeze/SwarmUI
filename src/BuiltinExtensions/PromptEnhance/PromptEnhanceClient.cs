@@ -130,7 +130,7 @@ public static class PromptEnhanceClient
     /// <summary>Shared HTTP client for every writer request. One instance so pooled connections are reused
     /// across calls; the connect timeout is fixed low here because the writer host is a LAN/tailnet machine,
     /// and the per-request overall timeout is enforced separately via a linked <see cref="CancellationTokenSource"/>.</summary>
-    private static readonly HttpClient Client = BuildClient();
+    internal static readonly HttpClient Client = BuildClient();
 
     /// <summary>Builds the shared client: a 5 second connect timeout and no overall client-level timeout, since
     /// the overall timeout is enforced per request instead (each writer endpoint configures its own).</summary>
@@ -138,6 +138,7 @@ public static class PromptEnhanceClient
     {
         SocketsHttpHandler handler = new()
         {
+            AllowAutoRedirect = false,
             ConnectTimeout = TimeSpan.FromSeconds(5),
             PooledConnectionLifetime = TimeSpan.FromMinutes(10)
         };
@@ -220,9 +221,13 @@ public static class PromptEnhanceClient
                 }
             }
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException ex) when (ex.StatusCode is null)
         {
             throw new SwarmReadableErrorException($"Prompt Enhance endpoint '{request.Url}' could not be reached: {ex.Message}");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new SwarmReadableErrorException($"The writer returned HTTP {(int)ex.StatusCode.Value}.");
         }
         catch (OperationCanceledException)
         {

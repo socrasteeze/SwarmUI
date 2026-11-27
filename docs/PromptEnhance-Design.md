@@ -1,6 +1,8 @@
 # Prompt Enhance — architecture-aware local-LLM prompt writer
 
-**Status:** design only. Nothing is implemented. Written 2026-09-12 against fork HEAD `64ba46f`.
+This document records the original design from 2026-09-12. The implementation now scopes Ollama to the
+targeted generation backend. For the current configuration and behavior, see the
+[Prompt Enhance README](../src/BuiltinExtensions/PromptEnhance/README.md).
 
 ## Mission
 

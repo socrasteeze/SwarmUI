@@ -3,7 +3,7 @@
  *
  * 1. The prompt-header pill is Enhance (not Coach); Coach registers under More > Prompt Coach.
  * 2. applyStatusToButton disables the pill with a reason when no profile resolves; enables it when one does
- *    (unhealthy endpoints still enable, matching desktop fail-open).
+ *    (unhealthy endpoints still enable, matching desktop).
  * 3. handleFrame streams chunks into the preview, enables Apply on a non-empty result, never enables Apply
  *    on conflict/passthrough/empty result, and applyResult writes the prompt + provenance into mState.
  * 4. Tapping the pill opens a bottom sheet (review flow) even while the pill reads as disabled, so the
@@ -144,8 +144,8 @@ const enabledUnhealthy = await page.evaluate(() => {
     return { enabled: mEnhance.buttonEnabled, text: mEnhance.pillEl.textContent, title: mEnhance.pillEl.title,
         disabledClass: mEnhance.pillEl.classList.contains('m-enhance-pill-disabled') };
 });
-check('resolved profile with unhealthy endpoint still enables Enhance (fail-open)',
-    enabledUnhealthy.enabled && !enabledUnhealthy.disabledClass && enabledUnhealthy.title.includes('pass through'),
+check('resolved profile with unhealthy endpoint still enables Enhance',
+    enabledUnhealthy.enabled && !enabledUnhealthy.disabledClass && enabledUnhealthy.title.includes('not reachable'),
     JSON.stringify(enabledUnhealthy));
 
 const enabledHealthy = await page.evaluate(() => {
